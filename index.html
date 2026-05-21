@@ -1349,7 +1349,9 @@ svg.map {
   pointer-events: none;
   position: relative;
   z-index: 2;
-  filter: drop-shadow(0 2px 4px rgba(0,0,0,.7));
+  /* ⚡ V0.5 fix lag — drop-shadow filter était appliqué sur 63 cellules × 60fps = killer perf.
+   * Remplacé par text-shadow (beaucoup moins coûteux que filter:drop-shadow). */
+  text-shadow: 0 1px 2px rgba(0,0,0,.6);
 }
 .m3-cell.stone {
   cursor: not-allowed;
@@ -5863,11 +5865,16 @@ svg.map {
 // (un match de 3 sur metal = 3 × 1 / SCORE_DIV = 0.6 → cumulé devient sensé)
 const SCORE_DIV = 5; // les gains sont divisés par 5 à la comptabilisation
 const TILES = [
-  { key:'metal',    label:'Métal',    color:'#ff8848', img:'tiles/metal.png',    emoji:'⛰', weight:28, value:1 },
-  { key:'energie',  label:'Énergie',  color:'#ffaf3a', img:'tiles/energie.png',  emoji:'⚡', weight:24, value:1 },
-  { key:'cristal',  label:'Cristal',  color:'#5fffe8', img:'tiles/cristal.png',  emoji:'◆', weight:20, value:1 },
-  { key:'biomass',  label:'Biomasse', color:'#7ed080', img:'tiles/biomass.png',  emoji:'❀', weight:18, value:1 },
-  { key:'artefact', label:'Artefact', color:'#a370ff', img:'tiles/artefact.png', emoji:'✦', weight:0,  value:2 },
+  // ⚡ V0.5 fix lisibilité + couleur :
+  // - Les symboles Unicode (◆ ★ ●) peuvent être rendus en EMOJI couleur natif par les navigateurs,
+  //   ignorant complètement notre `color:` CSS. Le suffixe \uFE0E (Variation Selector-15)
+  //   FORCE le rendu texte (monochrome), notre couleur CSS est alors appliquée.
+  // - Symboles distincts pour Énergie (◈) et Cristal (◆) afin de les différencier visuellement.
+  { key:'metal',    label:'Métal',    color:'#ff8848', img:'tiles/metal.png',    emoji:'\u25B2\uFE0E', weight:28, value:1 }, // ▲
+  { key:'energie',  label:'Énergie',  color:'#ffaf3a', img:'tiles/energie.png',  emoji:'\u25C8\uFE0E', weight:24, value:1 }, // ◈
+  { key:'cristal',  label:'Cristal',  color:'#5fffe8', img:'tiles/cristal.png',  emoji:'\u25C6\uFE0E', weight:20, value:1 }, // ◆
+  { key:'biomass',  label:'Biomasse', color:'#7ed080', img:'tiles/biomass.png',  emoji:'\u25CF\uFE0E', weight:18, value:1 }, // ●
+  { key:'artefact', label:'Artefact', color:'#a370ff', img:'tiles/artefact.png', emoji:'\u2605\uFE0E', weight:0,  value:2 }, // ★
 ];
 const TILE_W_TOTAL = TILES.reduce((s,t) => s + t.weight, 0);
 
@@ -5915,6 +5922,46 @@ function getTileImg(key, ctx) {
   if (key === 'megastone' || key === 'megahide') return `tiles/${key}.png`;
   const t = TILES.find(x => x.key === key);
   return t ? t.img : '';
+}
+
+// ⚡ V0.5 — Liste blanche des assets PNG réellement disponibles.
+// Évite de tenter de charger des fichiers manquants (zéro 404 = pas de lag).
+// Quand on ajoute des PNG dans tiles/, il faut les ajouter ici aussi.
+const AVAILABLE_TILE_ASSETS = new Set([
+  // Ressources de base (5) — uploadés 21/05
+  'tiles/metal.png',
+  'tiles/energie.png',
+  'tiles/cristal.png',
+  'tiles/biomass.png',
+  'tiles/artefact.png',
+  // Obstacles (2) — uploadés 21/05
+  'tiles/megastone.png',
+  'tiles/megahide.png',
+  // Bombes (4) — uploadées 21/05
+  'tiles/bombepetite.png',
+  'tiles/bombegrande.png',
+  'tiles/bombemega.png',
+  'tiles/bombehyper.png',
+  // Skins Labo (Recherche)
+  'tiles/laboratoire/lentilledobservation.png',
+  'tiles/laboratoire/noeudanalytique.png',
+  'tiles/laboratoire/cristaldedonnees.png',
+  'tiles/laboratoire/fragmentarchive.png',
+  'tiles/laboratoire/singularitecalcul.png',
+  'tiles/laboratoire/matricequantique.png',
+  // Skins Centrale (Énergie)
+  'tiles/energie/minireacteur.png',
+  'tiles/energie/bobineelectrique.png',
+  'tiles/energie/condensateur.png',
+  'tiles/energie/arcenergetique.png',
+  'tiles/energie/noyau_plasma.png',
+  'tiles/energie/cellulethermique.png',
+]);
+
+// Helper : retourne l'URL seulement si l'asset est connu, sinon null
+function getAvailableTileImg(key, ctx) {
+  const url = getTileImg(key, ctx);
+  return AVAILABLE_TILE_ASSETS.has(url) ? url : null;
 }
 const M3_COLS = 7, M3_ROWS = 9, M3_MOVES = 20;
 const M3_GOALS = { metal: 80, energie: 40 };
@@ -5967,8 +6014,9 @@ function getM3Objective() {
 
 // ⚡ Phase 2.15 — Précharge les images PNG des tiles + bombes au boot du jeu
 // Évite le spike de 17 secondes au premier render (décode synchrone des PNG par Safari)
+// ⚡ V0.5 fix critique : on filtre via AVAILABLE_TILE_ASSETS pour éviter 11 × 404 au boot.
 (function preloadM3Images() {
-  const urls = [
+  const candidateUrls = [
     'tiles/metal.png', 'tiles/energie.png', 'tiles/cristal.png',
     'tiles/biomass.png', 'tiles/artefact.png',
     'tiles/bombepetite.png', 'tiles/bombegrande.png',
@@ -5989,6 +6037,11 @@ function getM3Objective() {
     'tiles/energie/noyau_plasma.png',
     'tiles/energie/cellulethermique.png',
   ];
+  // Filtre via la whitelist : on ne précharge que les fichiers qui existent réellement.
+  // AVAILABLE_TILE_ASSETS est défini plus haut (vers ligne 5925).
+  const urls = candidateUrls.filter(u =>
+    typeof AVAILABLE_TILE_ASSETS !== 'undefined' && AVAILABLE_TILE_ASSETS.has(u)
+  );
   urls.forEach(url => {
     const img = new Image();
     img.decoding = 'async';
@@ -8337,9 +8390,15 @@ function hasSave() {
 }
 
 // Convertit un Set en Array pour sérialisation, et inversement au load
+// ⚡ V0.5 fix critique : Ne JAMAIS muter G.planet ! Si on remplace families par un Array
+// dans le G original, alors `G.planet.families.has(...)` plante partout dans le code.
+// On retourne un nouvel objet sans toucher au G d'origine.
 function _serializeSets(obj) {
-  // Cas spécial : G.planet.families est un Set
-  if (obj && obj.planet && obj.planet.families instanceof Set) {
+  if (!obj) return obj;
+  // On reconstruit un objet plat avec les sets convertis en arrays.
+  // IMPORTANT : on ne mute PAS obj.planet directement.
+  if (obj.planet && obj.planet.families instanceof Set) {
+    // Cloner planet sans toucher au G original
     obj.planet = { ...obj.planet, families: Array.from(obj.planet.families) };
   }
   return obj;
@@ -26084,21 +26143,33 @@ function renderM3Grid() {
       // ⚡ Phase 3 — Megastone / Megahide : obstacles que 3 mega-bombes détruisent
       // ⚡ Phase 6 — Skin contextuel : megastone → Matrice quantique en Recherche
       cell.classList.add('obstacle');
-      const img = document.createElement('img');
-      img.decoding = 'async';
-      img.src = getTileImg(tile.type, G.m3?.context);
-      img.alt = tile.type === 'megahide' ? 'Megahide' : 'Megastone';
-      img.className = 'obstacle-img';
-      img.onerror = () => {
-        img.style.display = 'none';
+      // ⚡ V0.5 fix lag — fallback préventif au lieu d'attendre 404
+      const url = getAvailableTileImg(tile.type, G.m3?.context);
+      if (url) {
+        const img = document.createElement('img');
+        img.decoding = 'async';
+        img.src = url;
+        img.alt = tile.type === 'megahide' ? 'Megahide' : 'Megastone';
+        img.className = 'obstacle-img';
+        img.onerror = () => {
+          img.style.display = 'none';
+          const fb = document.createElement('div');
+          fb.className = 'fb';
+          fb.style.color = '#888';
+          fb.style.fontSize = '28px';
+          fb.textContent = tile.type === 'megahide' ? '\u25C7\uFE0E' : '\u25C6\uFE0E';
+          cell.appendChild(fb);
+        };
+        cell.appendChild(img);
+      } else {
+        // Pas d'asset → fallback direct emoji
         const fb = document.createElement('div');
         fb.className = 'fb';
         fb.style.color = '#888';
         fb.style.fontSize = '28px';
-        fb.textContent = tile.type === 'megahide' ? '◇' : '◆';
+        fb.textContent = tile.type === 'megahide' ? '\u25C7\uFE0E' : '\u25C6\uFE0E';
         cell.appendChild(fb);
-      };
-      cell.appendChild(img);
+      }
       // Indicateur du nombre d'impacts (0/3)
       const hitInd = document.createElement('div');
       hitInd.className = 'obstacle-hits';
@@ -26108,41 +26179,66 @@ function renderM3Grid() {
       cell.classList.add(bombClass);
       const t = tileInfo(tile.type);
       const tileColor = t.color;
-      const img = document.createElement('img');
-      img.decoding = 'async';
-      img.src = bombImgMap[tile.bomb] || bombImgMap.petite;
-      img.alt = 'Bombe ' + tile.bomb;
-      img.className = 'bomb-img';
-      img.onerror = () => {
-        img.style.display = 'none';
+      // ⚡ V0.5 — Les PNG bombes existent dans le bundle, on les utilise.
+      const bombUrl = bombImgMap[tile.bomb] || bombImgMap.petite;
+      if (AVAILABLE_TILE_ASSETS.has(bombUrl)) {
+        const img = document.createElement('img');
+        img.decoding = 'async';
+        img.src = bombUrl;
+        img.alt = 'Bombe ' + tile.bomb;
+        img.className = 'bomb-img';
+        img.onerror = () => {
+          img.style.display = 'none';
+          const fb = document.createElement('div');
+          fb.className = 'fb';
+          fb.style.color = tileColor;
+          fb.style.fontSize = '32px';
+          fb.textContent = tile.bomb === 'hyper' ? '\u25C9\uFE0E' : tile.bomb === 'mega' ? '\u25CE\uFE0E' : '\u25CB\uFE0E';
+          cell.appendChild(fb);
+        };
+        cell.appendChild(img);
+      } else {
+        // Fallback safety (ne devrait jamais arriver)
         const fb = document.createElement('div');
         fb.className = 'fb';
         fb.style.color = tileColor;
         fb.style.fontSize = '32px';
-        fb.textContent = tile.bomb === 'hyper' ? '⭐' : tile.bomb === 'mega' ? '💥' : '💣';
+        fb.textContent = tile.bomb === 'hyper' ? '\u25C9\uFE0E' : tile.bomb === 'mega' ? '\u25CE\uFE0E' : '\u25CB\uFE0E';
         cell.appendChild(fb);
-      };
-      cell.appendChild(img);
+      }
       const typeIndicator = document.createElement('div');
       typeIndicator.className = 'bomb-type-indicator';
       typeIndicator.style.background = tileColor;
       cell.appendChild(typeIndicator);
     } else if (tile) {
       const t = tileInfo(tile.type);
-      const img = document.createElement('img');
-      img.decoding = 'async';
-      // ⚡ Phase 6 — Skin contextuel des tuiles (ex : labo)
-      img.src = getTileImg(tile.type, G.m3?.context);
-      img.alt = t.label;
-      img.onerror = () => {
-        img.style.display = 'none';
+      // ⚡ V0.5 fix lag — On vérifie d'abord si l'asset existe.
+      // Si oui : on crée un <img>. Si non : on dessine directement le fallback emoji.
+      // Évite le pattern "tenter de charger → 404 → fallback" qui lague avec des dizaines de cellules.
+      const url = getAvailableTileImg(tile.type, G.m3?.context);
+      if (url) {
+        const img = document.createElement('img');
+        img.decoding = 'async';
+        img.src = url;
+        img.alt = t.label;
+        img.onerror = () => {
+          // Safety net : si malgré tout le fichier ne charge pas (cache cassé, etc.)
+          img.style.display = 'none';
+          const fb = document.createElement('div');
+          fb.className = 'fb';
+          fb.style.color = t.color;
+          fb.textContent = t.emoji;
+          cell.appendChild(fb);
+        };
+        cell.appendChild(img);
+      } else {
+        // Pas d'asset disponible → dessine directement le fallback emoji (zéro 404)
         const fb = document.createElement('div');
         fb.className = 'fb';
         fb.style.color = t.color;
         fb.textContent = t.emoji;
         cell.appendChild(fb);
-      };
-      cell.appendChild(img);
+      }
     }
   }
 }
@@ -33859,6 +33955,62 @@ function _secretTap() {
 // Appelé en fin de boot, après que le DOM est prêt.
 function initDevMode() {
   _applyDevModeUI();
+  // ⚡ DIAGNOSTIC LAG — Panneau diag visible si mode dev activé
+  if (_isDevMode()) _initDiagPanel();
+}
+
+// ⚡ DIAGNOSTIC LAG — Panneau de monitoring temps réel
+// Affiche FPS, mémoire, dernière erreur JS. Visible uniquement en mode dev.
+function _initDiagPanel() {
+  if (document.getElementById('diag-panel')) return;
+  const panel = document.createElement('div');
+  panel.id = 'diag-panel';
+  panel.style.cssText = `
+    position: fixed; top: 8px; right: 8px; z-index: 99999;
+    background: rgba(0,0,0,.85); border: 1px solid #ffc864;
+    padding: 6px 10px; border-radius: 4px;
+    font-family: 'SF Mono', monospace; font-size: 10px;
+    color: #ffc864; line-height: 1.4; pointer-events: none;
+    min-width: 130px; backdrop-filter: blur(4px);
+  `;
+  panel.innerHTML = `
+    <div id="diag-fps">FPS: --</div>
+    <div id="diag-mem" style="color:#999">Mem: --</div>
+    <div id="diag-err" style="color:#ff5040;font-size:9px;margin-top:3px;display:none"></div>
+  `;
+  document.body.appendChild(panel);
+
+  // Capture erreurs JS
+  window.addEventListener('error', (e) => {
+    const errEl = document.getElementById('diag-err');
+    if (errEl) {
+      errEl.textContent = e.message.slice(0, 60);
+      errEl.style.display = '';
+    }
+  });
+
+  // FPS monitor léger
+  let frames = 0, lastTime = performance.now();
+  function fpsTick(now) {
+    frames++;
+    if (now - lastTime >= 500) {
+      const fps = Math.round(frames * 1000 / (now - lastTime));
+      const fpsEl = document.getElementById('diag-fps');
+      if (fpsEl) {
+        const color = fps < 30 ? '#ff5040' : fps < 50 ? '#ffaf3a' : '#5fffa8';
+        fpsEl.innerHTML = `<span style="color:${color}">FPS: ${fps}</span>`;
+      }
+      const memEl = document.getElementById('diag-mem');
+      if (memEl && performance.memory) {
+        const used = (performance.memory.usedJSHeapSize / 1048576).toFixed(0);
+        memEl.textContent = `Mem: ${used}MB`;
+      }
+      frames = 0;
+      lastTime = now;
+    }
+    requestAnimationFrame(fpsTick);
+  }
+  requestAnimationFrame(fpsTick);
 }
 
 /* ═══════════════════════════════════════════════════════════════
@@ -39785,10 +39937,22 @@ initSaveHooks();
 // ⚡ V0.5 — Initialiser l'état du mode dev (cacher/afficher le bouton CHEAT)
 if (typeof initDevMode === 'function') initDevMode();
 
-TILES.forEach(t => { const img = new Image(); img.src = t.img; });
-// Phase 6 — Préload aussi les skins contextuels (labo)
+// ⚡ V0.5 — Préchargement : seulement les fichiers qui existent vraiment
+// (évite 5+ requêtes 404 au boot pour tiles/metal.png, tiles/cristal.png, etc.)
+TILES.forEach(t => {
+  if (AVAILABLE_TILE_ASSETS.has(t.img)) {
+    const img = new Image();
+    img.src = t.img;
+  }
+});
+// Préload des skins contextuels (labo, centrale) — eux existent
 Object.values(TILE_THEMES).forEach(theme => {
-  Object.values(theme).forEach(url => { const img = new Image(); img.src = url; });
+  Object.values(theme).forEach(url => {
+    if (AVAILABLE_TILE_ASSETS.has(url)) {
+      const img = new Image();
+      img.src = url;
+    }
+  });
 });
 
 // D5.3 fix : cleanup modaux orphelins au démarrage (au cas où un cache navigateur
