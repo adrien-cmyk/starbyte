@@ -337,7 +337,13 @@
     }
     const s = _sel;
     if (s.kind === 'far') {
-      return `<div class="sm-panel"><div class="sm-ptitle">Trop loin pour les capteurs actuels</div><div class="sm-psub">Secteur ${esc(s.sector)}</div></div>`;
+      // Décision d'Adrien (10/10) : dire comment aller plus loin — c'est le Laboratoire qui étend la portée
+      const lt = (typeof getLaboTier === 'function') ? getLaboTier() : 0;
+      const hint = lt < 1 ? 'Construis un Laboratoire, puis développe-le au niveau 2 pour étendre la portée des sondes.'
+        : lt < 2 ? 'Développe ton Laboratoire au niveau 2 : portée +1 secteur.'
+        : lt < 3 ? 'Développe ton Laboratoire au niveau 3 : portée +3 secteurs.'
+        : 'Au-delà de ce que tes capteurs peuvent atteindre aujourd\'hui.';
+      return `<div class="sm-panel"><div class="sm-ptitle">Trop loin pour les capteurs actuels</div><div class="sm-psub">Secteur ${esc(s.sector)}</div><div class="sm-psub" style="margin-top:6px;color:#c8d6d2">${hint}</div></div>`;
     }
     if (s.kind === 'dark') {
       const st = (typeof _probeTierStatus === 'function') ? _probeTierStatus('radar') : { ok: false, build: true, why: 'Aucune Radar prête' };
