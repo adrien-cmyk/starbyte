@@ -364,7 +364,6 @@
     const svg = _root.querySelector('svg');
     svg.addEventListener('click', onTap);
     placeReticle();
-    bindParallax(_root.querySelector('.sm-wrap'));
     startLoop();
   }
 
@@ -376,43 +375,6 @@
     if (!el) { ret.style.display = 'none'; return; }
     ret.style.display = '';
     ret.setAttribute('transform', `translate(${el.getAttribute('cx')} ${el.getAttribute('cy')})`);
-  }
-
-  /* ─── Parallaxe : les couches de décor bougent avec le défilement (mobile) ou la souris (desktop) ;
-         les objets touchables restent fixes. Sur iPhone, le doigt fait défiler la page : on suit donc
-         la position de la carte dans la fenêtre, ce qui donne une profondeur naturelle sans geste dédié. ─── */
-  let _px = 0, _py = 0, _tx = 0, _ty = 0, _pRaf = null, _scrollEl = null, _onScroll = null;
-  function bindParallax(wrap) {
-    if (!wrap) return;
-    const layers = wrap.querySelectorAll('.sm-layer');
-    const apply = () => {
-      _pRaf = null;
-      _px += (_tx - _px) * 0.14; _py += (_ty - _py) * 0.14;
-      layers.forEach(l => { const d = +l.dataset.depth || 0; l.setAttribute('transform', `translate(${(_px * d * 14).toFixed(2)} ${(_py * d * 28).toFixed(2)})`); });
-      if (Math.abs(_tx - _px) > 0.002 || Math.abs(_ty - _py) > 0.002) _pRaf = requestAnimationFrame(apply);
-    };
-    const kick = () => { if (!_pRaf) _pRaf = requestAnimationFrame(apply); };
-    // Défilement : décalage vertical selon la position de la carte dans la fenêtre
-    const fromScroll = () => {
-      const r = wrap.getBoundingClientRect();
-      const vh = window.innerHeight || 800;
-      const c = (r.top + r.height / 2) / vh;          // 0 = haut de l'écran, 1 = bas
-      _ty = Math.max(-1, Math.min(1, (c - 0.5) * 2.2));
-      kick();
-    };
-    if (_scrollEl && _onScroll) _scrollEl.removeEventListener('scroll', _onScroll);
-    _scrollEl = wrap.closest('.screen-scroll') || window;
-    _onScroll = fromScroll;
-    _scrollEl.addEventListener('scroll', _onScroll, { passive: true });
-    fromScroll();
-    // Souris (desktop) : suit le pointeur ; au départ, retour au centre horizontal
-    wrap.addEventListener('pointermove', (e) => {
-      if (e.pointerType && e.pointerType !== 'mouse') return;
-      const r = wrap.getBoundingClientRect();
-      _tx = Math.max(-1, Math.min(1, ((e.clientX - r.left) / r.width - 0.5) * 2));
-      kick();
-    }, { passive: true });
-    wrap.addEventListener('pointerleave', (e) => { if (!e.pointerType || e.pointerType === 'mouse') { _tx = 0; kick(); } });
   }
 
   /* ─── Interaction ─── */
@@ -509,7 +471,6 @@
       #spacemap-root{padding:4px 12px 0}
       .sm-wrap{position:relative;border:1px solid var(--line);border-radius:14px;overflow:hidden;background:radial-gradient(circle at 50% 44%,#0a1517 0%,#050c0c 58%,#020505 100%);box-shadow:inset 0 0 50px rgba(0,0,0,.5)}
       .sm-svg{display:block;width:100%;height:auto;touch-action:manipulation}
-      .sm-layer{will-change:transform}
       .sm-drift{animation:smDrift 90s ease-in-out infinite alternate;transform-origin:50% 50%}
       .sm-drift.slow{animation-duration:160s}
       .sm-drift.fast{animation-duration:60s}
