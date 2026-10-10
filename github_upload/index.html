@@ -7346,12 +7346,30 @@ function makeDefaultCartoSkills() {
 //   { kind: 'sector_radius', radius: N }  → N secteurs adjacents
 //   { kind: 'cluster' }                   → tout l'amas
 //   { kind: 'universe' }                  → tous les amas
-function getMaxRange() {
+// Niveau de cartographie effectif (10/10) : jusqu'ici seuls les cheats débloquaient la portée,
+// alors que l'arbre promet Labo T2 → sismique, Labo T3 → interstellaire. On prend le plus haut
+// des deux : skills acquis (G.cartoSkills, cheats/futur) et niveau du Laboratoire construit.
+function getLaboTier() {
+  let t = 0;
+  for (const p of (G && G.planet && G.planet.parcels) || []) {
+    if (p && p.building === 'labo' && p.state === 'built') t = Math.max(t, p.lvl || 1);
+  }
+  return t;
+}
+function getCartoLevel() {
   const s = (G && G.cartoSkills) ? G.cartoSkills : makeDefaultCartoSkills();
-  if (s.interCluster) return { kind: 'universe' };
-  if (s.galactic)     return { kind: 'cluster' };
-  if (s.interstellar) return { kind: 'sector_radius', radius: 3 };
-  if (s.sismic)       return { kind: 'sector_radius', radius: 1 };
+  let i = 0;
+  ['sismic', 'interstellar', 'galactic', 'interCluster'].forEach((k, n) => { if (s[k]) i = Math.max(i, n + 1); });
+  const lt = getLaboTier();
+  if (lt >= 3) i = Math.max(i, 2); else if (lt >= 2) i = Math.max(i, 1);
+  return ['local', 'sismic', 'interstellar', 'galactic', 'interCluster'][i];
+}
+function getMaxRange() {
+  const lvl = getCartoLevel();
+  if (lvl === 'interCluster') return { kind: 'universe' };
+  if (lvl === 'galactic')     return { kind: 'cluster' };
+  if (lvl === 'interstellar') return { kind: 'sector_radius', radius: 3 };
+  if (lvl === 'sismic')       return { kind: 'sector_radius', radius: 1 };
   return { kind: 'sector_local' };
 }
 
@@ -7914,7 +7932,7 @@ function getTechNodeStatus(node) {
   }
   // Cartographie ?
   if (node.status === 'auto-carto') {
-    const currentCarto = G.carto?.level || 'local';
+    const currentCarto = getCartoLevel();
     const order = ['local', 'sismic', 'interstellar', 'galactic', 'interCluster'];
     const currentIdx = order.indexOf(currentCarto);
     const requiredIdx = order.indexOf(node.cartoLevel);
@@ -7923,7 +7941,7 @@ function getTechNodeStatus(node) {
   }
   // Sonde moyenne (besoin de carto sismique)
   if (node.status === 'auto-carto-medium') {
-    const cartoLvl = G.carto?.level || 'local';
+    const cartoLvl = getCartoLevel();
     return (cartoLvl !== 'local') ? 'built' : 'available';
   }
   // Flotte (vaisseau construit ?)
@@ -24387,7 +24405,7 @@ function cheatSetupMidGame() {
   }
 
   // ─── 12. Cartographie débloquée (sismique) ───
-  if (typeof cheatSetCarto === 'function' && G.carto?.level === 'local') {
+  if (typeof cheatSetCarto === 'function' && getCartoLevel() === 'local') {
     cheatSetCarto('sismic');
   }
 
@@ -40806,16 +40824,16 @@ if (G.knownTargets && Array.isArray(G.tankerMissions)) {
 
 </script>
 <!-- PLANET3D — carte 3D + boucle antenne (source : sb-build/src/planet3d.js) -->
-<script type="module" src="assets/planet3d.js?v=20261011-0030"></script>
+<script type="module" src="assets/planet3d.js?v=20261011-0040"></script>
 <!-- CLOUD — sauvegarde Supabase (source : sb-build/src/cloud.js) -->
-<script type="module" src="assets/cloud.js?v=20261011-0030"></script>
+<script type="module" src="assets/cloud.js?v=20261011-0040"></script>
 <!-- MATCH3 — Match-3 V2 (assets/match3.js, source src/match3.js + src/m3core.js) : remplace startM3 -->
-<script type="module" src="assets/match3.js?v=20261011-0030"></script>
+<script type="module" src="assets/match3.js?v=20261011-0040"></script>
 <!-- HOME V2 — « monde d'abord » : planète plein écran, ressources en ligne, Flotte / Défense / Prospection (assets/home.js) -->
 <script type="module" src="assets/home.js?v=20261010-2200"></script>
 <!-- SPACE MAP v0 — carte du Centre de prospection (assets/spacemap.js, source src/spacemap.js) -->
-<script src="assets/spacemap.js?v=20261011-0030"></script>
+<script src="assets/spacemap.js?v=20261011-0040"></script>
 <!-- SPACE MAP niveau B — diorama 3D d'un système (assets/system3d.js, source src/system3d.js) -->
-<script type="module" src="assets/system3d.js?v=20261011-0030"></script>
+<script type="module" src="assets/system3d.js?v=20261011-0040"></script>
 </body>
 </html>

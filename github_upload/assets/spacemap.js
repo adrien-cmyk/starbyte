@@ -20,7 +20,11 @@
 
   const W = 360, H = 360, CX = 180, CY = 180;
   // Rayons des anneaux (distance de secteur 0..3). Au-delà : hors carte.
-  const BANDS = [[0, 108], [108, 140], [140, 164], [164, 180]];
+  // Rééquilibré (10/10) : les secteurs voisins ont une vraie place quand la portée s'étend
+  const BANDS = [[0, 84], [84, 122], [122, 154], [154, 180]];
+  // Zoom (10/10, demande d'Adrien) : vue de départ rapprochée, pincer / molette / curseur, glisser pour se déplacer
+  const ZMIN = 1, ZMAX = 4.5, ZDEF = 1.9;
+  let _view = { z: ZDEF, x: CX, y: CY };
   const COL = {
     radar: '#e6f0ff', light: '#5fcc8a', medium: '#9a8aff', tanker: '#ffc864',
     cyan: '#5fffe8', mut: '#6a7a72',
@@ -54,7 +58,7 @@
     const [r0, r1] = BANDS[d];
     const rng = _mulberry32(_hashSeed('SM:' + sysKey));
     const a = rng() * Math.PI * 2;
-    const inner = d === 0 ? 34 : r0 + 4;
+    const inner = d === 0 ? 28 : r0 + 4;
     const outer = r1 - 6;
     const r = Math.min(166, inner + rng() * (outer - inner));
     return { x: CX + Math.cos(a) * r, y: CY + Math.sin(a) * r, band: d, angle: a };
@@ -318,7 +322,7 @@
     parts.push(`<g class="sm-reticle" pointer-events="none" style="display:none"><circle r="9" fill="none" stroke="#fff" stroke-opacity=".55" stroke-width=".7" stroke-dasharray="4.7 9.4" class="sm-ret-a"/><circle r="12.5" fill="none" stroke="#fff" stroke-opacity=".25" stroke-width=".5" stroke-dasharray="2 17.6" class="sm-ret-b"/></g>`);
     // Vignette
     parts.push(`<rect x="0" y="0" width="${W}" height="${H}" fill="url(#sm-vig)" pointer-events="none"/>`);
-    return `<svg class="sm-svg" viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">${parts.join('')}</svg>`;
+    return `<svg class="sm-svg" viewBox="${vbox()}" xmlns="http://www.w3.org/2000/svg">${parts.join('')}</svg>`;
   }
 
   function panelMarkup(state) {
@@ -413,13 +417,90 @@
     return '';
   }
 
+  /* ─── Vue (zoom / déplacement) ─── */
+  function clampView() {
+    _view.z = Math.max(ZMIN, Math.min(ZMAX, _view.z));
+    const half = W / _view.z / 2, m = 12;
+    _view.x = Math.max(half - m, Math.min(W - half + m, _view.x));
+    _view.y = Math.max(half - m, Math.min(H - half + m, _view.y));
+    if (_view.z <= 1.001) { _view.x = CX; _view.y = CY; }
+  }
+  function vbox() {
+    clampView();
+    const w = W / _view.z;
+    return `${(_view.x - w / 2).toFixed(2)} ${(_view.y - w / 2).toFixed(2)} ${w.toFixed(2)} ${w.toFixed(2)}`;
+  }
+  function applyView() {
+    const svg = _root && _root.querySelector('svg.sm-svg');
+    if (svg) svg.setAttribute('viewBox', vbox());
+    const sl = _root && _root.querySelector('.sm-zoom');
+    if (sl) sl.value = String(Math.round(_view.z * 100));
+  }
+  // Zoom autour d'un point (coordonnées carte) qui reste sous le doigt
+  function zoomAt(z, px, py) {
+    const k = 1 - _view.z / Math.max(ZMIN, Math.min(ZMAX, z));
+    _view.x += (px - _view.x) * k; _view.y += (py - _view.y) * k;
+    _view.z = z; applyView();
+  }
+  function centerOn(x, y) { _view.x = x; _view.y = y; applyView(); }
+
+  let _drag = null, _suppressTap = false;
+  const _ptrs = new Map();
+  function toMap(svg, cx, cy) {
+    const pt = svg.createSVGPoint(); pt.x = cx; pt.y = cy;
+    return pt.matrixTransform(svg.getScreenCTM().inverse());
+  }
+  function bindGestures(svg) {
+    svg.addEventListener('pointerdown', (e) => {
+      _ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (_ptrs.size === 1) _drag = { x: e.clientX, y: e.clientY, vx: _view.x, vy: _view.y, moved: false };
+      if (_ptrs.size === 2) {
+        const [a, b] = [..._ptrs.values()];
+        _drag = { pinch: true, d0: Math.hypot(a.x - b.x, a.y - b.y) || 1, z0: _view.z, moved: true };
+      }
+    });
+    svg.addEventListener('pointermove', (e) => {
+      if (!_ptrs.has(e.pointerId) || !_drag) return;
+      _ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (_drag.pinch && _ptrs.size >= 2) {
+        const [a, b] = [..._ptrs.values()];
+        const m = toMap(svg, (a.x + b.x) / 2, (a.y + b.y) / 2);
+        zoomAt(_drag.z0 * Math.hypot(a.x - b.x, a.y - b.y) / _drag.d0, m.x, m.y);
+        return;
+      }
+      const dx = e.clientX - _drag.x, dy = e.clientY - _drag.y;
+      if (!_drag.moved && Math.hypot(dx, dy) < 7) return;
+      _drag.moved = true;
+      const u = (W / _view.z) / (svg.clientWidth || 1);
+      _view.x = _drag.vx - dx * u; _view.y = _drag.vy - dy * u; applyView();
+    });
+    const end = (e) => {
+      _ptrs.delete(e.pointerId);
+      if (_drag && _drag.moved) _suppressTap = true;
+      if (_ptrs.size === 0) _drag = null;
+      else if (_ptrs.size === 1) { const [p] = [..._ptrs.values()]; _drag = { x: p.x, y: p.y, vx: _view.x, vy: _view.y, moved: true }; }
+    };
+    svg.addEventListener('pointerup', end);
+    svg.addEventListener('pointercancel', end);
+    svg.addEventListener('wheel', (e) => {
+      e.preventDefault();
+      const m = toMap(svg, e.clientX, e.clientY);
+      zoomAt(_view.z * Math.exp(-e.deltaY * 0.0015), m.x, m.y);
+    }, { passive: false });
+  }
+
   function render() {
     if (!_root) _root = document.getElementById('spacemap-root');
     if (!_root) return;
     const state = collect();
-    _root.innerHTML = `<div class="sm-wrap">${svgMarkup(state)}</div>${panelMarkup(state)}`;
+    _root.innerHTML = `<div class="sm-wrap">${svgMarkup(state)}
+      <div class="sm-zoombox"><span>+</span><input class="sm-zoom" type="range" min="${ZMIN * 100}" max="${ZMAX * 100}" step="1" value="${Math.round(_view.z * 100)}" aria-label="Zoom"><span>−</span></div>
+    </div>${panelMarkup(state)}`;
     const svg = _root.querySelector('svg');
     svg.addEventListener('click', onTap);
+    bindGestures(svg);
+    const sl = _root.querySelector('.sm-zoom');
+    sl.addEventListener('input', () => zoomAt(+sl.value / 100, _view.x, _view.y));
     placeReticle();
     startLoop();
   }
@@ -436,6 +517,7 @@
 
   /* ─── Interaction ─── */
   function onTap(e) {
+    if (_suppressTap) { _suppressTap = false; return; }   // fin d'un glissé / pincé, pas un toucher
     const svg = e.currentTarget;
     const obj = e.target.closest('.sm-obj');
     if (obj) {
@@ -527,7 +609,15 @@
     st.textContent = `
       #spacemap-root{padding:4px 12px 0}
       .sm-wrap{position:relative;border:1px solid var(--line);border-radius:14px;overflow:hidden;background:radial-gradient(circle at 50% 44%,#0a1517 0%,#050c0c 58%,#020505 100%);box-shadow:inset 0 0 50px rgba(0,0,0,.5)}
-      .sm-svg{display:block;width:100%;height:auto;touch-action:manipulation}
+      .sm-svg{display:block;width:100%;height:auto;touch-action:none;cursor:grab}
+      .sm-svg:active{cursor:grabbing}
+      .sm-zoombox{position:absolute;right:6px;top:50%;transform:translateY(-50%);width:26px;height:150px;display:flex;flex-direction:column;align-items:center;justify-content:space-between;pointer-events:none}
+      .sm-zoombox span{font:600 13px/1 'JetBrains Mono',monospace;color:${COL.cyan};opacity:.55}
+      .sm-zoom{pointer-events:auto;-webkit-appearance:none;appearance:none;width:110px;height:26px;background:transparent;transform:rotate(-90deg);margin:0;flex:none}
+      .sm-zoom::-webkit-slider-runnable-track{height:2px;background:rgba(95,255,232,.22);border-radius:2px}
+      .sm-zoom::-webkit-slider-thumb{-webkit-appearance:none;width:16px;height:16px;border-radius:50%;background:#0b0f12;border:1.5px solid ${COL.cyan};margin-top:-7px}
+      .sm-zoom::-moz-range-track{height:2px;background:rgba(95,255,232,.22)}
+      .sm-zoom::-moz-range-thumb{width:14px;height:14px;border-radius:50%;background:#0b0f12;border:1.5px solid ${COL.cyan}}
       .sm-drift{animation:smDrift 90s ease-in-out infinite alternate;transform-origin:50% 50%}
       .sm-drift.slow{animation-duration:160s}
       .sm-drift.fast{animation-duration:60s}
@@ -570,5 +660,15 @@
 
   injectCss();
   function panelFor(sel) { const keep = _sel; _sel = sel; let h = ''; try { h = panelMarkup(collect()); } finally { _sel = keep; } return h; }
-  window.SBMap = { render, sweep, panelFor, select(kind, key) { _sel = { kind, key }; render(); }, clear() { _sel = null; } };
+  window.SBMap = {
+    render, sweep, panelFor,
+    select(kind, key) {
+      _sel = { kind, key }; render();
+      // l'objet demandé (ex. « Voir sur la carte ») est amené au centre de la vue
+      const el = _root && _root.querySelector(`.sm-obj[data-kind="${kind}"][data-key="${CSS.escape(key)}"] circle`);
+      if (el) centerOn(+el.getAttribute('cx'), +el.getAttribute('cy'));
+    },
+    clear() { _sel = null; },
+    resetView() { _view = { z: ZDEF, x: CX, y: CY }; applyView(); },
+  };
 })();
