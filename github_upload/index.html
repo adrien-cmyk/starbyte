@@ -10241,6 +10241,15 @@ function _carnetDistanceMult(sector) {
 function _carnetTargetFromPlanet(p) {
   const mult = _carnetDistanceMult(p.sector);
   const base = { id: 'carnet:' + p.coord, coord: p.coord, carnet: true, targetable: true, distanceMult: mult, description: p.desc || '' };
+  // MULTIJOUEUR v0 : un vrai commandant ne se raide pas avec le combat local (défense et butin inventés).
+  // Grisé jusqu'aux raids résolus par le serveur (étape 2 du GDD multijoueur).
+  if (p.isReal) {
+    return Object.assign(base, {
+      name: p.name || p.coord, level: p.playerLevel || 1, profile: 'Commandant · ' + p.playerName,
+      kind: 'player', targetable: false, defense: 0, garrison: 0, resources: {},
+      description: 'Raids entre commandants : bientôt',
+    });
+  }
   if (p.playerName) {
     const lvl = p.playerLevel || 100;
     return Object.assign(base, {
@@ -40940,16 +40949,16 @@ if (G.knownTargets && Array.isArray(G.tankerMissions)) {
 
 </script>
 <!-- PLANET3D — carte 3D + boucle antenne (source : sb-build/src/planet3d.js) -->
-<script type="module" src="assets/planet3d.js?v=20261011-0300"></script>
+<script type="module" src="assets/planet3d.js?v=20261011-0310"></script>
 <!-- CLOUD — sauvegarde Supabase (source : sb-build/src/cloud.js) -->
-<script type="module" src="assets/cloud.js?v=20261011-0300"></script>
+<script type="module" src="assets/cloud.js?v=20261011-0310"></script>
 <!-- MATCH3 — Match-3 V2 (assets/match3.js, source src/match3.js + src/m3core.js) : remplace startM3 -->
-<script type="module" src="assets/match3.js?v=20261011-0300"></script>
+<script type="module" src="assets/match3.js?v=20261011-0310"></script>
 <!-- HOME V2 — « monde d'abord » : planète plein écran, ressources en ligne, Flotte / Défense / Prospection (assets/home.js) -->
-<script type="module" src="assets/home.js?v=20261011-0300"></script>
+<script type="module" src="assets/home.js?v=20261011-0310"></script>
 <!-- SPACE MAP v0 — carte du Centre de prospection (assets/spacemap.js, source src/spacemap.js) -->
-<script src="assets/spacemap.js?v=20261011-0300"></script>
+<script src="assets/spacemap.js?v=20261011-0310"></script>
 <!-- SPACE MAP niveau B — diorama 3D d'un système (assets/system3d.js, source src/system3d.js) -->
-<script type="module" src="assets/system3d.js?v=20261011-0300"></script>
+<script type="module" src="assets/system3d.js?v=20261011-0310"></script>
 </body>
 </html>
