@@ -29933,6 +29933,26 @@ function onTankerReportTargetClick(reportId, targetId) {
   else if (typeof renderProspectRapports === 'function') renderProspectRapports();
 }
 
+// Que sélectionner sur la Carte pour une coordonnée de rapport ? Signature → la signature ;
+// adresse système (W-X-YYYY[-Z]) → le système ; coordonnées locales « 9°-6°-N » → rien.
+function mapSelectionFor(coords) {
+  const s = String(coords || '').trim().toUpperCase();
+  if (/^SIG-/.test(s)) return (G.signatures && G.signatures[s]) ? { kind: 'sig', key: s } : null;
+  const m = s.match(/^([A-Z])-([A-Z])-(\d{4})/);
+  if (m) {
+    const key = `${m[1]}-${m[2]}-${m[3]}`;
+    return { kind: key === `${MY_ADDRESS.cluster}-${MY_ADDRESS.sector}-${MY_ADDRESS.system}` ? 'home' : 'system', key };
+  }
+  return null;
+}
+function openOnMap(kind, key) {
+  G.prospectTab = 'univers';
+  if (typeof getCurrentScreen === 'function' && getCurrentScreen() !== 'prospect') goto('prospect');
+  setProspectTab('univers');
+  if (window.SBMap) SBMap.select(kind, key);
+  setTimeout(() => document.getElementById('spacemap-root')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 60);
+}
+
 function onSendProbeToSignature(tier, sigId) {
   const mission = launchProbe(tier, sigId, 'local', false);
   if (!mission) return;
@@ -30060,9 +30080,15 @@ function renderProbeReportRow(r, isUnread) {
   const dateText = r.createdAt ? new Date(r.createdAt).toLocaleString('fr-FR', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : '';
 
   // Bloc coordonnées
+  // 10/10/2026 : les coordonnées sont un lien vers la Carte (signature ou système sélectionné)
+  const mapSel = mapSelectionFor(r.targetCoords);
+  const coordsStyle = `margin:10px 0 14px;padding:10px;background:var(--bg-1);border:1px solid ${accent}30;border-radius:6px`;
+  const coordsAttr = mapSel
+    ? `onclick="event.stopPropagation();openOnMap('${mapSel.kind}','${mapSel.key}')" style="cursor:pointer;${coordsStyle}"`
+    : `style="${coordsStyle}"`;
   const coordsHtml = r.targetCoords
-    ? `<div style="margin:10px 0 14px;padding:10px;background:var(--bg);border:1px solid ${accent}30;border-radius:6px">
-        <div style="font-size:9px;color:var(--mut);letter-spacing:.12em;text-transform:uppercase;margin-bottom:4px">Coordonnées</div>
+    ? `<div ${coordsAttr}>
+        <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:4px"><div style="font-size:9px;color:var(--mut);letter-spacing:.12em;text-transform:uppercase">Coordonnées</div>${mapSel ? `<div style="font-size:9px;color:var(--cyan);letter-spacing:.12em;text-transform:uppercase">Voir sur la carte →</div>` : ''}</div>
         <div style="font-family:'SF Mono',monospace;font-size:16px;color:${accent};letter-spacing:.06em;text-align:center">${r.targetCoords}</div>
       </div>`
     : '';
@@ -40489,16 +40515,16 @@ if (G.knownTargets && Array.isArray(G.tankerMissions)) {
 
 </script>
 <!-- PLANET3D — carte 3D + boucle antenne (source : sb-build/src/planet3d.js) -->
-<script type="module" src="assets/planet3d.js?v=20261010-1830"></script>
+<script type="module" src="assets/planet3d.js?v=20261010-1900"></script>
 <!-- CLOUD — sauvegarde Supabase (source : sb-build/src/cloud.js) -->
-<script type="module" src="assets/cloud.js?v=20261010-1830"></script>
+<script type="module" src="assets/cloud.js?v=20261010-1900"></script>
 <!-- MATCH3 — Match-3 V2 (assets/match3.js, source src/match3.js + src/m3core.js) : remplace startM3 -->
-<script type="module" src="assets/match3.js?v=20261010-1830"></script>
+<script type="module" src="assets/match3.js?v=20261010-1900"></script>
 <!-- HOME V2 — « monde d'abord » : planète plein écran, ressources en ligne, Flotte / Défense / Prospection (assets/home.js) -->
-<script type="module" src="assets/home.js?v=20261010-1830"></script>
+<script type="module" src="assets/home.js?v=20261010-1900"></script>
 <!-- SPACE MAP v0 — carte du Centre de prospection (assets/spacemap.js, source src/spacemap.js) -->
-<script src="assets/spacemap.js?v=20261010-1830"></script>
+<script src="assets/spacemap.js?v=20261010-1900"></script>
 <!-- SPACE MAP niveau B — diorama 3D d'un système (assets/system3d.js, source src/system3d.js) -->
-<script type="module" src="assets/system3d.js?v=20261010-1830"></script>
+<script type="module" src="assets/system3d.js?v=20261010-1900"></script>
 </body>
 </html>

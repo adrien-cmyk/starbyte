@@ -101,6 +101,12 @@
         if (!s.planets.some(p => p.coord === sig.fixedAddress)) s.planets.push({ coord: sig.fixedAddress, name: sig.fixedAddress, fromSig: sig });
       }
     }
+    // Systèmes balayés sans rien relever : le silence a un sens (Principe #7), le système reste connu
+    for (const r of (G.probeReports || [])) {
+      if (r.tier !== 'radar') continue;
+      const m = String(r.targetCoords || '').toUpperCase().match(/^([A-Z])-([A-Z])-(\d{4})/);
+      if (m) add(`${m[1]}-${m[2]}-${m[3]}`, { known: true });
+    }
     // Cibles connues sans signature (anciennes saves)
     for (const [key, kt] of Object.entries(G.knownTargets || {})) {
       if (kt.expiresAt && kt.expiresAt < now) continue;
