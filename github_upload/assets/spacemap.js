@@ -378,31 +378,41 @@
     ret.setAttribute('transform', `translate(${el.getAttribute('cx')} ${el.getAttribute('cy')})`);
   }
 
-  /* ─── Parallaxe : les couches de décor suivent le doigt, les objets restent fixes ─── */
-  let _px = 0, _py = 0, _tx = 0, _ty = 0, _pRaf = null;
+  /* ─── Parallaxe : les couches de décor bougent avec le défilement (mobile) ou la souris (desktop) ;
+         les objets touchables restent fixes. Sur iPhone, le doigt fait défiler la page : on suit donc
+         la position de la carte dans la fenêtre, ce qui donne une profondeur naturelle sans geste dédié. ─── */
+  let _px = 0, _py = 0, _tx = 0, _ty = 0, _pRaf = null, _scrollEl = null, _onScroll = null;
   function bindParallax(wrap) {
     if (!wrap) return;
     const layers = wrap.querySelectorAll('.sm-layer');
     const apply = () => {
       _pRaf = null;
-      _px += (_tx - _px) * 0.12; _py += (_ty - _py) * 0.12;
-      layers.forEach(l => { const d = +l.dataset.depth || 0; l.setAttribute('transform', `translate(${(_px * d * 14).toFixed(2)} ${(_py * d * 14).toFixed(2)})`); });
+      _px += (_tx - _px) * 0.14; _py += (_ty - _py) * 0.14;
+      layers.forEach(l => { const d = +l.dataset.depth || 0; l.setAttribute('transform', `translate(${(_px * d * 14).toFixed(2)} ${(_py * d * 28).toFixed(2)})`); });
       if (Math.abs(_tx - _px) > 0.002 || Math.abs(_ty - _py) > 0.002) _pRaf = requestAnimationFrame(apply);
     };
-    const move = (e) => {
-      const t = e.touches ? e.touches[0] : e;
+    const kick = () => { if (!_pRaf) _pRaf = requestAnimationFrame(apply); };
+    // Défilement : décalage vertical selon la position de la carte dans la fenêtre
+    const fromScroll = () => {
       const r = wrap.getBoundingClientRect();
-      _tx = Math.max(-1, Math.min(1, ((t.clientX - r.left) / r.width - 0.5) * 2));
-      _ty = Math.max(-1, Math.min(1, ((t.clientY - r.top) / r.height - 0.5) * 2));
-      if (!_pRaf) _pRaf = requestAnimationFrame(apply);
+      const vh = window.innerHeight || 800;
+      const c = (r.top + r.height / 2) / vh;          // 0 = haut de l'écran, 1 = bas
+      _ty = Math.max(-1, Math.min(1, (c - 0.5) * 2.2));
+      kick();
     };
-    const reset = () => { _tx = 0; _ty = 0; if (!_pRaf) _pRaf = requestAnimationFrame(apply); };
-    wrap.addEventListener('pointermove', move, { passive: true });
-    wrap.addEventListener('touchmove', move, { passive: true });
-    wrap.addEventListener('pointerleave', reset);
-    wrap.addEventListener('touchend', reset);
-    wrap.addEventListener('touchcancel', reset);
-    if (_px || _py) { if (!_pRaf) _pRaf = requestAnimationFrame(apply); }
+    if (_scrollEl && _onScroll) _scrollEl.removeEventListener('scroll', _onScroll);
+    _scrollEl = wrap.closest('.screen-scroll') || window;
+    _onScroll = fromScroll;
+    _scrollEl.addEventListener('scroll', _onScroll, { passive: true });
+    fromScroll();
+    // Souris (desktop) : suit le pointeur ; au départ, retour au centre horizontal
+    wrap.addEventListener('pointermove', (e) => {
+      if (e.pointerType && e.pointerType !== 'mouse') return;
+      const r = wrap.getBoundingClientRect();
+      _tx = Math.max(-1, Math.min(1, ((e.clientX - r.left) / r.width - 0.5) * 2));
+      kick();
+    }, { passive: true });
+    wrap.addEventListener('pointerleave', (e) => { if (!e.pointerType || e.pointerType === 'mouse') { _tx = 0; kick(); } });
   }
 
   /* ─── Interaction ─── */
