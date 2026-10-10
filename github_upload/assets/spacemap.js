@@ -200,7 +200,7 @@
       const isMine = s.key === mySystemKey();
       const short = s.key.split('-').slice(1).join('-');
       if (isMine) {
-        const name = esc((G.profile && G.profile.planetName) || 'MA PLANÈTE');
+        const name = esc((G.planet && G.planet.name) || (G.profile && G.profile.planetName) || 'MA PLANÈTE');
         objs.push(`<g class="sm-obj sm-home" data-kind="home" data-key="${esc(s.key)}">
           <circle cx="${CX}" cy="${CY}" r="14" fill="transparent"/>
           <circle class="sm-breathe" cx="${CX}" cy="${CY}" r="13" fill="none" stroke="${COL.cyan}" stroke-opacity=".28" stroke-width=".8"/>
@@ -289,7 +289,7 @@
       return `<div class="sm-panel"><div class="sm-ptitle">Secteur ${esc(s.sector)} · zone inexplorée</div><div class="sm-psub">Rien de connu ici.</div>${act}</div>`;
     }
     if (s.kind === 'home') {
-      const name = (G.profile && G.profile.planetName) || 'Ma planète';
+      const name = (G.planet && G.planet.name) || (G.profile && G.profile.planetName) || 'Ma planète';
       const insp = window.SBSystem ? _sigBtn(COL.cyan, 'Inspecter le système', `SBSystem.open('${esc(mySystemKey())}')`, '', true) : '';
       return `<div class="sm-panel"><div class="sm-ptitle">${esc(name)}</div><div class="sm-psub mono">${esc(mySystemKey())}</div>${insp}</div>`;
     }

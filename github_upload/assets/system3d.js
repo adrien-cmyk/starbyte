@@ -334,7 +334,8 @@ export const SBSystem = {
     const sector = k.split('-')[1], d = _sectorDistance(MY_ADDRESS.sector, sector);
     const res = (typeof getSystemResolution === 'function') ? getSystemResolution(k) : 0;
     const status = isMine ? 'Système d\'origine' : st.scanning ? 'Balayage en cours' : !st.known ? 'Jamais balayé' : res >= 100 ? 'Entièrement résolu' : `Résolution ${res} %`;
-    if (name) name.textContent = (isMine && G.profile && G.profile.planetName) ? `${G.profile.planetName} · ${k}` : k;
+    const pn = (G.planet && G.planet.name) || (G.profile && G.profile.planetName);
+    if (name) name.textContent = (isMine && pn) ? `${pn} · ${k}` : k;
     if (sub) sub.textContent = `Secteur ${sector}${d ? ` · à ${d} secteur${d > 1 ? 's' : ''}` : ''} · ${status}`;
     this._renderSheet();
   },
