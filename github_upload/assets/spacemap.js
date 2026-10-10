@@ -397,6 +397,9 @@
     }, 120);
   });
 
+  // Recul de départ : en portrait (plein écran), on recule pour voir mon secteur entier
+  function homeDist() { const a = E.camera ? E.camera.aspect : 1; return a < 0.8 ? 980 : DIST_DEF; }
+
   const E = {
     ready: false, loading: null,
 
@@ -471,6 +474,7 @@
       this._picking(r.domElement);
       new ResizeObserver(() => this._resize()).observe(host);
       this._resize();
+      this.moveTo(0, 0, homeDist(), 1);   // portrait plein écran : plus de recul, comme la planète
       this._t = 0; this._last = performance.now(); this._check = 0;
       r.setAnimationLoop(() => this._frame());
       this.ready = true;
@@ -617,7 +621,7 @@
           g.font = '600 52px "Space Grotesk", system-ui, sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle';
           g.fillStyle = '#bfe4ff'; g.fillText(txt.split('').join(' '), w / 2, h / 2 + 2);
         });
-        const m = new T.Mesh(new T.PlaneGeometry(190, 36), new T.MeshBasicMaterial({ map: tex, transparent: true, opacity: lit ? 0.3 : 0.12, depthWrite: false }));
+        const m = new T.Mesh(new T.PlaneGeometry(190, 36), new T.MeshBasicMaterial({ map: tex, transparent: true, opacity: lit ? 0.2 : 0.09, depthWrite: false }));
         m.rotation.x = -Math.PI / 2; m.position.set(x, 1.9, z); m.renderOrder = 2;
         this.labels.add(m);
       };
@@ -977,8 +981,10 @@
   function refreshIfChanged() { if (_root && _root.isConnected) refresh(false); }
 
   function renderPanel(st) {
+    st = st || collect();
+    if (W.on) return W.renderCard(st);
     const host = _root && _root.querySelector('.sm3-panel');
-    if (host) host.innerHTML = panelMarkup(st || collect());
+    if (host) host.innerHTML = panelMarkup(st);
   }
 
   function ensureDom() {
@@ -990,7 +996,7 @@
           <button class="sm3-btn sm3-home" aria-label="Recentrer sur ma planète" title="Recentrer"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="6.5"/><circle cx="12" cy="12" r="1.8" fill="currentColor"/><path d="M12 1.5v4M12 18.5v4M1.5 12h4M18.5 12h4"/></svg></button>
           <button class="sm3-btn sm3-wide" aria-label="Vue d'ensemble" title="Vue d'ensemble"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M12 2.5l8.2 4.75v9.5L12 21.5l-8.2-4.75v-9.5z"/><path d="M12 8l3.5 2v4L12 16l-3.5-2v-4z"/></svg></button>
         </div><div class="sm3-panel"></div>`;
-      _root.querySelector('.sm3-home').onclick = () => { if (E.ready) E.moveTo(0, 0, DIST_DEF, 700); };
+      _root.querySelector('.sm3-home').onclick = () => { if (E.ready) E.moveTo(0, 0, homeDist(), 700); };
       _root.querySelector('.sm3-wide').onclick = () => { if (E.ready) E.moveTo(0, 0, Math.min(DIST_MAX, 520 + E.T.MathUtils.clamp(_state ? _state.lit : 5, 5, 14) * 120), 900); };
     }
     return true;
@@ -1001,6 +1007,7 @@
     _fallback = true;
     console.warn('[SpaceMap] 3D indisponible : carte SVG');
     if (_root) _root.innerHTML = '';
+    const mp = document.querySelector('.smw-map'); if (mp) mp.classList.add('svg2d');
     const s = document.createElement('script');
     s.src = 'assets/spacemap2d.js?v=' + Date.now().toString(36);
     s.onload = () => { if (window.SBMap && window.SBMap !== API) window.SBMap.render(); };
@@ -1038,6 +1045,203 @@
     if (typeof renderProbesPane === 'function' && document.getElementById('probes-cards-list')) { try { renderProbesPane(); } catch (e) {} }
   }
 
+  /* ═══════════════════ Écran plein : « monde d'abord », comme la planète ═══════════════════
+     Demande d'Adrien (10/10, nuit) : la carte prend tout l'écran du Centre de prospection ;
+     tout le reste s'ouvre PAR-DESSUS, exactement comme sur la planète (home.js) :
+       · HUD haut : nom du lieu + état en une ligne, croix pour revenir
+       · fiche d'action flottante en bas quand on touche une case (comme la fiche de parcelle)
+       · raccourcis bas : Sondes (hangar) · Rapports · Carnet · Archives → feuilles par-dessus la carte
+     L'illustration, les onglets et le bouton Retour disparaissent. Les panneaux existants
+     (#prospect-pane-*) sont déplacés tels quels dans la feuille : leur code de rendu ne change pas. */
+  const ICO = {
+    sondes: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="6" height="6" rx="1"/><path d="M9 12H3.5M20.5 12H15M3.5 9v6M20.5 9v6M12 9V5.5M10.5 4h3"/></svg>',
+    rapports: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M6 2.8h8.5L19 7.3v13.9H6z"/><path d="M14.5 2.8v4.5H19M9 11.5h7M9 15h7M9 18.4h4.5"/></svg>',
+    carnet: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5.5 3.5h12a1 1 0 0 1 1 1v15a1 1 0 0 1-1 1h-12z"/><path d="M8.5 3.5v17M11.5 8h4M11.5 11.5h4"/></svg>',
+    archives: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="4.5" rx="1"/><path d="M4.5 8.5v11h15v-11M9.5 12.5h5"/></svg>',
+    center: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="12" cy="12" r="6.5"/><circle cx="12" cy="12" r="1.8" fill="currentColor"/><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3"/></svg>',
+    wide: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><path d="M12 2.5l8.2 4.75v9.5L12 21.5l-8.2-4.75v-9.5z"/><path d="M12 8l3.5 2v4L12 16l-3.5-2v-4z"/></svg>',
+  };
+  const SHEETS = { sondes: 'Hangar des sondes', rapports: 'Rapports de mission', carnet: 'Carnet', archives: 'Archives du vide' };
+
+  const W = {
+    on: false, tab: null,
+
+    mount() {
+      if (this.on) return;
+      const scr = document.getElementById('scr-prospect');
+      const root = document.getElementById('spacemap-root');
+      if (!scr || !root) return;
+      const probe = document.createElement('canvas');
+      if (!(probe.getContext('webgl2') || probe.getContext('webgl'))) return;   // sans WebGL : ancienne mise en page
+      this.on = true; this.scr = scr;
+      scr.classList.add('sm-world');
+
+      // La carte : tout l'écran, sous le reste
+      const map = document.createElement('div'); map.className = 'smw-map';
+      scr.appendChild(map); map.appendChild(root); _root = root;
+
+      // HUD haut
+      const top = document.createElement('div'); top.className = 'smw-top';
+      top.innerHTML = `<div class="smw-title">CENTRE DE PROSPECTION</div><div class="smw-meta" id="smw-meta"></div>`;
+      scr.appendChild(top);
+      // la croix de retour est celle de tous les écrans détaillés (home.js : .w-screen-x → planète)
+      const tools = document.createElement('div'); tools.className = 'smw-tools';
+      tools.innerHTML = `<button data-a="center" aria-label="Recentrer sur ma planète">${ICO.center}</button><button data-a="wide" aria-label="Vue d'ensemble">${ICO.wide}</button>`;
+      tools.querySelector('[data-a="center"]').onclick = () => { if (E.ready) E.moveTo(0, 0, homeDist(), 700); };
+      tools.querySelector('[data-a="wide"]').onclick = () => { if (E.ready) E.moveTo(0, 0, Math.min(DIST_MAX, 520 + Math.max(5, (_state ? _state.lit : 5)) * 120), 900); };
+      scr.appendChild(tools);
+
+      // Fiche d'action flottante (comme la fiche de parcelle de la planète)
+      const card = this.card = document.createElement('div'); card.className = 'smw-card';
+      card.innerHTML = '<button class="smw-cx" aria-label="Fermer">×</button><div class="smw-card-in"></div>';
+      card.querySelector('.smw-cx').onclick = () => API.clear();
+      scr.appendChild(card);
+
+      // Raccourcis bas — les badges existants (rapports, archives) sont déplacés dedans, le jeu continue de les tenir à jour
+      const nav = document.createElement('nav'); nav.className = 'smw-nav';
+      nav.innerHTML = ['sondes', 'rapports', 'carnet', 'archives'].map((k) =>
+        `<button data-t="${k}">${ICO[k]}<span>${{ sondes: 'Sondes', rapports: 'Rapports', carnet: 'Carnet', archives: 'Archives' }[k]}</span></button>`).join('');
+      scr.appendChild(nav);
+      nav.querySelectorAll('button').forEach((b) => { b.onclick = () => window.setProspectTab(b.dataset.t); });
+      const rb = document.getElementById('prospect-tab-rapports-badge'); if (rb) nav.querySelector('[data-t="rapports"]').appendChild(rb);
+      const ab = document.getElementById('prospect-tab-archives-badge'); if (ab) nav.querySelector('[data-t="archives"]').appendChild(ab);
+      const aBtn = document.getElementById('prospect-tab-archives'), myA = nav.querySelector('[data-t="archives"]');
+      const syncA = () => { myA.style.display = (aBtn && aBtn.style.display === 'none') ? 'none' : ''; };
+      if (aBtn) new MutationObserver(syncA).observe(aBtn, { attributes: true, attributeFilter: ['style'] });
+      syncA();
+      this.nav = nav;
+
+      // Feuille par-dessus la carte : on y déplace les panneaux existants
+      const sheet = this.sheet = document.createElement('div'); sheet.className = 'smw-sheet';
+      sheet.innerHTML = '<div class="smw-sheet-in"><header><span class="smw-sh-t"></span><button class="smw-sh-x" aria-label="Fermer">×</button></header><div class="smw-sh-body"></div></div>';
+      sheet.addEventListener('click', (e) => { if (e.target === sheet) this.closeSheet(); });
+      sheet.querySelector('.smw-sh-x').onclick = () => this.closeSheet();
+      const body = sheet.querySelector('.smw-sh-body');
+      for (const id of ['prospect-pane-sondes', 'prospect-pane-univers', 'prospect-pane-rapports', 'prospect-pane-archives']) {
+        const el = document.getElementById(id); if (el) body.appendChild(el);
+      }
+      scr.appendChild(sheet);
+      document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !scr.classList.contains('hidden')) { if (this.tab) this.closeSheet(); else API.clear(); } });
+
+      // Onglets → feuilles. « univers » (la carte) = refermer la feuille.
+      const origTab = window.setProspectTab;
+      if (typeof origTab === 'function' && !origTab._smw) {
+        const self = this;
+        window.setProspectTab = function (tab) {
+          if (tab === 'sonder' || tab === 'sonde') tab = 'sondes';
+          // pendant un rafraîchissement de l'écran, garder le carnet ouvert
+          if (tab === 'univers' && self._keepCarnet) tab = 'carnet';
+          if (tab === 'carnet') { origTab.call(this, 'univers'); G.prospectTab = 'carnet'; self.openSheet('carnet'); return; }
+          origTab.call(this, tab);
+          if (G.prospectTab === 'univers') self.closeSheet(true); else self.openSheet(G.prospectTab);
+        };
+        window.setProspectTab._smw = true;
+      }
+      const origRender = window.renderProspectScreen;
+      if (typeof origRender === 'function' && !origRender._smw) {
+        const self = this;
+        window.renderProspectScreen = function () {
+          self._keepCarnet = G.prospectTab === 'carnet';
+          try { return origRender.apply(this, arguments); } finally { self._keepCarnet = false; }
+        };
+        window.renderProspectScreen._smw = true;
+      }
+      const origCarnet = window.openCarnetAddresses;
+      if (typeof origCarnet === 'function' && !origCarnet._smw) {
+        window.openCarnetAddresses = function () { const r = origCarnet.apply(this, arguments); setTimeout(() => window.setProspectTab('carnet'), 20); return r; };
+        window.openCarnetAddresses._smw = true;
+      }
+
+      // La carte vit dès que l'écran est visible (quel que soit l'onglet) ; en sortant, on revient à la carte
+      new MutationObserver(() => {
+        if (!scr.classList.contains('hidden')) render();
+        else if (this.tab) { this.closeSheet(); }
+      }).observe(scr, { attributes: true, attributeFilter: ['class'] });
+    },
+
+    openSheet(tab) {
+      if (!this.sheet) return;
+      this.tab = tab;
+      this.sheet.querySelector('.smw-sh-t').textContent = SHEETS[tab] || '';
+      this.nav.querySelectorAll('button').forEach((b) => b.classList.toggle('on', b.dataset.t === tab));
+      this.sheet.classList.add('on');
+    },
+    closeSheet(fromTab) {
+      if (!this.sheet) return;
+      this.tab = null;
+      this.sheet.classList.remove('on');
+      this.nav.querySelectorAll('button').forEach((b) => b.classList.remove('on'));
+      if (!fromTab && typeof G !== 'undefined') G.prospectTab = 'univers';
+    },
+
+    renderCard(st) {
+      const meta = document.getElementById('smw-meta');
+      if (meta) {
+        const sysN = Object.values(st.systems).filter(s => s.known && s.key !== mySystemKey()).length;
+        const sigN = Object.values(G.signatures || {}).filter(s => !s.resolved && !s.ignored).length;
+        const bits = [`${sysN} système${sysN > 1 ? 's' : ''}`];
+        if (sigN) bits.push(`<b style="color:${COL.sig}">${sigN} signature${sigN > 1 ? 's' : ''}</b>`);
+        if (st.flights.length) bits.push(`<b style="color:${COL.tanker}">${st.flights.length} en vol</b>`);
+        meta.innerHTML = bits.join(' · ');
+      }
+      const inn = this.card && this.card.querySelector('.smw-card-in');
+      if (!inn) return;
+      if (!_sel) { this.card.classList.remove('on'); return; }
+      const h = panelMarkup(st);
+      if (inn.innerHTML !== h) inn.innerHTML = h;
+      this.card.classList.add('on');
+    },
+  };
+
+  function injectWorldCss() {
+    if (document.getElementById('smw-style')) return;
+    const st = document.createElement('style');
+    st.id = 'smw-style';
+    st.textContent = `
+      /* un écran caché (opacité 0) ne doit jamais intercepter un toucher — ex. la croix de l'orbite par-dessus la nôtre */
+      .screen.hidden, .screen.hidden *{pointer-events:none !important}
+      #scr-prospect.sm-world{background:#03070b}
+      #scr-prospect.sm-world > .stars,#scr-prospect.sm-world > .glow,#scr-prospect.sm-world > footer.actions,
+      #scr-prospect.sm-world .screen-scroll > .head,#scr-prospect.sm-world #prospect-banner,#scr-prospect.sm-world #prospect-tabs{display:none !important}
+      #scr-prospect.sm-world > .screen-scroll{display:none}
+      .smw-map{position:absolute;inset:0;z-index:1}
+      .smw-map #spacemap-root{position:absolute;inset:0;padding:0}
+      .smw-map .sm3-wrap{position:absolute;inset:0;height:auto;border:0;border-radius:0;box-shadow:none}
+      .smw-map .sm3-btn,.smw-map .sm3-panel{display:none}
+      .smw-top{position:absolute;left:0;right:0;top:0;z-index:20;padding:calc(var(--sai,0px) + 14px) 64px 22px;text-align:center;pointer-events:none;background:linear-gradient(to bottom,rgba(3,6,10,.8),rgba(3,6,10,0))}
+      .smw-title{font:600 10.5px/1.2 'Space Grotesk',system-ui,sans-serif;letter-spacing:.28em;color:#d6e4ee}
+      .smw-meta{margin-top:5px;font:500 10px/1.3 'JetBrains Mono',monospace;letter-spacing:.06em;color:rgba(190,205,215,.62)}
+      .smw-meta b{font-weight:500}
+      .smw-tools{position:absolute;right:12px;top:calc(var(--sai,0px) + 66px);z-index:20;display:flex;flex-direction:column;gap:10px}
+      .smw-tools button{width:44px;height:44px;padding:10px;border-radius:50%;background:rgba(10,16,24,.62);border:1px solid rgba(150,190,220,.2);color:rgba(200,215,225,.85);cursor:pointer}
+      .smw-tools button:active{border-color:rgba(95,255,232,.7);color:#5fffe8}
+      .smw-card{position:absolute;left:10px;right:10px;bottom:calc(var(--sab,0px) + 92px);z-index:25;max-height:52%;overflow-y:auto;transform:translateY(16px);opacity:0;pointer-events:none;transition:opacity .18s ease,transform .18s ease}
+      .smw-card.on{transform:none;opacity:1;pointer-events:auto}
+      .smw-card .sm-panel{margin:0;padding:13px 50px 13px 14px;background:rgba(8,13,19,.92);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);border:1px solid rgba(120,160,190,.22);border-radius:12px}
+      .smw-card .sm-panel .sig-next{margin-right:-36px}
+      .smw-cx{position:absolute;top:2px;right:2px;z-index:2;width:44px;height:44px;border:0;background:none;color:rgba(220,230,238,.8);font-size:26px;line-height:1;cursor:pointer}
+      .smw-nav{position:absolute;left:0;right:0;bottom:0;z-index:20;display:flex;justify-content:space-around;align-items:flex-end;padding:18px 10px calc(var(--sab,0px) + 10px);background:linear-gradient(to top,rgba(3,6,10,.88),rgba(3,6,10,0));pointer-events:none}
+      .smw-nav button{pointer-events:auto;position:relative;display:flex;flex-direction:column;align-items:center;gap:4px;width:78px;background:none;border:0;color:#cfdbe4;cursor:pointer;padding:6px 0}
+      .smw-nav svg{width:26px;height:26px;padding:10px;box-sizing:content-box;border-radius:50%;background:rgba(10,16,24,.72);border:1px solid rgba(150,190,220,.22)}
+      .smw-nav [data-t="sondes"] svg{color:#5fa8e8}.smw-nav [data-t="rapports"] svg{color:#e6f0ff}.smw-nav [data-t="carnet"] svg{color:#a0c8ff}.smw-nav [data-t="archives"] svg{color:#ffc864}
+      .smw-nav button.on svg,.smw-nav button:active svg{border-color:rgba(95,168,232,.8);background:rgba(20,40,60,.85)}
+      .smw-nav span{font-size:9px;letter-spacing:.16em;text-transform:uppercase;color:rgba(200,215,225,.75)}
+      .smw-nav .tab-badge{position:absolute;top:2px;right:14px;min-width:16px;height:16px;padding:0 4px;border-radius:8px;background:#ffb14a;color:#0b0f12;font:700 9px/16px 'JetBrains Mono',monospace;text-align:center;box-shadow:0 0 8px rgba(255,177,74,.6)}
+      .smw-sheet{position:absolute;inset:0;z-index:40;background:rgba(3,6,10,.45);display:flex;align-items:flex-end;opacity:0;pointer-events:none;transition:opacity .2s ease}
+      .smw-sheet.on{opacity:1;pointer-events:auto}
+      .smw-sheet-in{width:100%;max-height:84%;overflow-y:auto;-webkit-overflow-scrolling:touch;background:rgba(7,11,17,.96);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);border-top:1px solid rgba(120,160,190,.25);border-radius:16px 16px 0 0;padding:6px 0 calc(var(--sab,0px) + 18px);transform:translateY(24px);transition:transform .22s ease}
+      .smw-sheet.on .smw-sheet-in{transform:none}
+      .smw-sheet header{position:sticky;top:-6px;z-index:2;display:flex;justify-content:space-between;align-items:center;padding:4px 6px 4px 18px;background:rgba(7,11,17,.96)}
+      .smw-sh-t{font-size:11px;letter-spacing:.24em;text-transform:uppercase;color:#cfe1ee}
+      .smw-sh-x{width:44px;height:44px;border:0;background:none;color:rgba(220,230,238,.8);font-size:26px;line-height:1;cursor:pointer}
+      .smw-sh-body{padding:0 14px}
+      .smw-sh-body #prospect-pane-univers .universe-stats{display:none}
+      .smw-map.svg2d #spacemap-root{overflow-y:auto;padding:calc(var(--sai,0px) + 70px) 12px 120px}
+    `;
+    document.head.appendChild(st);
+  }
+  injectWorldCss();
+
   /* ─── Styles ─── */
   function injectCss() {
     if (document.getElementById('sm3-style')) return;
@@ -1073,9 +1277,10 @@
       if (!E.ready) { _sel = sel; _pendingFocus = sel; render(); return; }
       ensureDom(); focusSel(sel);
     },
-    clear() { _sel = null; if (E.ready) { E.setSelection(-1); renderPanel(); } },
-    resetView() { if (E.ready) E.moveTo(0, 0, DIST_DEF, 1); },
+    clear() { _sel = null; if (E.ready) E.setSelection(-1); renderPanel(); },
+    resetView() { if (E.ready) E.moveTo(0, 0, homeDist(), 1); },
   };
   API._e = E; API._cells = CELLS; API._collect = collect;   // pour les tests headless
   window.SBMap = API;
+  W.mount();
 })();
