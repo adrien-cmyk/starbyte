@@ -300,6 +300,17 @@ button {
    - .ignite-2 : Envoyer en mission (moyen, ciblage tactique)
    - .ignite-3 : Lancer la mission (extrême, point de non-retour)
    ═══════════════════════════════════════════════════════════════ */
+/* PROSPECTION — action suivante par signature (10/10/2026) */
+.sig-next{margin-top:10px;display:flex;flex-direction:column;gap:4px}
+.sig-next button{width:100%;min-height:44px;display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 12px;border-radius:8px;border:1px solid;background:transparent;cursor:pointer;font-family:inherit;text-align:left;-webkit-tap-highlight-color:transparent}
+.sig-next button:active{transform:scale(.985)}
+.sig-next .lab{font-size:11px;letter-spacing:.10em;text-transform:uppercase;font-weight:600}
+.sig-next .arr{font-family:var(--font-mono);font-size:13px;opacity:.85}
+.sig-next .sub{font-size:9px;color:var(--mut);letter-spacing:.06em;padding:0 2px}
+.sig-next .off{min-height:36px;padding:8px 12px;border:1px dashed var(--border);border-radius:8px;font-size:10px;color:var(--mut);font-style:italic;display:flex;align-items:center;justify-content:space-between;gap:8px}
+.prospect-rule{margin:2px 16px 10px;padding:9px 12px;border:1px solid var(--border);border-radius:8px;background:var(--bg);font-size:10px;line-height:1.75;color:var(--mut);letter-spacing:.03em}
+.prospect-rule b{font-weight:600;letter-spacing:.08em;text-transform:uppercase;font-size:9px}
+.prospect-rule .t{font-size:8px;letter-spacing:.16em;text-transform:uppercase;opacity:.7;margin-bottom:2px}
 .btn-ignition {
   position: relative;
   width: 100%;
@@ -29759,7 +29770,7 @@ function renderProspectRapports() {
   }
 
   if (allReports.length === 0) {
-    list.innerHTML = `<div class="empty-line">Aucun rapport de mission. Envoie une sonde pour collecter des données.</div>`;
+    list.innerHTML = prospectRuleHtml() + `<div class="empty-line">Aucun rapport de mission. Envoie une sonde pour collecter des données.</div>`;
     return;
   }
 
@@ -29784,7 +29795,98 @@ function renderProspectRapports() {
     ${_archivesUnfolded ? `<div style="padding:0 0 8px">${archives.map(r => renderReportRow(r)).join('')}</div>` : ''}
   `;
 
-  list.innerHTML = `<div style="padding:0 0 8px">${recentsHtml}${archivesHtml}</div>`;
+  list.innerHTML = prospectRuleHtml() + `<div style="padding:0 0 8px">${recentsHtml}${archivesHtml}</div>`;
+}
+
+/* ═══════════ PROSPECTION — RÈGLE VISIBLE + ACTION SUIVANTE (10/10/2026) ═══════════
+   Retour testeurs : « les sondes sont compliquées », « que faire d'une signature ? ».
+   Chaque cible a un état, chaque état a UNE action suivante, toujours affichée,
+   et quand elle est impossible on dit pourquoi (test « encore une action », North Star §49). */
+
+function prospectRuleHtml() {
+  return `
+    <div class="prospect-rule">
+      <div class="t">Comment ça marche</div>
+      <div><b style="color:#e6f0ff">Radar</b> balaye un système et détecte des <span style="color:var(--text)">signatures</span></div>
+      <div><b style="color:#5fcc8a">Légère</b> identifie une signature → <span style="color:var(--text)">veine</span> ou <span style="color:var(--text)">planète</span></div>
+      <div><b style="color:#ffc864">Tanker</b> exploite une veine · <b style="color:#9a8aff">Moyenne</b> fixe l'adresse d'une planète</div>
+    </div>`;
+}
+
+// Disponibilité d'un tier de sonde : prête / en mission / en construction / aucune
+function _probeTierStatus(tier) {
+  const cfg = PROBE_TIER_CONFIG[tier] || { label: tier };
+  if ((G.probesPool || []).some(p => p.tier === tier && p.state === 'ready')) return { ok: true };
+  const now = Date.now();
+  const m = (G.probeMissions || []).filter(x => x.tier === tier && x.status === 'in_transit').sort((a, b) => a.arrivalAt - b.arrivalAt)[0];
+  if (m) return { ok: false, why: `${cfg.label} en mission · retour ${formatTankerDuration(Math.max(0, m.arrivalAt - now))}` };
+  const q = (typeof QUEUES !== 'undefined' && QUEUES.prospect && QUEUES.prospect.commands || []).find(c => c.unitKey === 'probe_' + tier);
+  if (q) return { ok: false, why: `${cfg.label} en construction · ${formatTime(Math.max(0, (q.unitDuration || 0) - (q.currentElapsed || 0)))}` };
+  return { ok: false, build: true, why: `Aucune ${cfg.label} prête` };
+}
+
+function _sigBtn(color, label, onclick, sub, soft) {
+  const bg = soft ? 'transparent' : `${color}14`;
+  return `<div class="sig-next">
+    <button onclick="event.stopPropagation();${onclick}" style="border-color:${color}${soft ? '55' : '90'};color:${color};background:${bg}">
+      <span class="lab">${label}</span><span class="arr">→</span>
+    </button>${sub ? `<div class="sub">${sub}</div>` : ''}
+  </div>`;
+}
+function _sigOff(text, sub) {
+  return `<div class="sig-next"><div class="off"><span>${text}</span></div>${sub ? `<div class="sub">${sub}</div>` : ''}</div>`;
+}
+
+// L'action suivante pour une signature, selon son état
+function probeSignatureNextAction(sig) {
+  if (!sig || sig.ignored) return '';
+  const cfgL = PROBE_TIER_CONFIG.light, cfgM = PROBE_TIER_CONFIG.medium;
+  const costOf = (cfg) => Object.entries(cfg.cost || {}).map(([k, v]) => `${v} ${(TILES.find(t => t.key === k) || {}).label || k}`).join(' · ');
+
+  // 1. Détectée, pas encore identifiée → Légère
+  if (!sig.resolved) {
+    const st = _probeTierStatus('light');
+    if (st.ok) return _sigBtn('#5fcc8a', `Envoyer une Légère`, `onSendProbeToSignature('light','${sig.id}')`, `Identifie ${sig.id} · ${cfgL.duration}`);
+    if (st.build) return _sigBtn('#5fcc8a', `Construire une Légère`, `openProbeDetail('light')`, `${costOf(cfgL)} · puis reviens envoyer sur ${sig.id}`, true);
+    return _sigOff(st.why, `Dès son retour, envoie-la sur ${sig.id}`);
+  }
+
+  // 2. Identifiée mouvante (veine, épave…) → tanker
+  if (sig.resolvedType === 'moving') {
+    const key = sig.movingCoordKey;
+    const kt = key && G.knownTargets && G.knownTargets[key];
+    if (!kt) return _sigOff('Cible exploitée ou expirée');
+    if (kt.status === 'engaged') {
+      const m = (G.tankerMissions || []).find(x => x.id === kt.tankerMissionId);
+      const eta = m ? ` · retour ${formatTankerDuration(Math.max(0, m.arrivalAt - Date.now()))}` : '';
+      return _sigOff(`Tanker en route${eta}`);
+    }
+    const stat = G.fleet?.stationed || {};
+    const total = (stat.tanker?.t1 || 0) + (stat.tanker?.t2 || 0) + (stat.tanker?.t3 || 0);
+    const busy = (G.tankerMissions || []).filter(x => x.status === 'in_transit' || x.status === 'returning').length;
+    if (total - busy > 0) return _sigBtn('#ffc864', 'Envoyer un tanker', `onTankerKnownTargetClick('${key}')`, `Ramène le cargo de ${key.split('/').pop() || key}`);
+    if (total === 0) return _sigOff('Aucun tanker', 'Construis un tanker au Chantier orbital');
+    return _sigOff('Tous les tankers sont en mission');
+  }
+
+  // 3. Identifiée fixe, pas encore verrouillée → Moyenne
+  if (!sig.fixedAddress) {
+    const st = _probeTierStatus('medium');
+    if (st.ok) return _sigBtn('#9a8aff', `Envoyer une Moyenne`, `onSendProbeToSignature('medium','${sig.id}')`, `Fixe l'adresse de la planète · ${cfgM.duration}`);
+    if (st.build) return _sigBtn('#9a8aff', `Construire une Moyenne`, `openProbeDetail('medium')`, `${costOf(cfgM)} · puis reviens envoyer sur ${sig.id}`, true);
+    return _sigOff(st.why, `Dès son retour, envoie-la sur ${sig.id}`);
+  }
+
+  // 4. Verrouillée → carnet / fiche
+  return _sigBtn('#5fffe8', 'Voir corps céleste', `openPlanetDetail('${sig.fixedAddress}')`, sig.fixedAddress, true);
+}
+
+function onSendProbeToSignature(tier, sigId) {
+  const mission = launchProbe(tier, sigId, 'local', false);
+  if (!mission) return;
+  if (typeof saveGame === 'function') saveGame();
+  if (typeof refreshCurrentScreen === 'function') refreshCurrentScreen();
+  else if (typeof renderProspectRapports === 'function') renderProspectRapports();
 }
 
 // Rend une ligne de rapport (commune aux deux types : planète + sonde)
@@ -29980,9 +30082,9 @@ function renderProbeReportRow(r, isUnread) {
               Type : <span style="color:var(--text)">${sig.typeLabel}</span><br>
               Intensité : <span style="color:var(--text)">${sig.intensity}</span><br>
               Position : <span style="color:var(--text)">${sig.position}</span><br>
-              Interprétation : <span style="color:var(--text)">${sig.interpretation}</span><br>
-              Action recommandée : <span style="color:${accent}">${sig.recommendedAction}</span>
+              Interprétation : <span style="color:var(--text)">${sig.interpretation}</span>
             </div>
+            ${probeSignatureNextAction(sig)}
             ${actionsHtml}
           </div>
         `;
@@ -30093,8 +30195,9 @@ function renderProbeReportRow(r, isUnread) {
         const fixedClassLine = r.signatureResolvedAs === 'fixed' && r.fixedClass
           ? `<div style="font-size:11px;color:var(--text);margin-top:6px">Classe estimée : <span style="color:${resolveColor}">${fixedClassLabel[r.fixedClass] || r.fixedClass}</span></div>`
           : '';
-        const nextActionLine = r.signatureResolvedAs === 'fixed'
-          ? `<div style="font-size:10px;color:var(--mut);margin-top:8px;font-style:italic">→ Pour révéler l'adresse fixe, envoie une Sonde Moyenne.</div>`
+        // 10/10/2026 : l'action suivante est un bouton (Moyenne), plus une phrase
+        const nextActionLine = (r.signatureResolvedAs === 'fixed' && r.signatureId && G.signatures && G.signatures[r.signatureId])
+          ? probeSignatureNextAction(G.signatures[r.signatureId])
           : '';
         const gainLine = r.resolutionGain
           ? `<div style="font-size:9px;color:var(--mut);margin-top:10px;letter-spacing:.04em;font-style:italic;text-align:right">Résolution système : +${r.resolutionGain}%</div>`
@@ -40301,12 +40404,12 @@ if (G.knownTargets && Array.isArray(G.tankerMissions)) {
 
 </script>
 <!-- PLANET3D — carte 3D + boucle antenne (source : sb-build/src/planet3d.js) -->
-<script type="module" src="assets/planet3d.js?v=20261010-0800"></script>
+<script type="module" src="assets/planet3d.js?v=20261010-1000"></script>
 <!-- CLOUD — sauvegarde Supabase (source : sb-build/src/cloud.js) -->
-<script type="module" src="assets/cloud.js?v=20261010-0800"></script>
+<script type="module" src="assets/cloud.js?v=20261010-1000"></script>
 <!-- MATCH3 — Match-3 V2 (assets/match3.js, source src/match3.js + src/m3core.js) : remplace startM3 -->
-<script type="module" src="assets/match3.js?v=20261010-0800"></script>
+<script type="module" src="assets/match3.js?v=20261010-1000"></script>
 <!-- HOME V2 — « monde d'abord » : planète plein écran, ressources en ligne, Flotte / Défense / Prospection (assets/home.js) -->
-<script type="module" src="assets/home.js?v=20261010-0800"></script>
+<script type="module" src="assets/home.js?v=20261010-1000"></script>
 </body>
 </html>
