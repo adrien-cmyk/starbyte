@@ -10085,9 +10085,87 @@ const FAKE_TARGETS = [
   },
 ];
 
-// Récupère un faux adversaire par son ID
+// Récupère une cible par son ID : adversaires de test, puis adresses du carnet
 function getFakeTarget(id) {
-  return FAKE_TARGETS.find(t => t.id === id) || null;
+  if (!id) return null;
+  return FAKE_TARGETS.find(t => t.id === id)
+    || (String(id).startsWith('carnet:') ? getCarnetTargets().find(t => t.id === id) : null)
+    || null;
+}
+
+// ─── 10/10/2026 — Adresses du carnet exploitables par la flotte ───
+// Sources :
+//   - planètes connues (knownSystems) hors la mienne : verrouillées par Moyenne,
+//     joueurs détectés, planètes de test
+//   - signatures identifiées (Légère) mais non verrouillées → présentes mais
+//     non ciblables (Moyenne requise)
+// Le profil de combat est dérivé de la classe / du niveau joueur.
+function _carnetDistanceMult(sector) {
+  const mySector = (typeof MY_ADDRESS !== 'undefined' && MY_ADDRESS) ? MY_ADDRESS.sector : null;
+  const d = (typeof _sectorDistance === 'function') ? _sectorDistance(mySector, sector) : 0;
+  if (d <= 0) return 1;
+  if (d <= 2) return 3;
+  return 5;
+}
+function _carnetTargetFromPlanet(p) {
+  const mult = _carnetDistanceMult(p.sector);
+  const base = { id: 'carnet:' + p.coord, coord: p.coord, carnet: true, targetable: true, distanceMult: mult, description: p.desc || '' };
+  if (p.playerName) {
+    const lvl = p.playerLevel || 100;
+    return Object.assign(base, {
+      name: p.name || p.coord,
+      level: lvl,
+      profile: 'Joueur · ' + p.playerName,
+      kind: 'player',
+      defense: Math.round(lvl * 4),
+      garrison: Math.round(lvl * 2.5),
+      resources: { metal: Math.round(lvl * 7), energie: Math.round(lvl * 3), cristal: Math.round(lvl * 0.7) },
+    });
+  }
+  const byType = {
+    dead:      { profile: 'Monde mort',       resources: { metal: 1500, energie: 0,    cristal: 200 } },
+    lunar:     { profile: 'Lune stérile',     resources: { metal: 600,  energie: 0,    cristal: 0 } },
+    gas:       { profile: 'Géante gazeuse',   resources: { metal: 0,    energie: 2500, cristal: 0 } },
+    habitable: { profile: 'Monde libre',      resources: { metal: 800,  energie: 400,  cristal: 100 } },
+  };
+  const t = byType[p.type] || byType.habitable;
+  return Object.assign(base, {
+    name: p.name || p.coord,
+    level: '—',
+    profile: t.profile,
+    kind: p.type || 'habitable',
+    defense: 0,
+    garrison: 0,
+    resources: t.resources,
+  });
+}
+function getCarnetTargets() {
+  const out = [];
+  const seen = new Set();
+  for (const sys of Object.values(G.knownSystems || {})) {
+    for (const p of (sys.planets || [])) {
+      if (!p || p.isMine || !p.coord || seen.has(p.coord)) continue;
+      seen.add(p.coord);
+      out.push(_carnetTargetFromPlanet(p));
+    }
+  }
+  const classLabel = { dead_world: 'Monde mort', gas_giant: 'Planète gazeuse', habitable: 'Corps habitable', lunar: 'Lune stérile', unknown: 'Corps orbital' };
+  for (const sig of Object.values(G.signatures || {})) {
+    if (!sig || !sig.resolved || sig.resolvedType !== 'fixed' || sig.fixedAddress || !sig.inCarnet) continue;
+    const sector = (sig.system || '').split('-')[1];
+    out.push({
+      id: 'carnet:' + sig.id, coord: sig.system, carnet: true, targetable: false,
+      name: sig.id, level: '?', profile: (classLabel[sig.fixedClass] || 'Corps orbital') + ' · identifié',
+      kind: 'signature', signatureId: sig.id,
+      hint: 'Adresse non verrouillée · Sonde Moyenne requise',
+      distanceMult: _carnetDistanceMult(sector), defense: 0, garrison: 0,
+      resources: { metal: 0, energie: 0, cristal: 0 }, description: '',
+    });
+  }
+  // Joueurs d'abord, puis mondes ciblables, puis signatures à verrouiller
+  const rank = t => t.kind === 'player' ? 0 : (t.targetable ? 1 : 2);
+  out.sort((a, b) => rank(a) - rank(b));
+  return out;
 }
 
 // Calcul du coût en énergie pour envoyer une flotte vers une cible
@@ -11349,36 +11427,65 @@ function openFleetTargetSelection() {
   goto('fleet-target');
 }
 
-function renderTargetList(fleet) {
-  const listEl = document.getElementById('fleet-target-list');
-  if (!listEl) return;
-
-  let html = '';
-  for (const target of FAKE_TARGETS) {
-    const fuelCost = computeMissionFuelCost(fleet, target);
-    const energieAvailable = G.res.energie.v || 0;
-    const canAfford = energieAvailable >= fuelCost;
-    const profileColor = target.distanceMult === 1 ? 'var(--green)' : target.distanceMult === 3 ? 'var(--amber)' : 'var(--red)';
-    const distanceLabel = target.distanceMult === 1 ? 'Proche' : target.distanceMult === 3 ? 'Distance moyenne' : 'Lointaine';
-
-    html += `
-      <div class="fleet-prepared-row${canAfford ? '' : ' disabled'}" onclick="${canAfford ? `openMissionConfirm('${target.id}')` : `toast('Énergie insuffisante : ${fmt(fuelCost)} requis')`}" style="${canAfford ? '' : 'opacity:.5;cursor:not-allowed'}">
+function _fleetTargetRowHtml(fleet, target) {
+  const fuelCost = computeMissionFuelCost(fleet, target);
+  const energieAvailable = G.res.energie.v || 0;
+  const canAfford = energieAvailable >= fuelCost;
+  const targetable = target.targetable !== false;
+  const enabled = canAfford && targetable;
+  const profileColor = target.distanceMult === 1 ? 'var(--green)' : target.distanceMult === 3 ? 'var(--amber)' : 'var(--red)';
+  const distanceLabel = target.distanceMult === 1 ? 'Proche' : target.distanceMult === 3 ? 'Distance moyenne' : 'Lointaine';
+  const onclick = !targetable
+    ? `toast('${(target.hint || 'Cible non verrouillée').replace(/'/g, "\\'")}')`
+    : (canAfford ? `openMissionConfirm('${target.id}')` : `toast('Énergie insuffisante : ${fmt(fuelCost)} requis')`);
+  const coordLine = target.coord
+    ? `<div style="font-family:'SF Mono',monospace;font-size:9px;color:var(--mut);margin-top:2px;letter-spacing:.04em">${target.coord}</div>`
+    : '';
+  const statsLine = targetable
+    ? `<span style="color:var(--cyan)">${fmt(target.defense)} déf</span> ·
+            <span style="color:var(--amber)">${fmt(target.resources.metal)} métal</span> ·
+            <span style="color:${canAfford ? 'var(--green)' : 'var(--red)'};display:inline-flex;align-items:center;gap:4px">${icon('zap', {size:11})} ${fmt(fuelCost)}</span>`
+    : `<span style="color:#ffc864;font-style:italic">${target.hint || ''}</span>`;
+  return `
+      <div class="fleet-prepared-row${enabled ? '' : ' disabled'}" onclick="${onclick}" style="${enabled ? '' : 'opacity:.5;cursor:not-allowed'}">
         <div class="fleet-prepared-icon" style="color:${profileColor};background:rgba(184,208,255,.06);border-color:rgba(184,208,255,.2)">
-          <div style="font-size:18px;font-weight:700;font-family:'SF Mono',monospace">${target.level}</div>
+          <div style="font-size:${String(target.level).length > 3 ? 14 : 18}px;font-weight:700;font-family:'SF Mono',monospace">${target.level}</div>
         </div>
         <div class="fleet-prepared-info">
           <div class="fleet-prepared-name">${target.name}</div>
+          ${coordLine}
           <div style="font-size:10px;color:${profileColor};margin-top:2px;font-style:italic">${target.profile} · ${distanceLabel}</div>
           <div class="fleet-prepared-stats" style="margin-top:3px">
-            <span style="color:var(--cyan)">${fmt(target.defense)} déf</span> ·
-            <span style="color:var(--amber)">${fmt(target.resources.metal)} métal</span> ·
-            <span style="color:${canAfford ? 'var(--green)' : 'var(--red)'};display:inline-flex;align-items:center;gap:4px">${icon('zap', {size:11})} ${fmt(fuelCost)}</span>
+            ${statsLine}
           </div>
         </div>
         <div class="fleet-prepared-arrow">→</div>
       </div>
     `;
+}
+
+function renderTargetList(fleet) {
+  const listEl = document.getElementById('fleet-target-list');
+  if (!listEl) return;
+
+  const sectionHead = (label) => `<div style="padding:10px 16px 6px;font-size:10px;color:var(--mut);letter-spacing:.12em;text-transform:uppercase">${label}</div>`;
+
+  // 10/10/2026 — Adresses du carnet en premier : c'est la vraie progression
+  // (verrouillages Moyenne, joueurs repérés). Les cibles de test restent dessous.
+  const carnetTargets = (typeof getCarnetTargets === 'function') ? getCarnetTargets() : [];
+  let html = sectionHead(`Adresses du carnet${carnetTargets.length ? ' · ' + carnetTargets.length : ''}`);
+  if (carnetTargets.length === 0) {
+    html += `
+      <div style="margin:0 16px 8px;padding:12px 14px;border:1px dashed var(--border);border-radius:8px;font-size:10px;color:var(--mut);line-height:1.6;font-style:italic">
+        Aucune adresse dans le carnet. Verrouille un corps orbital avec une Sonde Moyenne, ou repère un joueur, pour qu'il apparaisse ici.
+      </div>`;
+  } else {
+    for (const target of carnetTargets) html += _fleetTargetRowHtml(fleet, target);
   }
+
+  html += sectionHead('Cibles d\'entraînement');
+  for (const target of FAKE_TARGETS) html += _fleetTargetRowHtml(fleet, target);
+
   listEl.innerHTML = html;
 }
 
@@ -19039,7 +19146,11 @@ function _generateSignatureId() {
 // Charge G.signatures depuis localStorage
 function loadSignatures() {
   try {
-    const raw = localStorage.getItem(SIGNATURES_STORAGE_KEY);
+    // 10/10/2026 — BUG : cette fonction est appelée à l'initialisation de G,
+    // AVANT la déclaration de `const SIGNATURES_STORAGE_KEY` (TDZ → ReferenceError
+    // avalé par le catch → {} → seedStarterSignature() écrasait le store à chaque
+    // rechargement : toutes les signatures étaient perdues). Clé en littéral.
+    const raw = localStorage.getItem('starbyte_signatures');
     if (!raw) return {};
     const parsed = JSON.parse(raw);
     if (typeof parsed !== 'object' || parsed === null) return {};
@@ -19063,6 +19174,11 @@ function loadSignatures() {
       } else if (!v.expiresAt || v.expiresAt > now) {
         fresh[k] = v;
       }
+      // 10/10/2026 — Carnet explicite : les signatures résolues avant cette
+      // version étaient listées d'office ; on les garde (inCarnet=true).
+      // Les nouvelles résolutions passent par le bouton « Ajouter au carnet »
+      // du rapport (carnetPrompted=true), sauf verrouillage Moyenne (permanent).
+      if (fresh[k] && v.resolved && !v.inCarnet && !v.carnetPrompted) fresh[k].inCarnet = true;
     }
     return fresh;
   } catch (e) {
@@ -19173,6 +19289,7 @@ function resolveSignatureToMoving(signatureId, movingCoordKey) {
   sig.resolvedAt = Date.now();
   sig.resolvedType = 'moving';
   sig.movingCoordKey = movingCoordKey;
+  sig.carnetPrompted = true; // le rapport Légère propose « Ajouter au carnet »
   // Les signatures mouvantes résolues partagent le TTL de la cible mouvante
   // (gérée via knownTargets) — on garde expiresAt en miroir
   saveSignatures();
@@ -19189,10 +19306,39 @@ function resolveSignatureToFixed(signatureId, fixedAddress, fixedClass) {
   sig.resolvedType = 'fixed';
   sig.fixedAddress = fixedAddress || null;
   sig.fixedClass = fixedClass || null;
+  sig.carnetPrompted = true; // le rapport Légère propose « Ajouter au carnet »
+  if (sig.fixedAddress) sig.inCarnet = true; // adresse verrouillée = permanente dans le carnet
   // Les signatures résolues fixes ne périment jamais
   sig.expiresAt = null;
   saveSignatures();
   return true;
+}
+
+// 10/10/2026 — Recrée une signature résolue à partir d'un rapport Légère/Moyenne
+// (anciens saves où la signature a été perdue). Idempotent.
+function rehydrateSignatureFromReport(r) {
+  if (!r || !r.signatureId || !r.systemAddress) return null;
+  if (!G.signatures) G.signatures = {};
+  if (G.signatures[r.signatureId]) return G.signatures[r.signatureId];
+  if (typeof createSignature !== 'function') return null;
+  const sig = createSignature(r.systemAddress, 'Archives', { id: r.signatureId, type: r.signatureType || 'cold_mass' });
+  if (!sig) return null;
+  sig.detectedAt = r.createdAt || Date.now();
+  sig.resolved = true;
+  sig.resolvedAt = r.createdAt || Date.now();
+  sig.carnetPrompted = true;
+  if (r.signatureResolvedAs === 'moving') {
+    sig.resolvedType = 'moving';
+    sig.movingCoordKey = r.movingCoord || null;
+  } else {
+    sig.resolvedType = 'fixed';
+    sig.fixedAddress = r.fixedAddress || null;
+    sig.fixedClass = r.fixedClass || null;
+    sig.expiresAt = null;
+    if (sig.fixedAddress) sig.inCarnet = true;
+  }
+  saveSignatures();
+  return sig;
 }
 
 // Bascule l'état "dans le carnet"
@@ -19231,7 +19377,8 @@ const SYSTEM_RESOLUTION_STORAGE_KEY = 'starbyte_system_resolution';
 // Charge depuis localStorage
 function loadSystemResolution() {
   try {
-    const raw = localStorage.getItem(SYSTEM_RESOLUTION_STORAGE_KEY);
+    // 10/10/2026 — même bug TDZ que loadSignatures (const déclarée plus bas) : clé en littéral.
+    const raw = localStorage.getItem('starbyte_system_resolution');
     if (!raw) return {};
     const parsed = JSON.parse(raw);
     if (typeof parsed !== 'object' || parsed === null) return {};
@@ -30268,6 +30415,12 @@ function renderProbeReportRow(r, isUnread) {
     // Bannière Carta scientifique — découverte d'une planète dans le système
     // d'origine. Initialisée vide ici pour être en scope partout en bas.
     let cartaBanner = '';
+    // 10/10/2026 — Les signatures étaient perdues à chaque rechargement (bug TDZ
+    // loadSignatures). Les rapports, eux, survivaient : on réhydrate la signature
+    // depuis le rapport pour que ses actions (Moyenne, carnet) fonctionnent.
+    if (r.signatureId && r.signatureResolvedAs && typeof rehydrateSignatureFromReport === 'function') {
+      rehydrateSignatureFromReport(r);
+    }
     if (r.signatureId && r.signatureResolvedAs) {
       const fixedClassLabel = {
         dead_world: 'monde mort',
@@ -30329,8 +30482,9 @@ function renderProbeReportRow(r, isUnread) {
             </div>
             <div style="font-family:'SF Mono',monospace;font-size:16px;color:#9a8aff;margin-top:10px;letter-spacing:.06em;text-align:center;padding:8px;background:rgba(154,138,255,.08);border-radius:4px">${r.fixedAddress}</div>
             <div style="font-size:11px;color:var(--text);margin-top:10px">Classe : <span style="color:#9a8aff">${fixedClassLabel[r.fixedClass] || r.fixedClass}</span></div>
-            <div style="font-size:10px;color:var(--mut);margin-top:6px;font-style:italic">Cette adresse est maintenant permanente dans ton carnet.</div>
+            <div style="font-size:10px;color:var(--mut);margin-top:6px;font-style:italic">Cette adresse est maintenant permanente dans ton carnet et ciblable par ta flotte.</div>
             ${gainLine}
+            ${carnetRowForSignature(r.signatureId)}
             ${actionRow}
           </div>
         `;
@@ -30363,6 +30517,7 @@ function renderProbeReportRow(r, isUnread) {
             ${fixedClassLine}
             ${nextActionLine}
             ${gainLine}
+            ${carnetRowForSignature(r.signatureId)}
           </div>
         `;
       }
@@ -32091,7 +32246,9 @@ function renderKnownPlayersView() {
 function renderCarnetView() {
   const signatures = G.signatures || {};
   // Signatures suivies (inCarnet + résolues, ce qui mérite suivi)
-  const carnetSigs = Object.values(signatures).filter(s => s.inCarnet || s.resolved);
+  // 10/10/2026 — choix explicite du joueur (décision #15) : inCarnet,
+  // ou adresse verrouillée par Moyenne (permanente).
+  const carnetSigs = Object.values(signatures).filter(s => s.inCarnet || (s.resolved && s.fixedAddress));
 
   // ─── Joueurs connus : parcourir G.knownSystems et collecter les planètes
   // avec playerName non-null (autres joueurs détectés/cheat) ───
@@ -32263,7 +32420,7 @@ function renderCarnetView() {
     }
 
     return `
-      <div style="padding:12px 14px;border:1px solid var(--border);border-radius:8px;margin:0 16px 8px;background:var(--bg-soft)">
+      <div id="carnet-sig-${sig.id}" style="padding:12px 14px;border:1px solid var(--border);border-radius:8px;margin:0 16px 8px;background:var(--bg-soft)">
         <div style="display:flex;align-items:baseline;justify-content:space-between">
           <span style="font-family:'SF Mono',monospace;font-size:13px;color:#5fffe8;letter-spacing:.06em">${sig.id}</span>
           ${sig.resolved
@@ -32289,7 +32446,46 @@ function renderCarnetView() {
       ${carnetSigs.length} signature${carnetSigs.length > 1 ? 's' : ''} suivie${carnetSigs.length > 1 ? 's' : ''}
     </div>
     ${rows}
+    <div style="margin:4px 16px 12px;font-size:10px;color:var(--mut);font-style:italic;line-height:1.5">Les adresses verrouillées et les joueurs connus sont proposés comme cibles à l'envoi d'une flotte.</div>
   `;
+}
+
+// ─── 10/10/2026 — Ouvre le carnet (Centre de prospection › Carte › Carnet)
+// et fait défiler jusqu'à la signature demandée.
+function openCarnetAddresses(signatureId) {
+  G.universeTab = 'list';
+  openProspectAtTab('univers');
+  setTimeout(() => {
+    if (typeof setUniverseTab === 'function') setUniverseTab('list');
+    const el = signatureId ? document.getElementById('carnet-sig-' + signatureId) : document.getElementById('universe-content');
+    if (!el) return;
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    if (signatureId) {
+      el.style.transition = 'box-shadow .4s';
+      el.style.boxShadow = '0 0 0 1px #a0c8ff, 0 0 18px rgba(160,200,255,.35)';
+      setTimeout(() => { el.style.boxShadow = ''; }, 1800);
+    }
+  }, 160);
+}
+
+// ─── 10/10/2026 — Ligne « carnet » d'un rapport de signature résolue :
+// état (dans le carnet / pas encore) + action (Ajouter / Ouvrir le carnet).
+function carnetRowForSignature(signatureId) {
+  const sig = G.signatures && G.signatures[signatureId];
+  if (!sig) return '';
+  const btn = "font-size:10px;letter-spacing:.08em;text-transform:uppercase;padding:6px 12px;border-radius:4px;cursor:pointer;font-family:inherit;display:inline-flex;align-items:center;gap:5px";
+  if (sig.inCarnet) {
+    return `
+      <div style="margin-top:12px;display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap">
+        <span style="font-size:10px;color:#a0c8ff;display:inline-flex;align-items:center;gap:5px">${icon('check', {size:11, color:'#a0c8ff'})} Dans le carnet</span>
+        <button onclick="event.stopPropagation();openCarnetAddresses('${sig.id}')" style="${btn};background:rgba(160,200,255,.10);border:1px solid #a0c8ff60;color:#a0c8ff">${icon('fileText', {size:11})} Ouvrir le carnet</button>
+      </div>`;
+  }
+  return `
+      <div style="margin-top:12px;display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap">
+        <span style="font-size:10px;color:var(--mut);font-style:italic">Pas encore dans le carnet</span>
+        <button onclick="event.stopPropagation();onSignatureCarnetToggle('${sig.id}')" style="${btn};background:rgba(160,200,255,.12);border:1px solid #a0c8ff;color:#a0c8ff">${icon('fileText', {size:11})} Ajouter au carnet</button>
+      </div>`;
 }
 
 // Rend la section "Cibles connues" de l'écran Univers (univers mouvant)
@@ -40586,16 +40782,16 @@ if (G.knownTargets && Array.isArray(G.tankerMissions)) {
 
 </script>
 <!-- PLANET3D — carte 3D + boucle antenne (source : sb-build/src/planet3d.js) -->
-<script type="module" src="assets/planet3d.js?v=20261010-2000"></script>
+<script type="module" src="assets/planet3d.js?v=20261010-2100"></script>
 <!-- CLOUD — sauvegarde Supabase (source : sb-build/src/cloud.js) -->
-<script type="module" src="assets/cloud.js?v=20261010-2000"></script>
+<script type="module" src="assets/cloud.js?v=20261010-2100"></script>
 <!-- MATCH3 — Match-3 V2 (assets/match3.js, source src/match3.js + src/m3core.js) : remplace startM3 -->
-<script type="module" src="assets/match3.js?v=20261010-2000"></script>
+<script type="module" src="assets/match3.js?v=20261010-2100"></script>
 <!-- HOME V2 — « monde d'abord » : planète plein écran, ressources en ligne, Flotte / Défense / Prospection (assets/home.js) -->
-<script type="module" src="assets/home.js?v=20261010-2000"></script>
+<script type="module" src="assets/home.js?v=20261010-2100"></script>
 <!-- SPACE MAP v0 — carte du Centre de prospection (assets/spacemap.js, source src/spacemap.js) -->
-<script src="assets/spacemap.js?v=20261010-2000"></script>
+<script src="assets/spacemap.js?v=20261010-2100"></script>
 <!-- SPACE MAP niveau B — diorama 3D d'un système (assets/system3d.js, source src/system3d.js) -->
-<script type="module" src="assets/system3d.js?v=20261010-2000"></script>
+<script type="module" src="assets/system3d.js?v=20261010-2100"></script>
 </body>
 </html>
