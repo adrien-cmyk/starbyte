@@ -593,14 +593,11 @@
         if (cl.ring > BOARD) {                       // bord : se dissout dans le vide
           const k = Math.max(0, 1 - (cl.ring - BOARD) / (RIM + 0.5));
           plate = [0.35 * k, 0.35 * k, 0.4 * k]; frame = [0.45 * k, 0.45 * k, 0.5 * k]; node = [0, 0.02 * k, 0.04 * k];
-        } else if (cl.ring > lit) {                  // hors portée : éteint, grisé
-          plate = [0.32, 0.32, 0.34]; frame = [0.36, 0.36, 0.38]; node = [0.03, 0.035, 0.045];
-          if (o) node = [0.18, 0.2, 0.22];
         } else {
-          plate = [1, 1, 1]; frame = [1, 1, 1];
-          node = cl.ring === lit ? [0.32, 0.85, 1.75] : [0.16, 0.48, 0.95];   // frontière de portée plus vive
-          const isBandEdge = BAND_RINGS.some(([, b]) => b === cl.ring) && cl.ring !== lit;
-          if (isBandEdge) node = [0.22, 0.6, 1.2];
+          // Décision d'Adrien (10/10, nuit) : aucune bordure visible — ni secteur, ni portée.
+          // Toutes les cases jouables se ressemblent ; on découvre les autres zones en parcourant la carte
+          // (toucher une case dit « Secteur X · zone inexplorée » ou « Trop loin »).
+          plate = [1, 1, 1]; frame = [1, 1, 1]; node = [0.16, 0.48, 0.95];
           if (o) { const t = tint[o.kind] || tint.system; node = t; plate = [1.35, 1.4, 1.5]; }
         }
         this.iPlate.setColorAt(i, c.setRGB(plate[0], plate[1], plate[2]));
@@ -610,7 +607,6 @@
       });
       this.iPlate.instanceColor.needsUpdate = this.iFrame.instanceColor.needsUpdate = this.iNodes.instanceColor.needsUpdate = true;
       this._sectorLabels(st);
-      this._frontier(st);
       this._sweepFan(st);
     },
 
@@ -627,38 +623,8 @@
         m.rotation.x = -Math.PI / 2; m.position.set(x, 1.9, z); m.renderOrder = 2;
         this.labels.add(m);
       };
-      const litB = litBands();
+      // seul mon secteur est nommé : les autres se découvrent en les touchant
       put('SECTEUR ' + mySector(), 0, CELL * SQ3 / 2 * 4.5, true);
-      for (let b = 1; b < 4; b++) {
-        const mid = (BAND_RINGS[b][0] + BAND_RINGS[b][1]) / 2 * CELL;
-        const L = sectorForBand(b, Math.PI), R = sectorForBand(b, 0);
-        put('SECTEUR ' + L, -mid, 0, b < litB);
-        if (R !== L) put('SECTEUR ' + R, mid, 0, b < litB);
-      }
-    },
-
-    // Frontière de portée : un liseré bleu « prospection » dans les joints, tout autour des cases atteignables
-    _frontier(st) {
-      const T = this.T;
-      if (this.front && this.front.lit === st.lit) return;
-      if (this.front) { this.scene.remove(this.front); this.front.geometry.dispose(); }
-      const DIRS = [[1, 0], [1, -1], [0, -1], [-1, 0], [-1, 1], [0, 1]], half = CELL / SQ3 / 2 + 0.6, w = 0.9, v = [];
-      for (const c of CELLS) {
-        if (c.ring !== st.lit) continue;
-        for (const [dq, dr] of DIRS) {
-          if (ringOf(c.q + dq, c.r + dr) <= st.lit) continue;
-          const n = cellXZ(c.q + dq, c.r + dr), mx = (c.x + n.x) / 2, mz = (c.z + n.z) / 2;
-          let dx = n.x - c.x, dz = n.z - c.z; const L = Math.hypot(dx, dz); dx /= L; dz /= L;
-          const px = -dz, pz = dx, y = 1.95;
-          const a = [mx + px * half - dx * w, y, mz + pz * half - dz * w], b = [mx - px * half - dx * w, y, mz - pz * half - dz * w];
-          const c2 = [mx - px * half + dx * w, y, mz - pz * half + dz * w], d = [mx + px * half + dx * w, y, mz + pz * half + dz * w];
-          v.push(...a, ...b, ...c2, ...a, ...c2, ...d);
-        }
-      }
-      const g = new T.BufferGeometry(); g.setAttribute('position', new T.Float32BufferAttribute(v, 3));
-      const m = new T.MeshBasicMaterial({ color: new T.Color(0x5fa8e8).multiplyScalar(1.5), transparent: true, opacity: 0.85, side: T.DoubleSide, depthWrite: false });
-      this.front = new T.Mesh(g, m); this.front.lit = st.lit; this.front.renderOrder = 2;
-      this.scene.add(this.front);
     },
 
     _sweepFan(st) {
@@ -666,7 +632,7 @@
       if (this.fan) { this.fx.remove(this.fan); this.fan.traverse(o => o.geometry && o.geometry.dispose()); this.fan = null; }
       const anyRadar = st.flights.some(f => f.kind === 'probe' && f.tier === 'radar');
       if (!anyRadar) return;
-      const R = (st.lit + 0.5) * CELL, g = new T.Group();
+      const R = (BOARD + 0.5) * CELL, g = new T.Group();   // l'éventail ne trahit pas la portée
       const a = new T.CircleGeometry(R, 48, 0, 0.55); a.rotateX(-Math.PI / 2);
       g.add(new T.Mesh(a, this.M.add(0x9fb4c8, 0.006)));
       const b = new T.CircleGeometry(R, 48, 0, 0.12); b.rotateX(-Math.PI / 2);
@@ -929,7 +895,6 @@
       if (this.homeBall && !this.still) this.homeBall.rotation.y = t * 0.05;
       if (this.homeRing && !this.still) this.homeRing.material.opacity = 0.3 + 0.15 * Math.sin(t * 1.6);
       if (this.fan && !this.still) this.fan.rotation.y = -t * 1.05;
-      if (this.front && !this.still) this.front.material.opacity = 0.65 + 0.25 * Math.sin(t * 1.3);
       if (this.selIdx > 0) {
         const k = this.still ? 3 : 2.6 + Math.sin(t * 4) * 1.2;
         this.iNodes.setColorAt(this.selIdx, this._c || (this._c = new this.T.Color()).setRGB(0.8 * k, 0.95 * k, 1.0 * k));
