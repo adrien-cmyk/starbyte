@@ -8432,6 +8432,8 @@ function saveGame() {
     const snapshot = {
       saveVersion: SAVE_VERSION,
       savedAt: Date.now(),
+      // OFFLINE — instant jusqu'auquel le monde a été simulé (production, files)
+      simAt: G._simAt || Date.now(),
       // Données du joueur (ce qui doit survivre à un reload)
       empire: G.empire,
       res: G.res,
@@ -8522,6 +8524,8 @@ function loadGame() {
       if (snapshot.queues.capital !== undefined) QUEUES.capital = snapshot.queues.capital;
     }
 
+    // OFFLINE — reprendre la simulation là où la sauvegarde l'a laissée
+    G._simAt = snapshot.simAt || snapshot.savedAt || Date.now();
     G._lastLoadedAt = Date.now();
     const ageS = Math.round((Date.now() - snapshot.savedAt) / 1000);
     console.log(`[loadGame] Save chargée — v${snapshot.saveVersion} · dernière sauvegarde il y a ${ageS}s`);
@@ -8581,7 +8585,14 @@ function initSaveHooks() {
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'hidden') {
       saveGame();
+    } else if (document.visibilityState === 'visible') {
+      // OFFLINE — Safari revient au premier plan : créditer le temps écoulé
+      catchUpOffline();
     }
+  });
+  // OFFLINE — page restaurée depuis le cache arrière/avant (iOS Safari)
+  window.addEventListener('pageshow', (e) => {
+    if (e.persisted) catchUpOffline();
   });
 }
 
@@ -25615,11 +25626,11 @@ function startPassiveLoop() {
   // Tracker quelles ressources étaient pleines au tick précédent (évite le spam de toast)
   if (!G.fullResources) G.fullResources = new Set();
   G.passiveTimer = setInterval(() => {
+    // OFFLINE — production calculée sur le temps réel écoulé (rattrape aussi un gel iOS)
+    simulateTo(Date.now());
     const newlyFull = [];
     for (const [resKey, r] of Object.entries(G.res)) {
       if (r.rate > 0) {
-        const before = r.v;
-        r.v = Math.min(r.max, r.v + r.rate / 6);
         const isNowFull = r.v >= r.max;
         const wasAlreadyFull = G.fullResources.has(resKey);
         if (isNowFull && !wasAlreadyFull) {
@@ -25661,9 +25672,9 @@ function startPassiveLoop() {
     // Chunk 15/05 : décompte attrition des garnisons (tanker logistique)
     if (typeof tickGarrisonAttrition === 'function') tickGarrisonAttrition();
     // Passe Commerce Phase 1 : production CG passive depuis les Comptoirs
-    if (typeof tickCommerceProduction === 'function') tickCommerceProduction();
+    // OFFLINE — CG des Comptoirs désormais crédités dans simulateTo()
     // 18/05 : production carburant passive depuis les Raffineries
-    if (typeof tickFuelProduction === 'function') tickFuelProduction();
+    // OFFLINE — carburant des Raffineries désormais crédité dans simulateTo()
 
     // 19/05 : vérifier progression onboarding à chaque tick
     if (typeof checkOnboardingProgress === 'function') checkOnboardingProgress();
@@ -27997,44 +28008,11 @@ let queueTicker = null;
 function startQueueTicker() {
   if (queueTicker) return;
   queueTicker = setInterval(() => {
-    let changed = false;
-    for (const type of ['barracks', 'shipyard', 'prospect']) {
-      const queue = QUEUES[type];
-      const slots = type === 'barracks' ? G.skills.barracksSlots : 1;
-      const active = queue.commands.slice(0, slots);
-      for (const cmd of active) {
-        cmd.currentElapsed++;
-        changed = true;
-        if (cmd.currentElapsed >= cmd.unitDuration) {
-          // Une unité produite
-          cmd.completed++;
-          cmd.currentElapsed = 0;
-          completeUnitProduction(type, cmd);
-          if (cmd.completed >= cmd.totalQty) {
-            // Commande terminée
-            const idx = queue.commands.indexOf(cmd);
-            if (idx >= 0) queue.commands.splice(idx, 1);
-            // Récupère le nom selon le type d'unité produite
-            let unitName = '';
-            if (DEFENSE_UNITS[cmd.unitKey]) {
-              unitName = DEFENSE_UNITS[cmd.unitKey].name;
-            } else if (PROBE_PSEUDO_UNITS && PROBE_PSEUDO_UNITS[cmd.unitKey]) {
-              unitName = PROBE_PSEUDO_UNITS[cmd.unitKey].name;
-            } else if (SHIP_UNITS[cmd.unitKey]) {
-              const tier = cmd.shipTier || 1;
-              unitName = SHIP_TIERS[cmd.unitKey]?.[tier]?.name || SHIP_UNITS[cmd.unitKey].name;
-            }
-            if (cmd.totalQty > 1 && unitName) {
-              toast(`${cmd.totalQty}× ${unitName} prêts`);
-            }
-          }
-        }
-      }
-      if (changed) renderQueue(type);
-    }
-    // Tick de la queue capital (amélioration de bâtiment)
-    if (QUEUES.capital.upgrade) {
-      tickCapitalQueue(1);
+    // OFFLINE — les files avancent du temps réellement écoulé (simulateTo)
+    const out = simulateTo(Date.now());
+    for (const type of out.queueTypes) renderQueue(type);
+    let changed = out.queueTypes.size > 0;
+    if (out.capital) {
       changed = true;
       // Re-render fiche bâtiment si elle est ouverte
       if (!document.getElementById('scr-building-detail')?.classList.contains('hidden')) {
@@ -28055,6 +28033,211 @@ function startQueueTicker() {
       if (!document.getElementById('scr-probe-detail')?.classList.contains('hidden') && typeof renderProbeDetailScreen === 'function') renderProbeDetailScreen();
     }
   }, 1000);
+}
+
+/* ═══════════ OFFLINE — SIMULATION DU TEMPS ÉCOULÉ (10/10/2026) ═══════════
+   Une page web ne tourne pas quand Safari est fermé ou en arrière-plan.
+   Le monde n'est donc jamais « en marche » : il est simulé jusqu'à maintenant
+   à chaque tick, au démarrage et au retour au premier plan.
+   Ancre unique : G._simAt (sauvegardée dans le snapshot sous `simAt`). */
+
+const SIM_MAX_GAP_MS = 14 * 24 * 3600 * 1000;   // garde-fou (horloge trafiquée)
+const OFFLINE_RECAP_MIN_MS = 60 * 1000;          // récap affiché au-delà d'une minute
+
+function simulateTo(now) {
+  const out = { dtMs: 0, queueTypes: new Set(), capital: false, units: 0, upgrades: 0 };
+  if (!G._simAt || now < G._simAt) { G._simAt = now; return out; }
+  let dt = now - G._simAt;
+  if (dt <= 0) return out;
+  G._simAt = now;
+  if (dt > SIM_MAX_GAP_MS) dt = SIM_MAX_GAP_MS;
+  out.dtMs = dt;
+
+  // 1. Ressources — même cadence que l'ancienne boucle (rate/6 toutes les 10 s, soit `rate` par minute)
+  const minutes = dt / 60000;
+  for (const r of Object.values(G.res || {})) {
+    if (r.rate > 0 && r.v < r.max) r.v = Math.min(r.max, r.v + r.rate * minutes);
+  }
+
+  // 2. Crédits (Comptoirs) et carburant (Raffineries) — taux horaires
+  const hours = dt / 3600000;
+  if (typeof getCommerceCreditsRate === 'function') {
+    const rate = getCommerceCreditsRate();
+    if (rate > 0) {
+      G._creditsBuffer = (G._creditsBuffer || 0) + rate * hours;
+      const whole = Math.floor(G._creditsBuffer);
+      if (whole >= 1) { G.credits = (G.credits || 0) + whole; G._creditsBuffer -= whole; }
+    }
+  }
+  if (typeof getFuelProductionRate === 'function') {
+    const rate = getFuelProductionRate();
+    if (rate > 0) {
+      G._fuelBuffer = (G._fuelBuffer || 0) + rate * hours;
+      const whole = Math.floor(G._fuelBuffer);
+      if (whole >= 1) {
+        const cap = getFuelCap();
+        const before = G.fuel || 0;
+        G.fuel = Math.min(cap, before + whole);
+        G._fuelBuffer -= whole;
+        if (G.fuel >= cap && before < cap) toast('Silos de carburant pleins — production stoppée');
+      }
+    }
+  }
+
+  // 3. Files (caserne, chantier, prospection, amélioration de bâtiment) — à la seconde près
+  G._simSecBuf = (G._simSecBuf || 0) + dt / 1000;
+  const secs = Math.floor(G._simSecBuf);
+  G._simSecBuf -= secs;
+  if (secs > 0 && typeof QUEUES !== 'undefined') _advanceQueues(secs, out);
+  return out;
+}
+
+function _announceCommandDone(cmd) {
+  let unitName = '';
+  if (DEFENSE_UNITS[cmd.unitKey]) {
+    unitName = DEFENSE_UNITS[cmd.unitKey].name;
+  } else if (PROBE_PSEUDO_UNITS && PROBE_PSEUDO_UNITS[cmd.unitKey]) {
+    unitName = PROBE_PSEUDO_UNITS[cmd.unitKey].name;
+  } else if (SHIP_UNITS[cmd.unitKey]) {
+    const tier = cmd.shipTier || 1;
+    unitName = SHIP_TIERS[cmd.unitKey]?.[tier]?.name || SHIP_UNITS[cmd.unitKey].name;
+  }
+  if (cmd.totalQty > 1 && unitName) toast(`${cmd.totalQty}× ${unitName} prêts`);
+}
+
+function _advanceQueues(secs, out) {
+  for (const type of ['barracks', 'shipyard', 'prospect']) {
+    const queue = QUEUES[type];
+    if (!queue || !Array.isArray(queue.commands) || queue.commands.length === 0) continue;
+    const slots = type === 'barracks' ? (G.skills?.barracksSlots || 1) : 1;
+    let next = slots;               // prochaine commande en attente d'une cale
+    const done = [];
+    for (let i = 0; i < slots && i < queue.commands.length; i++) {
+      let cmd = queue.commands[i];
+      let budget = secs;
+      while (cmd && budget > 0) {
+        out.queueTypes.add(type);
+        const dur = Math.max(1, cmd.unitDuration | 0);
+        const need = dur - (cmd.currentElapsed || 0);
+        if (budget < need) { cmd.currentElapsed = (cmd.currentElapsed || 0) + budget; budget = 0; break; }
+        budget -= need;
+        cmd.currentElapsed = 0;
+        cmd.completed++;
+        out.units++;
+        completeUnitProduction(type, cmd);
+        if (cmd.completed >= cmd.totalQty) {
+          done.push(cmd);
+          _announceCommandDone(cmd);
+          cmd = queue.commands[next++] || null;   // la cale libérée prend la suivante
+        }
+      }
+    }
+    for (const cmd of done) {
+      const idx = queue.commands.indexOf(cmd);
+      if (idx >= 0) queue.commands.splice(idx, 1);
+    }
+  }
+  if (QUEUES.capital && QUEUES.capital.upgrade) {
+    const had = QUEUES.capital.upgrade;
+    tickCapitalQueue(secs);
+    out.capital = true;
+    if (QUEUES.capital.upgrade !== had) out.upgrades++;
+  }
+}
+
+// Rattrapage complet : au démarrage, au retour au premier plan, à la restauration bfcache.
+function catchUpOffline(opts) {
+  opts = opts || {};
+  const before = {};
+  for (const [k, r] of Object.entries(G.res || {})) before[k] = r.v;
+  const creditsBefore = G.credits || 0;
+  const fuelBefore = G.fuel || 0;
+
+  const out = simulateTo(Date.now());
+
+  // Timers déjà basés sur des dates absolues : forcer la résolution immédiate
+  if (typeof tickProbes === 'function') tickProbes();
+  if (typeof tickTankerMissions === 'function') tickTankerMissions();
+  if (typeof tickGarrisonAttrition === 'function') tickGarrisonAttrition();
+  if (_missionTimerInterval && typeof tickMissionTimers === 'function') tickMissionTimers();
+
+  if (out.dtMs >= OFFLINE_RECAP_MIN_MS) {
+    const gains = [];
+    for (const [k, r] of Object.entries(G.res || {})) {
+      const d = r.v - (before[k] || 0);
+      if (d >= 1) gains.push({ k, d, full: r.v >= r.max });
+    }
+    const dc = (G.credits || 0) - creditsBefore;
+    const df = (G.fuel || 0) - fuelBefore;
+    if (gains.length || dc >= 1 || df >= 1 || out.units || out.upgrades) {
+      const show = () => showOfflineRecap(out, gains, dc, df);
+      if (opts.boot) setTimeout(show, 1400); else show();
+    }
+    if (typeof saveGame === 'function') saveGame();
+  }
+  return out;
+}
+
+function _fmtAway(ms) {
+  const m = Math.round(ms / 60000);
+  if (m < 60) return `${m} min`;
+  const h = Math.floor(m / 60), mm = m % 60;
+  if (h < 24) return mm ? `${h} h ${String(mm).padStart(2, '0')}` : `${h} h`;
+  const d = Math.floor(h / 24), hh = h % 24;
+  return hh ? `${d} j ${hh} h` : `${d} j`;
+}
+
+function showOfflineRecap(out, gains, dc, df) {
+  if (!document.getElementById('sb-away-style')) {
+    const st = document.createElement('style');
+    st.id = 'sb-away-style';
+    st.textContent = `
+      #sb-away{position:fixed;left:50%;top:calc(env(safe-area-inset-top,0px) + 56px);transform:translate(-50%,-12px);
+        width:min(340px,calc(100vw - 32px));z-index:9500;padding:14px 16px 12px;border-radius:14px;
+        background:rgba(10,14,16,.94);border:1px solid var(--line);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);
+        color:var(--txt);font-family:'Space Grotesk',system-ui,sans-serif;opacity:0;transition:opacity .25s,transform .25s;cursor:pointer}
+      #sb-away.on{opacity:1;transform:translate(-50%,0)}
+      #sb-away .t{font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--mut);margin-bottom:8px}
+      #sb-away .t b{color:var(--amber);font-weight:600}
+      #sb-away .r{display:flex;justify-content:space-between;font-size:13px;padding:3px 0}
+      #sb-away .r span:last-child{font-family:var(--font-mono);color:var(--amber)}
+      #sb-away .r em{font-style:normal;font-size:10px;color:var(--mut);margin-left:6px;letter-spacing:.08em}
+      #sb-away .x{margin-top:8px;font-size:12px;color:var(--mut)}`;
+    document.head.appendChild(st);
+  }
+  document.getElementById('sb-away')?.remove();
+  const label = (k) => (typeof tileInfo === 'function' && tileInfo(k)?.label) || k;
+  let rows = gains.map(g => `<div class="r"><span>${label(g.k)}${g.full ? '<em>SILO PLEIN</em>' : ''}</span><span>+${fmt(g.d)}</span></div>`).join('');
+  if (dc >= 1) rows += `<div class="r"><span>Crédits</span><span>+${fmt(dc)}</span></div>`;
+  if (df >= 1) rows += `<div class="r"><span>Carburant</span><span>+${fmt(df)}</span></div>`;
+  const extra = [];
+  if (out.units) extra.push(`${out.units} unité${out.units > 1 ? 's' : ''} produite${out.units > 1 ? 's' : ''}`);
+  if (out.upgrades) extra.push('amélioration terminée');
+  const el = document.createElement('div');
+  el.id = 'sb-away';
+  el.innerHTML = `<div class="t">Pendant ton absence · <b>${_fmtAway(out.dtMs)}</b></div>${rows}${extra.length ? `<div class="x">${extra.join(' · ')}</div>` : ''}`;
+  const close = () => { el.classList.remove('on'); setTimeout(() => el.remove(), 260); };
+  el.addEventListener('click', close);
+  document.body.appendChild(el);
+  requestAnimationFrame(() => el.classList.add('on'));
+  setTimeout(close, 6500);
+}
+
+// Antenne : si la page a été fermée pendant le rituel de construction (~4 s),
+// la sauvegarde contient building:true et l'antenne resterait bloquée. On termine la construction.
+function repairInterruptedAntenna() {
+  const a = G.antenna;
+  if (!a || !a.built || !a.building) return;
+  a.building = false;
+  a.stage = 3;
+  if (!a.signal) {
+    a.signal = { name: 'SIGNATURE 01', origin: 'inconnue', dist: '0.7 UA', intensity: 'faible', cls: 'impossible', at: Date.now() };
+    if (a.parcel != null && window.SBAntenna && typeof window.SBAntenna._revealNearby === 'function') {
+      try { window.SBAntenna._revealNearby(a.parcel, 2); } catch (e) { console.warn('[antenna] reveal', e); }
+    }
+  }
+  if (typeof saveGame === 'function') saveGame();
+  if (window.Planet3D && window.Planet3D.ready && typeof window.Planet3D.sync === 'function') window.Planet3D.sync();
 }
 
 function completeUnitProduction(type, cmd) {
@@ -39997,6 +40180,13 @@ if (_SAVE_LOADED_AT_BOOT) {
 // Démarrer l'autosave et brancher les hooks (beforeunload, visibilitychange)
 initSaveHooks();
 
+// OFFLINE — créditer le temps passé hors du jeu (fermé, natel éteint, Safari en arrière-plan)
+if (_SAVE_LOADED_AT_BOOT) catchUpOffline({ boot: true }); else G._simAt = Date.now();
+// OFFLINE — les files de production n'étaient relancées qu'en ouvrant un écran : on les relance au boot
+if (typeof startQueueTicker === 'function') startQueueTicker();
+// Antenne interrompue pendant son rituel : terminer après le chargement des modules
+document.addEventListener('DOMContentLoaded', repairInterruptedAntenna);
+
 // ⚡ V0.5 — Initialiser l'état du mode dev (cacher/afficher le bouton CHEAT)
 if (typeof initDevMode === 'function') initDevMode();
 
@@ -40111,12 +40301,12 @@ if (G.knownTargets && Array.isArray(G.tankerMissions)) {
 
 </script>
 <!-- PLANET3D — carte 3D + boucle antenne (source : sb-build/src/planet3d.js) -->
-<script type="module" src="assets/planet3d.js?v=20260925-0815"></script>
+<script type="module" src="assets/planet3d.js?v=20261010-0800"></script>
 <!-- CLOUD — sauvegarde Supabase (source : sb-build/src/cloud.js) -->
-<script type="module" src="assets/cloud.js?v=20260925-0815"></script>
+<script type="module" src="assets/cloud.js?v=20261010-0800"></script>
 <!-- MATCH3 — Match-3 V2 (assets/match3.js, source src/match3.js + src/m3core.js) : remplace startM3 -->
-<script type="module" src="assets/match3.js?v=20260925-0815"></script>
+<script type="module" src="assets/match3.js?v=20261010-0800"></script>
 <!-- HOME V2 — « monde d'abord » : planète plein écran, ressources en ligne, Flotte / Défense / Prospection (assets/home.js) -->
-<script type="module" src="assets/home.js?v=20260925-0815"></script>
+<script type="module" src="assets/home.js?v=20261010-0800"></script>
 </body>
 </html>
