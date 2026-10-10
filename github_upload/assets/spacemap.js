@@ -290,7 +290,8 @@
     }
     if (s.kind === 'home') {
       const name = (G.profile && G.profile.planetName) || 'Ma planète';
-      return `<div class="sm-panel"><div class="sm-ptitle">${esc(name)}</div><div class="sm-psub mono">${esc(mySystemKey())}</div></div>`;
+      const insp = window.SBSystem ? _sigBtn(COL.cyan, 'Inspecter le système', `SBSystem.open('${esc(mySystemKey())}')`, '', true) : '';
+      return `<div class="sm-panel"><div class="sm-ptitle">${esc(name)}</div><div class="sm-psub mono">${esc(mySystemKey())}</div>${insp}</div>`;
     }
     if (s.kind === 'system') {
       const sys = state.systems[s.key];
@@ -307,7 +308,8 @@
         else if (st.build) act = _sigBtn(COL.radar, 'Construire une Radar', `openProbeDetail('radar')`, '', true);
         else act = _sigOff(st.why);
       }
-      return `<div class="sm-panel"><div class="sm-ptitle">Système ${esc(s.key)}</div><div class="sm-psub">${bits.join(' · ') || 'Balayé, rien de relevé.'}</div>${act}</div>`;
+      const insp = (window.SBSystem && sys && (sys.known || sys.scanning)) ? _sigBtn(COL.cyan, 'Inspecter le système', `SBSystem.open('${esc(s.key)}')`, '', true) : '';
+      return `<div class="sm-panel"><div class="sm-ptitle">Système ${esc(s.key)}</div><div class="sm-psub">${bits.join(' · ') || 'Balayé, rien de relevé.'}</div>${insp}${act}</div>`;
     }
     if (s.kind === 'sig') {
       const sig = G.signatures && G.signatures[s.key];
@@ -512,5 +514,6 @@
   }
 
   injectCss();
-  window.SBMap = { render, sweep, select(kind, key) { _sel = { kind, key }; render(); }, clear() { _sel = null; } };
+  function panelFor(sel) { const keep = _sel; _sel = sel; let h = ''; try { h = panelMarkup(collect()); } finally { _sel = keep; } return h; }
+  window.SBMap = { render, sweep, panelFor, select(kind, key) { _sel = { kind, key }; render(); }, clear() { _sel = null; } };
 })();
