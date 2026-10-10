@@ -25396,8 +25396,11 @@ function renderInfoCard(i) {
     primaryHandler = `toast('Skill de recyclage requis')`;
     ghostLabel = null;
   } else if (stKey === 'building') {
-    primaryHandler = `toast('Accélérer indisponible')`;
-    ghostLabel = null;
+    const left = Math.max(0, (p.buildEndsAt || 0) - Date.now());
+    primaryLabel = `Fin dans ${formatTankerDuration(left)}`;
+    primaryHandler = `toast('Le chantier avance — ${formatTankerDuration(left)} restantes')`;
+    ghostLabel = 'Annuler';
+    ghostHandler = `cancelBuild(${i})`;
   } else if (stKey === 'mine') {
     primaryHandler = `startM3FromInfo(${i}, 'Extraction')`;
     ghostHandler = `openBuildingDetail(${i})`;
@@ -25564,6 +25567,40 @@ function doBuild(key, idx) {
   }
 
   const parcel = G.planet.parcels[idx];
+  // CONSTRUCTION VISIBLE (10/10/2026, P0.3) : un bâtiment prend du temps, se voit se construire,
+  // et finit même jeu fermé (date de fin absolue, détectée par simulateTo). Cf. GDD « Construction visible ».
+  const buildMs = (BUILD_TIME_MIN[key] || 0) * 60000;
+  if (buildMs > 0 && !G.cheats?.instantBuild) {
+    const now = Date.now();
+    parcel.state = 'building';
+    parcel.building = key;
+    parcel.n = `Chantier — ${customBuildingName(key)}`;
+    parcel.sub = `Fin dans ${formatTankerDuration(buildMs)}`;
+    parcel.buildStartedAt = now;
+    parcel.buildEndsAt = now + buildMs;
+    parcel.buildCost = { ...b.cost };
+    parcel.lvl = null; parcel.prod = null;
+    toast(`Chantier ouvert — ${b.name} dans ${formatTankerDuration(buildMs)}`);
+    closeBuildCard();
+    renderPlanetMap();
+    if (typeof saveGame === 'function') saveGame();
+    return;
+  }
+  finishBuild(idx, key);
+}
+
+// Durées de construction T1 (minutes) — courtes : le joueur doit voir finir sa première mine dans sa session
+const BUILD_TIME_MIN = {
+  mine: 2, centrale: 3, labo: 4, comptoir: 4, raffinerie: 5, caserne: 6, turret: 8, shipyard: 10,
+  silo_metal: 3, silo_energie: 3, silo_cristal: 3, silo_biomass: 3, silo_artefact: 3,
+};
+
+// Fin de chantier : le bâtiment devient réel (production, familles, niveau de planète, moment 7…)
+function finishBuild(idx, key) {
+  const b = BUILDINGS[key];
+  const parcel = G.planet.parcels[idx];
+  if (!b || !parcel) return;
+  delete parcel.buildStartedAt; delete parcel.buildEndsAt; delete parcel.buildCost;
   parcel.state = 'built';
   parcel.building = key;
   parcel.n = customBuildingName(key);
@@ -25606,7 +25643,7 @@ function doBuild(key, idx) {
     if (G.res[res] !== undefined) G.res[res].rate += rate;
   }
 
-  let msg = `${b.name} construite`;
+  let msg = `${b.name} opérationnelle`;
   if (key === 'shipyard') {
     // Moment 7 (North Star §28) : première entrée en orbite possible
     G.orbitUnseen = true;
@@ -28040,6 +28077,7 @@ function startQueueTicker() {
     const out = simulateTo(Date.now());
     for (const type of out.queueTypes) renderQueue(type);
     let changed = out.queueTypes.size > 0;
+    if (out.builds && out.builds.length) { changed = true; if (typeof renderPlanetMap === 'function') renderPlanetMap(); if (typeof saveGame === 'function') saveGame(); }
     if (out.capital) {
       changed = true;
       // Re-render fiche bâtiment si elle est ouverte
@@ -28112,6 +28150,9 @@ function simulateTo(now) {
     }
   }
 
+  // 2b. Chantiers de bâtiments (date de fin absolue)
+  if (typeof tickConstructions === 'function') out.builds = tickConstructions(now);
+
   // 3. Files (caserne, chantier, prospection, amélioration de bâtiment) — à la seconde près
   G._simSecBuf = (G._simSecBuf || 0) + dt / 1000;
   const secs = Math.floor(G._simSecBuf);
@@ -28173,6 +28214,35 @@ function _advanceQueues(secs, out) {
   }
 }
 
+// Chantiers terminés → bâtiments réels. Retourne les noms terminés (pour le récap d'absence).
+function tickConstructions(now) {
+  const done = [];
+  if (!G.planet || !Array.isArray(G.planet.parcels)) return done;
+  G.planet.parcels.forEach((p, idx) => {
+    if (p && p.state === 'building' && p.buildEndsAt && p.buildEndsAt <= now) {
+      const key = p.building;
+      finishBuild(idx, key);
+      done.push((BUILDINGS[key] && BUILDINGS[key].name) || key);
+    } else if (p && p.state === 'building' && p.buildEndsAt) {
+      p.sub = `Fin dans ${formatTankerDuration(Math.max(0, p.buildEndsAt - now))}`;
+    }
+  });
+  return done;
+}
+
+// Annuler un chantier : parcelle rendue, coût remboursé à 100 % (MVP)
+function cancelBuild(idx) {
+  const p = G.planet.parcels[idx];
+  if (!p || p.state !== 'building') return;
+  for (const [res, qty] of Object.entries(p.buildCost || {})) { if (G.res[res]) G.res[res].v = Math.min(G.res[res].max, G.res[res].v + qty); }
+  delete p.buildStartedAt; delete p.buildEndsAt; delete p.buildCost;
+  p.state = 'rocky'; p.building = null; p.n = 'Plaine rocheuse'; p.sub = 'Sol stable. Disponible pour terraformation.'; p.lvl = null; p.prod = null;
+  toast('Chantier annulé — ressources rendues');
+  renderPlanetMap();
+  if (typeof renderInfoCard === 'function') renderInfoCard(idx);
+  if (typeof saveGame === 'function') saveGame();
+}
+
 // Rattrapage complet : au démarrage, au retour au premier plan, à la restauration bfcache.
 function catchUpOffline(opts) {
   opts = opts || {};
@@ -28197,7 +28267,7 @@ function catchUpOffline(opts) {
     }
     const dc = (G.credits || 0) - creditsBefore;
     const df = (G.fuel || 0) - fuelBefore;
-    if (gains.length || dc >= 1 || df >= 1 || out.units || out.upgrades) {
+    if (gains.length || dc >= 1 || df >= 1 || out.units || out.upgrades || (out.builds && out.builds.length)) {
       const show = () => showOfflineRecap(out, gains, dc, df);
       if (opts.boot) setTimeout(show, 1400); else show();
     }
@@ -28241,6 +28311,7 @@ function showOfflineRecap(out, gains, dc, df) {
   const extra = [];
   if (out.units) extra.push(`${out.units} unité${out.units > 1 ? 's' : ''} produite${out.units > 1 ? 's' : ''}`);
   if (out.upgrades) extra.push('amélioration terminée');
+  if (out.builds && out.builds.length) extra.push(`terminé : ${out.builds.join(', ')}`);
   const el = document.createElement('div');
   el.id = 'sb-away';
   el.innerHTML = `<div class="t">Pendant ton absence · <b>${_fmtAway(out.dtMs)}</b></div>${rows}${extra.length ? `<div class="x">${extra.join(' · ')}</div>` : ''}`;
@@ -40515,16 +40586,16 @@ if (G.knownTargets && Array.isArray(G.tankerMissions)) {
 
 </script>
 <!-- PLANET3D — carte 3D + boucle antenne (source : sb-build/src/planet3d.js) -->
-<script type="module" src="assets/planet3d.js?v=20261010-1900"></script>
+<script type="module" src="assets/planet3d.js?v=20261010-2000"></script>
 <!-- CLOUD — sauvegarde Supabase (source : sb-build/src/cloud.js) -->
-<script type="module" src="assets/cloud.js?v=20261010-1900"></script>
+<script type="module" src="assets/cloud.js?v=20261010-2000"></script>
 <!-- MATCH3 — Match-3 V2 (assets/match3.js, source src/match3.js + src/m3core.js) : remplace startM3 -->
-<script type="module" src="assets/match3.js?v=20261010-1900"></script>
+<script type="module" src="assets/match3.js?v=20261010-2000"></script>
 <!-- HOME V2 — « monde d'abord » : planète plein écran, ressources en ligne, Flotte / Défense / Prospection (assets/home.js) -->
-<script type="module" src="assets/home.js?v=20261010-1900"></script>
+<script type="module" src="assets/home.js?v=20261010-2000"></script>
 <!-- SPACE MAP v0 — carte du Centre de prospection (assets/spacemap.js, source src/spacemap.js) -->
-<script src="assets/spacemap.js?v=20261010-1900"></script>
+<script src="assets/spacemap.js?v=20261010-2000"></script>
 <!-- SPACE MAP niveau B — diorama 3D d'un système (assets/system3d.js, source src/system3d.js) -->
-<script type="module" src="assets/system3d.js?v=20261010-1900"></script>
+<script type="module" src="assets/system3d.js?v=20261010-2000"></script>
 </body>
 </html>
