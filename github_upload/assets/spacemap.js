@@ -133,33 +133,67 @@
 
   function svgMarkup(state) {
     const lit = litBands();
+    const litR = BANDS[Math.min(3, lit - 1)][1];      // rayon de la portée
     const parts = [];
-    parts.push(`<defs>
-      <radialGradient id="sm-home" cx="50%" cy="50%" r="50%"><stop offset="0" stop-color="${COL.cyan}" stop-opacity=".22"/><stop offset="1" stop-color="${COL.cyan}" stop-opacity="0"/></radialGradient>
-      <radialGradient id="sm-fog" cx="50%" cy="50%" r="50%"><stop offset="0" stop-color="#0d1a1c"/><stop offset="1" stop-color="#05090a"/></radialGradient>
-    </defs>`);
-    // Bandes (de l'extérieur vers l'intérieur pour l'empilement)
-    for (let d = 3; d >= 0; d--) {
-      const [, r1] = BANDS[d];
-      const isLit = d < lit;
-      const isEdge = d === lit;          // première bande hors portée : grisée, muette
-      if (!isLit && !isEdge) continue;   // au-delà : rien (pilier 7)
-      parts.push(`<circle class="sm-band ${isLit ? 'lit' : 'far'}" data-band="${d}" cx="${CX}" cy="${CY}" r="${r1}"/>`);
-    }
-    parts.push(`<circle cx="${CX}" cy="${CY}" r="60" fill="url(#sm-home)" pointer-events="none"/>`);
-    // Poussière d'étoiles déterministe (décor, non interactive)
-    const rng = _mulberry32(_hashSeed('SM:dust:' + mySystemKey()));
-    const dust = [];
-    for (let i = 0; i < 70; i++) { const a = rng() * Math.PI * 2, r = 20 + rng() * 158; dust.push(`<circle cx="${(CX + Math.cos(a) * r).toFixed(1)}" cy="${(CY + Math.sin(a) * r).toFixed(1)}" r="${(0.3 + rng() * 0.7).toFixed(2)}" fill="#cfe" opacity="${(0.08 + rng() * 0.22).toFixed(2)}"/>`); }
-    parts.push(`<g pointer-events="none">${dust.join('')}</g>`);
+    const rng = _mulberry32(_hashSeed('SM:scene:' + mySystemKey()));
+    const anyRadar = state.flights.some(f => f.kind === 'probe' && f.tier === 'radar');
 
-    // Trajets en vol (sous les objets)
+    parts.push(`<defs>
+      <radialGradient id="sm-home" cx="50%" cy="50%" r="50%"><stop offset="0" stop-color="${COL.cyan}" stop-opacity=".18"/><stop offset=".45" stop-color="${COL.cyan}" stop-opacity=".04"/><stop offset="1" stop-color="${COL.cyan}" stop-opacity="0"/></radialGradient>
+      <radialGradient id="sm-range" cx="50%" cy="50%" r="50%"><stop offset="0" stop-color="${COL.cyan}" stop-opacity="0"/><stop offset=".86" stop-color="${COL.cyan}" stop-opacity=".012"/><stop offset=".975" stop-color="${COL.cyan}" stop-opacity=".08"/><stop offset="1" stop-color="${COL.cyan}" stop-opacity="0"/></radialGradient>
+      <radialGradient id="sm-far" cx="50%" cy="50%" r="50%"><stop offset="0" stop-color="#7a8c88" stop-opacity="0"/><stop offset=".9" stop-color="#7a8c88" stop-opacity=".03"/><stop offset="1" stop-color="#7a8c88" stop-opacity="0"/></radialGradient>
+      <radialGradient id="sm-vig" cx="50%" cy="50%" r="50%"><stop offset=".6" stop-color="#000" stop-opacity="0"/><stop offset="1" stop-color="#000" stop-opacity=".38"/></radialGradient>
+      <radialGradient id="sm-neb-a" cx="50%" cy="50%" r="50%"><stop offset="0" stop-color="#2a7a86" stop-opacity=".16"/><stop offset="1" stop-color="#2a7a86" stop-opacity="0"/></radialGradient>
+      <radialGradient id="sm-neb-b" cx="50%" cy="50%" r="50%"><stop offset="0" stop-color="#5a4a9a" stop-opacity=".12"/><stop offset="1" stop-color="#5a4a9a" stop-opacity="0"/></radialGradient>
+      <radialGradient id="sm-neb-c" cx="50%" cy="50%" r="50%"><stop offset="0" stop-color="#1f5a4a" stop-opacity=".14"/><stop offset="1" stop-color="#1f5a4a" stop-opacity="0"/></radialGradient>
+      <filter id="sm-glow" x="-100%" y="-100%" width="300%" height="300%"><feGaussianBlur stdDeviation="1.4" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+      <filter id="sm-glow2" x="-150%" y="-150%" width="400%" height="400%"><feGaussianBlur stdDeviation="3" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+      <clipPath id="sm-clip-lit"><circle cx="${CX}" cy="${CY}" r="${litR}"/></clipPath>
+    </defs>`);
+
+    // ── Couche 0 : nébuleuses (parallaxe lente) ──
+    const neb = [];
+    for (let i = 0; i < 3; i++) {
+      const a = rng() * Math.PI * 2, r = 40 + rng() * 120, rx = 70 + rng() * 70, ry = 40 + rng() * 50, rot = rng() * 180;
+      neb.push(`<ellipse cx="${(CX + Math.cos(a) * r).toFixed(1)}" cy="${(CY + Math.sin(a) * r).toFixed(1)}" rx="${rx.toFixed(0)}" ry="${ry.toFixed(0)}" fill="url(#sm-neb-${'abc'[i]})" transform="rotate(${rot.toFixed(0)} ${(CX + Math.cos(a) * r).toFixed(1)} ${(CY + Math.sin(a) * r).toFixed(1)})"/>`);
+    }
+    parts.push(`<g class="sm-layer" data-depth=".18" pointer-events="none"><g class="sm-drift slow">${neb.join('')}</g></g>`);
+
+    // ── Couche 1 : étoiles lointaines (petites, nombreuses) ──
+    const far = [];
+    for (let i = 0; i < 110; i++) { const x = -30 + rng() * (W + 60), y = -30 + rng() * (H + 60); far.push(`<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="${(0.25 + rng() * 0.5).toFixed(2)}" fill="#dfe" opacity="${(0.10 + rng() * 0.25).toFixed(2)}"/>`); }
+    parts.push(`<g class="sm-layer" data-depth=".35" pointer-events="none"><g class="sm-drift">${far.join('')}</g></g>`);
+
+    // ── Couche 2 : étoiles proches (plus grosses, quelques scintillements) ──
+    const near = [];
+    for (let i = 0; i < 34; i++) { const x = -20 + rng() * (W + 40), y = -20 + rng() * (H + 40); const tw = rng() < 0.35; near.push(`<circle class="${tw ? 'sm-twinkle' : ''}" style="${tw ? `animation-delay:${(rng() * 4).toFixed(1)}s` : ''}" cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="${(0.6 + rng() * 0.8).toFixed(2)}" fill="#eef" opacity="${(0.25 + rng() * 0.4).toFixed(2)}"/>`); }
+    parts.push(`<g class="sm-layer" data-depth=".6" pointer-events="none"><g class="sm-drift fast">${near.join('')}</g></g>`);
+
+    // ── Portée : halo de la zone sondable, bande hors portée en brume ──
+    const edge = Math.min(3, lit);
+    if (lit < 4) parts.push(`<circle class="sm-band far" data-band="${edge}" cx="${CX}" cy="${CY}" r="${BANDS[edge][1]}" fill="url(#sm-far)"/>`);
+    parts.push(`<circle class="sm-band lit" cx="${CX}" cy="${CY}" r="${litR}" fill="url(#sm-range)"/>`);
+    parts.push(`<circle class="sm-range-ring" cx="${CX}" cy="${CY}" r="${litR}" pointer-events="none"/>`);
+    for (let d = 1; d < lit && d < 4; d++) parts.push(`<circle class="sm-band-sep" cx="${CX}" cy="${CY}" r="${BANDS[d - 1][1]}" pointer-events="none"/>`);
+    parts.push(`<circle cx="${CX}" cy="${CY}" r="64" fill="url(#sm-home)" pointer-events="none"/>`);
+
+    // ── Balayage radar (tant qu'une Radar est en vol) ──
+    if (anyRadar) {
+      parts.push(`<g clip-path="url(#sm-clip-lit)" pointer-events="none"><g class="sm-sweep-rot" style="transform-origin:${CX}px ${CY}px">
+        <path d="M${CX} ${CY} L${CX + litR} ${CY} A${litR} ${litR} 0 0 0 ${(CX + Math.cos(-0.5) * litR).toFixed(1)} ${(CY + Math.sin(-0.5) * litR).toFixed(1)} Z" fill="${COL.radar}" fill-opacity=".035"/>
+        <path d="M${CX} ${CY} L${CX + litR} ${CY} A${litR} ${litR} 0 0 0 ${(CX + Math.cos(-0.12) * litR).toFixed(1)} ${(CY + Math.sin(-0.12) * litR).toFixed(1)} Z" fill="${COL.radar}" fill-opacity=".05"/>
+        <line x1="${CX}" y1="${CY}" x2="${CX + litR}" y2="${CY}" stroke="${COL.radar}" stroke-opacity=".32" stroke-width=".6"/></g></g>`);
+    }
+
+    // ── Trajets en vol (traînée fine, sous les objets) ──
     for (const f of state.flights) {
       const c = f.kind === 'tanker' ? COL.tanker : (f.tier === 'radar' ? COL.radar : f.tier === 'medium' ? COL.medium : COL.light);
-      parts.push(`<line class="sm-route" x1="${f.from.x.toFixed(1)}" y1="${f.from.y.toFixed(1)}" x2="${f.to.x.toFixed(1)}" y2="${f.to.y.toFixed(1)}" stroke="${c}"/>`);
+      parts.push(`<g pointer-events="none"><line class="sm-route" x1="${f.from.x.toFixed(1)}" y1="${f.from.y.toFixed(1)}" x2="${f.to.x.toFixed(1)}" y2="${f.to.y.toFixed(1)}" stroke="${c}"/>
+        <line class="sm-trail" data-for="${esc(f.id)}" x1="${f.from.x.toFixed(1)}" y1="${f.from.y.toFixed(1)}" x2="${f.from.x.toFixed(1)}" y2="${f.from.y.toFixed(1)}" stroke="${c}"/></g>`);
     }
 
-    // Systèmes
+    // ── Objets (couche fixe : les touchers restent exacts) ──
+    const objs = [];
     for (const s of Object.values(state.systems)) {
       const p = systemPos(s.key);
       if (p.band >= lit && !s.known) continue;
@@ -167,61 +201,68 @@
       const short = s.key.split('-').slice(1).join('-');
       if (isMine) {
         const name = esc((G.profile && G.profile.planetName) || 'MA PLANÈTE');
-        parts.push(`<g class="sm-obj sm-home" data-kind="home" data-key="${esc(s.key)}">
-          <circle cx="${CX}" cy="${CY}" r="7" fill="${COL.cyan}" opacity=".95"/>
-          <circle cx="${CX}" cy="${CY}" r="12" fill="none" stroke="${COL.cyan}" stroke-opacity=".35"/>
-          <text x="${CX}" y="${CY + 24}" class="sm-lab" fill="${COL.cyan}">${name}</text></g>`);
+        objs.push(`<g class="sm-obj sm-home" data-kind="home" data-key="${esc(s.key)}">
+          <circle cx="${CX}" cy="${CY}" r="14" fill="transparent"/>
+          <circle class="sm-breathe" cx="${CX}" cy="${CY}" r="13" fill="none" stroke="${COL.cyan}" stroke-opacity=".28" stroke-width=".8"/>
+          <circle cx="${CX}" cy="${CY}" r="5.2" fill="${COL.cyan}" filter="url(#sm-glow2)"/>
+          <circle cx="${CX}" cy="${CY}" r="2.2" fill="#f4fffd"/>
+          <text x="${CX}" y="${CY + 25}" class="sm-lab" fill="${COL.cyan}">${name}</text></g>`);
       } else {
-        const cls = s.known ? 'sm-sys' : 'sm-sys faint';
-        parts.push(`<g class="sm-obj ${cls}" data-kind="system" data-key="${esc(s.key)}">
-          <circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="9" fill="transparent"/>
-          <circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="${s.known ? 2.6 : 1.8}" fill="${s.known ? '#dfe' : COL.mut}"/>
-          ${s.scanning && !s.known ? `<circle class="sm-scan" cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="6" fill="none" stroke="${COL.radar}" stroke-opacity=".5"/>` : ''}
+        const known = s.known;
+        objs.push(`<g class="sm-obj sm-sys${known ? '' : ' faint'}" data-kind="system" data-key="${esc(s.key)}">
+          <circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="10" fill="transparent"/>
+          ${known ? `<path class="sm-glint" d="M${(p.x - 6).toFixed(1)} ${p.y.toFixed(1)} H${(p.x + 6).toFixed(1)} M${p.x.toFixed(1)} ${(p.y - 6).toFixed(1)} V${(p.y + 6).toFixed(1)}" stroke="#dfe" stroke-opacity=".28" stroke-width=".5"/>` : ''}
+          <circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="${known ? 2.4 : 1.6}" fill="${known ? '#eafff9' : COL.mut}" ${known ? 'filter="url(#sm-glow)"' : ''}/>
+          ${s.scanning ? `<circle class="sm-scan" cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="7" fill="none" stroke="${COL.radar}" stroke-opacity=".6" stroke-width=".7"/><circle class="sm-scan d2" cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="7" fill="none" stroke="${COL.radar}" stroke-opacity=".6" stroke-width=".7"/>` : ''}
           <text x="${p.x.toFixed(1)}" y="${(p.y + 15).toFixed(1)}" class="sm-lab tiny" fill="${COL.mut}">${esc(short)}</text></g>`);
       }
       let k = 0;
-      // Signatures (non résolues → pulsantes ; corps orbital identifié → pointillé)
       for (const sig of s.sigs) {
         const q = satellitePos(s.key, sig.id, k++);
         if (!sig.resolved) {
-          parts.push(`<g class="sm-obj sm-sig" data-kind="sig" data-key="${esc(sig.id)}">
-            <circle cx="${q.x.toFixed(1)}" cy="${q.y.toFixed(1)}" r="8" fill="transparent"/>
-            <circle class="sm-pulse" cx="${q.x.toFixed(1)}" cy="${q.y.toFixed(1)}" r="2.4" fill="${COL.radar}"/></g>`);
+          objs.push(`<g class="sm-obj sm-sig" data-kind="sig" data-key="${esc(sig.id)}">
+            <circle cx="${q.x.toFixed(1)}" cy="${q.y.toFixed(1)}" r="9" fill="transparent"/>
+            <circle class="sm-ring" cx="${q.x.toFixed(1)}" cy="${q.y.toFixed(1)}" r="5" fill="none" stroke="${COL.radar}" stroke-opacity=".35" stroke-width=".5"/>
+            <circle class="sm-pulse" cx="${q.x.toFixed(1)}" cy="${q.y.toFixed(1)}" r="2.2" fill="${COL.radar}" filter="url(#sm-glow)"/></g>`);
         } else {
-          parts.push(`<g class="sm-obj sm-body" data-kind="sig" data-key="${esc(sig.id)}">
-            <circle cx="${q.x.toFixed(1)}" cy="${q.y.toFixed(1)}" r="8" fill="transparent"/>
-            <circle cx="${q.x.toFixed(1)}" cy="${q.y.toFixed(1)}" r="4" fill="none" stroke="${COL.light}" stroke-dasharray="2 1.5"/></g>`);
+          objs.push(`<g class="sm-obj sm-body" data-kind="sig" data-key="${esc(sig.id)}">
+            <circle cx="${q.x.toFixed(1)}" cy="${q.y.toFixed(1)}" r="9" fill="transparent"/>
+            <circle cx="${q.x.toFixed(1)}" cy="${q.y.toFixed(1)}" r="4" fill="${COL.light}" fill-opacity=".12" stroke="${COL.light}" stroke-dasharray="2 1.5" stroke-width=".8"/></g>`);
         }
       }
-      // Cibles mouvantes (veines, épaves) → losange ambre
       for (const t of s.targets) {
         const q = satellitePos(s.key, t.key, k++);
         const engaged = t.kt.status === 'engaged';
         const col = engaged ? COL.mut : COL.tanker;
-        parts.push(`<g class="sm-obj sm-tgt" data-kind="target" data-key="${esc(t.key)}">
-          <circle cx="${q.x.toFixed(1)}" cy="${q.y.toFixed(1)}" r="8" fill="transparent"/>
-          <path d="M${q.x.toFixed(1)} ${(q.y - 4).toFixed(1)} L${(q.x + 4).toFixed(1)} ${q.y.toFixed(1)} L${q.x.toFixed(1)} ${(q.y + 4).toFixed(1)} L${(q.x - 4).toFixed(1)} ${q.y.toFixed(1)} Z" fill="${col}"/></g>`);
+        objs.push(`<g class="sm-obj sm-tgt" data-kind="target" data-key="${esc(t.key)}">
+          <circle cx="${q.x.toFixed(1)}" cy="${q.y.toFixed(1)}" r="9" fill="transparent"/>
+          <path d="M${q.x.toFixed(1)} ${(q.y - 4.2).toFixed(1)} L${(q.x + 4.2).toFixed(1)} ${q.y.toFixed(1)} L${q.x.toFixed(1)} ${(q.y + 4.2).toFixed(1)} L${(q.x - 4.2).toFixed(1)} ${q.y.toFixed(1)} Z" fill="${col}" ${engaged ? '' : 'filter="url(#sm-glow)"'}/></g>`);
       }
-      // Planètes fixées → disque violet + nom
       for (const pl of s.planets) {
         const q = satellitePos(s.key, pl.coord, k++);
-        parts.push(`<g class="sm-obj sm-planet" data-kind="planet" data-key="${esc(pl.coord)}">
-          <circle cx="${q.x.toFixed(1)}" cy="${q.y.toFixed(1)}" r="8" fill="transparent"/>
-          <circle cx="${q.x.toFixed(1)}" cy="${q.y.toFixed(1)}" r="3.6" fill="${COL.medium}"/>
-          <text x="${q.x.toFixed(1)}" y="${(q.y + 11).toFixed(1)}" class="sm-lab tiny" fill="${COL.medium}">${esc(pl.name || '')}</text></g>`);
+        objs.push(`<g class="sm-obj sm-planet" data-kind="planet" data-key="${esc(pl.coord)}">
+          <circle cx="${q.x.toFixed(1)}" cy="${q.y.toFixed(1)}" r="9" fill="transparent"/>
+          <circle cx="${q.x.toFixed(1)}" cy="${q.y.toFixed(1)}" r="5.5" fill="none" stroke="${COL.medium}" stroke-opacity=".3" stroke-width=".5"/>
+          <circle cx="${q.x.toFixed(1)}" cy="${q.y.toFixed(1)}" r="3.4" fill="${COL.medium}" filter="url(#sm-glow)"/>
+          <text x="${q.x.toFixed(1)}" y="${(q.y + 12).toFixed(1)}" class="sm-lab tiny" fill="${COL.medium}">${esc(pl.name || '')}</text></g>`);
       }
     }
-
-    // Marqueurs en vol (positionnés par la boucle d'animation)
     for (const f of state.flights) {
       const c = f.kind === 'tanker' ? COL.tanker : (f.tier === 'radar' ? COL.radar : f.tier === 'medium' ? COL.medium : COL.light);
-      parts.push(`<g class="sm-obj sm-flight" data-kind="flight" data-key="${esc(f.id)}" data-x1="${f.from.x}" data-y1="${f.from.y}" data-x2="${f.to.x}" data-y2="${f.to.y}" data-t0="${f.departedAt || 0}" data-t1="${f.arrivalAt || 0}">
-        <circle class="sm-fly-hit" r="8" fill="transparent"/>
+      objs.push(`<g class="sm-obj sm-flight" data-kind="flight" data-key="${esc(f.id)}" data-x1="${f.from.x}" data-y1="${f.from.y}" data-x2="${f.to.x}" data-y2="${f.to.y}" data-t0="${f.departedAt || 0}" data-t1="${f.arrivalAt || 0}">
+        <circle class="sm-fly-hit" r="9" fill="transparent"/>
+        <path class="sm-plume" d="M0 2.5 L1.6 9 L0 13 L-1.6 9 Z" fill="${c}" fill-opacity=".35"/>
         ${f.kind === 'tanker'
-          ? `<rect class="sm-fly" x="-3" y="-2" width="6" height="4" fill="${c}"/>`
-          : `<path class="sm-fly" d="M0 -3.5 L3 2.5 L-3 2.5 Z" fill="${c}"/>`}
+          ? `<rect class="sm-fly" x="-3" y="-2.4" width="6" height="4.8" rx=".6" fill="${c}" filter="url(#sm-glow)"/>`
+          : `<path class="sm-fly" d="M0 -4 L3.2 2.6 L0 1.4 L-3.2 2.6 Z" fill="${c}" filter="url(#sm-glow)"/>`}
       </g>`);
     }
+    parts.push(`<g class="sm-objects">${objs.join('')}</g>`);
+
+    // ── Réticule de sélection (positionné au rendu) ──
+    parts.push(`<g class="sm-reticle" pointer-events="none" style="display:none"><circle r="9" fill="none" stroke="#fff" stroke-opacity=".55" stroke-width=".7" stroke-dasharray="4.7 9.4" class="sm-ret-a"/><circle r="12.5" fill="none" stroke="#fff" stroke-opacity=".25" stroke-width=".5" stroke-dasharray="2 17.6" class="sm-ret-b"/></g>`);
+    // Vignette
+    parts.push(`<rect x="0" y="0" width="${W}" height="${H}" fill="url(#sm-vig)" pointer-events="none"/>`);
     return `<svg class="sm-svg" viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">${parts.join('')}</svg>`;
   }
 
@@ -320,10 +361,48 @@
     if (!_root) return;
     const state = collect();
     _root.innerHTML = `<div class="sm-wrap">${svgMarkup(state)}</div>${panelMarkup(state)}`;
-    _root.querySelectorAll('.sm-obj').forEach(el => el.classList.toggle('sel', !!_sel && el.dataset.kind === _sel.kind && el.dataset.key === _sel.key));
     const svg = _root.querySelector('svg');
     svg.addEventListener('click', onTap);
+    placeReticle();
+    bindParallax(_root.querySelector('.sm-wrap'));
     startLoop();
+  }
+
+  function placeReticle() {
+    const ret = _root && _root.querySelector('.sm-reticle');
+    if (!ret) return;
+    if (!_sel || !['home', 'system', 'sig', 'target', 'planet'].includes(_sel.kind)) { ret.style.display = 'none'; return; }
+    const el = _root.querySelector(`.sm-obj[data-kind="${_sel.kind}"][data-key="${CSS.escape(_sel.key)}"] circle`);
+    if (!el) { ret.style.display = 'none'; return; }
+    ret.style.display = '';
+    ret.setAttribute('transform', `translate(${el.getAttribute('cx')} ${el.getAttribute('cy')})`);
+  }
+
+  /* ─── Parallaxe : les couches de décor suivent le doigt, les objets restent fixes ─── */
+  let _px = 0, _py = 0, _tx = 0, _ty = 0, _pRaf = null;
+  function bindParallax(wrap) {
+    if (!wrap) return;
+    const layers = wrap.querySelectorAll('.sm-layer');
+    const apply = () => {
+      _pRaf = null;
+      _px += (_tx - _px) * 0.12; _py += (_ty - _py) * 0.12;
+      layers.forEach(l => { const d = +l.dataset.depth || 0; l.setAttribute('transform', `translate(${(_px * d * 14).toFixed(2)} ${(_py * d * 14).toFixed(2)})`); });
+      if (Math.abs(_tx - _px) > 0.002 || Math.abs(_ty - _py) > 0.002) _pRaf = requestAnimationFrame(apply);
+    };
+    const move = (e) => {
+      const t = e.touches ? e.touches[0] : e;
+      const r = wrap.getBoundingClientRect();
+      _tx = Math.max(-1, Math.min(1, ((t.clientX - r.left) / r.width - 0.5) * 2));
+      _ty = Math.max(-1, Math.min(1, ((t.clientY - r.top) / r.height - 0.5) * 2));
+      if (!_pRaf) _pRaf = requestAnimationFrame(apply);
+    };
+    const reset = () => { _tx = 0; _ty = 0; if (!_pRaf) _pRaf = requestAnimationFrame(apply); };
+    wrap.addEventListener('pointermove', move, { passive: true });
+    wrap.addEventListener('touchmove', move, { passive: true });
+    wrap.addEventListener('pointerleave', reset);
+    wrap.addEventListener('touchend', reset);
+    wrap.addEventListener('touchcancel', reset);
+    if (_px || _py) { if (!_pRaf) _pRaf = requestAnimationFrame(apply); }
   }
 
   /* ─── Interaction ─── */
@@ -398,6 +477,14 @@
       const x = +d.x1 + (+d.x2 - +d.x1) * k, y = +d.y1 + (+d.y2 - +d.y1) * k;
       const a = Math.atan2(+d.y2 - +d.y1, +d.x2 - +d.x1) * 180 / Math.PI + 90;
       el.setAttribute('transform', `translate(${x.toFixed(2)} ${y.toFixed(2)}) rotate(${a.toFixed(1)})`);
+      // Traînée : du départ (atténuée) jusqu'au marqueur, longueur bornée
+      const tr = _root.querySelector(`.sm-trail[data-for="${CSS.escape(el.dataset.key)}"]`);
+      if (tr) {
+        const L = Math.hypot(x - +d.x1, y - +d.y1), max = 26;
+        const f = L > max ? (L - max) / L : 0;
+        tr.setAttribute('x1', (+d.x1 + (x - +d.x1) * f).toFixed(2)); tr.setAttribute('y1', (+d.y1 + (y - +d.y1) * f).toFixed(2));
+        tr.setAttribute('x2', x.toFixed(2)); tr.setAttribute('y2', y.toFixed(2));
+      }
     });
     if (els.length) _raf = requestAnimationFrame(() => setTimeout(tick, 250));
   }
@@ -410,25 +497,45 @@
     st.id = 'sm-style';
     st.textContent = `
       #spacemap-root{padding:4px 12px 0}
-      .sm-wrap{position:relative;border:1px solid var(--line);border-radius:14px;overflow:hidden;background:radial-gradient(circle at 50% 50%,#0b1517 0%,#050a0b 70%,#030607 100%)}
+      .sm-wrap{position:relative;border:1px solid var(--line);border-radius:14px;overflow:hidden;background:radial-gradient(circle at 50% 44%,#0a1517 0%,#050c0c 58%,#020505 100%);box-shadow:inset 0 0 50px rgba(0,0,0,.5)}
       .sm-svg{display:block;width:100%;height:auto;touch-action:manipulation}
-      .sm-band{fill:transparent;stroke:rgba(95,255,232,.10);stroke-width:.6}
-      .sm-band.lit{fill:rgba(95,255,232,.025);cursor:pointer}
-      .sm-band.far{fill:rgba(120,140,136,.035);stroke:rgba(120,140,136,.22);stroke-dasharray:2 3}
-      .sm-route{stroke-width:.7;stroke-opacity:.35;stroke-dasharray:2 2}
+      .sm-layer{will-change:transform}
+      .sm-drift{animation:smDrift 90s ease-in-out infinite alternate;transform-origin:50% 50%}
+      .sm-drift.slow{animation-duration:160s}
+      .sm-drift.fast{animation-duration:60s}
+      @keyframes smDrift{0%{transform:translate(-3px,2px) rotate(-.4deg)}100%{transform:translate(3px,-2px) rotate(.4deg)}}
+      .sm-twinkle{animation:smTwinkle 3.6s ease-in-out infinite}
+      @keyframes smTwinkle{0%,100%{opacity:.25}50%{opacity:.75}}
+      .sm-band.lit{cursor:pointer}
+      .sm-band.far{cursor:pointer}
+      .sm-range-ring{fill:none;stroke:${COL.cyan};stroke-opacity:.3;stroke-width:.6}
+      .sm-band-sep{fill:none;stroke:${COL.cyan};stroke-opacity:.07;stroke-width:.5;stroke-dasharray:1 4}
+      .sm-sweep-rot{animation:smSweep 6s linear infinite}
+      @keyframes smSweep{to{transform:rotate(360deg)}}
+      .sm-route{stroke-width:.55;stroke-opacity:.22;stroke-dasharray:1.5 2.5}
+      .sm-trail{stroke-width:1.1;stroke-opacity:.55;stroke-linecap:round}
       .sm-obj{cursor:pointer}
-      .sm-obj.sel circle:nth-child(2),.sm-obj.sel path,.sm-obj.sel rect{filter:drop-shadow(0 0 3px rgba(255,255,255,.6))}
       .sm-lab{font-family:'Space Grotesk',system-ui,sans-serif;font-size:7.5px;letter-spacing:.14em;text-anchor:middle;text-transform:uppercase;pointer-events:none}
       .sm-lab.tiny{font-family:var(--font-mono);font-size:5.6px;letter-spacing:.06em;text-transform:none;opacity:.8}
+      .sm-breathe{animation:smBreathe 4s ease-in-out infinite;transform-box:fill-box;transform-origin:center}
+      @keyframes smBreathe{0%,100%{transform:scale(1);opacity:.6}50%{transform:scale(1.25);opacity:.2}}
       .sm-pulse{animation:smPulse 2.4s ease-in-out infinite;transform-box:fill-box;transform-origin:center}
-      @keyframes smPulse{0%,100%{opacity:.5;transform:scale(1)}50%{opacity:1;transform:scale(1.45)}}
-      .sm-scan{animation:smScan 1.6s ease-out infinite;transform-box:fill-box;transform-origin:center}
-      @keyframes smScan{0%{opacity:.6;transform:scale(.4)}100%{opacity:0;transform:scale(1.8)}}
+      @keyframes smPulse{0%,100%{opacity:.55;transform:scale(1)}50%{opacity:1;transform:scale(1.4)}}
+      .sm-ring{animation:smRing 2.4s ease-out infinite;transform-box:fill-box;transform-origin:center}
+      @keyframes smRing{0%{opacity:.5;transform:scale(.5)}100%{opacity:0;transform:scale(1.9)}}
+      .sm-scan{animation:smScan 2.2s ease-out infinite;transform-box:fill-box;transform-origin:center}
+      .sm-scan.d2{animation-delay:1.1s}
+      @keyframes smScan{0%{opacity:.7;transform:scale(.3)}100%{opacity:0;transform:scale(2.4)}}
+      .sm-plume{opacity:.9}
+      .sm-ret-a{animation:smRet 9s linear infinite;transform-box:fill-box;transform-origin:center}
+      .sm-ret-b{animation:smRet 14s linear infinite reverse;transform-box:fill-box;transform-origin:center}
+      @keyframes smRet{to{transform:rotate(360deg)}}
       .sm-panel{margin:8px 0 6px;padding:11px 12px;border:1px solid var(--line);border-radius:10px;background:var(--bg-1);min-height:56px}
       .sm-ptitle{font-size:12px;color:var(--txt);letter-spacing:.06em;text-transform:uppercase;font-weight:600}
       .sm-psub{font-size:10px;color:var(--mut);margin-top:3px;letter-spacing:.04em;line-height:1.5}
       .sm-psub.mono,.sm-psub .mono{font-family:var(--font-mono)}
       .sm-panel .sig-next{margin-top:8px}
+      @media (prefers-reduced-motion: reduce){.sm-drift,.sm-twinkle,.sm-sweep-rot,.sm-ret-a,.sm-ret-b{animation:none}}
     `;
     document.head.appendChild(st);
   }
