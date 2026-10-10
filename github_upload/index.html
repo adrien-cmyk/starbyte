@@ -4562,7 +4562,7 @@ svg.map {
     </div>
     <div class="stats">
       <div><b id="planet-stat-parcels">7<span style="color:var(--mut);font-weight:400">/25</span></b><span>parcelles</span></div>
-      <div><b id="planet-stat-prod">+0<span style="color:var(--amber)">/h</span></b><span>production</span></div>
+      <div><b id="planet-stat-prod">+0<span style="color:var(--amber)">/min</span></b><span>production</span></div>
       <div><b id="planet-stat-def">0</b><span>défense</span></div>
     </div>
   </header>
@@ -6146,9 +6146,9 @@ function hexCubeIdx(x, y, z) {
 }
 
 const BUILDINGS = {
-  mine:     { name:'Mine',         icon:'pickaxe', color:'var(--warm)',  family:'Extraction', cost:{metal:200},          prod:{metal:10},   prodLbl:'métal +10/h',   desc:'Extraction continue', kind:'match3' },
-  centrale: { name:'Centrale',     icon:'zap', color:'var(--amber)', family:'Énergie',    cost:{metal:300},          prod:{energie:15}, prodLbl:'énergie +15/h', desc:'Énergie thermique',   kind:'match3' },
-  labo:     { name:'Laboratoire',  icon:'⚗', color:'var(--cyan)',  family:'Recherche',  cost:{metal:400},          prod:{cristal:5},  prodLbl:'cristal +5/h',  desc:'Synthèse cristalline', kind:'match3' },
+  mine:     { name:'Mine',         icon:'pickaxe', color:'var(--warm)',  family:'Extraction', cost:{metal:200},          prod:{metal:10},   prodLbl:'métal +10/min',   desc:'Extraction continue', kind:'match3' },
+  centrale: { name:'Centrale',     icon:'zap', color:'var(--amber)', family:'Énergie',    cost:{metal:300},          prod:{energie:15}, prodLbl:'énergie +15/min', desc:'Énergie thermique',   kind:'match3' },
+  labo:     { name:'Laboratoire',  icon:'⚗', color:'var(--cyan)',  family:'Recherche',  cost:{metal:400},          prod:{cristal:5},  prodLbl:'cristal +5/min',  desc:'Synthèse cristalline', kind:'match3' },
   caserne:  { name:'Caserne',      icon:'sword', color:'var(--red)',   family:'Militaire',  cost:{metal:500,energie:100}, prod:{},        prodLbl:'défense +200',  desc:'Mobilisation militaire', def:200, kind:'screen', screen:'barracks' },
   shipyard: { name:'Chantier',     icon:'rocket', color:'var(--blue)', family:'Naval',      cost:{metal:600,energie:150}, prod:{},        prodLbl:'+1 cale',       desc:'Construction de vaisseaux', kind:'screen', screen:'shipyard' },
   turret:   { name:'Bunker',       icon:'⬢', color:'var(--red)',   family:'Défense',    cost:{metal:800,energie:200}, prod:{},        prodLbl:'défense +1500',  desc:'Forteresse militaire — débloque tourelles et soldats lourds', def:1500, kind:'screen', screen:'turret' },
@@ -8538,6 +8538,8 @@ function loadGame() {
       if (snapshot.queues.capital !== undefined) QUEUES.capital = snapshot.queues.capital;
     }
 
+    refreshParcelProdLabels();
+
     // OFFLINE — reprendre la simulation là où la sauvegarde l'a laissée
     G._simAt = snapshot.simAt || snapshot.savedAt || Date.now();
     G._lastLoadedAt = Date.now();
@@ -8951,7 +8953,7 @@ function renderDashboard() {
   document.getElementById('dash-planet-prod').innerHTML = prodEntries.length > 0
     ? prodEntries.map(([k,r]) => {
         const t = tileInfo(k);
-        return `<span>${t.label.toLowerCase()} <b>+${r.rate}/h</b></span>`;
+        return `<span>${t.label.toLowerCase()} <b>+${r.rate}/min</b></span>`;
       }).join('')
     : '';
 
@@ -9156,7 +9158,7 @@ function renderResourcesScreen() {
         <div class="res-detail-head" style="display:flex;align-items:center;gap:10px">
           ${resIcon}
           <span class="res-detail-name" style="color:${t.color};flex:1">${t.label}</span>
-          <span class="res-detail-rate ${r.rate > 0 ? '' : 'zero'}">${r.rate > 0 ? `+${r.rate}/h` : '— inactif'}</span>
+          <span class="res-detail-rate ${r.rate > 0 ? '' : 'zero'}">${r.rate > 0 ? `+${r.rate}/min` : '— inactif'}</span>
         </div>
         <div class="res-detail-bar-wrap">
           <span class="res-detail-val">${fmt(r.v)} <span class="max">/ ${fmt(r.max)}</span></span>
@@ -24069,7 +24071,7 @@ function cheatSpawnRaffinerie() {
   parcel.sub = b.desc;
   parcel.lvl = 1;
   parcel.max = 3;
-  parcel.prod = Object.entries(b.prod).map(([res, rate]) => [res, `+${rate}/h`]);
+  parcel.prod = Object.entries(b.prod).map(([res, rate]) => [prodInfo(res).label.toLowerCase(), rateLbl(res, rate)]);
   // Brancher production dans G.res (sauf carburant qui passe par tickFuelProduction)
   for (const [res, rate] of Object.entries(b.prod)) {
     if (res === 'fuel') continue; // fuel géré séparément
@@ -24239,8 +24241,8 @@ function cheatSetupMidGame() {
     parcel.lvl = 1;
     parcel.max = 3;
     parcel.prod = Object.entries(b.prod).map(([res, rate]) => [
-      (typeof tileInfo === 'function' && tileInfo(res)?.label.toLowerCase()) || res,
-      `+${rate}/h`
+      prodInfo(res).label.toLowerCase(),
+      rateLbl(res, rate)
     ]);
     for (const [res, rate] of Object.entries(b.prod)) {
       if (res === 'fuel') continue; // géré séparément
@@ -25309,7 +25311,7 @@ function renderPlanetMap() {
 
   const unlocked = p.parcels.filter(p => p.state !== 'locked').length;
   document.getElementById('planet-stat-parcels').innerHTML = `${unlocked}<span style="color:var(--mut);font-weight:400">/25</span>`;
-  document.getElementById('planet-stat-prod').innerHTML = `+${totalRate()}<span style="color:var(--amber)">/h</span>`;
+  document.getElementById('planet-stat-prod').innerHTML = `+${totalRate()}<span style="color:var(--amber)">/min</span>`;
   document.getElementById('planet-stat-def').textContent = fmt(totalDefense());
 
   drawHexMap();
@@ -25754,7 +25756,7 @@ function finishBuild(idx, key) {
   parcel.sub = b.desc;
   parcel.lvl = 1;
   parcel.max = 3;
-  parcel.prod = Object.entries(b.prod).map(([res, rate]) => [tileInfo(res)?.label.toLowerCase() || res, `+${rate}/h`]);
+  parcel.prod = Object.entries(b.prod).map(([res, rate]) => [prodInfo(res).label.toLowerCase(), rateLbl(res, rate)]);
   // ─── Bunker (passe 2.4) : 1er Bunker débloque les unités + donne défense passive ───
   //    Les Bunkers suivants ne donnent que la défense passive (effet local), pas de cumul de déblocage
   if (b.def && key === 'turret') {
@@ -25894,7 +25896,7 @@ function startPassiveLoop() {
     const planetVisible = !document.getElementById('scr-planet').classList.contains('hidden');
     const dashVisible = !document.getElementById('scr-dashboard').classList.contains('hidden');
     if (planetVisible) {
-      document.getElementById('planet-stat-prod').innerHTML = `+${totalRate()}<span style="color:var(--amber)">/h</span>`;
+      document.getElementById('planet-stat-prod').innerHTML = `+${totalRate()}<span style="color:var(--amber)">/min</span>`;
       // Re-render pour faire apparaître les points ambres sur les bâtiments avec rapports non-lus
       if (typeof renderPlanetMap === 'function') renderPlanetMap();
     }
@@ -27990,8 +27992,8 @@ function completeBuildingUpgrade() {
       if (G.res[res]?.rate !== undefined) G.res[res].rate += rate;
     }
     parcel.prod = Object.entries(tierData.prod).map(([res, rate]) => [
-      tileInfo(res)?.label.toLowerCase() || res,
-      `+${rate}/h`
+      prodInfo(res).label.toLowerCase(),
+      rateLbl(res, rate)
     ]);
   }
   if (tierData.def !== undefined) {
@@ -33753,10 +33755,10 @@ function renderTierProduction(tierData, buildingMeta, prevTierForCompare) {
   const lines = [];
   if (tierData.prod) {
     for (const [res, rate] of Object.entries(tierData.prod)) {
-      const resInfo = tileInfo(res);
+      const resInfo = prodInfo(res);
       const label = resInfo?.label || res;
       const color = resInfo?.color || 'var(--txt)';
-      let txt = `<span style="color:${color}">${label}</span> <strong style="color:${color}">+${rate}/h</strong>`;
+      let txt = `<span style="color:${color}">${label}</span> <strong style="color:${color}">${rateLbl(res, rate)}</strong>`;
       if (prevTierForCompare?.prod?.[res]) {
         const factor = (rate / prevTierForCompare.prod[res]).toFixed(1);
         txt += ` <span style="color:var(--mut);font-size:10px">(×${factor})</span>`;
@@ -34360,6 +34362,29 @@ function tileInfo(key) {
 
 function totalRate() {
   return Object.values(G.res).reduce((s, r) => s + r.rate, 0);
+}
+
+// Unités de production (décision 10/10) : les 5 ressources (G.res) sont créditées
+// à la MINUTE (simulateTo : rate × minutes) ; crédits et carburant restent HORAIRES.
+function rateUnit(res) { return (res === 'credits' || res === 'fuel') ? '/h' : '/min'; }
+function rateLbl(res, rate) { return `+${rate}${rateUnit(res)}`; }
+// Crédits et carburant ne sont pas des tuiles : tileInfo() renverrait Métal par défaut.
+// (fonction et non const : appelée depuis loadGame, déclarée plus bas → pas de TDZ)
+function prodInfo(res) {
+  if (res === 'credits') return { label:'Crédits', color:'#ffc864' };
+  if (res === 'fuel')    return { label:'Carburant', color:'#7aaadc' };
+  return tileInfo(res);
+}
+// Migration 10/10 : les parcelles sauvegardées portent un texte figé « +10/h ».
+function refreshParcelProdLabels() {
+  const parcels = G.planet && Array.isArray(G.planet.parcels) ? G.planet.parcels : [];
+  for (const p of parcels) {
+    if (!p || !p.building || !Array.isArray(p.prod)) continue;
+    const prod = (BUILDING_TIERS[p.building] && BUILDING_TIERS[p.building][p.lvl || 1] && BUILDING_TIERS[p.building][p.lvl || 1].prod)
+      || (BUILDINGS[p.building] && BUILDINGS[p.building].prod);
+    if (!prod || !Object.keys(prod).length) continue;
+    p.prod = Object.entries(prod).map(([res, rate]) => [prodInfo(res).label.toLowerCase(), rateLbl(res, rate)]);
+  }
 }
 
 function fmt(n) {
@@ -40380,7 +40405,7 @@ function cheatBuildBasic() {
     parcel.sub = b.desc;
     parcel.lvl = 1;
     parcel.max = 3;
-    parcel.prod = Object.entries(b.prod).map(([res, rate]) => [tileInfo(res)?.label.toLowerCase() || res, `+${rate}/h`]);
+    parcel.prod = Object.entries(b.prod).map(([res, rate]) => [prodInfo(res).label.toLowerCase(), rateLbl(res, rate)]);
     for (const [res, rate] of Object.entries(b.prod)) {
       if (G.res[res] !== undefined) G.res[res].rate += rate;
     }
@@ -40439,7 +40464,7 @@ function cheatBuildAll() {
     parcel.max = 3;
 
     // Production : produit/h selon le bâtiment
-    parcel.prod = Object.entries(b.prod || {}).map(([res, rate]) => [tileInfo(res)?.label.toLowerCase() || res, `+${rate}/h`]);
+    parcel.prod = Object.entries(b.prod || {}).map(([res, rate]) => [prodInfo(res).label.toLowerCase(), rateLbl(res, rate)]);
 
     // Défense passive (Caserne, Bunker)
     if (b.def && buildingKey === 'caserne') {
@@ -40782,16 +40807,16 @@ if (G.knownTargets && Array.isArray(G.tankerMissions)) {
 
 </script>
 <!-- PLANET3D — carte 3D + boucle antenne (source : sb-build/src/planet3d.js) -->
-<script type="module" src="assets/planet3d.js?v=20261010-2100"></script>
+<script type="module" src="assets/planet3d.js?v=20261010-2330"></script>
 <!-- CLOUD — sauvegarde Supabase (source : sb-build/src/cloud.js) -->
-<script type="module" src="assets/cloud.js?v=20261010-2100"></script>
+<script type="module" src="assets/cloud.js?v=20261010-2330"></script>
 <!-- MATCH3 — Match-3 V2 (assets/match3.js, source src/match3.js + src/m3core.js) : remplace startM3 -->
-<script type="module" src="assets/match3.js?v=20261010-2100"></script>
+<script type="module" src="assets/match3.js?v=20261010-2330"></script>
 <!-- HOME V2 — « monde d'abord » : planète plein écran, ressources en ligne, Flotte / Défense / Prospection (assets/home.js) -->
-<script type="module" src="assets/home.js?v=20261010-2100"></script>
+<script type="module" src="assets/home.js?v=20261010-2200"></script>
 <!-- SPACE MAP v0 — carte du Centre de prospection (assets/spacemap.js, source src/spacemap.js) -->
-<script src="assets/spacemap.js?v=20261010-2100"></script>
+<script src="assets/spacemap.js?v=20261010-2330"></script>
 <!-- SPACE MAP niveau B — diorama 3D d'un système (assets/system3d.js, source src/system3d.js) -->
-<script type="module" src="assets/system3d.js?v=20261010-2100"></script>
+<script type="module" src="assets/system3d.js?v=20261010-2330"></script>
 </body>
 </html>
