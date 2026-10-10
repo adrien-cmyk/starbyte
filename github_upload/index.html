@@ -8714,6 +8714,117 @@ function seedStarterSignature() {
   });
 }
 
+// ═══ MULTIJOUEUR v0 (10/10) — côté jeu. GDD starbyte_GDD_multijoueur_v0.md ═══
+// Le dialogue avec Supabase est dans src/cloud.js (window.SBMP).
+
+// Adresse du joueur au format du registre : 'A-N-3709-24'
+function mpMyAddressString() {
+  if (typeof MY_ADDRESS === 'undefined' || !MY_ADDRESS) return null;
+  return `${MY_ADDRESS.cluster}-${MY_ADDRESS.sector}-${MY_ADDRESS.system}-${String(MY_ADDRESS.planet).padStart(2, '0')}`;
+}
+
+// Ce que les autres peuvent savoir de mon monde (publié à chaque sauvegarde cloud)
+function mpWorldSnapshot() {
+  const parcels = (G.planet && G.planet.parcels) || [];
+  const built = parcels.filter(p => p && p.building && (p.state === 'built' || p.state === 'damaged'));
+  const level = 1 + built.reduce((s, p) => s + (p.lvl || 1), 0);
+  const stocks = {};
+  for (const k of ['metal', 'energie', 'cristal']) stocks[k] = Math.max(0, Math.floor((G.res && G.res[k] && G.res[k].v) || 0));
+  const home = (G.knownSystems || {})[`${MY_ADDRESS.cluster}-${MY_ADDRESS.sector}-${MY_ADDRESS.system}`];
+  const mine = home && (home.planets || []).find(p => p.isMine);
+  let planetName = (mine && (mine.customName || mine.name)) || 'KERATH-VII';
+  return {
+    planet_name: String(planetName).slice(0, 40),
+    level,
+    defense: Math.max(0, Math.round(typeof totalDefense === 'function' ? totalDefense() : 0)),
+    stocks,
+    buildings: built.map(p => ({ key: p.building, lvl: p.lvl || 1, state: p.damaged || p.state === 'damaged' ? 'damaged' : 'built' })),
+  };
+}
+
+// Déménagement unique vers la zone de test (ou alignement sur l'adresse du registre).
+// Garde toute la partie ; seule l'adresse change. Le rechargement est fait par l'appelant.
+function relocateHome(addrStr) {
+  const [cluster, sector, system, planet] = String(addrStr).split('-');
+  const oldKey = `${MY_ADDRESS.cluster}-${MY_ADDRESS.sector}-${MY_ADDRESS.system}`;
+  const oldCoord = mpMyAddressString();
+  const old = G.knownSystems && G.knownSystems[oldKey];
+  let oldName = null;
+  if (old) {
+    const me = (old.planets || []).find(p => p.isMine);
+    if (me) oldName = me.customName || null;
+    old.planets = (old.planets || []).filter(p => !p.isMine);
+    old.isMine = false;
+    if (!old.planets.length) delete G.knownSystems[oldKey];
+  }
+  const newAddr = { cluster, sector, system: parseInt(system, 10), planet: parseInt(planet, 10) };
+  const newCoord = `${cluster}-${sector}-${newAddr.system}-${String(newAddr.planet).padStart(2, '0')}`;
+  try {
+    const names = loadPlanetCustomNames();
+    if (names[oldCoord] || oldName) { names[newCoord] = names[oldCoord] || oldName; delete names[oldCoord]; localStorage.setItem('starbyte_planet_custom_names', JSON.stringify(names)); }
+    localStorage.setItem('starbyte_my_address', JSON.stringify(newAddr));
+  } catch (e) { console.warn('[MP] relocalisation : stockage indisponible', e); }
+  if (typeof saveGame === 'function') saveGame();
+}
+
+// Au chargement : si le système d'origine n'existe pas (première partie, ou après déménagement), le créer
+function ensureHomeSystem() {
+  if (typeof MY_ADDRESS === 'undefined' || !MY_ADDRESS || !G.knownSystems) return;
+  const k = `${MY_ADDRESS.cluster}-${MY_ADDRESS.sector}-${MY_ADDRESS.system}`;
+  const sys = G.knownSystems[k];
+  if (!sys || !(sys.planets || []).some(p => p.isMine)) {
+    const others = sys ? (sys.planets || []) : [];
+    initKnownUniverse();
+    const coord = mpMyAddressString();
+    G.knownSystems[k].planets = G.knownSystems[k].planets.concat(others.filter(p => p.coord !== coord));
+    try { const n = loadPlanetCustomNames()[coord]; if (n) G.knownSystems[k].planets[0].customName = n; } catch (e) {}
+  }
+}
+
+// Zone de test : pas de faux joueurs, tout joueur rencontré est une vraie personne
+function mpIsTestZone(cluster, sector) {
+  return cluster === 'A' && ['M', 'N', 'O'].includes(sector);
+}
+
+// Une sonde a révélé de vrais mondes dans un système : on les inscrit (remplace une planète inventée au même endroit)
+function mergeRealWorlds(sysKey, worlds) {
+  if (!Array.isArray(worlds) || !worlds.length) return;
+  const [cluster, sector, system] = sysKey.split('-');
+  if (!G.knownSystems[sysKey]) {
+    G.knownSystems[sysKey] = { cluster, sector, system: parseInt(system, 10), planets: [], discoveredAt: Date.now(), isMine: false };
+  }
+  const sys = G.knownSystems[sysKey];
+  const fresh = [];
+  for (const w of worlds) {
+    const parts = String(w.address).split('-');
+    const slot = parseInt(parts[3], 10);
+    const coord = `${sysKey}-${String(slot).padStart(2, '0')}`;
+    const lvl = w.level_estimate || 1;
+    const data = {
+      coord, cluster, sector, system: parseInt(system, 10), index: slot,
+      name: w.planet_name || 'Monde habité',
+      type: 'player',
+      desc: `Commandant : ${w.pseudo} · Niv. ~${lvl}`,
+      playerName: w.pseudo,
+      playerLevel: lvl,
+      isReal: true,
+      isMine: false,
+      lastSeenDays: w.last_seen_days,
+      reportTimestamp: Date.now(),
+      report: (typeof makeReport === 'function') ? makeReport('player', sector, parseInt(system, 10), slot, w.pseudo, lvl, cluster) : null,
+      reportRead: false,
+    };
+    const i = sys.planets.findIndex(p => p.coord === coord);
+    if (i >= 0) { if (!sys.planets[i].isReal) fresh.push(w.pseudo); sys.planets[i] = Object.assign({}, sys.planets[i], data); }
+    else { sys.planets.push(data); fresh.push(w.pseudo); }
+  }
+  if (fresh.length && typeof toast === 'function') {
+    toast(`Monde habité détecté dans ${sysKey} · ${fresh.join(', ')}`);
+  }
+  if (typeof saveGame === 'function') saveGame();
+  if (typeof refreshCurrentScreen === 'function') refreshCurrentScreen();
+}
+
 // ─── Helper : ajouter une planète au knownSystems du joueur ───
 // Utilisé par les futures résolutions (Sonde Moyenne qui verrouille
 // une adresse fixe, espionnage, etc.).
@@ -20428,6 +20539,9 @@ function handleProbeReturn(missionId) {
     return null;
   }
 
+  // MULTIJOUEUR v0 : la sonde a atteint un système → les vrais mondes qui y vivent se révèlent
+  if (window.SBMP && mission.targetCoords) window.SBMP.onProbeArrived(mission.targetCoords);
+
   // ─── PASSE 4-sondes-v1.1 : Vérifier d'abord si un secret se déclenche ───
   // Cf. PILIER 7 — Le contenu invisible. Si secret déclenché, il prend
   // le contrôle de tout le retour (peut être silencieux, partiel, etc.)
@@ -31825,7 +31939,7 @@ function generateDiscoveredSystem(sector, system, cluster) {
     } else {
       // Type 3 : habitable → libre OU joueur placeholder (~20% joueurs)
       const r = rng();
-      if (r > 0.20) {
+      if (r > 0.20 || mpIsTestZone(cluster, sector)) {
         pdata = {
           name: 'Planète vide',
           type: 'empty',
@@ -40700,6 +40814,8 @@ if (_SAVE_LOADED_AT_BOOT) {
 } else {
   console.log('[V0.5] Nouveau joueur (pas de save)');
 }
+// MULTIJOUEUR v0 : après un déménagement, le nouveau système d'origine est créé ici
+if (_SAVE_LOADED_AT_BOOT) ensureHomeSystem();
 // Démarrer l'autosave et brancher les hooks (beforeunload, visibilitychange)
 initSaveHooks();
 
@@ -40824,16 +40940,16 @@ if (G.knownTargets && Array.isArray(G.tankerMissions)) {
 
 </script>
 <!-- PLANET3D — carte 3D + boucle antenne (source : sb-build/src/planet3d.js) -->
-<script type="module" src="assets/planet3d.js?v=20261011-0245"></script>
+<script type="module" src="assets/planet3d.js?v=20261011-0300"></script>
 <!-- CLOUD — sauvegarde Supabase (source : sb-build/src/cloud.js) -->
-<script type="module" src="assets/cloud.js?v=20261011-0245"></script>
+<script type="module" src="assets/cloud.js?v=20261011-0300"></script>
 <!-- MATCH3 — Match-3 V2 (assets/match3.js, source src/match3.js + src/m3core.js) : remplace startM3 -->
-<script type="module" src="assets/match3.js?v=20261011-0245"></script>
+<script type="module" src="assets/match3.js?v=20261011-0300"></script>
 <!-- HOME V2 — « monde d'abord » : planète plein écran, ressources en ligne, Flotte / Défense / Prospection (assets/home.js) -->
-<script type="module" src="assets/home.js?v=20261010-2200"></script>
+<script type="module" src="assets/home.js?v=20261011-0300"></script>
 <!-- SPACE MAP v0 — carte du Centre de prospection (assets/spacemap.js, source src/spacemap.js) -->
-<script src="assets/spacemap.js?v=20261011-0245"></script>
+<script src="assets/spacemap.js?v=20261011-0300"></script>
 <!-- SPACE MAP niveau B — diorama 3D d'un système (assets/system3d.js, source src/system3d.js) -->
-<script type="module" src="assets/system3d.js?v=20261011-0245"></script>
+<script type="module" src="assets/system3d.js?v=20261011-0300"></script>
 </body>
 </html>
