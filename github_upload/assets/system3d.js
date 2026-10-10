@@ -18,7 +18,7 @@ const waitSB3D = () => new Promise((res) => {
 });
 const TEX = { albedo: 'assets/3d/kerath_albedo.jpg', clouds: 'assets/3d/kerath_clouds.jpg', lights: 'assets/3d/kerath_lights.jpg' };
 const COL = { radar: 0xe6f0ff, light: 0x5fcc8a, medium: 0x9a8aff, tanker: 0xffc864, cyan: 0x5fffe8 };
-const ORBIT_R = [2.7, 3.9, 5.1, 6.3, 7.5];
+const ORBIT_R = [2.0, 3.0, 4.0, 5.0, 6.0];
 
 const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const rngFor = (s) => _mulberry32(_hashSeed('S3:' + s));
@@ -26,20 +26,20 @@ const mySystemKey = () => `${MY_ADDRESS.cluster}-${MY_ADDRESS.sector}-${MY_ADDRE
 
 // Classe de planète → apparence (types du jeu PLANET_TYPES et classes des signatures)
 const CLASS = {
-  type1: { r: 0.22, c: 0xb9b2a9, rough: 1.0, label: 'Naine' },
-  type2: { r: 0.30, c: 0x9b6a4e, rough: 0.95, label: 'Fer' },
-  type3: { r: 0.34, c: 0x3f86a2, rough: 0.8, atmo: true, label: 'Vie' },
-  type4: { r: 0.52, c: 0xd9a066, rough: 0.9, bands: true, label: 'Gazeuse' },
-  type5: { r: 0.28, c: 0x6c6c74, rough: 1.0, label: 'Morte' },
+  type1: { r: 0.09, c: 0xb9b2a9, rough: 1.0, label: 'Naine' },
+  type2: { r: 0.12, c: 0x9b6a4e, rough: 0.95, label: 'Fer' },
+  type3: { r: 0.14, c: 0x3f86a2, rough: 0.8, atmo: true, label: 'Vie' },
+  type4: { r: 0.24, c: 0xd9a066, rough: 0.9, bands: true, label: 'Gazeuse' },
+  type5: { r: 0.11, c: 0x6c6c74, rough: 1.0, label: 'Morte' },
 };
 const SIG_CLASS = { dead_world: 'type5', gas_giant: 'type4', habitable: 'type3', lunar: 'type1', unknown: 'type2' };
 const classOf = (p) => CLASS[p.type] ? p.type : (SIG_CLASS[p.fixedClass] || (p.type === 'mine' ? 'type3' : 'type2'));
 
 function haloTexture(T) {
-  const c = document.createElement('canvas'); c.width = c.height = 128;
-  const x = c.getContext('2d'), g = x.createRadialGradient(64, 64, 0, 64, 64, 64);
+  const c = document.createElement('canvas'); c.width = c.height = 256;
+  const x = c.getContext('2d'), g = x.createRadialGradient(128, 128, 0, 128, 128, 128);
   g.addColorStop(0, 'rgba(255,255,255,1)'); g.addColorStop(0.25, 'rgba(255,255,255,.55)'); g.addColorStop(0.6, 'rgba(255,255,255,.12)'); g.addColorStop(1, 'rgba(255,255,255,0)');
-  x.fillStyle = g; x.fillRect(0, 0, 128, 128);
+  x.fillStyle = g; x.fillRect(0, 0, 256, 256);
   const t = new T.CanvasTexture(c); t.colorSpace = T.SRGBColorSpace; return t;
 }
 function bandTexture(T, seed) {
@@ -123,23 +123,17 @@ export const SBSystem = {
       }
 
       const cam = this.cam = new T.PerspectiveCamera(36, 1, 0.1, 200);
-      cam.position.set(0, 8.6, 13.4); cam.lookAt(0, -0.4, 0);
+      this.extent = 8; this._frame();
       this.world = new T.Group(); scene.add(this.world);
       this.ray = new T.Raycaster(); this.ray.params.Points = { threshold: 0.3 };
 
-      // Interaction : glisser pour tourner, toucher pour sélectionner
-      const el = r.domElement; let drag = null, moved = 0;
-      this.yaw = 0.3; this.vel = 0; this.lastTouch = -1e9;
-      el.addEventListener('pointerdown', (e) => { drag = { x: e.clientX, y: e.clientY, t: performance.now() }; moved = 0; el.setPointerCapture(e.pointerId); });
-      el.addEventListener('pointermove', (e) => {
-        if (!drag) return;
-        const dx = e.clientX - drag.x, now = performance.now(); moved += Math.abs(dx) + Math.abs(e.clientY - drag.y);
-        this.yaw += dx * 0.009; this.vel = dx * 0.009 / Math.max(8, now - drag.t) * 16;
-        drag.x = e.clientX; drag.y = e.clientY; drag.t = now; this.lastTouch = now;
-      });
-      const up = (e) => { if (drag && moved < 7) this._pick(e); drag = null; this.lastTouch = performance.now(); };
-      el.addEventListener('pointerup', up); el.addEventListener('pointercancel', () => { drag = null; });
-      el.style.touchAction = 'none';
+      // Interaction : toucher = sélectionner (pas de rotation au doigt ; le système tourne seul, très lentement)
+      const el = r.domElement; let down = null;
+      this.yaw = 0.3;
+      el.addEventListener('pointerdown', (e) => { down = { x: e.clientX, y: e.clientY }; });
+      el.addEventListener('pointerup', (e) => { if (down && Math.hypot(e.clientX - down.x, e.clientY - down.y) < 10) this._pick(e); down = null; });
+      el.addEventListener('pointercancel', () => { down = null; });
+      el.style.touchAction = 'pan-y';
       this.ready = true;
     })();
     return this._loading;
@@ -170,13 +164,11 @@ export const SBSystem = {
 
     // Étoile
     const sc = rng();
-    const star = sc < 0.55 ? { c: 0xfff1cc, l: 0xffe9b8, r: 0.62 } : sc < 0.8 ? { c: 0xffb070, l: 0xffb888, r: 0.56 } : sc < 0.92 ? { c: 0xd6e6ff, l: 0xcfe0ff, r: 0.7 } : { c: 0xff7a5a, l: 0xff8a6a, r: 0.48 };
+    const star = sc < 0.55 ? { c: 0xfff1cc, l: 0xffe9b8, r: 0.42 } : sc < 0.8 ? { c: 0xffb070, l: 0xffb888, r: 0.38 } : sc < 0.92 ? { c: 0xd6e6ff, l: 0xcfe0ff, r: 0.48 } : { c: 0xff7a5a, l: 0xff8a6a, r: 0.32 };
     const sun = new T.Mesh(new T.SphereGeometry(star.r, 48, 32), new T.MeshBasicMaterial({ color: star.c }));
     W.add(sun);
     const glow = new T.Sprite(new T.SpriteMaterial({ map: this.halo, color: star.l, transparent: true, depthWrite: false, blending: T.AdditiveBlending, opacity: 0.9 }));
     glow.scale.setScalar(star.r * 5.2); W.add(glow);
-    const glow2 = new T.Sprite(new T.SpriteMaterial({ map: this.halo, color: star.l, transparent: true, depthWrite: false, blending: T.AdditiveBlending, opacity: 0.16 }));
-    glow2.scale.setScalar(star.r * 11); W.add(glow2);
     const light = new T.PointLight(star.l, 14, 40, 1.5); W.add(light);
     this.anim.push((t) => { const k = 1 + Math.sin(t * 0.9) * 0.03; glow.scale.setScalar(star.r * 5.2 * k); });
 
@@ -205,37 +197,37 @@ export const SBSystem = {
           const [tA, tC, tL] = await Promise.all([load(TEX.albedo), load(TEX.clouds), load(TEX.lights)]);
           tA.colorSpace = T.SRGBColorSpace; tL.colorSpace = T.SRGBColorSpace;
           mat = new T.MeshStandardMaterial({ map: tA, roughness: 0.9, emissiveMap: tL, emissive: 0xffc890, emissiveIntensity: 0.35 });
-          const clouds = new T.Mesh(new T.SphereGeometry(0.55 * 1.01, 48, 32), new T.MeshStandardMaterial({ color: 0xe0e6ea, alphaMap: tC, transparent: true, opacity: 0.7, depthWrite: false, roughness: 1 }));
+          const clouds = new T.Mesh(new T.SphereGeometry(0.17 * 1.01, 40, 28), new T.MeshStandardMaterial({ color: 0xe0e6ea, alphaMap: tC, transparent: true, opacity: 0.7, depthWrite: false, roughness: 1 }));
           g.add(clouds); this.anim.push((t, dt) => { clouds.rotation.y += dt * 0.05; });
         } catch (e) { mat = null; }
       }
-      const R = p.isMine ? 0.55 : cls.r;
+      const R = p.isMine ? 0.17 : cls.r;
       if (!mat) {
         mat = new T.MeshStandardMaterial({ color: cls.c, roughness: cls.rough, metalness: 0 });
         if (cls.bands) { mat.map = bandTexture(T, p.coord); mat.color.set(cls.c); }
       }
       const m = new T.Mesh(new T.SphereGeometry(R, 40, 28), mat); g.add(m);
       if (cls.atmo || p.isMine) {
-        const atm = new T.Mesh(new T.SphereGeometry(R * 1.06, 32, 24), new T.MeshBasicMaterial({ color: 0x6fb6ff, transparent: true, opacity: 0.12, blending: T.AdditiveBlending, depthWrite: false, side: T.BackSide }));
+        const atm = new T.Mesh(new T.SphereGeometry(R * 1.12, 32, 24), new T.MeshBasicMaterial({ color: 0x6fb6ff, transparent: true, opacity: 0.18, blending: T.AdditiveBlending, depthWrite: false, side: T.BackSide }));
         g.add(atm);
       }
       this.anim.push((t, dt) => { m.rotation.y += dt * 0.08; });
       W.add(g);
       posOf[p.coord] = g.position.clone();
-      proxy(g, Math.max(0.5, R + 0.25), { kind: 'planet', key: p.coord, label: p.name || p.coord, sub: cls.label });
+      proxy(g, 0.45, { kind: 'planet', key: p.coord, label: p.name || p.coord, sub: cls.label });
     }
 
     // Échos : signatures non résolues (on ne devine pas une planète)
     for (const sig of st.echoes) {
       const o = orbitFor(sig.id), g = new T.Group(); place(g, o);
       const sp = new T.Sprite(new T.SpriteMaterial({ map: this.halo, color: COL.radar, transparent: true, depthWrite: false, blending: T.AdditiveBlending, opacity: 0.55 }));
-      sp.scale.setScalar(0.75); g.add(sp);
-      const wf = new T.Mesh(new T.IcosahedronGeometry(0.19, 1), new T.MeshBasicMaterial({ color: COL.radar, wireframe: true, transparent: true, opacity: 0.28 }));
+      sp.scale.setScalar(0.55); g.add(sp);
+      const wf = new T.Mesh(new T.IcosahedronGeometry(0.11, 1), new T.MeshBasicMaterial({ color: COL.radar, wireframe: true, transparent: true, opacity: 0.28 }));
       g.add(wf); W.add(g);
       const ph = rngFor('ph:' + sig.id)() * 6;
       this.anim.push((t, dt) => { sp.material.opacity = 0.35 + 0.3 * (0.5 + 0.5 * Math.sin(t * 1.8 + ph)); wf.rotation.y += dt * 0.4; wf.rotation.x += dt * 0.17; });
       posOf[sig.id] = g.position.clone();
-      proxy(g, 0.55, { kind: 'sig', key: sig.id, label: sig.typeLabel || 'Signature', sub: `${sig.id} · ${sig.intensity || ''}` });
+      proxy(g, 0.45, { kind: 'sig', key: sig.id, label: sig.typeLabel || 'Signature', sub: `${sig.id} · ${sig.intensity || ''}` });
     }
     // Corps orbitaux identifiés (silhouette, pas encore fixés)
     for (const sig of st.bodies) {
@@ -245,27 +237,29 @@ export const SBSystem = {
       g.add(sh, wf); W.add(g);
       this.anim.push((t, dt) => { wf.rotation.y += dt * 0.12; });
       posOf[sig.id] = g.position.clone();
-      proxy(g, Math.max(0.5, cls.r + 0.25), { kind: 'sig', key: sig.id, label: 'Corps orbital identifié', sub: `${sig.id} · ${cls.label.toLowerCase()} probable` });
+      proxy(g, 0.45, { kind: 'sig', key: sig.id, label: 'Corps orbital identifié', sub: `${sig.id} · ${cls.label.toLowerCase()} probable` });
     }
     // Veines, épaves : amas de roches hors des orbites
     for (const t of st.targets) {
-      const r2 = rngFor('tgt:' + t.key), a = r2() * Math.PI * 2, R = orbits[nOrb - 1] + 0.9 + r2() * 1.2;
+      const r2 = rngFor('tgt:' + t.key), a = r2() * Math.PI * 2, R = orbits[nOrb - 1] + 0.7 + r2() * 0.8;
       const g = new T.Group(); g.position.set(Math.cos(a) * R, (r2() - 0.5) * 0.6, Math.sin(a) * R);
       const engaged = t.kt.status === 'engaged';
       const mat = new T.MeshStandardMaterial({ color: engaged ? 0x6a6f6d : 0x9a7a4a, roughness: 1, emissive: engaged ? 0x000000 : 0x3a2a08, emissiveIntensity: 0.6 });
-      for (let i = 0; i < 5; i++) { const m = new T.Mesh(new T.DodecahedronGeometry(0.07 + r2() * 0.1, 0), mat); m.position.set((r2() - 0.5) * 0.6, (r2() - 0.5) * 0.3, (r2() - 0.5) * 0.6); m.rotation.set(r2() * 3, r2() * 3, 0); g.add(m); }
-      if (!engaged) { const sp = new T.Sprite(new T.SpriteMaterial({ map: this.halo, color: COL.tanker, transparent: true, depthWrite: false, blending: T.AdditiveBlending, opacity: 0.35 })); sp.scale.setScalar(0.9); g.add(sp); }
+      for (let i = 0; i < 5; i++) { const m = new T.Mesh(new T.DodecahedronGeometry(0.04 + r2() * 0.06, 0), mat); m.position.set((r2() - 0.5) * 0.4, (r2() - 0.5) * 0.2, (r2() - 0.5) * 0.4); m.rotation.set(r2() * 3, r2() * 3, 0); g.add(m); }
+      if (!engaged) { const sp = new T.Sprite(new T.SpriteMaterial({ map: this.halo, color: COL.tanker, transparent: true, depthWrite: false, blending: T.AdditiveBlending, opacity: 0.35 })); sp.scale.setScalar(0.6); g.add(sp); }
       W.add(g); this.anim.push((t, dt) => { g.rotation.y += dt * 0.15; });
       posOf[t.key] = g.position.clone();
       proxy(g, 0.6, { kind: 'target', key: t.key, label: t.kt.label || 'Cible', sub: t.key.split('/').pop() });
     }
 
+    // Étendue pour le cadrage : la plus grande distance au centre parmi les objets
+    this.extent = Math.max(orbits[nOrb - 1] + 0.3, ...this.pick.map((m) => Math.hypot(m.position.x, m.position.z) + 0.4));
+    this._frame();
+
     // Brume de scan : le système n'est pas entièrement résolu
     const res = (typeof getSystemResolution === 'function') ? getSystemResolution(sysKey) : 0;
     const unresolved = isMine ? 0 : (1 - Math.min(100, Math.max(0, res)) / 100);
     if (unresolved > 0.02 || !st.known) {
-      const fog = new T.Sprite(new T.SpriteMaterial({ map: this.halo, color: 0x2a7a86, transparent: true, depthWrite: false, blending: T.AdditiveBlending, opacity: 0.05 + 0.09 * (st.known ? unresolved : 1) }));
-      fog.scale.setScalar(24); W.add(fog);
       const n = 260, pos = new Float32Array(n * 3), r3 = rngFor('dust:' + sysKey);
       for (let i = 0; i < n; i++) { const a = r3() * Math.PI * 2, R = 1.5 + r3() * 8.5; pos.set([Math.cos(a) * R, (r3() - 0.5) * 1.6, Math.sin(a) * R], i * 3); }
       const g = new T.BufferGeometry(); g.setAttribute('position', new T.BufferAttribute(pos, 3));
@@ -364,7 +358,7 @@ export const SBSystem = {
     const radar = (typeof _probeTierStatus === 'function') ? _probeTierStatus('radar') : { ok: false };
     const sweepBtn = radar.ok ? `<button class="s3-act" onclick="SBSystem.sweep()">Balayer</button>` : radar.build ? `<button class="s3-act dim" onclick="openProbeDetail('radar')">Construire une Radar</button>` : `<button class="s3-act dim" disabled>${esc(radar.why || 'Radar indisponible')}</button>`;
     el.innerHTML = `<div class="s3-counts">${bits.join(' · ') || 'Rien de connu ici.'}</div>
-      <div class="s3-hint">Touche un objet · glisse pour tourner</div>
+      <div class="s3-hint">Touche un objet</div>
       <div class="s3-acts">${sweepBtn}<button class="s3-act" onclick="SBSystem.reports()">Rapports</button></div>`;
   },
 
@@ -385,13 +379,25 @@ export const SBSystem = {
     this._renderSheet();
   },
 
+  // Cadrage 3/4 vu de dessus : la caméra recule jusqu'à ce que tout le système tienne en largeur et en hauteur
+  _frame() {
+    const cam = this.cam; if (!cam) return;
+    const ext = this.extent || 8, elev = 56 * Math.PI / 180;
+    const vt = Math.tan(cam.fov * Math.PI / 360), ht = vt * cam.aspect;
+    // demi-largeur visible = D·ht ; demi-hauteur visible ≈ D·vt, l'ellipse projetée mesure ext·sin(elev) en hauteur (+ marge pour la feuille du bas)
+    const D = Math.max((ext + 0.6) / ht, (ext * Math.sin(elev) + 0.6) / (vt * 0.72));
+    cam.position.set(0, Math.sin(elev) * D, Math.cos(elev) * D);
+    cam.lookAt(0, 0, 0.15 * ext);
+  },
+
   _resize() {
     const h = document.getElementById('s3-view'); if (!h) return false;
     const w = h.clientWidth, ht = h.clientHeight; if (!w || !ht) return false;
     if (this._w !== w || this._h !== ht) {
       this._w = w; this._h = ht; this.r.setSize(w, ht, false);
       this.r.domElement.style.width = '100%'; this.r.domElement.style.height = '100%';
-      this.cam.aspect = w / ht; this.cam.fov = w < ht ? 47 : 34; this.cam.updateProjectionMatrix();
+      this.cam.aspect = w / ht; this.cam.fov = w < ht ? 42 : 32; this.cam.updateProjectionMatrix();
+      this._frame();
     }
     return true;
   },
@@ -404,7 +410,7 @@ SBSystem._loop = function loop(now) {
   requestAnimationFrame(loop);
   const dt = Math.min(0.05, (now - U._t) / 1000); U._t = now;
   if (document.hidden || !U._resize()) return;
-  if (now - U.lastTouch > 2500) U.yaw += dt * 0.05; else { U.yaw += U.vel; U.vel *= 0.9; }
+  U.yaw += dt * 0.02;
   U.world.rotation.y = U.yaw;
   const t = now / 1000;
   for (const f of U.anim) f(t, dt);
