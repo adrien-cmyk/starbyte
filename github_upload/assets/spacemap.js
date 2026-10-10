@@ -476,6 +476,8 @@
       this._resize();
       this.moveTo(0, 0, homeDist(), 1);   // portrait plein écran : plus de recul, comme la planète
       this._t = 0; this._last = performance.now(); this._check = 0;
+      // « Réduire les animations » (iOS) : plateau immobile, seuls les vaisseaux avancent (c'est une information)
+      try { this.still = window.matchMedia('(prefers-reduced-motion: reduce)').matches; } catch (e) { this.still = false; }
       r.setAnimationLoop(() => this._frame());
       this.ready = true;
       console.log('[SpaceMap] plateau 3D prêt');
@@ -923,13 +925,13 @@
       // brouillard réglé sur la distance : le plateau se perd au loin quel que soit le zoom
       const dist = this.camera.position.distanceTo(this.controls.target);
       this.scene.fog.near = dist * 1.05; this.scene.fog.far = dist * 2.9;
-      for (const f of this.anims) f(t);
-      if (this.homeBall) this.homeBall.rotation.y = t * 0.05;
-      if (this.homeRing) this.homeRing.material.opacity = 0.3 + 0.15 * Math.sin(t * 1.6);
-      if (this.fan) this.fan.rotation.y = -t * 1.05;
-      if (this.front) this.front.material.opacity = 0.65 + 0.25 * Math.sin(t * 1.3);
+      if (!this.still) for (const f of this.anims) f(t);
+      if (this.homeBall && !this.still) this.homeBall.rotation.y = t * 0.05;
+      if (this.homeRing && !this.still) this.homeRing.material.opacity = 0.3 + 0.15 * Math.sin(t * 1.6);
+      if (this.fan && !this.still) this.fan.rotation.y = -t * 1.05;
+      if (this.front && !this.still) this.front.material.opacity = 0.65 + 0.25 * Math.sin(t * 1.3);
       if (this.selIdx > 0) {
-        const k = 2.6 + Math.sin(t * 4) * 1.2;
+        const k = this.still ? 3 : 2.6 + Math.sin(t * 4) * 1.2;
         this.iNodes.setColorAt(this.selIdx, this._c || (this._c = new this.T.Color()).setRGB(0.8 * k, 0.95 * k, 1.0 * k));
         this.iNodes.instanceColor.needsUpdate = true;
         this.selGroup.children[1].rotation.y = t * 0.6;
@@ -1084,6 +1086,12 @@
       const top = document.createElement('div'); top.className = 'smw-top';
       top.innerHTML = `<div class="smw-title">CENTRE DE PROSPECTION</div><div class="smw-meta" id="smw-meta"></div>`;
       scr.appendChild(top);
+      // Ligne d'état de l'ancienne bannière (sondes prêtes, en mission, adresse, météo cosmique) : déplacée telle quelle,
+      // renderProspectScreen() continue de la tenir à jour
+      const sub = document.getElementById('prospect-banner-sub'); if (sub) { sub.classList.add('smw-sub'); top.appendChild(sub); }
+      // Indication discrète pour un nouveau joueur, quand rien n'est sélectionné (remplace « Touche un objet, ou le noir pour balayer »)
+      const hint = this.hint = document.createElement('div'); hint.className = 'smw-hint'; hint.textContent = 'Touche une case · une case noire se balaye';
+      scr.appendChild(hint);
       // la croix de retour est celle de tous les écrans détaillés (home.js : .w-screen-x → planète)
       const tools = document.createElement('div'); tools.className = 'smw-tools';
       tools.innerHTML = `<button data-a="center" aria-label="Recentrer sur ma planète">${ICO.center}</button><button data-a="wide" aria-label="Vue d'ensemble">${ICO.wide}</button>`;
@@ -1186,6 +1194,7 @@
       }
       const inn = this.card && this.card.querySelector('.smw-card-in');
       if (!inn) return;
+      if (this.hint) this.hint.classList.toggle('on', !_sel);
       if (!_sel) { this.card.classList.remove('on'); return; }
       const h = panelMarkup(st);
       if (inn.innerHTML !== h) inn.innerHTML = h;
@@ -1212,6 +1221,9 @@
       .smw-title{font:600 10.5px/1.2 'Space Grotesk',system-ui,sans-serif;letter-spacing:.28em;color:#d6e4ee}
       .smw-meta{margin-top:5px;font:500 10px/1.3 'JetBrains Mono',monospace;letter-spacing:.06em;color:rgba(190,205,215,.62)}
       .smw-meta b{font-weight:500}
+      .smw-top .smw-sub{margin:5px 0 0;padding:0;font-size:10px;line-height:1.4;letter-spacing:.04em;color:rgba(190,205,215,.6);display:flex;justify-content:center;align-items:center;gap:6px;flex-wrap:wrap;pointer-events:auto}
+      .smw-hint{position:absolute;left:0;right:0;bottom:calc(var(--sab,0px) + 100px);z-index:19;text-align:center;font:500 10px/1 'JetBrains Mono',monospace;letter-spacing:.12em;text-transform:uppercase;color:rgba(190,205,215,.5);text-shadow:0 1px 3px #000;pointer-events:none;opacity:0;transition:opacity .25s}
+      .smw-hint.on{opacity:1}
       .smw-tools{position:absolute;right:12px;top:calc(var(--sai,0px) + 66px);z-index:20;display:flex;flex-direction:column;gap:10px}
       .smw-tools button{width:44px;height:44px;padding:10px;border-radius:50%;background:rgba(10,16,24,.62);border:1px solid rgba(150,190,220,.2);color:rgba(200,215,225,.85);cursor:pointer}
       .smw-tools button:active{border-color:rgba(95,255,232,.7);color:#5fffe8}
