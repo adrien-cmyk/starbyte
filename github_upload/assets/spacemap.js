@@ -24,6 +24,8 @@
   const COL = {
     radar: '#e6f0ff', light: '#5fcc8a', medium: '#9a8aff', tanker: '#ffc864',
     cyan: '#5fffe8', mut: '#6a7a72',
+    sig: '#8fc4ff',     // signature détectée : bleu signal (distinct des étoiles de fond)
+    sys: '#c8fff4',     // système connu : blanc-cyan
   };
 
   let _root = null;       // conteneur HTML
@@ -63,7 +65,9 @@
     const p = systemPos(sysKey);
     const rng = _mulberry32(_hashSeed('SMS:' + id));
     const a = rng() * Math.PI * 2;
-    const r = 11 + (k % 3) * 5 + rng() * 4;
+    const home = sysKey === mySystemKey();
+    // Gros doigts : jamais à moins de ~24 du centre (zone de toucher de la planète), ~14 d'un système
+    const r = (home ? 26 : 14) + (k % 3) * 6 + rng() * 4;
     let x = p.x + Math.cos(a) * r, y = p.y + Math.sin(a) * r;
     // Rester dans le cadre (rayon 174 autour du centre)
     const dx = x - CX, dy = y - CY, dd = Math.hypot(dx, dy);
@@ -105,14 +109,32 @@
       const s = add(sysKey, { known: true });
       if (!s.targets.some(t => t.key === key)) s.targets.push({ key, kt, sig: null });
     }
+    // Systèmes en cours de balayage (pas encore connus) : ils ont une position
+    for (const m of (G.probeMissions || [])) {
+      if (m.status !== 'in_transit') continue;
+      const tc = String(m.targetCoords || '');
+      if (/^[A-Z]-[A-Z]-\d{4}/.test(tc) && !/^SIG-/.test(tc)) add(tc.split('-').slice(0, 3).join('-'), { scanning: true });
+    }
+
+    // Positions : déterministes, puis espacées pour les gros doigts
+    const pos = {};
+    for (const s of Object.values(systems)) {
+      pos['sys:' + s.key] = systemPos(s.key);
+      let k = 0;
+      for (const sig of s.sigs) pos['sig:' + sig.id] = satellitePos(s.key, sig.id, k++);
+      for (const t of s.targets) pos['tgt:' + t.key] = satellitePos(s.key, t.key, k++);
+      for (const pl of s.planets) pos['pl:' + pl.coord] = satellitePos(s.key, pl.coord, k++);
+    }
+    spaceOut(pos);
+
     // Missions en vol
     const flights = [];
     for (const m of (G.probeMissions || [])) {
       if (m.status !== 'in_transit') continue;
       let to = null, label = `Sonde ${m.probeName || ''}`.trim();
       const tc = String(m.targetCoords || '');
-      if (/^SIG-/.test(tc)) { const sig = G.signatures && G.signatures[tc]; if (sig) to = satellitePos(sig.system, sig.id, 0); }
-      else if (/^[A-Z]-[A-Z]-\d{4}/.test(tc)) { const sk = tc.split('-').slice(0, 3).join('-'); to = systemPos(sk); add(sk, { scanning: true }); }
+      if (/^SIG-/.test(tc)) { to = pos['sig:' + tc] || null; }
+      else if (/^[A-Z]-[A-Z]-\d{4}/.test(tc)) { to = pos['sys:' + tc.split('-').slice(0, 3).join('-')] || null; }
       if (to) flights.push({ kind: 'probe', tier: m.tier, id: m.id, label, to, from: { x: CX, y: CY }, departedAt: m.departedAt, arrivalAt: m.arrivalAt, target: tc });
     }
     for (const m of (G.tankerMissions || [])) {
@@ -120,12 +142,39 @@
       const tc = String(m.targetCoords || '');
       const sysKey = tc.split('/')[0];
       if (!/^[A-Z]-[A-Z]-\d{4}$/.test(sysKey)) continue;
-      const to = satellitePos(sysKey, tc, 0);
+      const to = pos['tgt:' + tc] || satellitePos(sysKey, tc, 0);
       const back = m.status === 'returning';
       flights.push({ kind: 'tanker', id: m.id, label: m.tankerName || 'Tanker', to: back ? { x: CX, y: CY } : to, from: back ? to : { x: CX, y: CY },
         departedAt: back ? (m.returnDepartedAt || m.arrivalAt || m.departedAt) : m.departedAt, arrivalAt: back ? (m.returnArrivalAt || m.arrivalAt) : m.arrivalAt, target: tc, back });
     }
-    return { systems, flights };
+    return { systems, flights, pos };
+  }
+
+  // Écarte les objets trop proches les uns des autres et du centre (déterministe : ordre des clés)
+  function spaceOut(pos) {
+    const MIN = 17, HOME_MIN = 24, homeKey = 'sys:' + mySystemKey();
+    const keys = Object.keys(pos).filter((k) => k !== homeKey).sort();
+    for (let it = 0; it < 14; it++) {
+      let moved = false;
+      for (let i = 0; i < keys.length; i++) {
+        const a = pos[keys[i]];
+        // distance au centre
+        let dx = a.x - CX, dy = a.y - CY, d = Math.hypot(dx, dy);
+        if (d < HOME_MIN) { if (d < 0.01) { const an = _mulberry32(_hashSeed(keys[i]))() * 6.283; dx = Math.cos(an); dy = Math.sin(an); d = 1; } a.x = CX + dx / d * HOME_MIN; a.y = CY + dy / d * HOME_MIN; moved = true; }
+        for (let j = i + 1; j < keys.length; j++) {
+          const b = pos[keys[j]];
+          let ex = b.x - a.x, ey = b.y - a.y, e = Math.hypot(ex, ey);
+          if (e >= MIN) continue;
+          if (e < 0.01) { const an = _mulberry32(_hashSeed(keys[i] + keys[j]))() * 6.283; ex = Math.cos(an); ey = Math.sin(an); e = 1; }
+          const push = (MIN - e) / 2 + 0.2;
+          a.x -= ex / e * push; a.y -= ey / e * push; b.x += ex / e * push; b.y += ey / e * push; moved = true;
+        }
+        // rester dans le cadre
+        dx = a.x - CX; dy = a.y - CY; d = Math.hypot(dx, dy);
+        if (d > 174) { a.x = CX + dx / d * 174; a.y = CY + dy / d * 174; }
+      }
+      if (!moved) break;
+    }
   }
 
   /* ─── Rendu ─── */
@@ -161,12 +210,12 @@
 
     // ── Couche 1 : étoiles lointaines (petites, nombreuses) ──
     const far = [];
-    for (let i = 0; i < 110; i++) { const x = -30 + rng() * (W + 60), y = -30 + rng() * (H + 60); far.push(`<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="${(0.25 + rng() * 0.5).toFixed(2)}" fill="#dfe" opacity="${(0.10 + rng() * 0.25).toFixed(2)}"/>`); }
+    for (let i = 0; i < 110; i++) { const x = -30 + rng() * (W + 60), y = -30 + rng() * (H + 60); far.push(`<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="${(0.25 + rng() * 0.45).toFixed(2)}" fill="#b9c4c2" opacity="${(0.08 + rng() * 0.2).toFixed(2)}"/>`); }
     parts.push(`<g class="sm-layer" data-depth=".35" pointer-events="none"><g class="sm-drift">${far.join('')}</g></g>`);
 
     // ── Couche 2 : étoiles proches (plus grosses, quelques scintillements) ──
     const near = [];
-    for (let i = 0; i < 34; i++) { const x = -20 + rng() * (W + 40), y = -20 + rng() * (H + 40); const tw = rng() < 0.35; near.push(`<circle class="${tw ? 'sm-twinkle' : ''}" style="${tw ? `animation-delay:${(rng() * 4).toFixed(1)}s` : ''}" cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="${(0.6 + rng() * 0.8).toFixed(2)}" fill="#eef" opacity="${(0.25 + rng() * 0.4).toFixed(2)}"/>`); }
+    for (let i = 0; i < 34; i++) { const x = -20 + rng() * (W + 40), y = -20 + rng() * (H + 40); const tw = rng() < 0.35; near.push(`<circle class="${tw ? 'sm-twinkle' : ''}" style="${tw ? `animation-delay:${(rng() * 4).toFixed(1)}s` : ''}" cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="${(0.5 + rng() * 0.7).toFixed(2)}" fill="#cfd8d6" opacity="${(0.18 + rng() * 0.3).toFixed(2)}"/>`); }
     parts.push(`<g class="sm-layer" data-depth=".6" pointer-events="none"><g class="sm-drift fast">${near.join('')}</g></g>`);
 
     // ── Portée : halo de la zone sondable, bande hors portée en brume ──
@@ -195,7 +244,7 @@
     // ── Objets (couche fixe : les touchers restent exacts) ──
     const objs = [];
     for (const s of Object.values(state.systems)) {
-      const p = systemPos(s.key);
+      const p = state.pos['sys:' + s.key] || systemPos(s.key);
       if (p.band >= lit && !s.known) continue;
       const isMine = s.key === mySystemKey();
       const short = s.key.split('-').slice(1).join('-');
@@ -211,19 +260,19 @@
         const known = s.known;
         objs.push(`<g class="sm-obj sm-sys${known ? '' : ' faint'}" data-kind="system" data-key="${esc(s.key)}">
           <circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="10" fill="transparent"/>
-          ${known ? `<path class="sm-glint" d="M${(p.x - 6).toFixed(1)} ${p.y.toFixed(1)} H${(p.x + 6).toFixed(1)} M${p.x.toFixed(1)} ${(p.y - 6).toFixed(1)} V${(p.y + 6).toFixed(1)}" stroke="#dfe" stroke-opacity=".28" stroke-width=".5"/>` : ''}
-          <circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="${known ? 2.4 : 1.6}" fill="${known ? '#eafff9' : COL.mut}" ${known ? 'filter="url(#sm-glow)"' : ''}/>
+          ${known ? `<circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="6" fill="none" stroke="${COL.sys}" stroke-opacity=".38" stroke-width=".6"/><path class="sm-glint" d="M${(p.x - 8).toFixed(1)} ${p.y.toFixed(1)} H${(p.x + 8).toFixed(1)} M${p.x.toFixed(1)} ${(p.y - 8).toFixed(1)} V${(p.y + 8).toFixed(1)}" stroke="${COL.sys}" stroke-opacity=".3" stroke-width=".5"/>` : ''}
+          <circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="${known ? 2.6 : 1.6}" fill="${known ? COL.sys : COL.mut}" ${known ? 'filter="url(#sm-glow)"' : ''}/>
           ${s.scanning ? `<circle class="sm-scan" cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="7" fill="none" stroke="${COL.radar}" stroke-opacity=".6" stroke-width=".7"/><circle class="sm-scan d2" cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="7" fill="none" stroke="${COL.radar}" stroke-opacity=".6" stroke-width=".7"/>` : ''}
           <text x="${p.x.toFixed(1)}" y="${(p.y + 15).toFixed(1)}" class="sm-lab tiny" fill="${COL.mut}">${esc(short)}</text></g>`);
       }
       let k = 0;
       for (const sig of s.sigs) {
-        const q = satellitePos(s.key, sig.id, k++);
+        const q = state.pos['sig:' + sig.id]; k++;
         if (!sig.resolved) {
           objs.push(`<g class="sm-obj sm-sig" data-kind="sig" data-key="${esc(sig.id)}">
             <circle cx="${q.x.toFixed(1)}" cy="${q.y.toFixed(1)}" r="9" fill="transparent"/>
-            <circle class="sm-ring" cx="${q.x.toFixed(1)}" cy="${q.y.toFixed(1)}" r="5" fill="none" stroke="${COL.radar}" stroke-opacity=".35" stroke-width=".5"/>
-            <circle class="sm-pulse" cx="${q.x.toFixed(1)}" cy="${q.y.toFixed(1)}" r="2.2" fill="${COL.radar}" filter="url(#sm-glow)"/></g>`);
+            <circle class="sm-ring" cx="${q.x.toFixed(1)}" cy="${q.y.toFixed(1)}" r="5" fill="none" stroke="${COL.sig}" stroke-opacity=".5" stroke-width=".6"/>
+            <circle class="sm-pulse" cx="${q.x.toFixed(1)}" cy="${q.y.toFixed(1)}" r="2.6" fill="${COL.sig}" filter="url(#sm-glow)"/></g>`);
         } else {
           objs.push(`<g class="sm-obj sm-body" data-kind="sig" data-key="${esc(sig.id)}">
             <circle cx="${q.x.toFixed(1)}" cy="${q.y.toFixed(1)}" r="9" fill="transparent"/>
@@ -231,7 +280,7 @@
         }
       }
       for (const t of s.targets) {
-        const q = satellitePos(s.key, t.key, k++);
+        const q = state.pos['tgt:' + t.key]; k++;
         const engaged = t.kt.status === 'engaged';
         const col = engaged ? COL.mut : COL.tanker;
         objs.push(`<g class="sm-obj sm-tgt" data-kind="target" data-key="${esc(t.key)}">
@@ -239,7 +288,7 @@
           <path d="M${q.x.toFixed(1)} ${(q.y - 4.2).toFixed(1)} L${(q.x + 4.2).toFixed(1)} ${q.y.toFixed(1)} L${q.x.toFixed(1)} ${(q.y + 4.2).toFixed(1)} L${(q.x - 4.2).toFixed(1)} ${q.y.toFixed(1)} Z" fill="${col}" ${engaged ? '' : 'filter="url(#sm-glow)"'}/></g>`);
       }
       for (const pl of s.planets) {
-        const q = satellitePos(s.key, pl.coord, k++);
+        const q = state.pos['pl:' + pl.coord]; k++;
         objs.push(`<g class="sm-obj sm-planet" data-kind="planet" data-key="${esc(pl.coord)}">
           <circle cx="${q.x.toFixed(1)}" cy="${q.y.toFixed(1)}" r="9" fill="transparent"/>
           <circle cx="${q.x.toFixed(1)}" cy="${q.y.toFixed(1)}" r="5.5" fill="none" stroke="${COL.medium}" stroke-opacity=".3" stroke-width=".5"/>
@@ -478,7 +527,7 @@
       .sm-drift.fast{animation-duration:60s}
       @keyframes smDrift{0%{transform:translate(-3px,2px) rotate(-.4deg)}100%{transform:translate(3px,-2px) rotate(.4deg)}}
       .sm-twinkle{animation:smTwinkle 3.6s ease-in-out infinite}
-      @keyframes smTwinkle{0%,100%{opacity:.25}50%{opacity:.75}}
+      @keyframes smTwinkle{0%,100%{opacity:.18}50%{opacity:.55}}
       .sm-band.lit{cursor:pointer}
       .sm-band.far{cursor:pointer}
       .sm-range-ring{fill:none;stroke:${COL.cyan};stroke-opacity:.3;stroke-width:.6}

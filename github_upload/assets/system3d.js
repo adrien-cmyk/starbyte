@@ -220,9 +220,9 @@ export const SBSystem = {
     // Échos : signatures non résolues (on ne devine pas une planète)
     for (const sig of st.echoes) {
       const o = orbitFor(sig.id), g = new T.Group(); place(g, o);
-      const sp = new T.Sprite(new T.SpriteMaterial({ map: this.halo, color: COL.radar, transparent: true, depthWrite: false, blending: T.AdditiveBlending, opacity: 0.55 }));
+      const sp = new T.Sprite(new T.SpriteMaterial({ map: this.halo, color: 0x8fc4ff, transparent: true, depthWrite: false, blending: T.AdditiveBlending, opacity: 0.55 }));
       sp.scale.setScalar(0.55); g.add(sp);
-      const wf = new T.Mesh(new T.IcosahedronGeometry(0.11, 1), new T.MeshBasicMaterial({ color: COL.radar, wireframe: true, transparent: true, opacity: 0.28 }));
+      const wf = new T.Mesh(new T.IcosahedronGeometry(0.11, 1), new T.MeshBasicMaterial({ color: 0x8fc4ff, wireframe: true, transparent: true, opacity: 0.28 }));
       g.add(wf); W.add(g);
       const ph = rngFor('ph:' + sig.id)() * 6;
       this.anim.push((t, dt) => { sp.material.opacity = 0.35 + 0.3 * (0.5 + 0.5 * Math.sin(t * 1.8 + ph)); wf.rotation.y += dt * 0.4; wf.rotation.x += dt * 0.17; });
