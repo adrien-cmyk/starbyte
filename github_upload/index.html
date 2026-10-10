@@ -8478,6 +8478,8 @@ function saveGame() {
       profile: G.profile || null,
       // PLANET3D — Boucle fondatrice : état de l'antenne de prospection
       antenna: G.antenna || null,
+      // ORBITE — chantier construit, orbite pas encore visitée (moment 7)
+      orbitUnseen: !!G.orbitUnseen,
     };
     // Convertir les Sets en Array pour JSON
     _serializeSets(snapshot);
@@ -8521,6 +8523,7 @@ function loadGame() {
       'onboarding',
       'profile',  // ⚡ V0.5 — Identité joueur
       'antenna',  // PLANET3D — Boucle fondatrice
+      'orbitUnseen',  // ORBITE — moment 7
     ];
     for (const key of keysToRestore) {
       if (snapshot[key] !== undefined) {
@@ -8880,6 +8883,12 @@ function cleanupOrphanModals() {
 
 function goto(scr, opts) {
   opts = opts || {};
+  // ORBITE = ARMER (10/10/2026) : la construction navale n'existe qu'avec le chantier orbital.
+  // Cf. North Star §12 : « pas de chantier orbital → pas de vue orbite ».
+  if (scr === 'shipyard' && typeof getShipyardTier === 'function' && getShipyardTier() === 0) {
+    if (typeof toast === 'function') toast('Construis le chantier orbital pour accéder à la construction navale');
+    scr = 'planet';
+  }
   // D5.3 fix scroll bloqué : cleanup proactif des modaux orphelins à chaque navigation.
   // Sur iOS, un modal qui n'a pas été nettoyé bloque le scroll de la page entière.
   // On nettoie systématiquement avant de naviguer.
@@ -11219,6 +11228,8 @@ function deployFleetToOrbit() {
   }
   fleet.status = 'deployed';
   fleet.deployedAt = Date.now();
+  // ORBITE = ARMER : la flotte qui quitte le dock se regarde en orbite (récompense visuelle, North Star §24)
+  if (window.SBOrbit && typeof getShipyardTier === 'function' && getShipyardTier() > 0) setTimeout(() => { try { SBOrbit.open(); } catch (e) {} }, 500);
   toast(`${fleet.name} en orbite`);
   refreshCurrentScreen();
 }
@@ -25400,7 +25411,8 @@ function renderInfoCard(i) {
     primaryHandler = `goto('defense')`;
     ghostHandler = `openBuildingDetail(${i})`;
   } else if (stKey === 'shipyard') {
-    primaryHandler = `goto('shipyard')`;
+    // ORBITE = ARMER : le bâtiment mène à l'orbite, où se construisent les vaisseaux
+    primaryHandler = `(window.SBOrbit ? SBOrbit.open() : goto('shipyard'))`;
     ghostHandler = `openBuildingDetail(${i})`;
   } else if (stKey === 'turret') {
     primaryHandler = `goto('defense')`;
@@ -25595,6 +25607,11 @@ function doBuild(key, idx) {
   }
 
   let msg = `${b.name} construite`;
+  if (key === 'shipyard') {
+    // Moment 7 (North Star §28) : première entrée en orbite possible
+    G.orbitUnseen = true;
+    msg = `Chantier orbital opérationnel — l'orbite est accessible`;
+  }
   if (!G.planet.families.has(b.family)) {
     G.planet.families.add(b.family);
     G.planet.level++;
@@ -40472,16 +40489,16 @@ if (G.knownTargets && Array.isArray(G.tankerMissions)) {
 
 </script>
 <!-- PLANET3D — carte 3D + boucle antenne (source : sb-build/src/planet3d.js) -->
-<script type="module" src="assets/planet3d.js?v=20261010-1630"></script>
+<script type="module" src="assets/planet3d.js?v=20261010-1700"></script>
 <!-- CLOUD — sauvegarde Supabase (source : sb-build/src/cloud.js) -->
-<script type="module" src="assets/cloud.js?v=20261010-1630"></script>
+<script type="module" src="assets/cloud.js?v=20261010-1700"></script>
 <!-- MATCH3 — Match-3 V2 (assets/match3.js, source src/match3.js + src/m3core.js) : remplace startM3 -->
-<script type="module" src="assets/match3.js?v=20261010-1630"></script>
+<script type="module" src="assets/match3.js?v=20261010-1700"></script>
 <!-- HOME V2 — « monde d'abord » : planète plein écran, ressources en ligne, Flotte / Défense / Prospection (assets/home.js) -->
-<script type="module" src="assets/home.js?v=20261010-1630"></script>
+<script type="module" src="assets/home.js?v=20261010-1700"></script>
 <!-- SPACE MAP v0 — carte du Centre de prospection (assets/spacemap.js, source src/spacemap.js) -->
-<script src="assets/spacemap.js?v=20261010-1630"></script>
+<script src="assets/spacemap.js?v=20261010-1700"></script>
 <!-- SPACE MAP niveau B — diorama 3D d'un système (assets/system3d.js, source src/system3d.js) -->
-<script type="module" src="assets/system3d.js?v=20261010-1630"></script>
+<script type="module" src="assets/system3d.js?v=20261010-1700"></script>
 </body>
 </html>
