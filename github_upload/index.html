@@ -29881,6 +29881,15 @@ function probeSignatureNextAction(sig) {
   return _sigBtn('#5fffe8', 'Voir corps céleste', `openPlanetDetail('${sig.fixedAddress}')`, sig.fixedAddress, true);
 }
 
+function onTankerReportTargetClick(reportId, targetId) {
+  const mission = launchTankerToTarget(reportId, targetId, false);
+  if (!mission) return;
+  if (typeof saveGame === 'function') saveGame();
+  if (typeof startTankerCountdownTicker === 'function') startTankerCountdownTicker();
+  if (typeof refreshCurrentScreen === 'function') refreshCurrentScreen();
+  else if (typeof renderProspectRapports === 'function') renderProspectRapports();
+}
+
 function onSendProbeToSignature(tier, sigId) {
   const mission = launchProbe(tier, sigId, 'local', false);
   if (!mission) return;
@@ -30249,9 +30258,18 @@ function renderProbeReportRow(r, isUnread) {
         ${r.targets.map(t => {
           const addr = t.cosmicAddress
             ? `<div style="font-family:'SF Mono',monospace;font-size:9px;color:${accent};opacity:.75;margin-top:3px">@ ${t.cosmicAddress}</div>`
-            : '';
-          const loot = t.lootEstimate
-            ? `<div style="font-size:9px;color:var(--mut);margin-top:3px">Loot estimé : ${Object.entries(t.lootEstimate).map(([k, v]) => `${v} ${k}`).join(' · ')}</div>`
+            : (t.coordinates ? `<div style="font-family:'SF Mono',monospace;font-size:9px;color:${accent};opacity:.75;margin-top:3px">@ ${t.coordinates}</div>` : '');
+          // 10/10/2026 : loot lisible (les cibles aléatoires ont {resource,min,max}, les mouvantes {res: qty})
+          const lootText = (le => {
+            if (!le) return '';
+            if (le.resource !== undefined) {
+              const lab = (TILES.find(x => x.key === le.resource) || {}).label || le.resource;
+              return `~${le.min}–${le.max} ${lab}`;
+            }
+            return Object.entries(le).map(([k, v]) => `${v} ${(TILES.find(x => x.key === k) || {}).label || k}`).join(' · ');
+          })(t.lootEstimate);
+          const loot = lootText
+            ? `<div style="font-size:9px;color:var(--mut);margin-top:3px">Loot estimé : ${lootText}</div>`
             : '';
 
           // ─── Bouton tanker — uniquement si la cible existe dans knownTargets ───
@@ -30341,6 +30359,30 @@ function renderProbeReportRow(r, isUnread) {
                   Cible exploitée ou expirée
                 </div>
               `;
+            }
+          } else if (t.id && t.status) {
+            // ─── 10/10/2026 — Cible d'une sonde envoyée sans signature (coordonnées locales) ───
+            // Retour testeurs : « si je clique sur ces coordonnées je devrais avoir une action ».
+            // Ces cibles passent par launchTankerToTarget(reportId, targetId) — le bouton avait
+            // disparu lors de la refonte des cibles connues (14/05).
+            if (t.status === 'pending') {
+              if (availableTankers > 0) {
+                tankerBtnHtml = _sigBtn('#ffc864', 'Envoyer un tanker', `onTankerReportTargetClick('${r.id}','${t.id}')`,
+                  `Ramène le cargo de ${t.coordinates || 'la cible'}${t.tankerDurationMs ? ' · ~' + formatTankerDuration(t.tankerDurationMs) : ''}${t.riskLossPct ? ' · risque ' + t.riskLossPct + '%' : ''}`);
+              } else if (totalTankers === 0) {
+                tankerBtnHtml = _sigOff('Aucun tanker', 'Construis un tanker au Chantier orbital');
+              } else {
+                tankerBtnHtml = _sigOff('Tous les tankers sont en mission');
+              }
+            } else if (t.status === 'tanker_sent') {
+              const m = (G.tankerMissions || []).find(x => x.id === t.tankerMissionId);
+              const eta = m && m.arrivalAt ? ` · retour ${formatTankerDuration(Math.max(0, m.arrivalAt - Date.now()))}` : '';
+              tankerBtnHtml = _sigOff(`${m ? m.tankerName : 'Tanker'} en route${eta}`);
+            } else {
+              const tr = (G.tankerReports || []).find(x => x.sourceProbeReportId === r.id && x.targetCoords === t.coordinates);
+              tankerBtnHtml = tr
+                ? _sigBtn('#ffc864', tr.isLost ? 'Tanker perdu · voir le rapport' : 'Cargo récupéré · voir le rapport', `toggleTankerReport('${tr.id}')`, '', true)
+                : _sigOff('Cible exploitée');
             }
           }
 
@@ -40404,12 +40446,12 @@ if (G.knownTargets && Array.isArray(G.tankerMissions)) {
 
 </script>
 <!-- PLANET3D — carte 3D + boucle antenne (source : sb-build/src/planet3d.js) -->
-<script type="module" src="assets/planet3d.js?v=20261010-1000"></script>
+<script type="module" src="assets/planet3d.js?v=20261010-1030"></script>
 <!-- CLOUD — sauvegarde Supabase (source : sb-build/src/cloud.js) -->
-<script type="module" src="assets/cloud.js?v=20261010-1000"></script>
+<script type="module" src="assets/cloud.js?v=20261010-1030"></script>
 <!-- MATCH3 — Match-3 V2 (assets/match3.js, source src/match3.js + src/m3core.js) : remplace startM3 -->
-<script type="module" src="assets/match3.js?v=20261010-1000"></script>
+<script type="module" src="assets/match3.js?v=20261010-1030"></script>
 <!-- HOME V2 — « monde d'abord » : planète plein écran, ressources en ligne, Flotte / Défense / Prospection (assets/home.js) -->
-<script type="module" src="assets/home.js?v=20261010-1000"></script>
+<script type="module" src="assets/home.js?v=20261010-1030"></script>
 </body>
 </html>
