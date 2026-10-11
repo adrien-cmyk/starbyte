@@ -1750,7 +1750,15 @@ svg.map {
 /* SHIP3D — fiche d'unité vaisseau en vue héros (même principe que le soldat lourd : 3D plein écran, fiche par-dessus) */
 /* zone libre au-dessus des cartes = la 3D (tous les gestes : orbite, inclinaison, pincer) ;
    les cartes défilent nativement et peuvent remonter par-dessus le vaisseau */
-#scr-unit-detail.ud-ship .ud-hero-space, #scr-building-detail.ud-ship .ud-hero-space { touch-action: none; }
+#scr-unit-detail.ud-ship .ud-hero-space, #scr-building-detail.ud-ship .ud-hero-space, #scr-fleet.ud-ship .ud-hero-space { touch-action: none; }
+/* écran Flotte en vue héros : la station OS-01 et la flotte à quai derrière les cartes */
+#scr-fleet.ud-hero > .stars, #scr-fleet.ud-hero > .glow, #scr-fleet.ud-hero .bld-banner { display: none; }
+#scr-fleet:not(.ud-hero) > .u3d-hero, #scr-fleet:not(.ud-hero) .ud-hero-space { display: none; }
+#scr-fleet.ud-hero .screen-scroll { position: relative; z-index: 2; touch-action: pan-y; }
+#scr-fleet.ud-hero .head { text-shadow: 0 2px 12px rgba(0,0,0,.8); }
+#scr-fleet.ud-hero .dash-section-card, #scr-fleet.ud-hero .fleet-stats > *, #scr-fleet.ud-hero .bld-cta-banner { background: rgba(8,12,18,.86); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); }
+#fleet-ship-hero .u3d-canvas { touch-action: none; }
+.w-nav [data-sys="fleet"].sb-off { opacity: .32; filter: grayscale(1); }
 #scr-unit-detail.ud-ship #ud-u3d { display: none; }
 #ud-ship-hero .u3d-canvas, #bd-ship-hero .u3d-canvas { touch-action: none; }
 #scr-building-detail.ud-ship #bd-u3d, #scr-building-detail.ud-ship #bd-hero-space { display: none; }
@@ -4757,8 +4765,9 @@ svg.map {
     <div id="fleet-reports-banner" style="display:none;padding:8px 16px 0"></div>
 
     <!-- Bouton COMPOSER UNE FLOTTE (passe 3.2) -->
-    <div style="padding:8px 16px 14px">
-      <button id="fleet-compose-cta" class="btn-primary fleet-cta" onclick="openFleetCompose()" style="width:100%;padding:14px;font-size:12px;display:flex;align-items:center;justify-content:center;gap:8px"><span class="icon-static" data-icon="anchor" data-icon-size="14"></span>Composer une flotte</button>
+    <div style="padding:8px 16px 14px;display:flex;gap:8px">
+      <button id="fleet-compose-cta" class="btn-primary fleet-cta" onclick="openFleetCompose()" style="flex:1.4;padding:14px;font-size:12px;display:flex;align-items:center;justify-content:center;gap:8px"><span class="icon-static" data-icon="anchor" data-icon-size="14"></span>Composer une flotte</button>
+      <button id="fleet-build-cta" class="btn-secondary" onclick="goto('shipyard')" style="flex:1;padding:14px;font-size:12px;border-radius:10px;border:1px solid rgba(200,210,220,.22);background:rgba(8,12,18,.6);color:var(--txt,#e6eef3);letter-spacing:.08em">Construire</button>
     </div>
 
     <!-- Flottes préparées (passe 3.2) — prêtes au départ -->
@@ -10722,6 +10731,8 @@ function renderFleetScreen() {
     deployedLabel.style.display = 'none';
     deployedList.innerHTML = '';
   }
+  // SHIP3D — écran Flotte = la station OS-01 en plein écran avec la flotte à quai (remplace l'ancienne vue orbite)
+  setTimeout(() => { if (hasShipyardBuilt()) mountFleetStation3D(); else unmountFleetStation3D(); }, 0);
 }
 
 // ─── Card garnison dans Flotte > Commandement ───
@@ -35268,7 +35279,7 @@ function mountUnitShip3D(key, inService) {
 // Gestes de la vue héros vaisseau : dans la zone libre, un doigt = orbite (rotation + inclinaison), deux doigts = zoom,
 // comme sur la vitrine. Sur les cartes, défilement natif (la liste remonte par-dessus la 3D).
 const shipHeroGesturesOn = {};
-function shipHeroGestures(scrId = 'scr-unit-detail', getHandle = () => unitShip3D && unitShip3D.handle) {
+function shipHeroGestures(scrId = 'scr-unit-detail', getHandle = () => unitShip3D && unitShip3D.handle, onTap = null) {
   if (shipHeroGesturesOn[scrId]) return;
   shipHeroGesturesOn[scrId] = true;
   const scr = document.getElementById(scrId);
@@ -35280,7 +35291,7 @@ function shipHeroGestures(scrId = 'scr-unit-detail', getHandle = () => unitShip3
     if (!e.target.closest || !e.target.closest('.ud-hero-space')) return;
     pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
     if (pts.size === 2) { mode = 'pinch'; pinch0 = dist(); }
-    else { mode = 'orbit'; last = { x: e.clientX, y: e.clientY }; }
+    else { mode = 'orbit'; last = { x: e.clientX, y: e.clientY, x0: e.clientX, y0: e.clientY, t0: performance.now() }; }
     h().begin();
   }, { passive: true });
   window.addEventListener('pointermove', (e) => {
@@ -35290,7 +35301,12 @@ function shipHeroGestures(scrId = 'scr-unit-detail', getHandle = () => unitShip3
     if (mode === 'orbit') { h().orbit(e.clientX - last.x, e.clientY - last.y); last.x = e.clientX; last.y = e.clientY; }
   }, { passive: true });
   const up = (e) => {
-    if (!pts.delete(e.pointerId)) return;
+    if (!pts.has(e.pointerId)) return;
+    if (onTap && mode === 'orbit' && last && e.type === 'pointerup' && Math.hypot(e.clientX - last.x0, e.clientY - last.y0) < 8 && performance.now() - last.t0 < 350) {
+      const hit = h() && h().pick ? h().pick(e.clientX, e.clientY) : null;   // toucher un vaisseau à quai → sa fiche
+      if (hit) setTimeout(() => onTap(hit), 0);
+    }
+    pts.delete(e.pointerId);
     if (pts.size === 0) { mode = null; if (h()) h().end(); }
     else if (mode === 'pinch') { mode = null; }
   };
@@ -35301,6 +35317,104 @@ function shipHeroGestures(scrId = 'scr-unit-detail', getHandle = () => unitShip3
     e.preventDefault(); h().begin(); h().dolly(1 + e.deltaY * 0.0012); h().end();
   }, { passive: false });
 }
+// ─── SHIP3D : écran Flotte = station OS-01 + flotte à quai (remplace la vue orbite de home.js) ───
+function hasShipyardBuilt() {
+  return !!(typeof G !== 'undefined' && G.planet && G.planet.parcels && G.planet.parcels.some(p => p && p.building === 'shipyard' && p.state === 'built'));
+}
+const DOCK_MODELS = {
+  tanker:   { url: 'assets/3d/sb_tk07_lod.glb?v=20261012-0100', engine: [1.0, 0.7, 0.4] },
+  fregate:  { url: 'assets/3d/sb_sr01_lod.glb?v=20261012-0100', engine: [0.5, 0.78, 1.0] },
+  cuirasse: { url: 'assets/3d/sb_kv01_lod.glb?v=20261012-0100', engine: [0.5, 0.78, 1.0] },
+};
+function fleetStationedCount(k) {
+  const c = (G.fleet && G.fleet.stationed && G.fleet.stationed[k]) || {};
+  return (c.t1 || 0) + (c.t2 || 0) + (c.t3 || 0);
+}
+function fleetDockList() {
+  // postes : tankers dans les 4 docks de maintenance, frégates en stationnement au bout des bras diagonaux,
+  // un cuirassé au large (il fait 1 200 m, la station 420 m). Repère glTF de la station, en mètres.
+  const out = [];
+  const tankSlots = [[187, -31.5, 0, Math.PI / 2], [-187, -31.5, 0, -Math.PI / 2], [0, -31.5, -187, Math.PI], [0, -31.5, 187, 0]];
+  for (let i = 0; i < Math.min(4, fleetStationedCount('tanker')); i++) {
+    const [x, y, z, r] = tankSlots[i];
+    out.push({ ...DOCK_MODELS.tanker, type: 'tanker', pos: [x, y, z], rotY: r });
+  }
+  const diag = [45, 225, 135, 315];
+  for (let i = 0; i < Math.min(4, fleetStationedCount('fregate')); i++) {
+    const a = diag[i] * Math.PI / 180, r = 300;
+    out.push({ ...DOCK_MODELS.fregate, type: 'fregate', pos: [r * Math.cos(a), 24, -r * Math.sin(a)], rotY: a + Math.PI });
+  }
+  if (fleetStationedCount('cuirasse') > 0) out.push({ ...DOCK_MODELS.cuirasse, type: 'cuirasse', pos: [-520, -40, 1250], rotY: -1.25 });   // au large, derrière la station
+  return out;
+}
+let fleetShip3D = null;   // { sig, handle }
+function mountFleetStation3D() {
+  const scr = document.getElementById('scr-fleet');
+  const scroll = scr && scr.querySelector('.screen-scroll');
+  const model = BUILDING_SHIP3D.shipyard;
+  if (!scr || !scroll || !model || !window.WebGLRenderingContext) return false;
+  let hero = document.getElementById('fleet-ship-hero');
+  if (!hero) { hero = document.createElement('div'); hero.id = 'fleet-ship-hero'; hero.className = 'u3d u3d-hero'; scr.insertBefore(hero, scroll); }
+  let space = document.getElementById('fleet-ship-space');
+  if (!space) { space = document.createElement('div'); space.id = 'fleet-ship-space'; space.className = 'ud-hero-space'; const h = scroll.querySelector('.head'); scroll.insertBefore(space, h ? h.nextSibling : scroll.firstChild); }
+  scr.classList.add('ud-hero', 'ud-ship');
+  hero.style.display = ''; space.style.display = '';
+  const dock = fleetDockList();
+  const total = ['tanker', 'fregate', 'cuirasse'].reduce((a, k) => a + fleetStationedCount(k), 0);
+  let stat = hero.querySelector('.u3d-stat');
+  if (!stat) {
+    hero.insertAdjacentHTML('beforeend', `<div class="u3d-stat"><b></b><span>à quai</span></div><div class="u3d-hint"></div>`);
+    stat = hero.querySelector('.u3d-stat');
+  }
+  stat.querySelector('b').textContent = fmt(total);
+  hero.querySelector('.u3d-hint').textContent = total ? 'OS-01 · touche un vaisseau' : 'OS-01 · poste 01 prêt';
+  requestAnimationFrame(() => {
+    const hb = hero.getBoundingClientRect(), sb = space.getBoundingClientRect();
+    if (hb.height) hero.style.setProperty('--u3d-band', Math.max(0, hb.bottom - sb.bottom) + 'px');
+  });
+  shipHeroGestures('scr-fleet', () => fleetShip3D && fleetShip3D.handle, (type) => openUnitDetail(type, 'ship'));
+  if (G.orbitUnseen) {                            // moment 7 : première arrivée au chantier opérationnel
+    G.orbitUnseen = false; if (typeof saveGame === 'function') saveGame();
+    if (typeof toast === 'function') toast('Chantier orbital opérationnel — ta flotte est à quai');
+  }
+  const sig = dock.map(d => d.type).join(',');
+  if (fleetShip3D && fleetShip3D.sig === sig) return true;
+  if (fleetShip3D) { try { fleetShip3D.handle.dispose(); } catch (e) {} fleetShip3D = null; }
+  if (typeof bdShip3D !== 'undefined' && bdShip3D) { try { bdShip3D.handle.dispose(); } catch (e) {} bdShip3D = null; }   // une seule station en mémoire
+  hero.classList.add('u3d-loading');
+  const start = () => {
+    fleetShip3D = { sig, handle: window.Ship3D.mount(hero, {
+      url: model.url, shiftY: 0.2, ship: window.Ship3D.profiles ? window.Ship3D.profiles[model.profile] : undefined, dock,
+      onReady: () => hero.classList.remove('u3d-loading'),
+      onError: () => { hero.classList.remove('u3d-loading'); hero.classList.add('u3d-fail'); },
+    }) };
+  };
+  if (window.Ship3D) start(); else window.addEventListener('ship3d-ready', start, { once: true });
+  return true;
+}
+function unmountFleetStation3D() {
+  const scr = document.getElementById('scr-fleet');
+  if (fleetShip3D) { try { fleetShip3D.handle.dispose(); } catch (e) {} fleetShip3D = null; }
+  const hero = document.getElementById('fleet-ship-hero'); if (hero) hero.style.display = 'none';
+  const space = document.getElementById('fleet-ship-space'); if (space) space.style.display = 'none';
+  if (scr) scr.classList.remove('ud-hero', 'ud-ship');
+}
+// Barre de navigation (home.js) : le bouton Flotte ouvre directement l'écran Flotte (plus de vue orbite ni de menu) ;
+// grisé tant que le chantier orbital n'est pas construit.
+(function wireFleetNav() {
+  document.addEventListener('click', (e) => {
+    const b = e.target.closest && e.target.closest('.w-nav [data-sys="fleet"]');
+    if (!b) return;
+    e.stopPropagation(); e.preventDefault();
+    if (!hasShipyardBuilt()) { if (typeof toast === 'function') toast('Construis le chantier orbital pour accéder à ta flotte'); return; }
+    goto('fleet');
+  }, true);
+  setInterval(() => {
+    const b = document.querySelector('.w-nav [data-sys="fleet"]');
+    if (b) b.classList.toggle('sb-off', !hasShipyardBuilt());
+  }, 1000);
+})();
+
 // ─── SHIP3D : fiche bâtiment en vue héros (chantier orbital OS-01) ───
 const BUILDING_SHIP3D = { shipyard: { url: 'assets/3d/sb_os01.glb?v=20261011-2340', code: 'OS-01 Chantier orbital', profile: 'os01' } };
 let bdShip3D = null;   // { key, handle }
@@ -35328,6 +35442,7 @@ function mountBuildingShip3D(key, tier) {
   shipHeroGestures('scr-building-detail', () => bdShip3D && bdShip3D.handle);
   if (bdShip3D && bdShip3D.key === key) return true;
   if (bdShip3D) { try { bdShip3D.handle.dispose(); } catch (e) {} bdShip3D = null; }
+  if (fleetShip3D) { try { fleetShip3D.handle.dispose(); } catch (e) {} fleetShip3D = null; }   // une seule station en mémoire
   scroll.scrollTop = 0;
   hero.classList.add('u3d-loading');
   const start = () => {

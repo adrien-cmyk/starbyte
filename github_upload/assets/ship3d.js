@@ -42,7 +42,7 @@ const PROFIL_OS01 = {
   V: 2.6, bowGltf: 0, center: true, axisY: 0.6, engineY: 0, engineZ: 0, nozzleZ: 0, targetY: 0.55,
   nozzles: [], plasma: false, planet: true, spin: 0.018, dustSpeed: 0.35, fit: 1.3,
   engineColor: [1.0, 0.62, 0.30], plume: [0xff5a1a, 0xff8a2a, 0xffc070, 0xfff2d8, 0xffc890, 0xffa060],
-  gloss: { M_TK_ARMOR_JAUNE: [0.40, 0.08], M_KV_ARMOR_WHITE: [0.40, 0.0], M_KV_GUNMETAL: [0.26, 0.85], M_KV_STRUCT_BLACK: [0.30, 0.55], M_TK_GRAPHITE: [0.30, 0.6], M_SR_VERRIERE: [0.06, 0.4] }, glossEnv: 0.9,
+  gloss: { M_TK_ARMOR_JAUNE: [0.40, 0.08], M_KV_ARMOR_WHITE: [0.40, 0.0], M_KV_ARMOR_RED: [0.28, 0.3], M_KV_GUNMETAL: [0.26, 0.85], M_KV_STRUCT_BLACK: [0.30, 0.55], M_TK_GRAPHITE: [0.30, 0.6], M_SR_VERRIERE: [0.06, 0.4] }, glossEnv: 0.9,
   hull: [[0,0,10,10],[1,0,10,10]],
 };
 
@@ -535,6 +535,51 @@ ship.add(shockLight);
 /* ================================================================== chargement du modèle (glb gzip + base64) */
 const navMats = [];
 const loader = new GLTFLoader();
+function prepMats(root, engineColor, engineInt) {
+  root.traverse(o => {
+    if (!o.isMesh) return;
+    o.castShadow = true; o.receiveShadow = true;
+    const mats = Array.isArray(o.material) ? o.material : [o.material];
+    for (const mat of mats) {
+      const gl = P.gloss && P.gloss[mat.name];   // brillance par vaisseau : rugosité, métal, reflets
+      mat.envMapIntensity = gl ? (mat.name === 'M_SR_VERRIERE' ? 2.0 : P.glossEnv) : 0.45;
+      if (gl) { mat.roughness = gl[0]; mat.metalness = gl[1]; }
+      const look = LOOK[mat.name];
+      if (look && !mat.userData.kv) { mat.userData.kv = 1; premium(mat, look); }
+      if (mat.name === 'M_KV_GLOW_MOTEUR') { mat.emissive.copy(engineColor); mat.emissiveIntensity = engineInt; mat.color.copy(engineColor); }
+      else if (mat.name === 'M_KV_GLOW_ORANGE') { mat.emissiveIntensity = 2.2; }
+      else if (mat.name === 'M_KV_GLOW_BLUE') { mat.emissiveIntensity = 1.8; }
+      else if (mat.name.startsWith('M_KV_NAV_')) { if (!navMats.includes(mat)) navMats.push(mat); }
+    }
+  });
+}
+// vaisseaux à quai autour d'une station : [{ url, type, pos:[x,y,z] (m, repère glTF de la station), rotY, engine:[r,g,b] }]
+const dockGroup = new THREE.Group(); ship.add(dockGroup);
+const dockCache = {};
+async function loadDock(list) {
+  const getModel = (url) => dockCache[url] || (dockCache[url] = new Promise((ok, ko) => loader.load(url, ok, undefined, ko)));
+  for (const d of list) {
+    const gltf = await getModel(d.url);
+    if (!alive) return;
+    const g = gltf.scene.clone(true);
+    g.traverse(o => { if (o.isMesh) { o.material = Array.isArray(o.material) ? o.material.map(x => x.clone()) : o.material.clone(); o.userData.type = d.type; } });
+    prepMats(g, new THREE.Color(...(d.engine || [1, 0.6, 0.3])), 1.6);   // moteurs au ralenti
+    const k = P.V * S * (d.scale || 1);
+    g.scale.setScalar(k);
+    g.position.set(d.pos[0] * P.V * S, d.pos[1] * P.V * S, d.pos[2] * P.V * S);
+    g.rotation.y = d.rotY || 0;
+    g.userData.type = d.type; g.userData.hold = g.position.y; g.userData.ph = Math.random() * 6.28;
+    dockGroup.add(g);
+  }
+}
+const raycaster = new THREE.Raycaster();
+function pickAt(cx, cy) {
+  const r = renderer.domElement.getBoundingClientRect();
+  const ndc = new THREE.Vector2(((cx - r.left) / r.width) * 2 - 1, -((cy - r.top) / r.height) * 2 + 1);
+  raycaster.setFromCamera(ndc, camera);
+  const hit = raycaster.intersectObjects(dockGroup.children, true)[0];
+  return hit ? hit.object.userData.type || null : null;
+}
 function loadShip() {
   return new Promise((ok, ko) => loader.load(opts.url, ok, (e) => { if (e.total && opts.onProgress) opts.onProgress(e.loaded / e.total); }, ko));
 }
@@ -547,23 +592,9 @@ loadShip().then((gltf) => {
     m.traverse(o => { if (o !== m) { o.position.set(0, 0, 0); o.rotation.set(0, 0, 0); o.scale.set(1, 1, 1); } });
   }
   m.scale.setScalar(S);
-  m.traverse(o => {
-    if (!o.isMesh) return;
-    o.castShadow = true; o.receiveShadow = true;
-    const mats = Array.isArray(o.material) ? o.material : [o.material];
-    for (const mat of mats) {
-      const gl = P.gloss && P.gloss[mat.name];   // brillance par vaisseau : rugosité, métal, reflets
-      mat.envMapIntensity = gl ? (mat.name === 'M_SR_VERRIERE' ? 2.0 : P.glossEnv) : 0.45;
-      if (gl) { mat.roughness = gl[0]; mat.metalness = gl[1]; }
-      const look = LOOK[mat.name];
-      if (look && !mat.userData.kv) { mat.userData.kv = 1; premium(mat, look); }
-      if (mat.name === 'M_KV_GLOW_MOTEUR') { mat.emissive.copy(ENGINE_COLOR); mat.emissiveIntensity = 5.5; mat.color.copy(ENGINE_COLOR); }
-      else if (mat.name === 'M_KV_GLOW_ORANGE') { mat.emissiveIntensity = 2.2; }
-      else if (mat.name === 'M_KV_GLOW_BLUE') { mat.emissiveIntensity = 1.8; }
-      else if (mat.name.startsWith('M_KV_NAV_')) { if (!navMats.includes(mat)) navMats.push(mat); }
-    }
-  });
+  prepMats(m, ENGINE_COLOR, 5.5);
   ship.add(m);
+  if (opts.dock && opts.dock.length) loadDock(opts.dock).catch(e => console.warn('[Ship3D] quai', e));
   // occulteur invisible (profondeur seule) dans la scène d'effets : la coque masque les filaments passant derrière
   const occ = m.clone(true);
   const depthOnly = new THREE.MeshBasicMaterial({ colorWrite: false });
@@ -628,6 +659,7 @@ function frame() {
   const amp = REDUCED ? 0.25 : 1;
   if (P.spin) {                                    // station : rotation lente sur son axe
     ship.rotation.y = t * P.spin * amp; ship.position.y = Math.sin(t * 0.21) * 0.03 * amp;
+    for (const g of dockGroup.children) g.position.y = g.userData.hold + Math.sin(t * 0.3 + g.userData.ph) * 0.004;
   } else {
     ship.position.y = Math.sin(t * 0.45) * 0.05 * amp;
     ship.rotation.z = Math.sin(t * 0.32) * 0.015 * amp;
@@ -690,6 +722,7 @@ let alive = true, raf = requestAnimationFrame(frame);
   }
   return {
     begin() { controls.autoRotate = false; clearTimeout(idleTimer); },
+    pick(cx, cy) { return pickAt(cx, cy); },
     orbit(dx, dy) { pend.x += dx; pend.y += dy; },
     dolly(scale) { pend.z += Math.log(scale); },
     end() { clearTimeout(idleTimer); if (!REDUCED) idleTimer = setTimeout(() => { controls.autoRotate = true; }, 6000); },
@@ -708,7 +741,7 @@ function whenReady(cb) {
 }
 window.Ship3D = { profiles: { kv01: PROFIL_KV01, sr01: PROFIL_SR01, tk07: PROFIL_TK07, os01: PROFIL_OS01 }, mount: (c, o) => { let h = null, dead = false; whenReady(() => { if (!dead) h = mount(c, o); });
   return {
-    begin() { if (h) h.begin(); }, orbit(dx, dy) { if (h) h.orbit(dx, dy); }, dolly(k) { if (h) h.dolly(k); }, end() { if (h) h.end(); },
+    pick(x, y) { return h ? h.pick(x, y) : null; }, begin() { if (h) h.begin(); }, orbit(dx, dy) { if (h) h.orbit(dx, dy); }, dolly(k) { if (h) h.dolly(k); }, end() { if (h) h.end(); },
     dispose() { dead = true; if (h) h.dispose(); },
   }; } };
 window.dispatchEvent(new Event('ship3d-ready'));
