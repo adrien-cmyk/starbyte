@@ -30,13 +30,19 @@ renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.0;
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFShadowMap;
+renderer.domElement.className = 'u3d-canvas';
 stage.appendChild(renderer.domElement);
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x010207);
 const camera = new THREE.PerspectiveCamera(40, W() / H(), 0.05, 600);
+// vue héros : la scène occupe tout l'écran, le vaisseau est cadré dans la partie haute (au-dessus des cartes)
+function applyShift() {
+  const sh = opts.shiftY || 0;
+  if (sh) camera.setViewOffset(W(), H(), 0, H() * sh, W(), H()); else camera.clearViewOffset();
+}
 function fitDistance() {
-  camera.fov = camera.aspect < 0.8 ? 54 : 40; camera.updateProjectionMatrix();
+  camera.fov = camera.aspect < 0.8 ? 54 : 40; applyShift(); camera.updateProjectionMatrix();
   const v = THREE.MathUtils.degToRad(camera.fov) / 2;
   const h = Math.atan(Math.tan(v) * camera.aspect);
   const half = camera.aspect < 0.8 ? 4.7 : 5.0;

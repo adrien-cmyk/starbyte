@@ -1747,33 +1747,11 @@ svg.map {
 }
 
 /* Building interiors */
-.ud-ship3d {
-  position: relative;
-  height: 64vh;
-  min-height: 360px;
-  margin: 8px 0 6px;
-  touch-action: none;
-  z-index: 2;
-  background: #020409;
-  overflow: hidden;
-}
-.ud-ship3d canvas { display: block; width: 100%; height: 100%; }
-.ud-ship3d::after {                       /* fondu bas vers la fiche */
-  content: ''; position: absolute; left: 0; right: 0; bottom: 0; height: 70px;
-  background: linear-gradient(to bottom, rgba(11,15,18,0), #0b0f12); pointer-events: none;
-}
-.ud-ship3d-load {
-  position: absolute; inset: 0; display: grid; place-content: center; text-align: center; gap: 10px;
-  font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; letter-spacing: .12em; color: rgba(232,236,241,.6);
-  transition: opacity .6s ease; pointer-events: none;
-}
-.ud-ship3d-load.done { opacity: 0; }
-.ud-ship3d-bar { width: 150px; height: 2px; background: rgba(255,255,255,.08); overflow: hidden; }
-.ud-ship3d-bar i { display: block; height: 100%; width: 0; background: #f0a040; transition: width .2s; }
-.ud-ship3d-hint {
-  position: absolute; left: 0; right: 0; bottom: 14px; text-align: center; z-index: 1; pointer-events: none;
-  font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 10px; letter-spacing: .08em; color: rgba(232,236,241,.45);
-}
+/* SHIP3D — fiche d'unité vaisseau en vue héros (même principe que le soldat lourd : 3D plein écran, fiche par-dessus) */
+#scr-unit-detail.ud-ship .screen-scroll { pointer-events: none; }               /* l'espace libre laisse passer les gestes vers la 3D */
+#scr-unit-detail.ud-ship .screen-scroll > *:not(.ud-hero-space) { pointer-events: auto; }
+#scr-unit-detail.ud-ship #ud-u3d { display: none; }
+#ud-ship-hero .u3d-canvas { touch-action: none; }
 .bld-banner {
   margin: 12px 16px 4px;
   padding: 18px 16px;
@@ -5482,12 +5460,6 @@ svg.map {
       <h1 class="smaller" id="ud-title">UNITÉ</h1>
       <div class="meta" id="ud-meta">Défense</div>
     </header>
-
-    <!-- SHIP3D — fiche d'unité 3D plein cadre (assets/ship3d.js) : le cuirassé navigue, orbite au doigt, zoom au pincement -->
-    <div class="ud-ship3d" id="ud-ship3d" hidden>
-      <div class="ud-ship3d-load" id="ud-ship3d-load">CHARGEMENT DU VAISSEAU<div class="ud-ship3d-bar"><i id="ud-ship3d-bar"></i></div></div>
-      <div class="ud-ship3d-hint">Glisser pour tourner · Pincer pour zoomer</div>
-    </div>
 
     <div class="bld-banner" id="ud-banner">
       <div class="bld-banner-icon" id="ud-icon"><span class="icon-static" data-icon="sword" data-icon-size="42"></span></div>
@@ -34948,7 +34920,7 @@ function renderDefenseUnitDetail(key) {
     : '';
   document.getElementById('ud-meta').innerHTML = `Défense · <span style="color:${unit.color}">${unit.defPerUnit}/unité</span>${atkBadge}`;
   document.getElementById('ud-banner').style.borderColor = 'rgba(255,80,64,.25)';
-  unmountUnitShip3D(); document.getElementById('ud-banner').style.display = '';
+  unmountUnitShip3D();
   const udIcon = document.getElementById('ud-icon');
   udIcon.innerHTML = getIllustration(key);
   udIcon.style.color = unit.color;
@@ -35005,32 +34977,56 @@ function renderDefenseUnitDetail(key) {
   actionsEl.innerHTML = actionsHtml;
 }
 
-// ─── SHIP3D : scène 3D de la fiche d'unité (une seule instance, gardée tant qu'on revient au même vaisseau) ───
-const UNIT_SHIP3D_MODELS = { cuirasse: 'assets/3d/sb_kv01.glb?v=20261011-2000' };
+// ─── SHIP3D : fiche vaisseau en vue héros (3D plein écran derrière la fiche, comme le soldat lourd) ───
+const UNIT_SHIP3D_MODELS = { cuirasse: { url: 'assets/3d/sb_kv01.glb?v=20261011-2000', code: 'KV-01 Kerath' } };
 let unitShip3D = null;   // { key, handle }
-function mountUnitShip3D(key) {
-  const stage = document.getElementById('ud-ship3d');
-  if (!stage || !UNIT_SHIP3D_MODELS[key] || !window.WebGLRenderingContext) return false;
-  stage.hidden = false;
+function mountUnitShip3D(key, inService) {
+  const scr = document.getElementById('scr-unit-detail');
+  const scroll = scr && scr.querySelector('.screen-scroll');
+  const model = UNIT_SHIP3D_MODELS[key];
+  if (!scr || !scroll || !model || !window.WebGLRenderingContext) return false;
+  // héros : couche 3D sous la fiche + espace libre après le titre
+  let hero = document.getElementById('ud-ship-hero');
+  if (!hero) { hero = document.createElement('div'); hero.id = 'ud-ship-hero'; hero.className = 'u3d u3d-hero'; scr.insertBefore(hero, scroll); }
+  let space = document.getElementById('ud-hero-space');
+  if (!space) { space = document.createElement('div'); space.id = 'ud-hero-space'; space.className = 'ud-hero-space'; const h = scroll.querySelector('.head'); scroll.insertBefore(space, h ? h.nextSibling : scroll.firstChild); }
+  const oldU3d = document.getElementById('ud-u3d');
+  if (oldU3d && window.SBUnit3D) { try { window.SBUnit3D.unmount(oldU3d); } catch (e) {} }
+  scr.classList.add('ud-hero', 'ud-ship');
+  hero.style.display = '';
+  scroll.scrollTop = 0;
+  let stat = hero.querySelector('.u3d-stat');
+  if (!stat) {
+    hero.insertAdjacentHTML('beforeend', `<div class="u3d-stat"><b></b><span>en service</span></div><div class="u3d-hint">${model.code} · glisser pour tourner</div>`);
+    stat = hero.querySelector('.u3d-stat');
+  }
+  stat.querySelector('b').textContent = fmt(inService);
+  // bande basse (zone des cartes) : place le compteur et l'aide juste au-dessus, comme le soldat lourd
+  requestAnimationFrame(() => {
+    const hb = hero.getBoundingClientRect(), sb = space.getBoundingClientRect();
+    if (hb.height) hero.style.setProperty('--u3d-band', Math.max(0, hb.bottom - sb.bottom) + 'px');
+  });
   if (unitShip3D && unitShip3D.key === key) return true;
-  unmountUnitShip3D(); stage.hidden = false;
-  const load = document.getElementById('ud-ship3d-load'), bar = document.getElementById('ud-ship3d-bar');
-  load.classList.remove('done'); load.firstChild.textContent = 'CHARGEMENT DU VAISSEAU'; bar.style.width = '0';
+  unmountUnitShip3D(true);
+  hero.classList.add('u3d-loading');
   const start = () => {
-    unitShip3D = { key, handle: window.Ship3D.mount(stage, {
-      url: UNIT_SHIP3D_MODELS[key],
-      onProgress: (f) => { bar.style.width = Math.round(f * 100) + '%'; },
-      onReady: () => { load.classList.add('done'); },
-      onError: () => { load.firstChild.textContent = 'MODÈLE INDISPONIBLE'; },
+    unitShip3D = { key, handle: window.Ship3D.mount(hero, {
+      url: model.url, shiftY: 0.2,
+      onReady: () => hero.classList.remove('u3d-loading'),
+      onError: () => { hero.classList.remove('u3d-loading'); hero.classList.add('u3d-fail'); },
     }) };
   };
   if (window.Ship3D) start(); else window.addEventListener('ship3d-ready', start, { once: true });
   return true;
 }
-function unmountUnitShip3D() {
-  const stage = document.getElementById('ud-ship3d');
+function unmountUnitShip3D(keepClasses) {
   if (unitShip3D) { try { unitShip3D.handle.dispose(); } catch (e) {} unitShip3D = null; }
-  if (stage) stage.hidden = true;
+  const hero = document.getElementById('ud-ship-hero');
+  if (hero) hero.classList.remove('u3d-loading', 'u3d-fail');
+  if (keepClasses) return;                       // remontage immédiat d'un autre vaisseau
+  if (hero) hero.style.display = 'none';
+  const scr = document.getElementById('scr-unit-detail');
+  if (scr) scr.classList.remove('ud-ship', 'ud-hero');
 }
 
 // ─── Fiche détail d'un vaisseau militaire (Tanker / Frégate / Cuirassé) ───
@@ -35046,12 +35042,7 @@ function renderShipUnitDetail(key) {
   document.getElementById('ud-title').textContent = meta.name.toUpperCase();
   document.getElementById('ud-banner').style.borderColor = 'rgba(95,255,232,.25)';
   // SHIP3D — le cuirassé a sa fiche 3D plein cadre : plus de case illustration (décision 11/10/2026)
-  if (key === 'cuirasse' && mountUnitShip3D('cuirasse')) {
-    document.getElementById('ud-banner').style.display = 'none';
-  } else {
-    unmountUnitShip3D();
-    document.getElementById('ud-banner').style.display = '';
-  }
+  if (!(UNIT_SHIP3D_MODELS[key] && mountUnitShip3D(key, total))) unmountUnitShip3D();
   const udIcon = document.getElementById('ud-icon');
   if (PNG_ILLUSTRATIONS[key]) {
     udIcon.innerHTML = `<img class="illu-png" src="${PNG_ILLUSTRATIONS[key]}" alt="${meta.name}" onerror="pngFallback(this, '${key}')">`;
