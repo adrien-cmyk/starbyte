@@ -600,6 +600,7 @@ function frame() {
       if (fps < 24) renderer.setPixelRatio(1);
     }
   }
+  smoothOrbit();
   controls.update();
   updateHaze();
   composer.render();
@@ -617,10 +618,20 @@ let alive = true, raf = requestAnimationFrame(frame);
     sph.radius = Math.min(controls.maxDistance, Math.max(controls.minDistance, sph.radius * (dScale || 1)));
     off.setFromSpherical(sph); camera.position.copy(controls.target).add(off); controls.update();
   }
+  // lissage : le doigt alimente une consigne, la caméra la rattrape en douceur (≈ 0,15 s) puis glisse sur son élan
+  const pend = { x: 0, y: 0, z: 0 }; let lastT = performance.now();
+  function smoothOrbit() {
+    const now = performance.now(), dt = Math.min(0.1, (now - lastT) / 1000); lastT = now;
+    if (Math.abs(pend.x) + Math.abs(pend.y) < 0.01 && Math.abs(pend.z) < 1e-4) { pend.x = pend.y = pend.z = 0; return; }
+    const f = 1 - Math.exp(-dt * 7.0);
+    const ax = pend.x * f, ay = pend.y * f, az = pend.z * f;
+    pend.x -= ax; pend.y -= ay; pend.z -= az;
+    orbitBy(ax, ay, Math.exp(az));
+  }
   return {
     begin() { controls.autoRotate = false; clearTimeout(idleTimer); },
-    orbit(dx, dy) { orbitBy(dx, dy, 1); },
-    dolly(scale) { orbitBy(0, 0, scale); },
+    orbit(dx, dy) { pend.x += dx; pend.y += dy; },
+    dolly(scale) { pend.z += Math.log(scale); },
     end() { clearTimeout(idleTimer); if (!REDUCED) idleTimer = setTimeout(() => { controls.autoRotate = true; }, 6000); },
     dispose() {
       alive = false; cancelAnimationFrame(raf); ro.disconnect(); controls.dispose();
