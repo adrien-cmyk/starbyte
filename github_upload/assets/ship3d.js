@@ -1,5 +1,6 @@
 /* Starbyte — Ship3D : fiche d'unité 3D du cuirassé KV-01 (classe Kerath).
    Source : viewer validé par Adrien (artifact « KV-01 Kerath », 11 oct. 2026) — skill starbyte-ship-showcase.
+   Profils : KV-01 cuirassé, SR-01 frégate, TK-07 tanker.
    Usage : const h = window.Ship3D.mount(container, { url, ship, onProgress, onReady, onError }); … h.dispose();
    `ship` (facultatif) : profil d'un autre vaisseau mis à l'échelle de la scène du KV-01 (V m de scène par m réel,
    proue glTF recalée sur z = 600) — tuyères, axe de la bulle, table de section de coque (voir PROFIL_KV01).
@@ -14,7 +15,8 @@ function libs() {
 
 // Profil du cuirassé KV-01 (référence de la scène : 1 m de scène = 1 m réel)
 const PROFIL_KV01 = {
-  V: 1, bowGltf: 0, axisY: 0.78, engineY: 0.8, engineZ: -7.2, nozzleZ: -655,
+  V: 1, bowGltf: 0, axisY: 0.78, engineY: 0.8, engineZ: -7.2, nozzleZ: -655, targetY: 0.9,
+  engineColor: [0.50, 0.78, 1.0], plume: [0x2a5cff, 0x3f86ff, 0x86c0ff, 0xe6f3ff, 0x9ccaff, 0x6fa8ff],
   nozzles: [[100, 21], [52, 17]].flatMap(([y, r]) => [-44, 0, 44].map(x => ({ x, y, r }))),
   hull: [[0,72,98,50],[48,52,104,72],[70,46,110,74],[140,46,112,78],[146,22,112,70],[162,22,113,82],[248,22,113,86],[252,22,120,88],[282,12,120,91],[440,12,120,91],[456,12,116,86],[544,12,116,84],[548,10,126,92],[582,6,131,95],[788,4,131,98],[792,3,128,108],[1092,4,136,108],[1122,7,133,101],[1141,12,129,94],[1155,17,125,63],[1180,25,118,40],[1260,30,120,70],[2200,0,150,120],[5000,-40,190,170]],
 };
@@ -26,13 +28,23 @@ const PROFIL_SR01 = {
   hull: [[0,78,85,5],[7,75,90,14],[51,61,105,34],[85,44,122,48],[170,22,141,73],[255,12,150,94],[340,7,156,105],[425,5,162,114],[510,5,165,119],[612,5,167,130],[680,5,158,130],[765,7,146,130],[850,7,148,109],[935,5,146,78],[966,5,143,76],[978,24,136,73],[1020,27,133,65],[1088,29,124,60],[1124,32,119,54],[1165,40,118,85],[1250,45,125,95],[2200,15,160,130],[5000,-30,200,175]],
 };
 
+// Profil du tanker TK-07 (28,6 m, ×40 → gabarit de scène du KV-01) : réacteurs ion / chimiques orangés
+const PROFIL_TK07 = {
+  V: 40, bowGltf: 14.3, axisY: 1.8, engineY: 1.0, engineZ: (600 - 30 * 40) * 0.01, nozzleZ: 600 - 28.7 * 40, targetY: 1.9,
+  nozzles: [{ x: -2.5 * 40, y: 2.55 * 40, r: 1.3 * 40 }, { x: 2.5 * 40, y: 2.55 * 40, r: 1.3 * 40 }],
+  engineColor: [1.0, 0.74, 0.42], plume: [0xff5a1a, 0xff8a2a, 0xffc070, 0xfff2d8, 0xffc890, 0xffa060],
+  gloss: { M_TK_ARMOR_JAUNE: [0.40, 0.08], M_KV_GUNMETAL: [0.26, 0.85], M_KV_STRUCT_BLACK: [0.30, 0.55], M_TK_GRAPHITE: [0.30, 0.6] }, glossEnv: 0.85,
+  hull: [[0,16,280,170],[30,0,300,200],[72,0,300,205],[944,0,300,205],[984,40,290,195],[1064,40,280,190],[1144,40,270,140],[1200,50,260,150],[1300,60,280,190],[2200,20,320,240],[5000,-40,360,300]],
+};
+
 function mount(container, opts = {}) {
 const { THREE, GLTFLoader, OrbitControls, RoomEnvironment, EffectComposer, RenderPass, UnrealBloomPass, OutputPass } = libs();
 /* ================================================================== réglages */
 const S = 0.01;                                   // 1 unité = 100 m
 const REDUCED = matchMedia('(prefers-reduced-motion: reduce)').matches;
-const ENGINE_COLOR = new THREE.Color(0.50, 0.78, 1.0);   // pleine puissance : bleu-blanc
 const P = Object.assign({}, PROFIL_KV01, opts.ship || {});
+const ENGINE_COLOR = new THREE.Color(...P.engineColor);   // pleine puissance (bleu-blanc par défaut)
+const PL = P.plume;                               // couleurs des panaches : halo, gaine, corps, cœur, lueur, lumière
 const NOZZLES = P.nozzles;                        // sorties de cloches (m de scène)
 const NOZZLE_Z = P.nozzleZ;
 
@@ -148,7 +160,7 @@ scene.add(key);
 const rim = new THREE.DirectionalLight(0x9db8e8, 1.3); rim.position.set(-9, 4, -10); scene.add(rim);   // contre-jour froid
 const fill = new THREE.DirectionalLight(0xb8c6e8, 0.8); fill.position.set(3, 10, -4); scene.add(fill);
 scene.add(new THREE.HemisphereLight(0x2c3a58, 0x05060a, 0.55));
-const engineLight = new THREE.PointLight(0x6fa8ff, 0, 10, 1.7);
+const engineLight = new THREE.PointLight(PL[5], 0, 10, 1.7);
 engineLight.position.set(0, P.engineY, P.engineZ);
 ship.add(engineLight);
 
@@ -161,6 +173,8 @@ const LOOK = {
   M_KV_ARMOR_RED:    { cell: [8.0, 5.0], seam: .16, depth: .12, tint: .07, rough: .10, grime: .32, wear: .30 },
   M_KV_GUNMETAL:     { cell: [6.0, 4.0], seam: .15, depth: .40, tint: .08, rough: .14, grime: .24, wear: .40 },
   M_KV_STRUCT_BLACK: { cell: [15.0, 8.5], seam: .20, depth: .12, tint: .16, rough: .18, grime: .18, wear: .25 },
+  M_TK_ARMOR_JAUNE:  { cell: [9.0, 6.0], seam: .16, depth: .05, tint: .06, rough: .10, grime: .40, wear: .35 },
+  M_TK_GRAPHITE:     { cell: [12.0, 8.0], seam: .18, depth: .20, tint: .12, rough: .16, grime: .22, wear: .35 },
 };
 function premium(mat, p) {
   mat.onBeforeCompile = (sh) => {
@@ -271,17 +285,17 @@ for (const nz of NOZZLES) {
   g.position.set(nz.x * S, nz.y * S, NOZZLE_Z * S);
   const R = nz.r * S;
   for (const [len, rIn, rOut, color, alpha, flick, layer] of [
-    [R * 40, R * .86, R * .20, 0x2a5cff, .16, 1.0, 1.0],   // halo externe, long et diffus
-    [R * 28, R * .74, R * .10, 0x3f86ff, .30, 1.0, .7],    // gaine bleue
-    [R * 16, R * .58, R * .05, 0x86c0ff, .42, .8, .4],     // corps
-    [R * 7,  R * .40, R * .03, 0xe6f3ff, .55, .4, 0.0],    // cœur blanc
+    [R * 40, R * .86, R * .20, PL[0], .16, 1.0, 1.0],   // halo externe, long et diffus
+    [R * 28, R * .74, R * .10, PL[1], .30, 1.0, .7],    // gaine bleue
+    [R * 16, R * .58, R * .05, PL[2], .42, .8, .4],     // corps
+    [R * 7,  R * .40, R * .03, PL[3], .55, .4, 0.0],    // cœur blanc
   ]) {
     const geo = new THREE.CylinderGeometry(rIn, rOut, len, 40, 1, true);
     geo.rotateX(Math.PI / 2); geo.translate(0, 0, -len / 2);
     const m = plumeMat(color, alpha, flick, layer); plumeMats.push(m);
     g.add(new THREE.Mesh(geo, m));
   }
-  const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex, color: 0x9ccaff, blending: THREE.AdditiveBlending, depthWrite: false, transparent: true, opacity: .45, fog: false }));
+  const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex, color: PL[4], blending: THREE.AdditiveBlending, depthWrite: false, transparent: true, opacity: .45, fog: false }));
   sp.scale.setScalar(R * 2.8); sp.position.z = -R * .3;
   g.add(sp);
   ship.add(g);
@@ -518,7 +532,7 @@ loadShip().then((gltf) => {
 }).catch((e) => { console.error(e); if (opts.onError) opts.onError(e); });
 
 /* ================================================================== caméra : orbite + pincer */
-const TARGET = new THREE.Vector3(0, 0.9, W() / H() < 0.8 ? -1.8 : -0.2);
+const TARGET = new THREE.Vector3(0, P.targetY, W() / H() < 0.8 ? -1.8 : -0.2);
 {
   const d = fitDistance();
   camera.position.copy(TARGET).add(new THREE.Vector3(0.55, 0.24, -0.80).normalize().multiplyScalar(d));
@@ -646,7 +660,7 @@ function whenReady(cb) {
   if (window.SB3D) return cb();
   const t = setInterval(() => { if (window.SB3D) { clearInterval(t); cb(); } }, 100);
 }
-window.Ship3D = { profiles: { kv01: PROFIL_KV01, sr01: PROFIL_SR01 }, mount: (c, o) => { let h = null, dead = false; whenReady(() => { if (!dead) h = mount(c, o); });
+window.Ship3D = { profiles: { kv01: PROFIL_KV01, sr01: PROFIL_SR01, tk07: PROFIL_TK07 }, mount: (c, o) => { let h = null, dead = false; whenReady(() => { if (!dead) h = mount(c, o); });
   return {
     begin() { if (h) h.begin(); }, orbit(dx, dy) { if (h) h.orbit(dx, dy); }, dolly(k) { if (h) h.dolly(k); }, end() { if (h) h.end(); },
     dispose() { dead = true; if (h) h.dispose(); },
