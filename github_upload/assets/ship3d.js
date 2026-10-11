@@ -607,7 +607,21 @@ function frame() {
 }
 let alive = true, raf = requestAnimationFrame(frame);
 
+  // gestes relayés par la page (fiche héros : la liste défile au-dessus de la 3D, comme pour le soldat lourd)
+  const sph = new THREE.Spherical(), off = new THREE.Vector3();
+  function orbitBy(dx, dy, dScale) {
+    off.copy(camera.position).sub(controls.target); sph.setFromVector3(off);
+    const k = 2 * Math.PI * controls.rotateSpeed / H();
+    sph.theta -= dx * k;
+    sph.phi = Math.min(controls.maxPolarAngle, Math.max(controls.minPolarAngle, sph.phi - dy * k));
+    sph.radius = Math.min(controls.maxDistance, Math.max(controls.minDistance, sph.radius * (dScale || 1)));
+    off.setFromSpherical(sph); camera.position.copy(controls.target).add(off); controls.update();
+  }
   return {
+    begin() { controls.autoRotate = false; clearTimeout(idleTimer); },
+    orbit(dx, dy) { orbitBy(dx, dy, 1); },
+    dolly(scale) { orbitBy(0, 0, scale); },
+    end() { clearTimeout(idleTimer); if (!REDUCED) idleTimer = setTimeout(() => { controls.autoRotate = true; }, 6000); },
     dispose() {
       alive = false; cancelAnimationFrame(raf); ro.disconnect(); controls.dispose();
       scene.traverse(o => { if (o.geometry) o.geometry.dispose(); });
@@ -622,5 +636,8 @@ function whenReady(cb) {
   const t = setInterval(() => { if (window.SB3D) { clearInterval(t); cb(); } }, 100);
 }
 window.Ship3D = { profiles: { kv01: PROFIL_KV01, sr01: PROFIL_SR01 }, mount: (c, o) => { let h = null, dead = false; whenReady(() => { if (!dead) h = mount(c, o); });
-  return { dispose() { dead = true; if (h) h.dispose(); } }; } };
+  return {
+    begin() { if (h) h.begin(); }, orbit(dx, dy) { if (h) h.orbit(dx, dy); }, dolly(k) { if (h) h.dolly(k); }, end() { if (h) h.end(); },
+    dispose() { dead = true; if (h) h.dispose(); },
+  }; } };
 window.dispatchEvent(new Event('ship3d-ready'));

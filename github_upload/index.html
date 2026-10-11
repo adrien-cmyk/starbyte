@@ -1748,8 +1748,9 @@ svg.map {
 
 /* Building interiors */
 /* SHIP3D — fiche d'unité vaisseau en vue héros (même principe que le soldat lourd : 3D plein écran, fiche par-dessus) */
-#scr-unit-detail.ud-ship .screen-scroll { pointer-events: none; }               /* l'espace libre laisse passer les gestes vers la 3D */
-#scr-unit-detail.ud-ship .screen-scroll > *:not(.ud-hero-space) { pointer-events: auto; }
+/* la liste défile normalement (pan vertical natif) ; les gestes horizontaux / pincements au-dessus des cartes
+   sont relayés à la 3D par shipHeroGestures(), comme pour le soldat lourd */
+#scr-unit-detail.ud-ship .ud-hero-space { touch-action: pan-y; }
 #scr-unit-detail.ud-ship #ud-u3d { display: none; }
 #ud-ship-hero .u3d-canvas { touch-action: none; }
 .bld-banner {
@@ -35082,8 +35083,53 @@ function mountUnitShip3D(key, inService) {
       onError: () => { hero.classList.remove('u3d-loading'); hero.classList.add('u3d-fail'); },
     }) };
   };
+  shipHeroGestures();
   if (window.Ship3D) start(); else window.addEventListener('ship3d-ready', start, { once: true });
   return true;
+}
+// Gestes de la vue héros vaisseau : un doigt horizontal = orbite, deux doigts = zoom ; le défilement vertical
+// reste natif (touch-action: pan-y). Seuls les gestes commencés au-dessus des cartes (zone libre) pilotent la 3D.
+let shipHeroGesturesOn = false;
+function shipHeroGestures() {
+  if (shipHeroGesturesOn) return;
+  shipHeroGesturesOn = true;
+  const scr = document.getElementById('scr-unit-detail');
+  const pts = new Map(); let mode = null, last = null, pinch0 = 0;
+  const h = () => unitShip3D && unitShip3D.handle;
+  const dist = () => { const v = [...pts.values()]; return Math.hypot(v[0].x - v[1].x, v[0].y - v[1].y); };
+  scr.addEventListener('pointerdown', (e) => {
+    if (!scr.classList.contains('ud-ship') || !h()) return;
+    if (e.target.closest && e.target.closest('button, a, input, .dash-section-card, .info, .card, .head')) return;
+    const space = document.getElementById('ud-hero-space');
+    if (!space || e.clientY > space.getBoundingClientRect().bottom) return;
+    pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (pts.size === 2) { mode = 'pinch'; pinch0 = dist(); }
+    else { mode = 'pending'; last = { x: e.clientX, y: e.clientY, x0: e.clientX, y0: e.clientY }; }
+    h().begin();
+  }, { passive: true });
+  window.addEventListener('pointermove', (e) => {
+    if (!pts.has(e.pointerId) || !h()) return;
+    pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (mode === 'pinch' && pts.size === 2) { const d = dist(); if (d > 10 && pinch0 > 10) h().dolly(pinch0 / d); pinch0 = d; return; }
+    if (mode === 'pending') {                       // décide : rotation (horizontal) ou défilement (vertical, natif)
+      const dx = e.clientX - last.x0, dy = e.clientY - last.y0;
+      if (Math.abs(dx) > 8 && Math.abs(dx) > Math.abs(dy)) mode = 'orbit';
+      else if (Math.abs(dy) > 8) { mode = null; pts.delete(e.pointerId); h().end(); return; }
+    }
+    if (mode === 'orbit') { h().orbit(e.clientX - last.x, 0); last.x = e.clientX; last.y = e.clientY; }
+  }, { passive: true });
+  const up = (e) => {
+    if (!pts.delete(e.pointerId)) return;
+    if (pts.size === 0) { mode = null; if (h()) h().end(); }
+    else if (mode === 'pinch') { mode = null; }
+  };
+  window.addEventListener('pointerup', up, { passive: true });
+  window.addEventListener('pointercancel', up, { passive: true });
+  scr.addEventListener('wheel', (e) => {             // souris : molette au-dessus des cartes = zoom
+    const space = document.getElementById('ud-hero-space');
+    if (!scr.classList.contains('ud-ship') || !h() || !space || e.clientY > space.getBoundingClientRect().bottom) return;
+    e.preventDefault(); h().begin(); h().dolly(1 + e.deltaY * 0.0012); h().end();
+  }, { passive: false });
 }
 function unmountUnitShip3D(keepClasses) {
   if (unitShip3D) { try { unitShip3D.handle.dispose(); } catch (e) {} unitShip3D = null; }
@@ -41976,6 +42022,6 @@ if (G.knownTargets && Array.isArray(G.tankerMissions)) {
 <!-- SPACE MAP niveau B — diorama 3D d'un système (assets/system3d.js, source src/system3d.js) -->
 <script type="module" src="assets/system3d.js?v=20261011-2020"></script>
 <!-- SHIP3D — fiches d'unité 3D du cuirassé KV-01 et de la frégate SR-01 (assets/ship3d.js, sur le moteur partagé window.SB3D) -->
-<script type="module" src="assets/ship3d.js?v=20261011-2120"></script>
+<script type="module" src="assets/ship3d.js?v=20261011-2130"></script>
 </body>
 </html>
