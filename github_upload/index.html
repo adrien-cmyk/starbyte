@@ -8808,6 +8808,7 @@ function mergeRealWorlds(sysKey, worlds) {
       playerName: w.pseudo,
       playerLevel: lvl,
       isReal: true,
+      mpAddress: w.address,
       isMine: false,
       lastSeenDays: w.last_seen_days,
       reportTimestamp: Date.now(),
@@ -8824,6 +8825,261 @@ function mergeRealWorlds(sysKey, worlds) {
   if (typeof saveGame === 'function') saveGame();
   if (typeof refreshCurrentScreen === 'function') refreshCurrentScreen();
 }
+
+
+// ═══ MP_RAIDS_V0 — Raids entre commandants (étape 2, 11/10/2026) ═══
+// Le jeu envoie la flotte au registre (mp_launch_raid) ; le serveur fixe l'heure d'arrivée,
+// résout le combat avec le moteur du jeu (fonction resolve-raids) et applique pillage +
+// bâtiment abîmé chez le défenseur. Au retour, le jeu lit le résultat et l'applique à la flotte.
+var _mpResolveAsked = new Set();   // var : lu par la boucle des missions
+var _mpReturning = new Set();
+
+// Même règle que le serveur : 10 min + 5 min par secteur d'écart (aller) ; retour = aller × 2
+function mpRaidTravelMs(target) {
+  const mine = (typeof MY_ADDRESS !== 'undefined' && MY_ADDRESS) ? MY_ADDRESS.sector : null;
+  const sector = String(target.mpAddress || target.coord || '').split('-')[1];
+  const d = (mine && sector) ? Math.min(Math.abs(mine.charCodeAt(0) - sector.charCodeAt(0)), 25) : 0;
+  return (10 + 5 * d) * 60000;
+}
+
+function _mpFleetPayload(fleet) {
+  const heroes = {};
+  for (const [k, h] of Object.entries(fleet.heroes || {})) if (h && h.name) heroes[k] = { name: h.name, dead: !!h.dead };
+  return {
+    composition: JSON.parse(JSON.stringify(fleet.composition || {})),
+    soldiers: { garde: (fleet.soldiers && fleet.soldiers.garde) || 0, lourd: (fleet.soldiers && fleet.soldiers.lourd) || 0 },
+    heroes,
+  };
+}
+
+var MP_RAID_ERRORS = {
+  target_shielded: 'Ce commandant est sous bouclier protecteur',
+  target_too_weak: 'Ce monde est trop faible pour toi : aucune gloire à le piller',
+  raid_already_enroute: 'Une de tes flottes est déjà en route vers ce monde',
+  target_self: 'C\'est ton propre monde',
+  target_unknown: 'Ce monde n\'est plus au registre',
+  target_other_season: 'Ce monde appartient à une autre saison',
+  no_world: 'Ton monde n\'est pas encore au registre',
+};
+
+async function mpLaunchRaid(fleet, target) {
+  if ((fleet.status || 'prepared') !== 'deployed') { toast('La flotte doit être en orbite'); return; }
+  const fuelCost = computeMissionFuelCost(fleet, target);
+  if ((G.res.energie.v || 0) < fuelCost) { toast('Énergie insuffisante'); return; }
+  if (!window.SBMP || !window.SBMP.ready()) { toast('Registre hors ligne : réessaie dans un instant'); return; }
+  let raid;
+  try {
+    raid = await window.SBMP.launchRaid(target.mpAddress, _mpFleetPayload(fleet), fleet.name);
+  } catch (e) {
+    const code = (String(e && e.message || e).match(/[a-z_]+/g) || []).find(c => MP_RAID_ERRORS[c]);
+    toast(code ? MP_RAID_ERRORS[code] : 'Lancement impossible : liaison perdue');
+    goto('fleet');
+    return;
+  }
+  G.res.energie.v -= fuelCost;
+  const t0 = Date.parse(raid.departed_at) || Date.now();
+  fleet.status = 'in_mission';
+  fleet.missionTargetId = target.id;
+  fleet.missionStartedAt = t0;
+  fleet.mpArrivesAt = Date.parse(raid.arrives_at);
+  fleet.missionEndsAt = Date.parse(raid.returns_at);
+  fleet.missionFuelSpent = fuelCost;
+  fleet.mpRaidId = raid.id;
+  fleet.mpTarget = { name: target.name, pseudo: target.mpPseudo || '', address: target.mpAddress, profile: target.profile };
+  pendingMissionTargetId = null;
+  if (typeof saveGame === 'function') saveGame();
+  toast(`${fleet.name} en route vers ${target.name} · arrivée ${new Date(fleet.mpArrivesAt).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}`);
+  startMissionTimerLoop();
+  goto('fleet');
+}
+
+function _mpClearMission(fleet) {
+  fleet.status = 'deployed';
+  fleet.missionTargetId = null;
+  fleet.missionStartedAt = null;
+  fleet.missionEndsAt = null;
+  fleet.missionFuelSpent = null;
+  fleet.mpRaidId = null;
+  fleet.mpArrivesAt = null;
+  fleet.mpTarget = null;
+}
+
+// Retour d'un raid : le résultat est sur le serveur. S'il n'y est pas encore, on réessaie.
+async function mpReturnRaid(fleet) {
+  const id = fleet.mpRaidId;
+  if (!id || _mpReturning.has(id)) return;
+  _mpReturning.add(id);
+  const retry = (msg, ms) => {
+    fleet.missionEndsAt = Date.now() + (ms || 30000);
+    if (msg) toast(msg);
+    startMissionTimerLoop();
+  };
+  try {
+    if (!window.SBMP || !window.SBMP.ready()) { retry(null, 5000); return; }   // registre pas encore prêt (démarrage)
+    let raid = await window.SBMP.getRaid(id);
+    if (raid && (raid.status === 'enroute' || raid.status === 'resolving')) {
+      await window.SBMP.resolveDue(true);
+      raid = await window.SBMP.getRaid(id);
+    }
+    if (raid === null) {
+      // Le raid n'existe plus au registre (saison remise à zéro) : la flotte rentre intacte
+      _mpClearMission(fleet);
+      toast(`${fleet.name} rentre : mission annulée par le registre`);
+    } else if (!raid || (raid.status !== 'resolved' && raid.status !== 'aborted')) {
+      retry(`${fleet.name} : rapport de combat en attente`);
+      return;
+    } else {
+      _mpFinishRaid(fleet, raid);
+    }
+    if (typeof saveGame === 'function') saveGame();
+    if (typeof refreshCurrentScreen === 'function') refreshCurrentScreen();
+  } catch (e) {
+    console.warn('[MP] retour de raid :', e);
+    retry();
+  } finally {
+    _mpReturning.delete(id);
+  }
+}
+
+function _mpFinishRaid(fleet, raid) {
+  const res = raid.result || {};
+  const tgt = fleet.mpTarget || {};
+  const target = { name: tgt.name || raid.defender_address, profile: 'Commandant · ' + (raid.defender_pseudo || tgt.pseudo || '?') };
+  const combat = res.combat ? JSON.parse(JSON.stringify(res.combat)) : null;
+  if (combat) combat.loot = Object.assign({ metal: 0, energie: 0, cristal: 0 }, res.loot || {});   // butin plafonné par le serveur
+  const doctrine = detectFleetDoctrine(fleet.composition, fleet.soldiers);
+  const intent = getMissionIntent(fleet);
+  const compositionBefore = JSON.parse(JSON.stringify(fleet.composition));
+  const soldiersBefore = { ...fleet.soldiers };
+  const heroesBefore = JSON.parse(JSON.stringify(fleet.heroes || {}));
+  if (combat) applyCombatResult(fleet, combat, target);
+  if (!G.reports) G.reports = [];
+  G.reports.unshift({
+    id: 'rpt-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8),
+    fleetId: fleet.id, fleetName: fleet.name,
+    targetId: fleet.missionTargetId, targetName: target.name, targetProfile: target.profile,
+    doctrine: doctrine ? { key: doctrine.key, name: doctrine.name, color: doctrine.color, icon: doctrine.icon } : null,
+    intent: { label: intent.label, icon: intent.icon },
+    startedAt: fleet.missionStartedAt, returnedAt: Date.now(),
+    fuelSpent: fleet.missionFuelSpent || 0, read: false,
+    combat, compositionBefore, soldiersBefore, heroesBefore, placeholder: false,
+    mpRaidId: raid.id, mpDamagedBuilding: res.damaged_building || null,
+  });
+  _mpClearMission(fleet);
+  if (window.SBMP) window.SBMP.raidSeen(raid.id);
+  if (raid.status === 'aborted' || !combat) { toast(`${fleet.name} rentre : la cible a quitté le registre`); return; }
+  const labels = { crushing_victory: '⭐ Victoire écrasante', victory: 'Victoire', pyrrhic: 'Victoire à la Pyrrhus', defeat: 'Défaite', massacre: 'Massacre' };
+  toast(`${fleet.name} : ${labels[combat.outcome] || 'Mission terminée'} sur ${target.name}`);
+}
+
+// ─── Côté défenseur : un raid m'a frappé pendant mon absence ───
+var _MP_BUILDING_LABEL = (k) => (typeof BUILDINGS !== 'undefined' && BUILDINGS[k] && BUILDINGS[k].name) || k;
+
+function mpApplyRaidAgainstMe(raid) {
+  if (!raid || !raid.id) return false;
+  if ((G.reports || []).some(r => r.mpRaidId === raid.id)) return true;   // déjà intégré
+  const res = raid.result || {};
+  const won = res.outcome === 'victory';
+  const loot = Object.assign({ metal: 0, energie: 0, cristal: 0 }, won ? (res.loot || {}) : {});
+  for (const k of ['metal', 'energie', 'cristal']) {
+    if (G.res[k]) G.res[k].v = Math.max(0, (G.res[k].v || 0) - (loot[k] || 0));
+  }
+  let damagedName = null;
+  if (won && res.damaged_building) {
+    const p = (G.planet.parcels || []).find(q => q && q.building === res.damaged_building && q.state === 'built' && !q.damaged);
+    if (p) { mpDamageParcel(p, raid.attacker_pseudo); damagedName = p.n || _MP_BUILDING_LABEL(p.building); }
+  }
+  const combat = res.combat || null;
+  if (!G.reports) G.reports = [];
+  G.reports.unshift({
+    id: 'rpt-def-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6),
+    kind: 'defense', mpRaidId: raid.id,
+    fleetName: 'Raid de ' + (raid.attacker_pseudo || 'commandant inconnu'), targetName: (mpWorldSnapshot().planet_name || 'ta colonie'),
+    intent: { label: won ? 'Raid subi · défense enfoncée' : 'Raid repoussé', icon: '' },
+    doctrine: { color: won ? 'var(--red)' : 'var(--green)' },
+    startedAt: Date.parse(raid.departed_at) || null, returnedAt: Date.parse(raid.resolved_at) || Date.now(), read: false,
+    defense: {
+      won: !won, attacker: raid.attacker_pseudo, attackerAddress: raid.attacker_address, fleetName: raid.fleet_name || '',
+      loot, damagedName,
+      atk: combat && combat.phases && combat.phases.phase1 ? combat.phases.phase1.atkEffective : null,
+      def: combat && combat.phases && combat.phases.phase1 ? combat.phases.phase1.defEffective : null,
+      landed: !!(combat && combat.phases && combat.phases.phase2 && combat.phases.phase2.won),
+    },
+  });
+  const lootTxt = ['metal', 'energie', 'cristal'].filter(k => loot[k] > 0).map(k => `${fmt(loot[k])} ${tileInfo(k).label.toLowerCase()}`).join(' · ');
+  toast(won
+    ? `⚠ Raid de ${raid.attacker_pseudo} : ${lootTxt || 'rien'} pillé${damagedName ? ' · ' + damagedName + ' abîmé' : ''}`
+    : `Raid de ${raid.attacker_pseudo} repoussé`);
+  if (typeof saveGame === 'function') saveGame();
+  if (typeof refreshCurrentScreen === 'function') refreshCurrentScreen();
+  return true;
+}
+
+// Bâtiment abîmé : la moitié de sa production s'arrête jusqu'à réparation
+function _mpTierProd(p) {
+  return (BUILDING_TIERS[p.building] && BUILDING_TIERS[p.building][p.lvl || 1] && BUILDING_TIERS[p.building][p.lvl || 1].prod)
+    || (BUILDINGS[p.building] && BUILDINGS[p.building].prod) || {};
+}
+function mpDamageParcel(p, byPseudo) {
+  if (!p || p.damaged) return;
+  p.damaged = true;
+  p.damagedAt = Date.now();
+  p.damagedBy = byPseudo || null;
+  for (const [res, rate] of Object.entries(_mpTierProd(p))) {
+    if (G.res[res] && G.res[res].rate !== undefined) G.res[res].rate -= rate / 2;
+  }
+}
+function mpRepairCost(p) {
+  const tier = (BUILDING_TIERS[p.building] && BUILDING_TIERS[p.building][p.lvl || 1]) || {};
+  const out = {};
+  for (const [res, q] of Object.entries(tier.cost || { metal: 200 })) out[res] = Math.max(1, Math.ceil(q * 0.25));
+  return out;
+}
+function mpRepairParcel(idx) {
+  const p = G.planet.parcels[idx];
+  if (!p || !p.damaged) return;
+  const cost = mpRepairCost(p);
+  if (!canAffordCost(cost)) { toast('Ressources insuffisantes'); return; }
+  for (const [res, q] of Object.entries(cost)) G.res[res].v -= q;
+  for (const [res, rate] of Object.entries(_mpTierProd(p))) {
+    if (G.res[res] && G.res[res].rate !== undefined) G.res[res].rate += rate / 2;
+  }
+  p.damaged = false;
+  p.damagedAt = null;
+  p.damagedBy = null;
+  toast(`${p.n || _MP_BUILDING_LABEL(p.building)} réparé`);
+  if (typeof saveGame === 'function') saveGame();
+  renderBuildingDetail();
+  if (typeof renderDashboard === 'function') renderDashboard();
+}
+
+function renderDefenseReportDetail(r) {
+  const d = r.defense || {};
+  document.getElementById('report-detail-title').textContent = (d.won ? 'RAID REPOUSSÉ' : 'RAID SUBI');
+  document.getElementById('report-detail-meta').textContent = `Rapport de défense · ${new Date(r.returnedAt).toLocaleString('fr-FR')}`;
+  const el = document.getElementById('report-detail-content');
+  if (!el) return;
+  const col = d.won ? 'var(--green)' : 'var(--red)';
+  const lootRows = ['metal', 'energie', 'cristal'].map(k =>
+    `<div class="dash-stat-row"><span class="lbl">${tileInfo(k).label}</span><span class="val" style="color:${(d.loot && d.loot[k]) ? 'var(--red)' : 'var(--mut)'}">${(d.loot && d.loot[k]) ? '−' + fmt(d.loot[k]) : '0'}</span></div>`).join('');
+  el.innerHTML = `
+    <div style="background:rgba(255,80,64,.04);border:1px solid ${d.won ? 'rgba(126,208,128,.3)' : 'rgba(255,80,64,.3)'};border-radius:10px;padding:18px;margin:0 16px 14px;font-family:'SF Mono',monospace;font-size:12px;line-height:1.7;color:var(--mut)">
+      <div style="color:${col};font-size:11px;letter-spacing:.16em;margin-bottom:10px">═══ ${d.won ? 'LA DÉFENSE A TENU' : 'DÉFENSE ENFONCÉE'} ═══</div>
+      <div style="color:#e6f0ff;font-size:13px">Assaillant : <strong>${d.attacker || '?'}</strong>${d.attackerAddress ? ` <span style="color:var(--mut)">(${d.attackerAddress})</span>` : ''}</div>
+      ${d.fleetName ? `<div>Flotte : ${d.fleetName}</div>` : ''}
+      ${d.atk != null ? `<div>Feu orbital : ${fmt(d.atk)} contre ${fmt(d.def)} de défense</div>` : ''}
+      ${!d.won ? `<div>${d.landed ? 'Les troupes ennemies ont pris pied au sol.' : 'Aucune troupe n\'a débarqué.'}</div>` : ''}
+    </div>
+    <div class="dash-section-card" style="margin:0 16px 14px">
+      <div style="font-size:10px;letter-spacing:.14em;color:var(--mut);text-transform:uppercase;margin-bottom:6px">Pillage</div>
+      ${lootRows}
+      <div class="dash-stat-row"><span class="lbl">Bâtiment abîmé</span><span class="val" style="color:${d.damagedName ? 'var(--red)' : 'var(--mut)'}">${d.damagedName || 'aucun'}</span></div>
+    </div>
+    <div style="margin:0 16px 14px;font-size:11px;color:var(--mut);font-style:italic;line-height:1.6">
+      ${d.won ? 'Le registre accorde 12 h de bouclier à ton monde.' : 'Le registre accorde 12 h de bouclier à ton monde. Renforce ta défense planétaire et répare ce qui a été touché.'}
+    </div>`;
+}
+// ═══ fin MP_RAIDS_V0 ═══
 
 // ─── Helper : ajouter une planète au knownSystems du joueur ───
 // Utilisé par les futures résolutions (Sonde Moyenne qui verrouille
@@ -10241,13 +10497,16 @@ function _carnetDistanceMult(sector) {
 function _carnetTargetFromPlanet(p) {
   const mult = _carnetDistanceMult(p.sector);
   const base = { id: 'carnet:' + p.coord, coord: p.coord, carnet: true, targetable: true, distanceMult: mult, description: p.desc || '' };
-  // MULTIJOUEUR v0 : un vrai commandant ne se raide pas avec le combat local (défense et butin inventés).
-  // Grisé jusqu'aux raids résolus par le serveur (étape 2 du GDD multijoueur).
+  // MULTIJOUEUR (étape 2, 11/10) : un vrai commandant se raide, mais le combat est résolu
+  // par le serveur (fonction resolve-raids) avec sa vraie défense et ses vrais stocks.
   if (p.isReal) {
+    const online = !!(window.SBMP && window.SBMP.ready && window.SBMP.ready());
     return Object.assign(base, {
       name: p.name || p.coord, level: p.playerLevel || 1, profile: 'Commandant · ' + p.playerName,
-      kind: 'player', targetable: false, defense: 0, garrison: 0, resources: {},
-      description: 'Raids entre commandants : bientôt',
+      kind: 'player', mp: true, mpAddress: p.mpAddress || p.coord, mpPseudo: p.playerName,
+      targetable: online, defense: 0, garrison: 0, resources: {},
+      hint: online ? '' : 'Connexion au registre requise pour attaquer un commandant',
+      description: 'Défense inconnue : le combat se joue sur le serveur, à l\'arrivée de ta flotte.',
     });
   }
   if (p.playerName) {
@@ -11581,7 +11840,11 @@ function _fleetTargetRowHtml(fleet, target) {
   const coordLine = target.coord
     ? `<div style="font-family:'SF Mono',monospace;font-size:9px;color:var(--mut);margin-top:2px;letter-spacing:.04em">${target.coord}</div>`
     : '';
-  const statsLine = targetable
+  const statsLine = (targetable && target.mp)
+    ? `<span style="color:var(--mut);font-style:italic">Défense inconnue</span> ·
+            <span style="color:var(--amber)">${formatMissionTimer(mpRaidTravelMs(target) * 2)} A/R</span> ·
+            <span style="color:${canAfford ? 'var(--green)' : 'var(--red)'};display:inline-flex;align-items:center;gap:4px">${icon('zap', {size:11})} ${fmt(fuelCost)}</span>`
+    : targetable
     ? `<span style="color:var(--cyan)">${fmt(target.defense)} déf</span> ·
             <span style="color:var(--amber)">${fmt(target.resources.metal)} métal</span> ·
             <span style="color:${canAfford ? 'var(--green)' : 'var(--red)'};display:inline-flex;align-items:center;gap:4px">${icon('zap', {size:11})} ${fmt(fuelCost)}</span>`
@@ -11651,7 +11914,7 @@ function openMissionConfirm(targetId) {
   if (bannerIcon) bannerIcon.innerHTML = intent.icon;
 
   // Récap mission
-  const duration = getMissionDuration();
+  const duration = target.mp ? mpRaidTravelMs(target) * 2 : getMissionDuration();
   let nShips = 0;
   for (const sk of ['tanker', 'fregate', 'cuirasse']) {
     for (let t = 1; t <= 3; t++) nShips += (fleet.composition?.[sk]?.['t' + t] || 0);
@@ -11713,6 +11976,7 @@ function confirmSendMission() {
   const fleet = G.fleet.prepared.find(f => f.id === selectedFleetId);
   const target = getFakeTarget(pendingMissionTargetId);
   if (!fleet || !target) { toast('Erreur : mission invalide'); return; }
+  if (target.mp) { mpLaunchRaid(fleet, target); return; }
   if ((fleet.status || 'prepared') !== 'deployed') {
     toast('La flotte doit être en orbite');
     return;
@@ -11763,6 +12027,10 @@ function tickMissionTimers() {
   for (const fleet of G.fleet.prepared) {
     if ((fleet.status || 'prepared') !== 'in_mission') continue;
     if (!fleet.missionEndsAt) continue;
+    if (fleet.mpRaidId && fleet.mpArrivesAt && now >= fleet.mpArrivesAt && !_mpResolveAsked.has(fleet.mpRaidId)) {
+      _mpResolveAsked.add(fleet.mpRaidId);
+      if (window.SBMP) window.SBMP.resolveDue();
+    }
     if (now >= fleet.missionEndsAt) {
       returnMission(fleet);
       anyReturned = true;
@@ -23672,6 +23940,7 @@ function applyCombatResult(fleet, result, target) {
 // (ou via cheat). Lance le combat, applique le résultat, génère le rapport.
 // ═══════════════════════════════════════════════════════════════
 function returnMission(fleet) {
+  if (fleet.mpRaidId) { mpReturnRaid(fleet); return; }
   const target = getFakeTarget(fleet.missionTargetId);
   const doctrine = detectFleetDoctrine(fleet.composition, fleet.soldiers);
   const intent = getMissionIntent(fleet);
@@ -23804,6 +24073,7 @@ function renderReportsList() {
 function renderReportDetail() {
   const r = (G.reports || []).find(r => r.id === selectedReportId);
   if (!r) return;
+  if (r.kind === 'defense') { renderDefenseReportDetail(r); return; }
 
   document.getElementById('report-detail-title').textContent = r.fleetName.toUpperCase();
   document.getElementById('report-detail-meta').textContent = `Rapport · ${new Date(r.returnedAt).toLocaleString('fr-FR')}`;
@@ -33742,6 +34012,23 @@ function renderBuildingDetail() {
         </button>
       </div>
     `;
+  } else if (parcel.damaged) {
+    // MULTIJOUEUR : abîmé par un raid → production réduite de moitié jusqu'à réparation
+    const rc = mpRepairCost(parcel);
+    costLabel.style.display = '';
+    costEl.style.display = '';
+    costEl.innerHTML = renderTierCost({ cost: rc });
+    const canRepair = canAffordCost(rc);
+    actionZone.innerHTML = `
+      <div class="dash-section-card" style="border-color:rgba(255,80,64,.35);padding:14px;margin:14px 16px 4px">
+        <div style="font-size:11px;letter-spacing:.16em;color:var(--red);text-transform:uppercase;margin-bottom:6px;display:flex;align-items:center;gap:5px">${icon('warning', {size:12, color:'var(--red)'})} Abîmé par un raid</div>
+        <div style="font-size:13px;color:var(--mut);line-height:1.5">${parcel.damagedBy ? `Touché par <strong style="color:var(--txt)">${parcel.damagedBy}</strong>. ` : ''}La production tourne à moitié tant que le bâtiment n'est pas réparé.</div>
+        <button onclick="mpRepairParcel(${idx})" ${canRepair ? '' : 'disabled'}
+                style="margin-top:12px;width:100%;padding:13px;background:${canRepair ? 'rgba(255,192,96,.08)' : 'rgba(120,140,136,.05)'};border:1px solid ${canRepair ? 'rgba(255,192,96,.45)' : 'var(--line)'};border-radius:8px;color:${canRepair ? 'var(--amber)' : 'var(--mut)'};font-size:12px;letter-spacing:.18em;text-transform:uppercase;cursor:${canRepair ? 'pointer' : 'not-allowed'}">
+          ${canRepair ? 'Réparer' : 'Ressources insuffisantes'}
+        </button>
+      </div>
+    `;
   } else {
     // Cas normal : on peut améliorer
     costLabel.style.display = '';
@@ -33789,6 +34076,8 @@ function renderBuildingDetail() {
 }
 
 function tryStartBuildingUpgrade(idx) {
+  const _p = G.planet.parcels[idx];
+  if (_p && _p.damaged) { toast('Bâtiment abîmé : répare-le d\'abord'); return; }
   if (startBuildingUpgrade(idx)) {
     renderBuildingDetail();
     renderDashboard();
@@ -40949,16 +41238,16 @@ if (G.knownTargets && Array.isArray(G.tankerMissions)) {
 
 </script>
 <!-- PLANET3D — carte 3D + boucle antenne (source : sb-build/src/planet3d.js) -->
-<script type="module" src="assets/planet3d.js?v=20261011-0310"></script>
+<script type="module" src="assets/planet3d.js?v=20261011-1210"></script>
 <!-- CLOUD — sauvegarde Supabase (source : sb-build/src/cloud.js) -->
-<script type="module" src="assets/cloud.js?v=20261011-0310"></script>
+<script type="module" src="assets/cloud.js?v=20261011-1210"></script>
 <!-- MATCH3 — Match-3 V2 (assets/match3.js, source src/match3.js + src/m3core.js) : remplace startM3 -->
-<script type="module" src="assets/match3.js?v=20261011-0310"></script>
+<script type="module" src="assets/match3.js?v=20261011-1210"></script>
 <!-- HOME V2 — « monde d'abord » : planète plein écran, ressources en ligne, Flotte / Défense / Prospection (assets/home.js) -->
-<script type="module" src="assets/home.js?v=20261011-1150"></script>
+<script type="module" src="assets/home.js?v=20261011-1210"></script>
 <!-- SPACE MAP v0 — carte du Centre de prospection (assets/spacemap.js, source src/spacemap.js) -->
-<script src="assets/spacemap.js?v=20261011-0310"></script>
+<script src="assets/spacemap.js?v=20261011-1210"></script>
 <!-- SPACE MAP niveau B — diorama 3D d'un système (assets/system3d.js, source src/system3d.js) -->
-<script type="module" src="assets/system3d.js?v=20261011-0310"></script>
+<script type="module" src="assets/system3d.js?v=20261011-1210"></script>
 </body>
 </html>
