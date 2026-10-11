@@ -8510,6 +8510,7 @@ var EXTRA_SAVE_KEYS = [
   'discoveredDocks', 'wantedTargets', 'navigationData', 'ambientReports', 'marketSeason',
   'tutorialArtefactSeen', 'tutorialBombSeen', 'tutorialHyperSeen', 'tutorialMegaSeen',
   'mpDeals',   // MP_DOCKS_V0 — marchés entre commandants (séquestre et règlement)
+  'botState',  // BOTS_1110 — stocks des commandants automates après pillage
 ];
 
 // Sauvegarde G complet dans localStorage. Appelé fréquemment, doit être rapide.
@@ -10955,6 +10956,40 @@ function pickFallenMemory() {
 }
 
 
+// BOTS_1110 — commandants automates : les anciennes cibles d'entraînement, placés dans l'univers
+var BOT_PROFILES = {
+  avantposte: { weight: 50, names: ['AVANT-POSTE', 'SENTINELLE', 'RELAIS-7'], level: 200, profile: 'Avant-poste automate',
+    description: 'Monde tenu par une IA de garde. Défenses minimales : bon terrain pour roder une flotte.',
+    defense: 500, garrison: 300, resources: { metal: 2000, energie: 500, cristal: 0 } },
+  raider: { weight: 35, names: ['BERSEK89', 'KORR-VEX', 'BLACKVEIN'], level: 740, profile: 'Raider automate',
+    description: 'Défenses solides, pillage difficile mais lucratif.',
+    defense: 3000, garrison: 1800, resources: { metal: 5000, energie: 2000, cristal: 500 } },
+  forteresse: { weight: 15, names: ['LYS-ORBITAL', 'AURIS-HOLD', 'NEMESIS-9'], level: 890, profile: 'Forteresse marchande automate',
+    description: 'Très défendue, mais regorge de ressources rares.',
+    defense: 8000, garrison: 4500, resources: { metal: 30000, energie: 5000, cristal: 15000 } },
+};
+function _botPick(rng) {
+  const total = Object.values(BOT_PROFILES).reduce((s, b) => s + b.weight, 0);
+  let r = rng() * total;
+  for (const [k, b] of Object.entries(BOT_PROFILES)) { r -= b.weight; if (r <= 0) return k; }
+  return 'avantposte';
+}
+// Stocks du bot : un pillage les vide, ils se reconstituent en 24 h (état propre à chaque joueur)
+function botResources(coord, profileKey) {
+  const base = BOT_PROFILES[profileKey].resources;
+  const st = (G.botState || {})[coord];
+  let k = 1;
+  if (st && st.raidedAt) k = Math.min(1, 0.25 + 0.75 * (Date.now() - st.raidedAt) / (24 * 3600e3));
+  const out = {};
+  for (const r of ['metal', 'energie', 'cristal']) out[r] = Math.round((base[r] || 0) * k);
+  return out;
+}
+function botRecordRaid(coord, loot) {
+  if (!coord) return;
+  if (!G.botState) G.botState = {};
+  G.botState[coord] = { raidedAt: Date.now(), lastLoot: loot || null };
+}
+
 const FAKE_TARGETS = [
   {
     id: 'cible-test',
@@ -11026,6 +11061,15 @@ function _carnetTargetFromPlanet(p) {
       targetable: online, defense: 0, garrison: 0, resources: {},
       hint: online ? '' : 'Connexion au registre requise pour attaquer un commandant',
       description: 'Défense inconnue : le combat se joue sur le serveur, à l\'arrivée de ta flotte.',
+    });
+  }
+  if (p.isBot && BOT_PROFILES[p.botType]) {
+    const bp = BOT_PROFILES[p.botType];
+    return Object.assign(base, {
+      name: p.playerName || p.coord, level: bp.level, profile: 'Bot · ' + bp.profile,
+      kind: 'player', isBot: true, botCoord: p.coord,
+      description: bp.description,
+      defense: bp.defense, garrison: bp.garrison, resources: botResources(p.coord, p.botType),
     });
   }
   if (p.playerName) {
@@ -12304,10 +12348,13 @@ const MISSION_DURATION_MS_CHEAT = 30 * 1000;
 
 // Cheats globaux passe 3.3
 if (!G.cheats) G.cheats = {};
-if (G.cheats.instantMission === undefined) G.cheats.instantMission = true; // 30s par défaut en dev
+if (G.cheats.instantMission === undefined) G.cheats.instantMission = true; // 30s en mode développeur seulement
 
-function getMissionDuration() {
-  return G.cheats?.instantMission ? MISSION_DURATION_MS_CHEAT : MISSION_DURATION_MS_DEFAULT;
+// BOTS_1110 — durée aller-retour = trajet réel (même règle que les raids entre commandants : 10 min + 5 min par secteur, ×2)
+function getMissionDuration(target) {
+  if (G.cheats?.instantMission && typeof _isDevMode === 'function' && _isDevMode()) return MISSION_DURATION_MS_CHEAT;
+  if (target && (target.coord || target.mpAddress) && typeof mpRaidTravelMs === 'function') return mpRaidTravelMs(target) * 2;
+  return MISSION_DURATION_MS_DEFAULT;
 }
 
 // Format un timer (ms) en chaîne lisible "12h 34m" ou "29s"
@@ -12401,14 +12448,13 @@ function renderTargetList(fleet) {
   if (carnetTargets.length === 0) {
     html += `
       <div style="margin:0 16px 8px;padding:12px 14px;border:1px dashed var(--border);border-radius:8px;font-size:10px;color:var(--mut);line-height:1.6;font-style:italic">
-        Aucune adresse dans le carnet. Verrouille un corps orbital avec une Sonde Moyenne, ou repère un joueur, pour qu'il apparaisse ici.
+        Aucune adresse dans le carnet. Sonde des systèmes de ton secteur : des commandants (joueurs ou automates) y vivent. Une Sonde Moyenne verrouille aussi les corps orbitaux.
       </div>`;
   } else {
     for (const target of carnetTargets) html += _fleetTargetRowHtml(fleet, target);
   }
 
-  html += sectionHead('Cibles d\'entraînement');
-  for (const target of FAKE_TARGETS) html += _fleetTargetRowHtml(fleet, target);
+  // BOTS_1110 — les cibles d'entraînement vivent désormais dans l'univers (commandants automates)
 
   listEl.innerHTML = html;
 }
@@ -12435,7 +12481,7 @@ function openMissionConfirm(targetId) {
   if (bannerIcon) bannerIcon.innerHTML = intent.icon;
 
   // Récap mission
-  const duration = target.mp ? mpRaidTravelMs(target) * 2 : getMissionDuration();
+  const duration = target.mp ? mpRaidTravelMs(target) * 2 : getMissionDuration(target);
   let nShips = 0;
   for (const sk of ['tanker', 'fregate', 'cuirasse']) {
     for (let t = 1; t <= 3; t++) nShips += (fleet.composition?.[sk]?.['t' + t] || 0);
@@ -12512,7 +12558,7 @@ function confirmSendMission() {
   G.res.energie.v -= fuelCost;
 
   // Passage en mission
-  const duration = getMissionDuration();
+  const duration = getMissionDuration(target);
   fleet.status = 'in_mission';
   fleet.missionTargetId = target.id;
   fleet.missionStartedAt = Date.now();
@@ -24496,6 +24542,7 @@ function returnMission(fleet) {
   // Application du résultat sur l'état du jeu
   if (combatResult) {
     applyCombatResult(fleet, combatResult, target);
+    if (target && target.botCoord && combatResult.phases?.phase3?.executed) botRecordRaid(target.botCoord, combatResult.loot);
   }
 
   // Génération du rapport (passe 3.4 — placeholder structurel en attendant 3.4-b/c)
@@ -32786,7 +32833,23 @@ function generateDiscoveredSystem(sector, system, cluster) {
     } else {
       // Type 3 : habitable → libre OU joueur placeholder (~20% joueurs)
       const r = rng();
-      if (r > 0.20 || mpIsTestZone(cluster, sector)) {
+      if (r <= 0.20 && mpIsTestZone(cluster, sector)) {
+        // BOTS_1110 — commandant automate (même tirage pour tous les joueurs)
+        const bk = _botPick(rng);
+        const bp = BOT_PROFILES[bk];
+        const bname = bp.names[Math.floor(rng() * bp.names.length)];
+        pdata = {
+          name: 'Monde automate',
+          type: 'player',
+          desc: `Commandant automate : ${bname} · Niv. ~${bp.level}`,
+          report: makeReport('player', sector, system, slot, bname, bp.level, cluster),
+          reportRead: false,
+          playerName: bname,
+          playerLevel: bp.level,
+          isBot: true,
+          botType: bk,
+        };
+      } else if (r > 0.20 || mpIsTestZone(cluster, sector)) {
         pdata = {
           name: 'Planète vide',
           type: 'empty',
@@ -34978,7 +35041,7 @@ function renderDefenseUnitDetail(key) {
 }
 
 // ─── SHIP3D : fiche vaisseau en vue héros (3D plein écran derrière la fiche, comme le soldat lourd) ───
-const UNIT_SHIP3D_MODELS = { cuirasse: { url: 'assets/3d/sb_kv01.glb?v=20261011-2000', code: 'KV-01 Kerath' } };
+const UNIT_SHIP3D_MODELS = { cuirasse: { url: 'assets/3d/sb_kv01.glb?v=20261011-2020', code: 'KV-01 Kerath' } };
 let unitShip3D = null;   // { key, handle }
 function mountUnitShip3D(key, inService) {
   const scr = document.getElementById('scr-unit-detail');
@@ -41898,18 +41961,18 @@ if (G.knownTargets && Array.isArray(G.tankerMissions)) {
 
 </script>
 <!-- PLANET3D — carte 3D + boucle antenne (source : sb-build/src/planet3d.js) -->
-<script type="module" src="assets/planet3d.js?v=20261011-2000"></script>
+<script type="module" src="assets/planet3d.js?v=20261011-2020"></script>
 <!-- CLOUD — sauvegarde Supabase (source : sb-build/src/cloud.js) -->
-<script type="module" src="assets/cloud.js?v=20261011-2000"></script>
+<script type="module" src="assets/cloud.js?v=20261011-2020"></script>
 <!-- MATCH3 — Match-3 V2 (assets/match3.js, source src/match3.js + src/m3core.js) : remplace startM3 -->
-<script type="module" src="assets/match3.js?v=20261011-2000"></script>
+<script type="module" src="assets/match3.js?v=20261011-2020"></script>
 <!-- HOME V2 — « monde d'abord » : planète plein écran, ressources en ligne, Flotte / Défense / Prospection (assets/home.js) -->
-<script type="module" src="assets/home.js?v=20261011-2000"></script>
+<script type="module" src="assets/home.js?v=20261011-2020"></script>
 <!-- SPACE MAP v0 — carte du Centre de prospection (assets/spacemap.js, source src/spacemap.js) -->
-<script src="assets/spacemap.js?v=20261011-2000"></script>
+<script src="assets/spacemap.js?v=20261011-2020"></script>
 <!-- SPACE MAP niveau B — diorama 3D d'un système (assets/system3d.js, source src/system3d.js) -->
-<script type="module" src="assets/system3d.js?v=20261011-2000"></script>
+<script type="module" src="assets/system3d.js?v=20261011-2020"></script>
 <!-- SHIP3D — fiche d'unité 3D du cuirassé KV-01 (assets/ship3d.js, sur le moteur partagé window.SB3D) -->
-<script type="module" src="assets/ship3d.js?v=20261011-2000"></script>
+<script type="module" src="assets/ship3d.js?v=20261011-2020"></script>
 </body>
 </html>
