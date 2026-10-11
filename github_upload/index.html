@@ -8085,7 +8085,7 @@ function totalDefense() {
   for (const [key, u] of Object.entries(G.defense.units)) {
     const inDeployedFleets = getSoldiersInDeployedFleets(key);
     const inMissionFleets = getSoldiersInMissionFleets(key);
-    const groundUnits = Math.max(0, u.qty - inDeployedFleets - inMissionFleets);
+    const groundUnits = Math.max(0, u.qty - inDeployedFleets - inMissionFleets - soldiersCommittedElsewhere(key));
     total += groundUnits * DEFENSE_UNITS[key].defPerUnit;
   }
   // Défense passive des bâtiments (Caserne, Bunker)
@@ -8096,7 +8096,7 @@ function totalDefense() {
     const tier = p.lvl || 1;
     const tierData = BUILDING_TIERS[p.building]?.[tier];
     const def = tierData?.def ?? meta.def;
-    total += def;
+    total += p.damaged ? def / 2 : def;
   }
   // Doctrine Z4-ter : bouclier orbital — les vaisseaux des flottes DÉPLOYÉES défendent
   // la planète. Ils ne sont pas au port (donc en assemblage) ni en mission, mais en orbite.
@@ -8107,6 +8107,52 @@ function totalDefense() {
 // Helper : soldats d'un type embarqués sur des flottes DÉPLOYÉES (en orbite)
 // Ces soldats ne défendent plus le sol mais sont à bord.
 // Helper : soldats d'un type réservés à des flottes DÉPLOYÉES (à bord, ne défendent plus)
+// AUDIT_1110 — Réservations : les totaux (G.fleet.stationed, G.defense.units[k].qty) sont ce qu'on POSSÈDE ;
+// flottes, garnisons et missions tanker en RÉSERVENT une partie.
+var TANKER_BUSY_STATUSES = ['in_transit', 'docked', 'returning', 'exploring', 'orbital_relay'];
+function _tankerMissionTier(m) { return m.tier || m.tankerTier || 0; }
+function _busyTankerMissions() { return (G.tankerMissions || []).filter(m => TANKER_BUSY_STATUSES.includes(m.status)); }
+function _tankersInFleets(t, excludeFleetId) {
+  let n = 0;
+  for (const f of (G.fleet && G.fleet.prepared) || []) {
+    if (excludeFleetId && f.id === excludeFleetId) continue;
+    n += (f.composition && f.composition.tanker && f.composition.tanker['t' + t]) || 0;
+  }
+  return n;
+}
+// Tankers libres (tier précis, ou n'importe lequel si tier absent)
+function tankerAvailability(tier) {
+  const stat = (G.fleet && G.fleet.stationed && G.fleet.stationed.tanker) || {};
+  const busy = _busyTankerMissions();
+  const perTier = {};
+  let sum = 0;
+  for (const t of [1, 2, 3]) {
+    perTier[t] = Math.max(0, (stat['t' + t] || 0) - _tankersInFleets(t) - busy.filter(m => _tankerMissionTier(m) === t).length);
+    sum += perTier[t];
+  }
+  const free = Math.max(0, sum - busy.filter(m => !_tankerMissionTier(m)).length);
+  return tier ? Math.min(perTier[tier] || 0, free) : free;
+}
+// Soldats engagés hors des flottes de guerre : garnisons et cales de tankers
+function soldiersCommittedElsewhere(k) {
+  let n = 0;
+  for (const g of G.garrisons || []) n += (g.soldiers && g.soldiers[k]) || 0;
+  for (const m of G.tankerMissions || []) {
+    if (m.status !== 'in_transit' && m.status !== 'orbital_relay' && m.status !== 'returning') continue;
+    n += (m.cargo && m.cargo.soldiers && m.cargo.soldiers[k]) || 0;
+  }
+  return n;
+}
+// Pertes définitives : retirées de ce qu'on possède (sinon les morts « revenaient » au hangar)
+function loseSoldiers(k, n) {
+  const u = G.defense && G.defense.units && G.defense.units[k];
+  if (u && n > 0) u.qty = Math.max(0, (u.qty || 0) - n);
+}
+function loseShips(type, tierKey, n) {
+  const s = G.fleet && G.fleet.stationed && G.fleet.stationed[type];
+  if (s && n > 0) s[tierKey] = Math.max(0, (s[tierKey] || 0) - n);
+}
+
 function getSoldiersInDeployedFleets(soldierKey) {
   let count = 0;
   for (const fleet of G.fleet.prepared) {
@@ -8452,6 +8498,15 @@ function _deserializeSets(obj) {
   return obj;
 }
 
+// AUDIT_1110 — état de progression hors du cœur historique de la sauvegarde
+// (fonction-constante en var : lue par saveGame/loadGame, déclarée avant tout appel)
+var EXTRA_SAVE_KEYS = [
+  'openLeads', 'rumorJournal', 'purchasedIntel', 'visitedDocks', 'encounteredPavillons',
+  'discoveredDocks', 'wantedTargets', 'navigationData', 'ambientReports', 'marketSeason',
+  'tutorialArtefactSeen', 'tutorialBombSeen', 'tutorialHyperSeen', 'tutorialMegaSeen',
+  'mpDeals',   // MP_DOCKS_V0 — marchés entre commandants (séquestre et règlement)
+];
+
 // Sauvegarde G complet dans localStorage. Appelé fréquemment, doit être rapide.
 // Marqué `_lastSavedAt` pour debugging.
 function saveGame() {
@@ -8499,6 +8554,9 @@ function saveGame() {
       // ORBITE — chantier construit, orbite pas encore visitée (moment 7)
       orbitUnseen: !!G.orbitUnseen,
     };
+    // AUDIT_1110 — carnet, pistes, docks découverts, marché, tutoriels : perdus à chaque rechargement avant
+    for (const k of EXTRA_SAVE_KEYS) if (G[k] !== undefined) snapshot[k] = G[k];
+    if (Array.isArray(snapshot.reports) && snapshot.reports.length > 60) { G.reports = G.reports.slice(0, 60); snapshot.reports = G.reports; }
     // Convertir les Sets en Array pour JSON
     _serializeSets(snapshot);
     localStorage.setItem(SAVE_KEY, JSON.stringify(snapshot));
@@ -8508,6 +8566,7 @@ function saveGame() {
     return true;
   } catch (e) {
     console.error('[saveGame] Échec :', e);
+    if (!window._sbSaveWarned && typeof toast === 'function') { window._sbSaveWarned = true; toast('⚠ Sauvegarde impossible sur cet appareil (stockage plein ?)'); }
     return false;
   }
 }
@@ -8542,7 +8601,7 @@ function loadGame() {
       'profile',  // ⚡ V0.5 — Identité joueur
       'antenna',  // PLANET3D — Boucle fondatrice
       'orbitUnseen',  // ORBITE — moment 7
-    ];
+    ].concat(EXTRA_SAVE_KEYS);
     for (const key of keysToRestore) {
       if (snapshot[key] !== undefined) {
         G[key] = snapshot[key];
@@ -8557,6 +8616,8 @@ function loadGame() {
     }
 
     refreshParcelProdLabels();
+    // AUDIT_1110 — l'adresse fait foi (déménagement vers la zone de test)
+    if (G.planet) { G.planet.address = MY_ADDRESS; G.planet.coordString = MY_COORD_STRING; }
 
     // OFFLINE — reprendre la simulation là où la sauvegarde l'a laissée
     G._simAt = snapshot.simAt || snapshot.savedAt || Date.now();
@@ -8584,6 +8645,9 @@ function deleteSave() {
     localStorage.removeItem('starbyte_signatures');
     localStorage.removeItem('starbyte_system_resolution');
     localStorage.removeItem('starbyte_legend_v1');
+    localStorage.removeItem('starbyte_home_discoveries');
+    localStorage.removeItem('starbyte_planet_custom_names');
+    localStorage.removeItem('starbyte_cloud_base');
     return true;
   } catch (e) {
     console.error('[deleteSave] Échec :', e);
@@ -8862,12 +8926,15 @@ var MP_RAID_ERRORS = {
   no_world: 'Ton monde n\'est pas encore au registre',
 };
 
+var _mpLaunching = false;
 async function mpLaunchRaid(fleet, target) {
+  if (_mpLaunching) return;
   if ((fleet.status || 'prepared') !== 'deployed') { toast('La flotte doit être en orbite'); return; }
   const fuelCost = computeMissionFuelCost(fleet, target);
   if ((G.res.energie.v || 0) < fuelCost) { toast('Énergie insuffisante'); return; }
   if (!window.SBMP || !window.SBMP.ready()) { toast('Registre hors ligne : réessaie dans un instant'); return; }
   let raid;
+  _mpLaunching = true;
   try {
     raid = await window.SBMP.launchRaid(target.mpAddress, _mpFleetPayload(fleet), fleet.name);
   } catch (e) {
@@ -8875,8 +8942,10 @@ async function mpLaunchRaid(fleet, target) {
     toast(code ? MP_RAID_ERRORS[code] : 'Lancement impossible : liaison perdue');
     goto('fleet');
     return;
+  } finally {
+    _mpLaunching = false;
   }
-  G.res.energie.v -= fuelCost;
+  G.res.energie.v = Math.max(0, G.res.energie.v - fuelCost);
   const t0 = Date.parse(raid.departed_at) || Date.now();
   fleet.status = 'in_mission';
   fleet.missionTargetId = target.id;
@@ -8947,6 +9016,10 @@ function _mpFinishRaid(fleet, raid) {
   const target = { name: tgt.name || raid.defender_address, profile: 'Commandant · ' + (raid.defender_pseudo || tgt.pseudo || '?') };
   const combat = res.combat ? JSON.parse(JSON.stringify(res.combat)) : null;
   if (combat) combat.loot = Object.assign({ metal: 0, energie: 0, cristal: 0 }, res.loot || {});   // butin plafonné par le serveur
+  if (combat && combat.phases && combat.phases.phase3 && combat.phases.phase3.executed) {
+    combat.phases.phase3.loot = { ...combat.loot };
+    combat.phases.phase3.cargoUsed = combat.loot.metal + combat.loot.energie + combat.loot.cristal;
+  }
   const doctrine = detectFleetDoctrine(fleet.composition, fleet.soldiers);
   const intent = getMissionIntent(fleet);
   const compositionBefore = JSON.parse(JSON.stringify(fleet.composition));
@@ -8979,6 +9052,7 @@ function mpApplyRaidAgainstMe(raid) {
   if (!raid || !raid.id) return false;
   if ((G.reports || []).some(r => r.mpRaidId === raid.id)) return true;   // déjà intégré
   const res = raid.result || {};
+  if (raid.status === 'aborted' || res.outcome === 'aborted') return true;   // aucun combat : rien à intégrer
   const won = res.outcome === 'victory';
   const loot = Object.assign({ metal: 0, energie: 0, cristal: 0 }, won ? (res.loot || {}) : {});
   for (const k of ['metal', 'energie', 'cristal']) {
@@ -8986,7 +9060,8 @@ function mpApplyRaidAgainstMe(raid) {
   }
   let damagedName = null;
   if (won && res.damaged_building) {
-    const p = (G.planet.parcels || []).find(q => q && q.building === res.damaged_building && q.state === 'built' && !q.damaged);
+    const upIdx = (typeof QUEUES !== 'undefined' && QUEUES.capital && QUEUES.capital.upgrade) ? QUEUES.capital.upgrade.parcelIdx : -1;
+    const p = (G.planet.parcels || []).find((q, qi) => q && q.building === res.damaged_building && q.state === 'built' && !q.damaged && qi !== upIdx);
     if (p) { mpDamageParcel(p, raid.attacker_pseudo); damagedName = p.n || _MP_BUILDING_LABEL(p.building); }
   }
   const combat = res.combat || null;
@@ -9004,6 +9079,7 @@ function mpApplyRaidAgainstMe(raid) {
       atk: combat && combat.phases && combat.phases.phase1 ? combat.phases.phase1.atkEffective : null,
       def: combat && combat.phases && combat.phases.phase1 ? combat.phases.phase1.defEffective : null,
       landed: !!(combat && combat.phases && combat.phases.phase2 && combat.phases.phase2.won),
+      groundHeld: !!(combat && combat.phases && combat.phases.phase2 && !combat.phases.phase2.won),
     },
   });
   const lootTxt = ['metal', 'energie', 'cristal'].filter(k => loot[k] > 0).map(k => `${fmt(loot[k])} ${tileInfo(k).label.toLowerCase()}`).join(' · ');
@@ -9025,9 +9101,17 @@ function mpDamageParcel(p, byPseudo) {
   p.damaged = true;
   p.damagedAt = Date.now();
   p.damagedBy = byPseudo || null;
+  p.damageLoss = {};
   for (const [res, rate] of Object.entries(_mpTierProd(p))) {
-    if (G.res[res] && G.res[res].rate !== undefined) G.res[res].rate -= rate / 2;
+    if (G.res[res] && G.res[res].rate !== undefined) { G.res[res].rate -= rate / 2; p.damageLoss[res] = rate / 2; }
   }
+}
+// REPAIR_1110 — réparer = jouer : une partie de match-3 sur le bâtiment, palier I atteint
+function mpStartRepair(idx) {
+  const p = G.planet.parcels[idx];
+  if (!p || !p.damaged) return;
+  if (typeof window.startM3 === 'function') window.startM3(idx, 'Réparation');
+  else toast('Match-3 indisponible pour le moment');
 }
 function mpRepairCost(p) {
   const tier = (BUILDING_TIERS[p.building] && BUILDING_TIERS[p.building][p.lvl || 1]) || {};
@@ -9035,22 +9119,26 @@ function mpRepairCost(p) {
   for (const [res, q] of Object.entries(tier.cost || { metal: 200 })) out[res] = Math.max(1, Math.ceil(q * 0.25));
   return out;
 }
-function mpRepairParcel(idx) {
+function mpRepairParcel(idx, opts) {
   const p = G.planet.parcels[idx];
   if (!p || !p.damaged) return;
-  const cost = mpRepairCost(p);
-  if (!canAffordCost(cost)) { toast('Ressources insuffisantes'); return; }
-  for (const [res, q] of Object.entries(cost)) G.res[res].v -= q;
-  for (const [res, rate] of Object.entries(_mpTierProd(p))) {
-    if (G.res[res] && G.res[res].rate !== undefined) G.res[res].rate += rate / 2;
+  if (!(opts && opts.free)) {
+    const cost = mpRepairCost(p);
+    if (!canAffordCost(cost)) { toast('Ressources insuffisantes'); return; }
+    for (const [res, q] of Object.entries(cost)) G.res[res].v -= q;
   }
+  const loss = p.damageLoss || Object.fromEntries(Object.entries(_mpTierProd(p)).map(([r, v]) => [r, v / 2]));
+  for (const [res, v] of Object.entries(loss)) {
+    if (G.res[res] && G.res[res].rate !== undefined) G.res[res].rate += v;
+  }
+  p.damageLoss = null;
   p.damaged = false;
   p.damagedAt = null;
   p.damagedBy = null;
   toast(`${p.n || _MP_BUILDING_LABEL(p.building)} réparé`);
   if (typeof saveGame === 'function') saveGame();
-  renderBuildingDetail();
-  if (typeof renderDashboard === 'function') renderDashboard();
+  const bd = document.getElementById('scr-building-detail');
+  if (bd && !bd.classList.contains('hidden')) renderBuildingDetail();
 }
 
 function renderDefenseReportDetail(r) {
@@ -9068,7 +9156,7 @@ function renderDefenseReportDetail(r) {
       <div style="color:#e6f0ff;font-size:13px">Assaillant : <strong>${d.attacker || '?'}</strong>${d.attackerAddress ? ` <span style="color:var(--mut)">(${d.attackerAddress})</span>` : ''}</div>
       ${d.fleetName ? `<div>Flotte : ${d.fleetName}</div>` : ''}
       ${d.atk != null ? `<div>Feu orbital : ${fmt(d.atk)} contre ${fmt(d.def)} de défense</div>` : ''}
-      ${!d.won ? `<div>${d.landed ? 'Les troupes ennemies ont pris pied au sol.' : 'Aucune troupe n\'a débarqué.'}</div>` : ''}
+      ${!d.won ? `<div>${d.landed ? 'Les troupes ennemies ont pris pied au sol.' : d.groundHeld ? 'Ta garnison a repoussé le débarquement : les tankers ennemis n\'ont pillé que depuis l\'orbite.' : 'Aucune troupe n\'a débarqué.'}</div>` : ''}
     </div>
     <div class="dash-section-card" style="margin:0 16px 14px">
       <div style="font-size:10px;letter-spacing:.14em;color:var(--mut);text-transform:uppercase;margin-bottom:6px">Pillage</div>
@@ -9076,10 +9164,431 @@ function renderDefenseReportDetail(r) {
       <div class="dash-stat-row"><span class="lbl">Bâtiment abîmé</span><span class="val" style="color:${d.damagedName ? 'var(--red)' : 'var(--mut)'}">${d.damagedName || 'aucun'}</span></div>
     </div>
     <div style="margin:0 16px 14px;font-size:11px;color:var(--mut);font-style:italic;line-height:1.6">
-      ${d.won ? 'Le registre accorde 12 h de bouclier à ton monde.' : 'Le registre accorde 12 h de bouclier à ton monde. Renforce ta défense planétaire et répare ce qui a été touché.'}
+      ${d.won ? 'Le registre accorde 12 h de bouclier à ton monde.' : 'Le registre accorde 12 h de bouclier à ton monde. Renforce ta défense planétaire' + (d.damagedName ? ' et répare ' + d.damagedName + ' (une partie de match-3 depuis sa fiche).' : '.')}
     </div>`;
 }
 // ═══ fin MP_RAIDS_V0 ═══
+
+
+// ═══ MP_DOCKS_V0 — Bar des docks entre commandants (étape 3, 11/10/2026) ═══
+// Un tanker amarré (séjour choisi) est inscrit au registre du dock. Les commandants amarrés
+// au même dock au même moment se voient, et peuvent conclure UN marché par séjour (D4) :
+// troc de ressources (séquestre : l'offre est mise de côté jusqu'à la réponse) ou adresse de colonie.
+// Les rumeurs du comptoir viennent des vrais événements de la saison (raids).
+
+// Même destination = même dock pour tous (identifiant canonique, indépendant des docks découverts)
+function mpDockIdForMission(m) {
+  return 'dock-' + _hashStringDeterministic((m && m.targetCoords) || 'unknown').toString(36);
+}
+
+// Ce que le registre doit savoir de mes tankers amarrés
+function mpDockPresenceWanted() {
+  const out = [];
+  const now = Date.now();
+  for (const m of G.tankerMissions || []) {
+    if (m.kind !== 'route_run' || m.status !== 'docked' || !m.dockStay || !(m.dockStay.endsAt > now)) continue;
+    const route = (G.routes || []).find(r => r.id === m.routeId);
+    const total = ['metal', 'energie', 'cristal'].reduce((a, k) => a + ((m.cargo && m.cargo[k]) || 0), 0);
+    out.push({
+      mission_id: m.id,
+      dock_id: mpDockIdForMission(m),
+      tanker_name: m.tankerName || null,
+      provenance: (route && route.originHint) || null,
+      cargo_hint: total >= 1500 ? 'lourde' : total > 0 ? 'légère' : 'vide',
+      crew_state: (m.crewMood && m.crewMood.physicalState) || 'sobre',
+      leaves_at: new Date(m.dockStay.endsAt).toISOString(),
+    });
+  }
+  return out;
+}
+
+// Marchés possibles (messages prédéfinis, D4)
+var MP_DEAL_PRESETS = {
+  t1: { kind: 'trade', offer: { metal: 300 }, ask: { energie: 150 }, msg: 'Du métal propre contre de l\'énergie. Pas de questions.' },
+  t2: { kind: 'trade', offer: { energie: 200 }, ask: { cristal: 80 }, msg: 'J\'ai du jus en trop. Il me faut du cristal.' },
+  t3: { kind: 'trade', offer: { cristal: 100 }, ask: { metal: 300 }, msg: 'Cristal taillé contre métal brut. Marché honnête.' },
+  addr: { kind: 'info', offer: { address: true }, ask: {}, msg: 'Voilà où me trouver. Passe en ami… ou pas.' },
+};
+var MP_BAR_LEAD_COST = 150;
+setInterval(() => { try { _mpPruneLedger(); } catch (e) {} }, 5 * 60 * 1000);
+
+function _mpResLine(obj) {
+  const parts = [];
+  for (const k of ['metal', 'energie', 'cristal']) if (obj && obj[k] > 0) parts.push(`${fmt(obj[k])} ${tileInfo(k).label.toLowerCase()}`);
+  if (obj && obj.address) parts.push(typeof obj.address === 'string' ? `l'adresse ${obj.address}` : 'l\'adresse de sa colonie');
+  return parts.join(' · ') || 'rien';
+}
+function _mpCanPay(cost) {
+  for (const k of ['metal', 'energie', 'cristal']) if ((cost[k] || 0) > ((G.res[k] && G.res[k].v) || 0)) return false;
+  return true;
+}
+function _mpPay(cost, sign, noCap) {
+  for (const k of ['metal', 'energie', 'cristal']) {
+    const q = Math.max(0, Math.floor(Number(cost && cost[k]) || 0));
+    if (!q || !G.res[k]) continue;
+    if (sign < 0) G.res[k].v = Math.max(0, G.res[k].v - q);
+    else if (noCap) G.res[k].v += q;   // séquestre rendu / marché conclu : dû au joueur, même au-delà du stockage
+    else G.res[k].v = Math.min(Math.max(G.res[k].max, G.res[k].v), G.res[k].v + q);
+  }
+}
+
+// REVIEW_1110 — Règlement d'un marché dans MA partie, idempotent même après reset / autre appareil :
+// - les montants viennent du modèle prédéfini (jamais du serveur tel quel) ;
+// - un marché déjà marqué « appliqué » au registre n'est jamais repayé ;
+// - l'expiration se juge au registre (statut), avec 10 min de marge sur l'horloge locale.
+var MP_DEAL_GRACE_MS = 10 * 60 * 1000;
+var _mpDealBusy = new Set();
+function _mpDealTerms(d) {
+  const pr = MP_DEAL_PRESETS[d.message_key];
+  if (!pr) return null;
+  const offer = { ...pr.offer };
+  if (offer.address) {
+    if (!d.offer || typeof d.offer.address !== 'string' || !/^[A-Z]-[A-Z]-\d{4}-\d{1,2}$/.test(d.offer.address)) return null;
+    offer.address = d.offer.address;
+  }
+  return { offer, ask: { ...pr.ask } };
+}
+function _mpLedger(id) {
+  if (!G.mpDeals) G.mpDeals = {};
+  return G.mpDeals[id] || null;
+}
+function _mpLedgerSet(id, v) {
+  if (!G.mpDeals) G.mpDeals = {};
+  G.mpDeals[id] = Object.assign({ at: Date.now() }, G.mpDeals[id] || {}, v);
+  return G.mpDeals[id];
+}
+function _mpPruneLedger() {
+  if (!G.mpDeals) return;
+  const old = Date.now() - 35 * 864e5;
+  for (const [k, v] of Object.entries(G.mpDeals)) {
+    if (k.startsWith('pending:')) {
+      if ((v.at || 0) < Date.now() - 864e5) { if (v.escrow) _mpPay(v.escrow, +1); delete G.mpDeals[k]; }   // jamais confirmé : rendu
+    } else if (v.settled && (v.at || 0) < old) delete G.mpDeals[k];
+  }
+}
+// Offre envoyée mais app fermée pendant l'attente : on rattache le séquestre au marché retrouvé
+function _mpAdoptPending(d) {
+  if (!G.mpDeals) return null;
+  for (const [k, v] of Object.entries(G.mpDeals)) {
+    if (k.startsWith('pending:') && v.to_presence === d.to_presence && v.key === d.message_key) {
+      delete G.mpDeals[k];
+      return _mpLedgerSet(d.id, { escrow: v.escrow });
+    }
+  }
+  return null;
+}
+function mpSettleDeal(d, meId) {
+  if (!d || !d.id || _mpDealBusy.has(d.id)) return false;
+  const role = d.from_id === meId ? 'from' : d.to_id === meId ? 'to' : null;
+  if (!role) return false;
+  let L = _mpLedger(d.id);
+  if (L && L.settled) return false;
+  const terms = _mpDealTerms(d);
+  const flagged = role === 'from' ? d.from_applied : d.to_applied;
+  // modèle inconnu, ou marché déjà appliqué (partie précédente, autre appareil) : rien à payer
+  if (!terms || (d.status === 'accepted' && flagged)) { _mpLedgerSet(d.id, { settled: true }); return false; }
+  const lateOpen = d.status === 'open' && Date.parse(d.expires_at) + MP_DEAL_GRACE_MS < Date.now();
+  if (role === 'from') {
+    if (!L) L = _mpAdoptPending(d);
+    if (d.status === 'accepted') {
+      _mpPay(terms.ask, +1, true);
+      _mpLedgerSet(d.id, { settled: true });
+      toast(`${d.to_pseudo} a accepté ton marché : +${_mpResLine(terms.ask)}`);
+      saveGame();
+      return true;
+    }
+    if (d.status === 'refused' || d.status === 'expired' || d.status === 'cancelled' || lateOpen) {
+      const esc = L && L.escrow;
+      if (esc) _mpPay(esc, +1, true);
+      _mpLedgerSet(d.id, { settled: true });
+      if (esc && _mpResLine(esc) !== 'rien') {
+        toast(`Marché avec ${d.to_pseudo} ${d.status === 'refused' ? 'refusé' : d.status === 'cancelled' ? 'retiré' : 'expiré'} · ${_mpResLine(esc)} rendus`);
+      }
+      saveGame();
+    }
+    return false;
+  }
+  // role === 'to'
+  if (d.status === 'accepted') {
+    if (!(L && L.paid)) _mpPay(terms.ask, -1);
+    _mpPay(terms.offer, +1, true);
+    if (typeof terms.offer.address === 'string' && window.SBMP) window.SBMP.onProbeArrived(terms.offer.address);
+    _mpLedgerSet(d.id, { paid: true, settled: true });
+    saveGame();
+    return true;
+  }
+  if (d.status !== 'open' || lateOpen) { if (L) _mpLedgerSet(d.id, { settled: true }); }
+  return false;
+}
+
+// Proposer un marché à un commandant amarré au même dock
+async function mpProposeDeal(presenceId, presetKey) {
+  const mission = (G.tankerMissions || []).find(m => m.id === _activeDockMissionId);
+  const pr = MP_DEAL_PRESETS[presetKey];
+  if (!mission || !pr || !window.SBMP) return;
+  const busyKey = 'p:' + presenceId;
+  if (_mpDealBusy.has(busyKey)) return;
+  const myPresence = window.SBMP.presenceFor(mission.id);
+  if (!myPresence) { toast('Ton convoi n\'est pas encore inscrit au registre du dock'); return; }
+  const offer = { ...pr.offer };
+  if (offer.address) offer.address = mpMyAddressString();
+  if (!_mpCanPay(offer)) { toast('Tes stocks ne suffisent pas pour cette offre'); return; }
+  _mpDealBusy.add(busyKey);
+  // séquestre inscrit AVANT l'appel : une app fermée pendant l'attente ne perd rien
+  const pendingKey = 'pending:' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+  _mpPay(offer, -1);
+  _mpLedgerSet(pendingKey, { escrow: offer, to_presence: presenceId, key: presetKey });
+  saveGame();
+  try {
+    const d = await window.SBMP.proposeDeal(myPresence, presenceId, pr.kind, offer, pr.ask, presetKey);
+    delete G.mpDeals[pendingKey];
+    _mpLedgerSet(d.id, { escrow: offer });
+    toast(`Proposition envoyée à ${d.to_pseudo}`);
+  } catch (e) {
+    delete G.mpDeals[pendingKey];
+    _mpPay(offer, +1, true);
+    const m = String((e && e.message) || e);
+    toast(/already_dealt/.test(m) ? 'Un seul marché par convoi et par séjour'
+      : /convoy_gone/.test(m) ? 'Ce convoi a quitté le dock'
+      : /not_docked/.test(m) ? 'Ton séjour est terminé'
+      : 'Le registre ne répond pas, réessaie');
+  } finally {
+    _mpDealBusy.delete(busyKey);
+  }
+  saveGame();
+  if (window.SBMP) window.SBMP.refreshDock(mission, true);
+  _mpRerenderConvoySheet();
+}
+
+// Répondre à un marché reçu (un seul appel à la fois par marché)
+async function mpAnswerDeal(dealId, answer) {
+  const d = ((window.SBMP && window.SBMP.deals) || []).find(x => x.id === dealId);
+  if (!d || _mpDealBusy.has(dealId)) return;
+  const terms = _mpDealTerms(d);
+  if (!terms) { toast('Offre illisible'); return; }
+  if (answer === 'accepted' && !_mpCanPay(terms.ask)) { toast(`Il te manque de quoi payer : ${_mpResLine(terms.ask)}`); return; }
+  _mpDealBusy.add(dealId);
+  let paidNow = false;
+  if (answer === 'accepted' && !(_mpLedger(dealId) || {}).paid) {
+    _mpPay(terms.ask, -1);                       // payé avant la réponse, rendu si le registre refuse
+    _mpLedgerSet(dealId, { paid: true });
+    paidNow = true;
+  }
+  saveGame();
+  try {
+    const r = await window.SBMP.answerDeal(dealId, answer);
+    d.status = r.status;
+    _mpDealBusy.delete(dealId);
+    if (r.status === 'accepted') {
+      if (mpSettleDeal(r, SBCloud_userId())) await window.SBMP.dealApplied(dealId);
+      toast(`Marché conclu avec ${d.from_pseudo} : +${_mpResLine(terms.offer)}`);
+    } else {
+      if (paidNow) { _mpPay(terms.ask, +1, true); _mpLedgerSet(dealId, { paid: false, settled: true }); }
+      toast(r.status === 'expired' ? 'Trop tard : l\'offre a expiré' : 'Offre refusée');
+    }
+  } catch (e) {
+    _mpDealBusy.delete(dealId);
+    if (paidNow) { _mpPay(terms.ask, +1, true); _mpLedgerSet(dealId, { paid: false }); }
+    toast('Cette offre n\'est plus disponible');
+  }
+  saveGame();
+  const mission = (G.tankerMissions || []).find(m => m.id === _activeDockMissionId);
+  if (mission && window.SBMP) window.SBMP.refreshDock(mission, true);
+}
+function SBCloud_userId() { return (window.SBCloud && window.SBCloud.user && window.SBCloud.user.id) || null; }
+
+// Payer le barman : l'adresse d'un commandant qu'on ne connaît pas encore (une fois par séjour)
+async function mpBuyBarLead() {
+  const mission = (G.tankerMissions || []).find(m => m.id === _activeDockMissionId);
+  if (!mission || mission.mpLeadBought || !window.SBMP) return;
+  if ((G.credits || 0) < MP_BAR_LEAD_COST) { toast(`Le barman veut ${MP_BAR_LEAD_COST} CG`); return; }
+  mission.mpLeadBought = true;
+  G.credits -= MP_BAR_LEAD_COST;
+  const known = [];
+  for (const sys of Object.values(G.knownSystems || {})) for (const pl of sys.planets || []) if (pl.isReal) known.push(pl.mpAddress || pl.coord);
+  let row = null;
+  try { row = await window.SBMP.barLead(known); } catch (e) { row = undefined; }
+  if (!row) {
+    G.credits += MP_BAR_LEAD_COST;
+    mission.mpLeadBought = row === undefined ? false : true;
+    toast(row === undefined ? 'Le barman ne répond pas, réessaie' : 'Le barman hausse les épaules : il ne connaît personne que tu ne connaisses déjà. Remboursé.');
+  } else {
+    const sysKey = String(row.address).split('-').slice(0, 3).join('-');
+    mergeRealWorlds(sysKey, [row]);
+    toast(`Le barman glisse une adresse : ${row.pseudo} · ${row.address}`);
+  }
+  saveGame();
+  if (typeof renderDockScreen === 'function') renderDockScreen();
+}
+
+// Rendu de la section (données en cache ; le registre est relu en arrière-plan)
+function _mpAgo(iso) {
+  const h = Math.floor((Date.now() - Date.parse(iso)) / 3600000);
+  return h < 1 ? 'à l\'instant' : h < 24 ? `il y a ${h} h` : `il y a ${Math.floor(h / 24)} j`;
+}
+function _mpRumorText(r) {
+  const s = r.sector ? ` (secteur ${r.sector})` : '';
+  switch (r.kind) {
+    case 'raid_victory': return `On raconte que ${r.actor} a pillé ${r.target}${s}. Les quais en parlent encore.`;
+    case 'raid_repelled': return `${r.target} a renvoyé la flotte de ${r.actor} dans le vide${s}.`;
+    case 'route_legendary': return `Une route de ${r.actor} est devenue légendaire.`;
+    case 'world_growth': return `Le monde de ${r.actor} grossit vite. Trop vite, disent certains.`;
+    case 'rare_discovery': return `${r.actor} aurait trouvé quelque chose de rare${s}.`;
+    default: return '';
+  }
+}
+function _renderDockPlayersSection(mission, dock) {
+  const mp = window.SBMP;
+  const head = (t) => `<div style="font-size:10px;color:var(--mut);letter-spacing:.12em;text-transform:uppercase;margin-bottom:8px;padding:0 2px">${t}</div>`;
+  if (!mp || !mp.ready || !mp.ready()) {
+    return `<div style="margin-bottom:18px">${head('Commandants à quai')}<div style="font-size:11px;color:var(--mut);font-style:italic;padding:4px 2px">Registre du dock hors de portée pour le moment.</div></div>`;
+  }
+  if (!mission.dockStay) {
+    return `<div style="margin-bottom:18px">${head('Commandants à quai')}<div style="font-size:11px;color:var(--mut);font-style:italic;padding:4px 2px">Choisis la durée du séjour : ton convoi sera inscrit au registre du dock, et tu verras qui d'autre y est amarré.</div></div>`;
+  }
+  mp.refreshDock(mission);
+  const st = mp.dockState(mission.id);
+  const myPresence = mp.presenceFor(mission.id);
+  const me = SBCloud_userId();
+  const deals = (mp.deals || []);
+  const incoming = deals.filter(d => d.status === 'open' && d.to_presence === myPresence && Date.parse(d.expires_at) > Date.now());
+  let html = '';
+
+  // Offres reçues
+  for (const d of incoming) {
+    const pr = MP_DEAL_PRESETS[d.message_key] || {};
+    html += `
+      <div style="margin-bottom:8px;padding:12px 14px;background:rgba(95,168,232,.06);border:1px solid rgba(95,168,232,.35);border-radius:8px">
+        <div style="font-size:12px;color:#e6f0ff"><strong>${d.from_pseudo}</strong> te propose un marché</div>
+        ${pr.msg ? `<div style="font-size:12px;color:var(--mut);font-style:italic;margin:6px 0;font-family:'Charter','Iowan Old Style',Georgia,serif">« ${pr.msg} »</div>` : ''}
+        <div style="font-size:11px;color:var(--text);line-height:1.6">Il donne : <span style="color:#78c88c">${_mpResLine(d.offer)}</span><br>Il demande : <span style="color:#ffc864">${_mpResLine(d.ask)}</span></div>
+        <div style="display:flex;gap:8px;margin-top:10px">
+          <button ${_mpDealBusy.has(d.id) ? 'disabled' : ''} onclick="mpAnswerDeal('${d.id}','accepted')" style="flex:1;padding:9px;background:rgba(120,200,140,.08);border:1px solid rgba(120,200,140,.4);color:#78c88c;border-radius:6px;font-family:inherit;font-size:11px;letter-spacing:.08em;cursor:pointer">ACCEPTER</button>
+          <button onclick="mpAnswerDeal('${d.id}','refused')" style="flex:1;padding:9px;background:transparent;border:1px solid var(--border);color:var(--mut);border-radius:6px;font-family:inherit;font-size:11px;letter-spacing:.08em;cursor:pointer">REFUSER</button>
+        </div>
+      </div>`;
+  }
+
+  // Convois de commandants
+  const convoys = (st && st.convoys) || [];
+  if (!st) {
+    html += `<div style="font-size:11px;color:var(--mut);font-style:italic;padding:4px 2px 10px">Lecture du registre du dock…</div>`;
+  } else if (!convoys.length) {
+    html += `<div style="font-size:11px;color:var(--mut);font-style:italic;padding:4px 2px 10px">Aucun autre commandant amarré ici en ce moment.</div>`;
+  } else {
+    html += convoys.map(c => {
+      const mine = deals.find(d => d.from_presence === myPresence && d.to_presence === c.presence_id);
+      const tag = mine ? ({ open: 'offre envoyée', accepted: 'marché conclu', refused: 'offre refusée', expired: 'offre expirée', cancelled: 'offre retirée' }[mine.status] || '') : '';
+      const crew = (CREW_PHYSICAL_LABELS[c.crew_state] || CREW_PHYSICAL_LABELS.sobre);
+      return `
+        <div onclick="openMpConvoySheet('${c.presence_id}')" style="display:flex;align-items:center;gap:10px;padding:10px 12px;background:rgba(95,168,232,.04);border:1px solid rgba(95,168,232,.30);border-radius:6px;cursor:pointer;margin-bottom:6px">
+          <div style="font-size:13px;color:#5fa8e8;width:18px;text-align:center">⚑</div>
+          <div style="flex:1;min-width:0">
+            <div style="display:flex;align-items:baseline;gap:8px;flex-wrap:wrap">
+              <span style="font-size:13px;color:#e6f0ff;font-weight:600">${c.pseudo}</span>
+              <span style="font-size:9px;color:#5fa8e8;letter-spacing:.1em;text-transform:uppercase">Commandant</span>
+            </div>
+            <div style="font-size:10px;color:var(--mut);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${c.tanker_name || 'Tanker'} · cale ${c.cargo_hint || 'inconnue'} · <span style="color:${crew.color}">${crew.label}</span></div>
+          </div>
+          <div style="font-size:9px;color:${tag ? '#ffc864' : 'var(--mut)'};text-align:right;white-space:nowrap">${tag}</div>
+          <div style="color:var(--mut);font-size:12px">›</div>
+        </div>`;
+    }).join('');
+  }
+
+  // Le barman (piste payante, une par séjour)
+  const canLead = !mission.mpLeadBought;
+  html += `
+    <div onclick="${canLead ? 'mpBuyBarLead()' : ''}" style="margin-top:4px;padding:10px 12px;border:1px dashed ${canLead ? 'rgba(255,200,100,.35)' : 'var(--border)'};border-radius:6px;${canLead ? 'cursor:pointer' : 'opacity:.55'}">
+      <div style="font-size:12px;color:${canLead ? '#ffc864' : 'var(--mut)'}">🍸 Payer le barman pour une adresse</div>
+      <div style="font-size:10px;color:var(--mut);margin-top:2px">${canLead ? `${MP_BAR_LEAD_COST} CG · un commandant que tu ne connais pas encore` : 'Déjà fait ce séjour'}</div>
+    </div>`;
+
+  // Rumeurs réelles
+  const rumors = (mp.rumors || []).map(r => ({ r, t: _mpRumorText(r) })).filter(x => x.t).slice(0, 3);
+  if (rumors.length) {
+    html += `<div style="margin-top:14px">${head('On raconte au comptoir')}` + rumors.map(({ r, t }) =>
+      `<div style="font-size:12px;color:#e6f0ff;font-style:italic;line-height:1.6;padding:6px 2px;border-bottom:1px solid var(--border);font-family:'Charter','Iowan Old Style',Georgia,serif">${t} <span style="font-size:10px;color:var(--mut);font-style:normal;font-family:inherit">· ${_mpAgo(r.created_at)}</span></div>`).join('') + `</div>`;
+  }
+
+  return `<div style="margin-bottom:18px">${head(`Commandants à quai${convoys.length ? ' · ' + convoys.length : ''}`)}${html}</div>`;
+}
+
+// Fiche d'un convoi de commandant (même gabarit que la fiche PNJ)
+var _mpOpenConvoyId = null;
+function openMpConvoySheet(presenceId) {
+  _mpOpenConvoyId = presenceId;
+  _mpRerenderConvoySheet();
+}
+function _mpRerenderConvoySheet() {
+  if (!_mpOpenConvoyId) return;
+  const mission = (G.tankerMissions || []).find(m => m.id === _activeDockMissionId);
+  const mp = window.SBMP;
+  const st = mission && mp ? mp.dockState(mission.id) : null;
+  const c = st && (st.convoys || []).find(x => x.presence_id === _mpOpenConvoyId);
+  const old = document.getElementById('npc-sheet-modal');
+  if (old) old.remove();
+  if (!c) { _mpOpenConvoyId = null; return; }
+  const myPresence = mp.presenceFor(mission.id);
+  const mine = (mp.deals || []).find(d => d.from_presence === myPresence && d.to_presence === c.presence_id);
+  const crew = (CREW_PHYSICAL_LABELS[c.crew_state] || CREW_PHYSICAL_LABELS.sobre);
+  const left = Math.max(0, Date.parse(c.leaves_at) - Date.now());
+  let actions = '';
+  if (mine) {
+    const lbl = { open: 'Offre envoyée — en attente de sa réponse.', accepted: 'Marché conclu.', refused: 'Il a refusé ton offre.', expired: 'Ton offre a expiré.', cancelled: 'Offre retirée.' }[mine.status] || '';
+    actions = `<div style="padding:12px 14px;border:1px solid var(--border);border-radius:8px;font-size:12px;color:#e6f0ff">${lbl}<div style="font-size:10px;color:var(--mut);margin-top:4px">Un seul marché par convoi et par séjour.</div></div>`;
+  } else {
+    actions = Object.entries(MP_DEAL_PRESETS).map(([key, pr]) => {
+      const offer = { ...pr.offer };
+      const ok = _mpCanPay(offer);
+      return `
+        <div ${ok ? `onclick="mpProposeDeal('${c.presence_id}','${key}')"` : ''} style="padding:10px 12px;background:${ok ? 'rgba(255,200,100,.04)' : 'rgba(255,255,255,.02)'};border:1px solid ${ok ? 'rgba(255,200,100,.30)' : 'var(--border)'};border-radius:6px;margin-bottom:6px;${ok ? 'cursor:pointer' : 'cursor:not-allowed'}">
+          <div style="font-size:12px;color:${ok ? '#ffc864' : 'var(--mut)'};font-weight:500">${pr.kind === 'info' ? '📍 Donner l\'adresse de ta colonie' : `🤝 ${_mpResLine(pr.offer)} contre ${_mpResLine(pr.ask)}`}</div>
+          <div style="font-size:10px;color:var(--mut);font-style:italic;margin-top:3px">« ${pr.msg} »${ok ? '' : ' · stocks insuffisants'}</div>
+        </div>`;
+    }).join('') + `<div style="font-size:10px;color:var(--mut);font-style:italic;line-height:1.5;margin-top:6px">Ton offre est mise de côté jusqu'à sa réponse. Refus, expiration ou départ d'un des convois : tout t'est rendu.</div>`;
+  }
+  const modal = document.createElement('div');
+  modal.id = 'npc-sheet-modal';
+  modal.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.85);backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px);z-index:99999;display:flex;align-items:flex-end;justify-content:center;padding:0;margin:0;';
+  modal.onclick = (e) => { if (e.target === modal) closeMpConvoySheet(); };
+  modal.innerHTML = `
+    <div style="background:var(--bg);width:100%;max-width:480px;border-top:1px solid var(--border);border-radius:14px 14px 0 0;padding:20px 18px 24px;font-family:inherit;max-height:90vh;overflow-y:auto;box-shadow:0 -20px 60px rgba(0,0,0,.5)">
+      <div style="width:36px;height:3px;background:var(--mut);border-radius:2px;margin:0 auto 16px;opacity:.5"></div>
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:14px">
+        <div style="flex:1;min-width:0">
+          <div style="font-size:9px;color:#5fa8e8;letter-spacing:.12em;text-transform:uppercase">Pavillon · Commandant</div>
+          <div style="font-size:18px;color:#e6f0ff;font-weight:600;margin-top:2px">${c.pseudo}</div>
+        </div>
+        <div onclick="closeMpConvoySheet()" style="cursor:pointer;width:32px;height:32px;border-radius:6px;border:1px solid var(--border);display:flex;align-items:center;justify-content:center;color:var(--mut);font-size:14px">×</div>
+      </div>
+      <div style="border-top:1px solid var(--border);padding-top:10px;margin-bottom:14px">
+        <div style="display:flex;justify-content:space-between;padding:5px 0;font-size:11px;border-bottom:1px solid var(--border)"><span style="color:var(--mut)">Tanker</span><span style="color:#e6f0ff;font-family:'SF Mono',monospace">${c.tanker_name || '—'}</span></div>
+        <div style="display:flex;justify-content:space-between;padding:5px 0;font-size:11px;border-bottom:1px solid var(--border)"><span style="color:var(--mut)">Provenance</span><span style="color:#e6f0ff">${c.provenance || 'inconnue'}</span></div>
+        <div style="display:flex;justify-content:space-between;padding:5px 0;font-size:11px;border-bottom:1px solid var(--border)"><span style="color:var(--mut)">Cale</span><span style="color:#e6f0ff">${c.cargo_hint || 'inconnue'}</span></div>
+        <div style="display:flex;justify-content:space-between;padding:5px 0;font-size:11px;border-bottom:1px solid var(--border)"><span style="color:var(--mut)">Équipage</span><span style="color:${crew.color};font-style:italic">${crew.label}</span></div>
+        <div style="display:flex;justify-content:space-between;padding:5px 0;font-size:11px"><span style="color:var(--mut)">Quitte le dock</span><span style="color:#e6f0ff">dans ${_formatDuration(left)}</span></div>
+      </div>
+      <div style="font-size:10px;color:var(--mut);letter-spacing:.12em;text-transform:uppercase;margin-bottom:8px">Marché · 1 par séjour</div>
+      ${actions}
+      <button onclick="closeMpConvoySheet()" style="margin-top:18px;width:100%;padding:11px;background:transparent;border:1px solid var(--border);color:var(--mut);border-radius:6px;font-family:inherit;font-size:12px;letter-spacing:.08em;cursor:pointer">FERMER</button>
+    </div>`;
+  document.body.appendChild(modal);
+}
+function closeMpConvoySheet() {
+  _mpOpenConvoyId = null;
+  const m = document.getElementById('npc-sheet-modal');
+  if (m) m.remove();
+}
+// Appelé par le registre quand de nouvelles données du dock arrivent
+function mpOnDockData(missionId) {
+  const scr = document.getElementById('scr-dock');
+  if (scr && !scr.classList.contains('hidden') && _activeDockMissionId === missionId) {
+    renderDockScreen();
+    if (_mpOpenConvoyId) _mpRerenderConvoySheet();
+  }
+}
+// ═══ fin MP_DOCKS_V0 ═══
 
 // ─── Helper : ajouter une planète au knownSystems du joueur ───
 // Utilisé par les futures résolutions (Sonde Moyenne qui verrouille
@@ -9481,10 +9990,10 @@ function renderDashboard() {
 function renderDashResGrid() {
   const grid = document.getElementById('dash-res-grid');
   if (!grid) return;
-  // Cap par ressource (basique pour l'instant, on raffinera avec les silos plus tard)
-  const RES_CAP = 10000;
+  // AUDIT_1110 — plafond réel de chaque ressource (silos compris)
   const cells = Object.entries(G.res).map(([k, r]) => {
     const t = tileInfo(k);
+    const RES_CAP = r.max || 1;
     const pct = Math.min(100, (r.v / RES_CAP) * 100);
     const isFull = r.v >= RES_CAP;
     return `
@@ -9493,7 +10002,7 @@ function renderDashResGrid() {
           <span class="res-cell-dot" style="background:${t.color}"></span>
           <span>${t.label}</span>
         </div>
-        ${r.rate > 0 ? `<div class="res-cell-rate">+${r.rate}</div>` : ''}
+        ${r.rate > 0 ? `<div class="res-cell-rate">+${Math.round(r.rate * 10) / 10}</div>` : ''}
         <div class="res-cell-val" style="color:${t.color}">${fmt(r.v)}</div>
         <div class="res-cell-cap">/ ${fmt(RES_CAP)}</div>
         <div class="res-cell-bar"><div class="res-cell-fill" style="width:${pct}%;background:${t.color}"></div></div>
@@ -9526,7 +10035,9 @@ function renderResourcesScreen() {
     const t = tileInfo(key);
     const pct = r.max > 0 ? Math.min(100, r.v / r.max * 100) : 0;
     let info = '';
-    if (r.rate > 0) {
+    if (r.rate > 0 && r.v >= r.max) {
+      info = 'Stock plein : la production est en pause. Dépense ou agrandis ton stockage.';
+    } else if (r.rate > 0) {
       info = `Production active. Stock plein dans ${formatTime(Math.round((r.max - r.v) / (r.rate / 3600)))}.`;
     } else if (r.v > 0) {
       info = 'Aucune source de production active.';
@@ -9704,7 +10215,7 @@ function renderTankerMissionCard(mission, opts) {
   const targetTxt = m.knownTargetCoordKey || m.targetCoords || '—';
   // Pour returning, le total est returnArrivalAt - cancelledAt
   const totalMs = isReturning
-    ? (m.returnArrivalAt - m.cancelledAt)
+    ? (m.returnArrivalAt - (m.cancelledAt || m.returnDepartedAt || m.arrivalAt || m.departedAt))
     : (m.arrivalAt - m.departedAt);
   const elapsedMs = totalMs - remainingMs;
   const pct = totalMs > 0 ? Math.min(100, (elapsedMs / totalMs) * 100) : 0;
@@ -9725,7 +10236,7 @@ function renderTankerMissionCard(mission, opts) {
 
   // Status badge et direction selon état
   const statusBadge = isReturning
-    ? `<span style="font-size:9px;background:rgba(95,255,232,.15);color:#5fffe8;padding:1px 6px;border-radius:3px;letter-spacing:.06em">DEMI-TOUR</span>`
+    ? `<span style="font-size:9px;background:rgba(95,255,232,.15);color:#5fffe8;padding:1px 6px;border-radius:3px;letter-spacing:.06em">${m.cancelledAt ? 'DEMI-TOUR' : 'RETOUR'}</span>`
     : `<span style="font-size:9px;background:rgba(255,200,100,.15);color:#ffc864;padding:1px 6px;border-radius:3px;letter-spacing:.06em">EN MISSION</span>`;
   const directionTxt = isReturning ? `← ${G.planet?.name || 'KERATH-VII'}` : `→ ${targetTxt}`;
   const barColor = isReturning ? '#5fffe8' : '#ffc864';
@@ -9751,7 +10262,7 @@ function renderTankerMissionCard(mission, opts) {
             Annuler la mission
           </button>
         ` : ''}
-        ${opts.inline ? `
+        ${opts.inline && _isDevMode() ? `
           <button onclick="event.stopPropagation();cheatReturnThisTanker('${m.id}')"
                   style="margin-top:6px;width:100%;padding:6px 10px;background:transparent;border:1px dashed rgba(255,200,100,.35);color:#ffc864;font-size:10px;letter-spacing:.08em;border-radius:5px;cursor:pointer;opacity:.7;font-family:inherit">
             ${icon('settings', {size:11})} CHEAT — Faire revenir maintenant
@@ -10199,6 +10710,9 @@ const COMBAT_CONSTS = {
   PHASE3_LOOT_MIN: 0.40,
   PHASE3_LOOT_MAX: 0.70,
   PHASE3_HEROIC_BONUS: 1.5,
+  // Débarquement (11/10) : effet sur le pillage
+  GROUND_WON_LOOT: 1.2,    // sol tenu : entrepôts ouverts
+  GROUND_LOST_LOOT: 0.6,   // débarquement repoussé : pillage orbital seul
 
   // Pertes asymétriques (doctrine Z3) : probabilité de récupération
   RECOVERY: {
@@ -10880,6 +11394,7 @@ function getAvailableShips(shipKey, tier) {
     if (prep.id === editingId) continue; // skip la flotte en cours d'édition
     reserved += prep.composition?.[shipKey]?.[tierKey] || 0;
   }
+  if (shipKey === 'tanker') reserved += _busyTankerMissions().filter(m => _tankerMissionTier(m) === tier).length;
   return Math.max(0, stationed - reserved);
 }
 
@@ -10892,6 +11407,7 @@ function getAvailableSoldiers(soldierKey) {
     if (prep.id === editingId) continue; // skip la flotte en cours d'édition
     reserved += prep.soldiers?.[soldierKey] || 0;
   }
+  reserved += soldiersCommittedElsewhere(soldierKey);
   return Math.max(0, total - reserved);
 }
 
@@ -11626,7 +12142,7 @@ function renderFleetDetail() {
         <div style="font-size:13px;color:#e6f0ff;font-family:'SF Mono',monospace;letter-spacing:.06em" id="fleet-detail-mission-timer">Retour dans ${formatMissionTimer(remaining)}</div>
       </div>
     `;
-    actionsHtml = `
+    actionsHtml = !_isDevMode() ? '' : `
       <div style="padding:0 16px 14px">
         <button class="btn-ghost" onclick="cheatReturnMission('${selectedFleetId}')" style="width:100%;padding:10px;color:var(--amber);border-color:rgba(255,192,96,.3);font-size:11px">${icon('settings', {size:11})} CHEAT : Faire revenir maintenant</button>
       </div>
@@ -12118,11 +12634,10 @@ function computeFleetOrbitalAttack(composition) {
 // Calcule la puissance d'attaque des soldats embarqués
 function computeSoldierAttack(soldiers) {
   if (!soldiers) return 0;
+  // SOLDIERS_1110 — mêmes valeurs que la fiche d'unité (DEFENSE_UNITS.atkPerUnit : garde 50, lourd 250)
   let atk = 0;
-  // Garde : 30 atk par unité (valeur de référence existante)
-  atk += (soldiers.garde || 0) * 30;
-  // Lourd : 90 atk par unité
-  atk += (soldiers.lourd || 0) * 90;
+  atk += (soldiers.garde || 0) * (DEFENSE_UNITS.garde.atkPerUnit || 0);
+  atk += (soldiers.lourd || 0) * (DEFENSE_UNITS.lourd.atkPerUnit || 0);
   return atk;
 }
 
@@ -12185,7 +12700,7 @@ function resolveCombat(fleet, target) {
   const atkEffective = atkOrbital * combatRand(COMBAT_CONSTS.RAND_MIN, COMBAT_CONSTS.RAND_MAX);
   const defEffective = defOrbital * combatRand(COMBAT_CONSTS.RAND_MIN, COMBAT_CONSTS.RAND_MAX);
 
-  const phase1Won = atkEffective > defEffective;
+  const phase1Won = defOrbital <= 0 || atkEffective > defEffective;
 
   // Compter les vaisseaux orbitaux engagés (frégates + cuirassés)
   const orbitalEngaged = {
@@ -12249,12 +12764,15 @@ function resolveCombat(fleet, target) {
   if (!phase1Won) {
     result.outcome = lossPct > 0.6 ? 'massacre' : 'defeat';
     // Tuer les héros si tout leur type est anéanti
-    _killHeroesIfAnnihilated(composition, heroes, result, soldiers);
+    _killHeroesIfAnnihilated(composition, heroes, result, soldiers, fleet.composition);
     return result;
   }
 
   // ═══ PHASE 2 — DÉBARQUEMENT ═══
   const totalSoldiers = (soldiers.garde || 0) + (soldiers.lourd || 0);
+  // Effet du débarquement sur le pillage : sol tenu ×1.2, débarquement repoussé ×0.6 (pillage orbital seul)
+  let groundLootFactor = 1;
+  let groundLost = false;
 
   if (totalSoldiers > 0) {
     const atkSoldiers = computeSoldierAttack(soldiers);
@@ -12301,10 +12819,11 @@ function resolveCombat(fleet, target) {
     };
 
     if (!phase2Won) {
-      // Phase 2 perdue → pas de pillage
-      result.outcome = 'pyrrhic'; // Phase 1 gagnée mais Phase 2 perdue
-      _killHeroesIfAnnihilated(composition, heroes, result, soldiers);
-      return result;
+      // Phase 2 perdue → les tankers pillent quand même depuis l'orbite, moins bien
+      groundLost = true;
+      groundLootFactor = COMBAT_CONSTS.GROUND_LOST_LOOT || 0.6;
+    } else {
+      groundLootFactor = COMBAT_CONSTS.GROUND_WON_LOOT || 1.2;
     }
   }
   // Si pas de soldats, on saute Phase 2 et on passe à Phase 3
@@ -12315,7 +12834,7 @@ function resolveCombat(fleet, target) {
 
   if (totalSurvivingTankers > 0) {
     const cargoCapacity = computeSurvivingCargo(survivingTankers);
-    const pillagePct = combatRand(COMBAT_CONSTS.PHASE3_LOOT_MIN, COMBAT_CONSTS.PHASE3_LOOT_MAX);
+    const pillagePct = Math.min(1, combatRand(COMBAT_CONSTS.PHASE3_LOOT_MIN, COMBAT_CONSTS.PHASE3_LOOT_MAX) * groundLootFactor);
 
     // Calculer le butin brut par ressource
     const lootBrut = {
@@ -12393,8 +12912,11 @@ function resolveCombat(fleet, target) {
     result.outcome = 'pyrrhic';
   }
 
+  // Débarquement repoussé : jamais mieux qu'une victoire à la Pyrrhus
+  if (groundLost) result.outcome = 'pyrrhic';
+
   // Tuer les héros si leur type est anéanti
-  _killHeroesIfAnnihilated(composition, heroes, result, soldiers);
+  _killHeroesIfAnnihilated(composition, heroes, result, soldiers, fleet.composition);
 
   return result;
 }
@@ -12436,8 +12958,9 @@ function _checkHeroicCombat(fleet, result) {
 }
 
 // Helper interne : marque les héros morts si leur type est anéanti
-function _killHeroesIfAnnihilated(survivingComposition, heroes, result, survivingSoldiers) {
+function _killHeroesIfAnnihilated(survivingComposition, heroes, result, survivingSoldiers, initialComposition) {
   for (const type of ['cuirasse', 'fregate', 'tanker']) {
+    if (initialComposition && countShipsByType(initialComposition, type) === 0) continue;   // type absent : héros au repos
     const survivingCount = countShipsByType(survivingComposition, type);
     const hero = heroes[type];
     if (hero && !hero.dead && survivingCount === 0) {
@@ -21842,7 +22365,7 @@ function launchTankerToTarget(reportId, targetId, force) {
   const stat = G.fleet?.stationed || {};
   const totalTankers = (stat.tanker?.t1 || 0) + (stat.tanker?.t2 || 0) + (stat.tanker?.t3 || 0);
   const inMission = G.tankerMissions.filter(m => m.status === 'in_transit' || m.status === 'returning').length;
-  const availableTankers = totalTankers - inMission;
+  const availableTankers = tankerAvailability(null);
   if (availableTankers <= 0 && !force) {
     if (typeof toast === 'function') toast('Aucun tanker disponible');
     return null;
@@ -21922,7 +22445,7 @@ function launchTankerToKnownTarget(coordKey, force) {
   const stat = G.fleet?.stationed || {};
   const totalTankers = (stat.tanker?.t1 || 0) + (stat.tanker?.t2 || 0) + (stat.tanker?.t3 || 0);
   const inMission = G.tankerMissions.filter(m => m.status === 'in_transit' || m.status === 'returning').length;
-  const availableTankers = totalTankers - inMission;
+  const availableTankers = tankerAvailability(null);
   if (availableTankers <= 0 && !force) {
     if (typeof toast === 'function') toast('Aucun tanker disponible');
     return null;
@@ -22365,13 +22888,20 @@ function tickTankerMissions() {
   // D5.3 : ajout du cas exploration (retour avec résolution de lead).
   const toComplete = G.tankerMissions.filter(m => m.status === 'returning' && now >= (m.returnArrivalAt || 0));
   for (const m of toComplete) {
-    if (m.kind === 'route_run') {
+    if (m.kind === 'route_run' && m._cancelled) {
+      _completeCancelledRouteRun(m.id);
+    } else if (m.kind === 'route_run') {
       _completeRouteRunReturn(m.id);
     } else if (m.kind === 'exploration') {
       completeExplorationReturn(m.id);
     } else {
       handleTankerReturnFromCancellation(m.id);
     }
+  }
+
+  // AUDIT_1110 — séjour terminé (même app fermée) : départ à l'heure de fin prévue
+  for (const m of G.tankerMissions.filter(x => x.status === 'docked' && x.kind === 'route_run' && x.dockStay && now >= x.dockStay.endsAt)) {
+    returnTankerFromDock(m.id, m.dockStay.endsAt);
   }
 
   // ─── D2 : tick humeur équipage pour les missions docked ───
@@ -22414,6 +22944,9 @@ async function cancelTankerMission(missionId) {
 
   // Composer le récap de la cale qui rentre
   let cargoLines = [];
+  if (m.kind === 'route_run' && m.cargo) {
+    for (const rk of ['metal', 'energie', 'cristal']) if (m.cargo[rk] > 0) cargoLines.push(`${fmt(m.cargo[rk])} ${rk}`);
+  }
   if (m.kind === 'dropoff' && m.cargo) {
     if (m.cargo.soldiers?.garde > 0) cargoLines.push(`${m.cargo.soldiers.garde} garde`);
     if (m.cargo.soldiers?.lourd > 0) cargoLines.push(`${m.cargo.soldiers.lourd} lourd`);
@@ -22442,6 +22975,7 @@ async function cancelTankerMission(missionId) {
   if (!ok) return;
 
   // Transformer la mission en "returning" : le tick gérera l'arrivée
+  if (m.kind === 'route_run') m._cancelled = true;   // AUDIT_1110 : demi-tour = pas de commerce, cale rendue
   m.status = 'returning';
   m.cancelledAt = now;
   m.returnArrivalAt = now + returnMs;
@@ -22584,7 +23118,7 @@ function openTankerCompose(planetCoord) {
   const totalTankers = (stat.t1 || 0) + (stat.t2 || 0) + (stat.t3 || 0);
   const inMission = (G.tankerMissions || []).filter(m => m.status === 'in_transit' || m.status === 'returning').length;
   const inRelay   = (G.tankerMissions || []).filter(m => m.status === 'orbital_relay').length;
-  const available = totalTankers - inMission - inRelay;
+  const available = tankerAvailability(null);
 
   if (available <= 0) {
     if (typeof toast === 'function') toast('Aucun tanker disponible');
@@ -22605,10 +23139,7 @@ function openTankerCompose(planetCoord) {
   for (const t of [1, 2, 3]) {
     if ((stat['t' + t] || 0) > 0) {
       // Vérifier qu'il n'est pas tous en mission/relay pour ce tier
-      const usedThisTier = (G.tankerMissions || []).filter(m =>
-        (m.status === 'in_transit' || m.status === 'orbital_relay' || m.status === 'returning') && m.tankerTier === t
-      ).length;
-      if ((stat['t' + t] || 0) > usedThisTier) {
+      if (tankerAvailability(t) > 0) {
         defaultTier = t;
         break;
       }
@@ -22707,10 +23238,7 @@ function renderTankerComposeTankers() {
   for (const t of tiers) {
     const total = stat['t' + t] || 0;
     if (total === 0) continue;
-    const used = (G.tankerMissions || []).filter(m =>
-      (m.status === 'in_transit' || m.status === 'orbital_relay' || m.status === 'returning') && m.tankerTier === t
-    ).length;
-    const available = total - used;
+    const available = tankerAvailability(t);
     if (available <= 0) continue;
     anyTier = true;
 
@@ -23281,6 +23809,8 @@ function handleTankerDropoffArrival(mission) {
     mission.status = 'returning';
     mission.cancelledAt = now;
     mission.returnArrivalAt = now + returnMs;
+    loseSoldiers('garde', mission.cargo?.soldiers?.garde || 0);
+    loseSoldiers('lourd', mission.cargo?.soldiers?.lourd || 0);
     mission.cargo = { soldiers: { garde: 0, lourd: 0 }, resources: { metal: 0, energie: 0, cristal: 0 } };  // cargo détruit
     storeTankerDropoffReport(mission, 'deadly');
     if (typeof toast === 'function') toast(`${mission.tankerName} : cargo perdu · retour dans ~${Math.ceil(returnMs/60000)}min`);
@@ -23304,6 +23834,7 @@ function handleTankerDropoffArrival(mission) {
       for (const sk of ['garde', 'lourd']) {
         const original = mission.cargo.soldiers[sk] || 0;
         mission.cargo.soldiers[sk] = Math.max(0, Math.floor(original * routeFactor));
+        loseSoldiers(sk, original - mission.cargo.soldiers[sk]);
       }
     }
   }
@@ -23441,6 +23972,7 @@ function tickGarrisonAttrition() {
         const lost = g.soldiers[sk] * lossRate;
         const lostInt = lost >= 1 ? Math.floor(lost) : (Math.random() < lost ? 1 : 0);
         if (lostInt > 0) {
+          loseSoldiers(sk, Math.min(lostInt, g.soldiers[sk]));
           g.soldiers[sk] = Math.max(0, g.soldiers[sk] - lostInt);
           totalLost += lostInt;
         }
@@ -23571,7 +24103,7 @@ async function rapatriateGarrison(garrisonId) {
   const stat = G.fleet?.stationed?.tanker || {};
   const totalTankers = (stat.t1 || 0) + (stat.t2 || 0) + (stat.t3 || 0);
   const inMission = (G.tankerMissions || []).filter(m => m.status === 'in_transit' || m.status === 'orbital_relay' || m.status === 'returning').length;
-  const available = totalTankers - inMission;
+  const available = tankerAvailability(null);
 
   if (available <= 0 && g.contactStatus !== 'connected') {
     if (typeof toast === 'function') toast('Aucun tanker disponible pour rapatrier');
@@ -23878,10 +24410,13 @@ function applyCombatResult(fleet, result, target) {
     for (const tier of ['t1', 't2', 't3']) {
       const destroyed = result.finalLosses.ships[type]?.[tier] || 0;
       fleet.composition[type][tier] = Math.max(0, fleet.composition[type][tier] - destroyed);
+      loseShips(type, tier, destroyed);
     }
   }
 
-  // 2. Soustraire les pertes de soldats
+  // 2. Soustraire les pertes de soldats (flotte ET effectif possédé)
+  loseSoldiers('garde', Math.min(result.finalLosses.soldiers.garde || 0, fleet.soldiers?.garde || 0));
+  loseSoldiers('lourd', Math.min(result.finalLosses.soldiers.lourd || 0, fleet.soldiers?.lourd || 0));
   if (result.finalLosses.soldiers.garde) {
     fleet.soldiers.garde = Math.max(0, (fleet.soldiers.garde || 0) - result.finalLosses.soldiers.garde);
   }
@@ -24178,8 +24713,8 @@ function _renderCombatPhases(r) {
         <div style="font-size:11px;line-height:1.8;color:var(--mut);padding-top:6px;border-top:1px dotted rgba(255,192,96,.08)">
           <div style="color:var(--amber);font-size:9px;letter-spacing:.18em;margin-bottom:4px">▸ LOGS TECHNIQUES</div>
           <div><span style="color:var(--mut)">Résultat   :</span> <span style="color:${p.won ? 'var(--green)' : 'var(--red)'}">${p.won ? 'VICTOIRE' : 'DÉFAITE'}</span></div>
-          <div><span style="color:var(--mut)">Attaque    :</span> <span style="color:#e6f0ff">${fmt(p.atkBase)} → <span style="color:var(--blue-light)">${fmt(p.atkEffective)}</span> (×${(p.atkEffective/p.atkBase).toFixed(2)})</span></div>
-          <div><span style="color:var(--mut)">Défense    :</span> <span style="color:#e6f0ff">${fmt(p.defBase)} → <span style="color:var(--red)">${fmt(p.defEffective)}</span> (×${(p.defEffective/p.defBase).toFixed(2)})</span></div>
+          <div><span style="color:var(--mut)">Attaque    :</span> <span style="color:#e6f0ff">${fmt(p.atkBase)} → <span style="color:var(--blue-light)">${fmt(p.atkEffective)}</span> (×${p.atkBase ? (p.atkEffective/p.atkBase).toFixed(2) : '—'})</span></div>
+          <div><span style="color:var(--mut)">Défense    :</span> <span style="color:#e6f0ff">${fmt(p.defBase)} → <span style="color:var(--red)">${fmt(p.defEffective)}</span> (×${p.defBase ? (p.defEffective/p.defBase).toFixed(2) : '—'})</span></div>
           <div><span style="color:var(--mut)">Engagés    :</span> <span style="color:#e6f0ff">${p.engaged.fregate || 0} frégates · ${p.engaged.cuirasse || 0} cuirassés</span></div>
           <div><span style="color:var(--mut)">Pertes     :</span> <span style="color:var(--red)">${(p.lossPct * 100).toFixed(0)}% des vaisseaux engagés</span></div>
         </div>
@@ -25943,7 +26478,7 @@ function renderInfoCard(i) {
     // Le bouton ghost devient RE-MINER si on n'a pas atteint le max de re-mines
     if (p.remineCount < REMINE_MAX) {
       const lvl = Math.min(p.remineCount, REMINE_MAX - 1);
-      ghostLabel = `Re-miner ×${REMINE_BONUS[lvl]}`;
+      ghostLabel = `Re-miner ×${Math.min(1.6, 1 + 0.15 * (lvl + 1)).toFixed(2).replace(/0$/, '')}`;
       ghostHandler = `startM3FromInfo(${i}, 'Re-mining')`;
     } else {
       ghostLabel = 'Épuisé';
@@ -28281,6 +28816,10 @@ function startBuildingUpgrade(parcelIdx) {
     toast('Parcelle invalide');
     return false;
   }
+  if (parcel.damaged) {
+    toast('Bâtiment abîmé : répare-le d\'abord');
+    return false;
+  }
   const currentTier = parcel.lvl || 1;
   if (currentTier >= TIER_MAX) {
     toast('Niveau maximum atteint');
@@ -28327,7 +28866,7 @@ function cancelBuildingUpgrade() {
   const tierData = BUILDING_TIERS[up.buildingKey]?.[up.toTier];
   if (tierData) {
     for (const [res, qty] of Object.entries(tierData.cost)) {
-      if (G.res[res]) G.res[res].v += Math.floor(qty * 0.80);
+      if (G.res[res]) G.res[res].v = Math.min(Math.max(G.res[res].max, G.res[res].v), G.res[res].v + Math.floor(qty * 0.80));
     }
   }
   QUEUES.capital.upgrade = null;
@@ -28408,7 +28947,7 @@ function completeBuildingUpgrade() {
     ]);
   }
   if (tierData.def !== undefined) {
-    parcel.prod = parcel.prod || [];
+    parcel.prod = (parcel.prod || []).filter(l => l[0] !== 'défense');
     parcel.prod.push(['défense', `+${tierData.def}`]);
   }
   // ─── Silo (passe 2.4) : ajuster la capacité de la ressource concernée ───
@@ -28506,16 +29045,18 @@ function cancelCommand(queueKey, idx) {
   if (!cmd) return;
   const remaining = cmd.totalQty - cmd.completed;
   if (remaining <= 0) return;
-  // Rembourse 80% du coût des unités non produites
+  // Rembourse 80% du coût des unités non produites (coût total enregistré dans la commande)
   const unit = DEFENSE_UNITS[cmd.unitKey] || PROBE_PSEUDO_UNITS[cmd.unitKey];
-  for (const [res, qPerUnit] of Object.entries(unit.cost)) {
-    const refund = Math.floor(qPerUnit * remaining * 0.8);
-    if (G.res[res]) G.res[res].v = Math.min(G.res[res].max, G.res[res].v + refund);
+  const totalCost = cmd.cost || (unit ? Object.fromEntries(Object.entries(unit.cost).map(([r, q]) => [r, q * cmd.totalQty])) : {});
+  for (const [res, q] of Object.entries(totalCost)) {
+    const refund = Math.floor(q * remaining / Math.max(1, cmd.totalQty) * 0.8);
+    if (G.res[res]) G.res[res].v = Math.min(Math.max(G.res[res].max, G.res[res].v), G.res[res].v + refund);
   }
   QUEUES[queueKey].commands.splice(idx, 1);
   toast(`Commande annulée — ${remaining} unités · 80% remboursé`);
   renderQueue(queueKey);
   // Si l'écran défense est ouvert, le rafraîchir
+  if (queueKey === 'shipyard' && typeof renderShipyard === 'function') renderShipyard();
   if (!document.getElementById('scr-defense').classList.contains('hidden')) {
     renderDefenseScreen();
   }
@@ -28678,9 +29219,29 @@ function simulateTo(now) {
   G._simAt = now;
   if (dt > SIM_MAX_GAP_MS) dt = SIM_MAX_GAP_MS;
   out.dtMs = dt;
+  out.builds = [];
+  // AUDIT_1110 — l'absence est découpée aux fins de chantier / d'amélioration :
+  // chaque bâtiment produit dès qu'il est terminé, même si le joueur n'était pas là.
+  const start = now - dt;
+  const cuts = [];
+  for (const p of (G.planet && G.planet.parcels) || []) {
+    if (p && p.state === 'building' && p.buildEndsAt > start && p.buildEndsAt < now) cuts.push(p.buildEndsAt);
+  }
+  const upg = (typeof QUEUES !== 'undefined' && QUEUES.capital) ? QUEUES.capital.upgrade : null;
+  if (upg) {
+    const endAt = start + Math.max(0, (upg.totalDur || 0) - (upg.elapsed || 0)) * 1000 + 1000;
+    if (endAt > start && endAt < now) cuts.push(endAt);
+  }
+  cuts.sort((a, b) => a - b);
+  let t0 = start;
+  for (const c of cuts) { _simSegment(c - t0, c, out); t0 = c; }
+  _simSegment(now - t0, now, out);
+  return out;
+}
 
+function _simSegment(ms, at, out) {
   // 1. Ressources — taux HORAIRES (décision d'Adrien 10/10 : « +40/h » veut dire 40 par heure)
-  const hours = dt / 3600000;
+  const hours = Math.max(0, ms) / 3600000;
   for (const r of Object.values(G.res || {})) {
     if (r.rate > 0 && r.v < r.max) r.v = Math.min(r.max, r.v + r.rate * hours);
   }
@@ -28710,14 +29271,16 @@ function simulateTo(now) {
   }
 
   // 2b. Chantiers de bâtiments (date de fin absolue)
-  if (typeof tickConstructions === 'function') out.builds = tickConstructions(now);
+  if (typeof tickConstructions === 'function') {
+    const b = tickConstructions(at);
+    if (b && b.length) out.builds.push(...b);
+  }
 
   // 3. Files (caserne, chantier, prospection, amélioration de bâtiment) — à la seconde près
-  G._simSecBuf = (G._simSecBuf || 0) + dt / 1000;
+  G._simSecBuf = (G._simSecBuf || 0) + Math.max(0, ms) / 1000;
   const secs = Math.floor(G._simSecBuf);
   G._simSecBuf -= secs;
   if (secs > 0 && typeof QUEUES !== 'undefined') _advanceQueues(secs, out);
-  return out;
 }
 
 function _announceCommandDone(cmd) {
@@ -28795,7 +29358,7 @@ function cancelBuild(idx) {
   if (!p || p.state !== 'building') return;
   for (const [res, qty] of Object.entries(p.buildCost || {})) { if (G.res[res]) G.res[res].v = Math.min(G.res[res].max, G.res[res].v + qty); }
   delete p.buildStartedAt; delete p.buildEndsAt; delete p.buildCost;
-  p.state = 'rocky'; p.building = null; p.n = 'Plaine rocheuse'; p.sub = 'Sol stable. Disponible pour terraformation.'; p.lvl = null; p.prod = null;
+  p.state = 'resource'; p.building = null; p.n = 'Gisement détecté'; p.sub = 'Construire un bâtiment ou re-miner.'; p.lvl = null; p.prod = null;
   toast('Chantier annulé — ressources rendues');
   renderPlanetMap();
   if (typeof renderInfoCard === 'function') renderInfoCard(idx);
@@ -30958,7 +31521,7 @@ function renderProbeReportRow(r, isUnread) {
       const stat = G.fleet?.stationed || {};
       const totalTankers = (stat.tanker?.t1 || 0) + (stat.tanker?.t2 || 0) + (stat.tanker?.t3 || 0);
       const inMission = (G.tankerMissions || []).filter(m => m.status === 'in_transit' || m.status === 'returning').length;
-      const availableTankers = totalTankers - inMission;
+      const availableTankers = tankerAvailability(null);
 
       fullBodyHtml = cartaBanner + signatureHeader + `
         <div style="font-size:9px;color:var(--mut);letter-spacing:.12em;text-transform:uppercase;margin-bottom:8px">${n} cible${n > 1 ? 's' : ''} détectée${n > 1 ? 's' : ''}</div>
@@ -32916,7 +33479,7 @@ function renderKnownTargetsSection(targets) {
   const stat = G.fleet?.stationed || {};
   const totalTankers = (stat.tanker?.t1 || 0) + (stat.tanker?.t2 || 0) + (stat.tanker?.t3 || 0);
   const inMission = (G.tankerMissions || []).filter(m => m.status === 'in_transit' || m.status === 'returning').length;
-  const availableTankers = totalTankers - inMission;
+  const availableTankers = tankerAvailability(null);
 
   const rows = entries.map(([coord, t]) => {
     const icon = t.icon || '◆';
@@ -33324,7 +33887,7 @@ function renderMovingTargetDetailScreen() {
                      + (G.fleet?.stationed?.tanker?.t2 || 0)
                      + (G.fleet?.stationed?.tanker?.t3 || 0);
   const inMissionT = (G.tankerMissions || []).filter(m => m.status === 'in_transit' || m.status === 'returning' || m.status === 'orbital_relay').length;
-  const availableTankers = totalTankers - inMissionT;
+  const availableTankers = tankerAvailability(null);
 
   let actionsHtml = '';
   if (consumed) {
@@ -33774,7 +34337,7 @@ function renderDefenseScreen() {
       const inDeployedFleets = getSoldiersInDeployedFleets(key);
       const inPreparedFleets = getSoldiersInPreparedFleets(key);
       const inMissionFleets = getSoldiersInMissionFleets(key);
-      const groundUnits = Math.max(0, u.qty - inDeployedFleets - inMissionFleets);
+      const groundUnits = Math.max(0, u.qty - inDeployedFleets - inMissionFleets - soldiersCommittedElsewhere(key));
       const subtotal = groundUnits * def.defPerUnit;
       const dmgBadge = u.dmg > 0 ? ` <span style="color:var(--amber);font-size:9px">(${u.dmg} endommagés)</span>` : '';
 
@@ -34013,19 +34576,17 @@ function renderBuildingDetail() {
       </div>
     `;
   } else if (parcel.damaged) {
-    // MULTIJOUEUR : abîmé par un raid → production réduite de moitié jusqu'à réparation
-    const rc = mpRepairCost(parcel);
-    costLabel.style.display = '';
-    costEl.style.display = '';
-    costEl.innerHTML = renderTierCost({ cost: rc });
-    const canRepair = canAffordCost(rc);
+    // MULTIJOUEUR : abîmé par un raid → production réduite de moitié jusqu'à réparation (match-3)
+    costLabel.style.display = 'none';
+    costEl.style.display = 'none';
+    const canRepair = true;
     actionZone.innerHTML = `
       <div class="dash-section-card" style="border-color:rgba(255,80,64,.35);padding:14px;margin:14px 16px 4px">
         <div style="font-size:11px;letter-spacing:.16em;color:var(--red);text-transform:uppercase;margin-bottom:6px;display:flex;align-items:center;gap:5px">${icon('warning', {size:12, color:'var(--red)'})} Abîmé par un raid</div>
-        <div style="font-size:13px;color:var(--mut);line-height:1.5">${parcel.damagedBy ? `Touché par <strong style="color:var(--txt)">${parcel.damagedBy}</strong>. ` : ''}La production tourne à moitié tant que le bâtiment n'est pas réparé.</div>
-        <button onclick="mpRepairParcel(${idx})" ${canRepair ? '' : 'disabled'}
+        <div style="font-size:13px;color:var(--mut);line-height:1.5">${parcel.damagedBy ? `Touché par <strong style="color:var(--txt)">${parcel.damagedBy}</strong>. ` : ''}La production tourne à moitié tant que le bâtiment n'est pas réparé. Une partie d'exploitation suffit : atteins le palier I, tu gardes aussi ce que tu extrais.</div>
+        <button onclick="mpStartRepair(${idx})" ${canRepair ? '' : 'disabled'}
                 style="margin-top:12px;width:100%;padding:13px;background:${canRepair ? 'rgba(255,192,96,.08)' : 'rgba(120,140,136,.05)'};border:1px solid ${canRepair ? 'rgba(255,192,96,.45)' : 'var(--line)'};border-radius:8px;color:${canRepair ? 'var(--amber)' : 'var(--mut)'};font-size:12px;letter-spacing:.18em;text-transform:uppercase;cursor:${canRepair ? 'pointer' : 'not-allowed'}">
-          ${canRepair ? 'Réparer' : 'Ressources insuffisantes'}
+          Réparer · match-3
         </button>
       </div>
     `;
@@ -34563,6 +35124,8 @@ function confirmScrapUnit(key) {
   const stat = G.defense.units[key];
   const unit = DEFENSE_UNITS[key];
   if (stat.qty <= 0) return;
+  const engaged = (G.fleet.prepared || []).reduce((a, f) => a + (f.soldiers?.[key] || 0), 0) + soldiersCommittedElsewhere(key);
+  if (stat.qty - engaged <= 0) { toast('Toutes ces unités sont engagées (flotte, garnison ou tanker)'); return; }
   stat.qty--;
   for (const [res, q] of Object.entries(unit.scrapReturn)) {
     if (G.res[res]) G.res[res].v = Math.min(G.res[res].max, G.res[res].v + q);
@@ -35209,10 +35772,10 @@ function getCommerceCreditsRate() {
   if (!G.planet?.parcels) return 0;
   let rate = 0;
   for (const parcel of G.planet.parcels) {
-    if (parcel?.building === 'comptoir') {
-      const tier = parcel.tier || 1;
+    if (parcel?.building === 'comptoir' && parcel.state === 'built') {
+      const tier = parcel.lvl || 1;
       const tierData = BUILDING_TIERS.comptoir?.[tier];
-      if (tierData?.prod?.credits) rate += tierData.prod.credits;
+      if (tierData?.prod?.credits) rate += tierData.prod.credits * (parcel.damaged ? 0.5 : 1);
     }
   }
   return rate;
@@ -35221,7 +35784,7 @@ function getCommerceCreditsRate() {
 // Compte les comptoirs construits (toutes parcelles confondues)
 function countComptoirs() {
   if (!G.planet?.parcels) return 0;
-  return G.planet.parcels.filter(p => p?.building === 'comptoir').length;
+  return G.planet.parcels.filter(p => p?.building === 'comptoir' && p.state === 'built').length;
 }
 
 // Tick de production passive CG — appelé toutes les 10s par la passive loop
@@ -35247,11 +35810,11 @@ function getFuelProductionRate() {
   if (!G.planet?.parcels) return 0;
   let rate = 0;
   for (const parcel of G.planet.parcels) {
-    if (parcel?.building === 'raffinerie') {
+    if (parcel?.building === 'raffinerie' && parcel.state === 'built') {
       // Note : le tier d'un bâtiment est stocké dans parcel.lvl (pas parcel.tier)
       const tier = parcel.lvl || parcel.tier || 1;
       const tierData = BUILDING_TIERS.raffinerie?.[tier];
-      if (tierData?.prod?.fuel) rate += tierData.prod.fuel;
+      if (tierData?.prod?.fuel) rate += tierData.prod.fuel * (parcel.damaged ? 0.5 : 1);
     }
   }
   return rate;
@@ -35264,7 +35827,7 @@ function getFuelCap() {
   if (!G.planet?.parcels) return 1000;
   let maxCap = 1000;
   for (const parcel of G.planet.parcels) {
-    if (parcel?.building === 'raffinerie') {
+    if (parcel?.building === 'raffinerie' && parcel.state === 'built') {
       const tier = parcel.lvl || parcel.tier || 1;
       const tierData = BUILDING_TIERS.raffinerie?.[tier];
       if (tierData?.fuelCap && tierData.fuelCap > maxCap) maxCap = tierData.fuelCap;
@@ -36190,7 +36753,7 @@ function _renderRouteRecentReports(route) {
       <div style="font-size:10px;color:var(--mut);letter-spacing:.1em;text-transform:uppercase;margin-bottom:8px">Derniers retours · ${reports.length}</div>
   `;
   for (const r of reports) {
-    const elapsed = Math.floor((Date.now() - r.at) / 3600000);
+    const elapsed = Math.floor((Date.now() - (r.createdAt || r.at || Date.now())) / 3600000);
     const elapsedLabel = elapsed < 1 ? 'à l\'instant' : elapsed < 24 ? `${elapsed}h` : `${Math.floor(elapsed/24)}j`;
     const lootStr = r.isLost
       ? '<span style="color:#e87a7a">PERDU</span>'
@@ -36626,7 +37189,7 @@ function launchTankerOnRoute(routeId, tierKey, cargo) {
     (m.status === 'in_transit' || m.status === 'docked' || m.status === 'returning')
     && m.tier === tier
   ).length;
-  if (tierStock - inMission <= 0) {
+  if (tankerAvailability(tier) <= 0) {
     if (typeof toast === 'function') toast(`Aucun tanker T${tier} disponible`);
     return null;
   }
@@ -37084,15 +37647,15 @@ function tickCrewMood(mission) {
 
   // ─── Auto-départ si fin de séjour prévu atteinte ───
   if (mission.dockStay && now >= mission.dockStay.endsAt) {
-    // Déclencher le retour automatique
-    setTimeout(() => returnTankerFromDock(mission.id), 100);
+    // Déclencher le retour automatique (à l'heure de fin prévue)
+    setTimeout(() => returnTankerFromDock(mission.id, mission.dockStay && mission.dockStay.endsAt), 100);
   }
 }
 
 // Choix de durée de séjour
 function setDockStayDuration(missionId, durationKey) {
   const mission = (G.tankerMissions || []).find(m => m.id === missionId);
-  if (!mission || mission.status !== 'docked') return;
+  if (!mission || mission.status !== 'docked' || mission.dockStay) return;
   const cfg = DOCK_STAY_DURATIONS[durationKey];
   if (!cfg) return;
   const now = Date.now();
@@ -37973,7 +38536,7 @@ function launchExplorationOnLead(leadId, tierKey) {
     ['in_transit', 'docked', 'returning', 'exploring'].includes(m.status)
     && m.tier === tier
   ).length;
-  if (tierStock - inMission <= 0) {
+  if (tankerAvailability(tier) <= 0) {
     if (typeof toast === 'function') toast(`Aucun tanker T${tier} disponible`);
     return null;
   }
@@ -38477,11 +39040,13 @@ function getNpcProtectionTiers(npc) {
 function getNpcInfoTiers(npc, drinkState) {
   const priceMult = getNpcPriceMultiplier(drinkState).mult;
   const tiers = [];
+  // AUDIT_1110 — prix stables pour un même PNJ (affiché = débité)
+  const _r = (id) => _makeSeededRandom(_hashStringDeterministic(npc.id + ':' + id))();
   // Banal : toujours dispo
   tiers.push({
     id: 'banal',
     label: 'Info banale',
-    cost: Math.round((10 + Math.random() * 20) * priceMult),
+    cost: Math.round((10 + _r('banal') * 20) * priceMult),
     desc: 'Un autre convoi, un dock voisin, son origine',
   });
   // Moyen : dispo si comportement info >= 'cond'
@@ -38490,7 +39055,7 @@ function getNpcInfoTiers(npc, drinkState) {
     tiers.push({
       id: 'medium',
       label: 'Info moyenne',
-      cost: Math.round((50 + Math.random() * 100) * priceMult),
+      cost: Math.round((50 + _r('medium') * 100) * priceMult),
       desc: 'Stabilité d\'une de tes routes, ou une route inconnue',
     });
   }
@@ -38499,7 +39064,7 @@ function getNpcInfoTiers(npc, drinkState) {
     tiers.push({
       id: 'rare',
       label: 'Info rare',
-      cost: Math.round((300 + Math.random() * 700) * priceMult),
+      cost: Math.round((300 + _r('rare') * 700) * priceMult),
       desc: 'Identité d\'un PNJ masqué · coordonnées d\'un dock secret',
     });
   }
@@ -38538,10 +39103,10 @@ const NPC_STATUSES = [
 
 // Génère la liste de tankers PNJ amarrés à un dock, déterministe par dock + jour.
 // Cache via mission.dock pour éviter de recalculer à chaque render.
-function getNpcMissionsAtDock(dock) {
+function getNpcMissionsAtDock(dock, atMs) {
   if (!dock) return [];
   // Granularité jour : tous les jours, le dock se renouvelle naturellement
-  const dayBucket = Math.floor(Date.now() / (24 * 60 * 60 * 1000));
+  const dayBucket = Math.floor((atMs || Date.now()) / (24 * 60 * 60 * 1000));
   const seed = _hashStringDeterministic((dock.id || dock.name || 'dock') + ':' + dayBucket);
   const rng = _makeSeededRandom(seed);
 
@@ -38951,7 +39516,7 @@ function onNpcInteract(npcId, verb) {
   // 📡 Vendre tes infos
   if (verb === 'sell') {
     // Trouver une route à exposer
-    const myRoutes = (G.tradeRoutes || []).filter(r => !r.exposedToPirates);
+    const myRoutes = (G.routes || []).filter(r => !r.exposedToPirates && r.status !== 'collapsed');
     if (myRoutes.length === 0) {
       _setNpcResult(mission, npcId, { text: `Tu n'as aucune route inédite à vendre.`, kind: 'fail' });
       _renderNpcSheet(npc);
@@ -39018,10 +39583,10 @@ function onNpcSubChoice(npcId, verb, choice) {
         infoText = `Le dock voisin le plus actif est à Σ-${20 + Math.floor(Math.random() * 80)}.`;
       }
     } else if (choice === 'medium') {
-      const myRoutes = G.tradeRoutes || [];
+      const myRoutes = G.routes || [];
       if (myRoutes.length > 0) {
         const r = myRoutes[Math.floor(Math.random() * myRoutes.length)];
-        const stability = Math.round((r.stability || 0.85) * 100);
+        const stability = Math.round(r.stability ?? 85);
         infoText = `Ta route "${r.name}" est en stabilité réelle ${stability}%. ${stability < 70 ? 'Risque élevé.' : stability < 85 ? 'Stable, mais surveille.' : 'Très stable.'}`;
       } else {
         infoText = `Un dock secret existe à Σ-${100 + Math.floor(Math.random() * 50)}. Pas sur les cartes officielles.`;
@@ -39061,6 +39626,12 @@ function onNpcSubChoice(npcId, verb, choice) {
     const tiers = getNpcProtectionTiers(npc);
     const tier = tiers.find(t => t.id === choice);
     if (!tier) { _exitSub(); _renderNpcSheet(npc); return; }
+    if (mission.protection && mission.protection.reduction >= tier.reduction) {
+      _setNpcResult(mission, npcId, { text: `Ton convoi est déjà couvert (${mission.protection.label}). Inutile de payer moins bien.`, kind: 'info' });
+      _exitSub();
+      _renderNpcSheet(npc);
+      return;
+    }
     if ((G.credits || 0) < tier.cost) {
       _setNpcResult(mission, npcId, { text: `Tu n'as pas ${tier.cost} CG.`, kind: 'fail' });
       _exitSub();
@@ -39156,6 +39727,7 @@ function closeNpcSheet() {
   const modal = document.getElementById('npc-sheet-modal');
   if (modal) modal.remove();
   _activeNpcId = null;
+  if (typeof _mpOpenConvoyId !== 'undefined') _mpOpenConvoyId = null;
 }
 
 // ─── Retour au home depuis le dock ───
@@ -39163,11 +39735,11 @@ function closeNpcSheet() {
 // Passe en status='returning' avec un timer (durée = même que l'aller).
 // Le calcul du butin + rapport se fait dans _completeRouteRunReturn quand le timer expire.
 // Cf. demande Adrien 18/05 : retour avec barre de progression comme l'aller.
-function returnTankerFromDock(missionId) {
+function returnTankerFromDock(missionId, departAt) {
   const mission = (G.tankerMissions || []).find(m => m.id === missionId);
   if (!mission || mission.status !== 'docked') return null;
 
-  const now = Date.now();
+  const now = Math.min(Date.now(), departAt || Date.now());
   // Durée du retour = même que l'aller (departedAt → arrivalAt)
   const goDuration = (mission.arrivalAt - mission.departedAt) || (60 * 1000);
   // En mode "instant mission" (cheat dev), accélérer le retour aussi
@@ -39185,6 +39757,24 @@ function returnTankerFromDock(missionId) {
   }
   if (typeof refreshCurrentScreen === 'function') refreshCurrentScreen();
   return mission;
+}
+
+// AUDIT_1110 — Tanker de route rappelé avant d'atteindre le dock : la cale revient telle quelle, sans commerce.
+function _completeCancelledRouteRun(missionId) {
+  const idx = (G.tankerMissions || []).findIndex(m => m.id === missionId);
+  if (idx === -1) return;
+  const m = G.tankerMissions[idx];
+  const back = [];
+  for (const k of ['metal', 'energie', 'cristal']) {
+    const q = (m.cargo && m.cargo[k]) || 0;
+    if (q > 0 && G.res[k]) { G.res[k].v = Math.min(Math.max(G.res[k].max, G.res[k].v), G.res[k].v + q); back.push(`${fmt(q)} ${k}`); }
+  }
+  const route = (G.routes || []).find(r => r.id === m.routeId);
+  if (route && route.activeMissionId === m.id) { route.activeMissionId = null; if (route.status === 'in_use') route.status = 'active'; }
+  G.tankerMissions.splice(idx, 1);
+  if (typeof toast === 'function') toast(`${m.tankerName} est rentré · ${back.length ? back.join(' · ') + ' rendus' : 'cale vide'}`);
+  if (typeof saveGame === 'function') saveGame();
+  if (typeof refreshCurrentScreen === 'function') refreshCurrentScreen();
 }
 
 // ─── INTERNE : finalise le retour ───
@@ -39560,9 +40150,13 @@ ${crew} a guidé le tanker ${mission.tankerName} le long de ${routeName}. ${mood
 function _summarizeDockInteractions(mission) {
   const result = { lines: [] };
   if (!mission?.npcInteractions || !mission.dock) return result;
-  const npcs = getNpcMissionsAtDock(mission.dock);
+  // Tous les jours du séjour (les PNJ changent chaque jour)
   const npcById = {};
-  for (const n of npcs) npcById[n.id] = n;
+  const DAY = 24 * 60 * 60 * 1000;
+  const from = mission.dock.arrivedAt || mission.arrivalAt || Date.now();
+  for (let t = from, n = 0; t <= Date.now() + DAY && n < 10; t += DAY, n++) {
+    for (const x of getNpcMissionsAtDock(mission.dock, t)) npcById[x.id] = x;
+  }
 
   for (const [npcId, state] of Object.entries(mission.npcInteractions)) {
     const npc = npcById[npcId];
@@ -39793,6 +40387,7 @@ async function onRecallTankerFromDock() {
   if (!ok) return;
   const result = returnTankerFromDock(_activeDockMissionId);
   _activeDockMissionId = null;
+  if (typeof closeNpcSheet === 'function') closeNpcSheet();
   // Si le tanker a été perdu, result est null mais le rapport est déjà stocké
   goto('commerce', { replace: true });
 }
@@ -39801,6 +40396,7 @@ async function onRecallTankerFromDock() {
 // Le joueur peut revenir dessus en re-cliquant la route depuis le hub Commerce.
 function onLeaveDockBack() {
   _activeDockMissionId = null;
+  if (typeof closeNpcSheet === 'function') closeNpcSheet();
   goto('commerce', { replace: true });
 }
 
@@ -39812,6 +40408,7 @@ function renderDockScreen() {
     // Mode replace pour ne pas laisser 'dock' polluer la nav stack
     // (sinon le bouton RETOUR du commerce ramène ici sur un dock fantôme — bug 18/05)
     _activeDockMissionId = null;
+    if (typeof closeNpcSheet === 'function') closeNpcSheet();
     goto('commerce', { replace: true });
     return;
   }
@@ -39867,6 +40464,9 @@ function renderDockScreen() {
 
     <!-- D2 : Choix durée OU séjour en cours -->
     ${_renderDockStaySection(mission, dock)}
+
+    <!-- MP : commandants à quai, marchés, rumeurs du comptoir -->
+    ${_renderDockPlayersSection(mission, dock)}
 
     <!-- D3 : Autres convois amarrés -->
     ${_renderDockNpcSection(mission, dock)}
@@ -40080,11 +40680,11 @@ function storeRouteRunReport(mission, route, mood, loot, isLost, narrative) {
     const remainingCargo = cargoFinal ? (cargoFinal.metal + cargoFinal.energie + cargoFinal.cristal) : 0;
     balance = {
       initialUnits: initialTotal,
-      returnedUnits: returnedRes + remainingCargo,
+      returnedUnits: returnedRes,
       credits: loot.credits || 0,
       fuelSpent: mission.fuelCost || 0,
       // Bénéfice net en unités (résiduel + butin - investi). Le carburant est en plus.
-      netUnits: returnedRes + remainingCargo - initialTotal,
+      netUnits: returnedRes - initialTotal,
     };
   }
   const report = {
@@ -41018,7 +41618,7 @@ const ONBOARDING_STEPS = [
     title: 'Premier balayage',
     instruction: 'Va au <strong>Centre de prospection</strong> (depuis ta planète) et lance une <strong>sonde Radar</strong>. Tu découvriras tes premières signatures dans l\'univers.',
     hint: 'La sonde Radar est gratuite et jetable. Elle ne revient pas, mais elle révèle un système entier.',
-    checkComplete: () => (G.probeReports || []).some(r => r.kind === 'radar') || (G.signatures || []).length > 0,
+    checkComplete: () => (G.probeReports || []).some(r => r.tier === 'radar' || r.kind === 'radar'),
   },
 ];
 
@@ -41238,16 +41838,16 @@ if (G.knownTargets && Array.isArray(G.tankerMissions)) {
 
 </script>
 <!-- PLANET3D — carte 3D + boucle antenne (source : sb-build/src/planet3d.js) -->
-<script type="module" src="assets/planet3d.js?v=20261011-1210"></script>
+<script type="module" src="assets/planet3d.js?v=20261011-2000"></script>
 <!-- CLOUD — sauvegarde Supabase (source : sb-build/src/cloud.js) -->
-<script type="module" src="assets/cloud.js?v=20261011-1210"></script>
+<script type="module" src="assets/cloud.js?v=20261011-2000"></script>
 <!-- MATCH3 — Match-3 V2 (assets/match3.js, source src/match3.js + src/m3core.js) : remplace startM3 -->
-<script type="module" src="assets/match3.js?v=20261011-1210"></script>
+<script type="module" src="assets/match3.js?v=20261011-2000"></script>
 <!-- HOME V2 — « monde d'abord » : planète plein écran, ressources en ligne, Flotte / Défense / Prospection (assets/home.js) -->
-<script type="module" src="assets/home.js?v=20261011-1930"></script>
+<script type="module" src="assets/home.js?v=20261011-2000"></script>
 <!-- SPACE MAP v0 — carte du Centre de prospection (assets/spacemap.js, source src/spacemap.js) -->
-<script src="assets/spacemap.js?v=20261011-1210"></script>
+<script src="assets/spacemap.js?v=20261011-2000"></script>
 <!-- SPACE MAP niveau B — diorama 3D d'un système (assets/system3d.js, source src/system3d.js) -->
-<script type="module" src="assets/system3d.js?v=20261011-1210"></script>
+<script type="module" src="assets/system3d.js?v=20261011-2000"></script>
 </body>
 </html>
