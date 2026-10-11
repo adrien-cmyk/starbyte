@@ -1750,9 +1750,11 @@ svg.map {
 /* SHIP3D — fiche d'unité vaisseau en vue héros (même principe que le soldat lourd : 3D plein écran, fiche par-dessus) */
 /* zone libre au-dessus des cartes = la 3D (tous les gestes : orbite, inclinaison, pincer) ;
    les cartes défilent nativement et peuvent remonter par-dessus le vaisseau */
-#scr-unit-detail.ud-ship .ud-hero-space { touch-action: none; }
+#scr-unit-detail.ud-ship .ud-hero-space, #scr-building-detail.ud-ship .ud-hero-space { touch-action: none; }
 #scr-unit-detail.ud-ship #ud-u3d { display: none; }
-#ud-ship-hero .u3d-canvas { touch-action: none; }
+#ud-ship-hero .u3d-canvas, #bd-ship-hero .u3d-canvas { touch-action: none; }
+#scr-building-detail.ud-ship #bd-u3d, #scr-building-detail.ud-ship #bd-hero-space { display: none; }
+#scr-building-detail.ud-ship .screen-scroll { pointer-events: auto; }
 .bld-banner {
   margin: 12px 16px 4px;
   padding: 18px 16px;
@@ -34874,6 +34876,10 @@ function renderBuildingDetail() {
 
   // PASSE 3.5-narrative : Archives ambient
   renderBuildingArchives(idx);
+  // SHIP3D — le chantier orbital a sa fiche 3D plein cadre (OS-01) ; après les surcouches de home.js
+  setTimeout(() => {
+    if (BUILDING_SHIP3D[buildingKey]) mountBuildingShip3D(buildingKey, currentTier); else unmountBuildingShip3D();
+  }, 0);
 }
 
 function tryStartBuildingUpgrade(idx) {
@@ -35261,13 +35267,13 @@ function mountUnitShip3D(key, inService) {
 }
 // Gestes de la vue héros vaisseau : dans la zone libre, un doigt = orbite (rotation + inclinaison), deux doigts = zoom,
 // comme sur la vitrine. Sur les cartes, défilement natif (la liste remonte par-dessus la 3D).
-let shipHeroGesturesOn = false;
-function shipHeroGestures() {
-  if (shipHeroGesturesOn) return;
-  shipHeroGesturesOn = true;
-  const scr = document.getElementById('scr-unit-detail');
+const shipHeroGesturesOn = {};
+function shipHeroGestures(scrId = 'scr-unit-detail', getHandle = () => unitShip3D && unitShip3D.handle) {
+  if (shipHeroGesturesOn[scrId]) return;
+  shipHeroGesturesOn[scrId] = true;
+  const scr = document.getElementById(scrId);
   const pts = new Map(); let mode = null, last = null, pinch0 = 0;
-  const h = () => unitShip3D && unitShip3D.handle;
+  const h = getHandle;
   const dist = () => { const v = [...pts.values()]; return Math.hypot(v[0].x - v[1].x, v[0].y - v[1].y); };
   scr.addEventListener('pointerdown', (e) => {
     if (!scr.classList.contains('ud-ship') || !h()) return;
@@ -35294,6 +35300,57 @@ function shipHeroGestures() {
     if (!scr.classList.contains('ud-ship') || !h() || !e.target.closest || !e.target.closest('.ud-hero-space')) return;
     e.preventDefault(); h().begin(); h().dolly(1 + e.deltaY * 0.0012); h().end();
   }, { passive: false });
+}
+// ─── SHIP3D : fiche bâtiment en vue héros (chantier orbital OS-01) ───
+const BUILDING_SHIP3D = { shipyard: { url: 'assets/3d/sb_os01.glb?v=20261011-2340', code: 'OS-01 Chantier orbital', profile: 'os01' } };
+let bdShip3D = null;   // { key, handle }
+function mountBuildingShip3D(key, tier) {
+  const scr = document.getElementById('scr-building-detail');
+  const scroll = scr && scr.querySelector('.screen-scroll');
+  const model = BUILDING_SHIP3D[key];
+  if (!scr || !scroll || !model || !window.WebGLRenderingContext) return false;
+  let hero = document.getElementById('bd-ship-hero');
+  if (!hero) { hero = document.createElement('div'); hero.id = 'bd-ship-hero'; hero.className = 'u3d u3d-hero'; scr.insertBefore(hero, scroll); }
+  let space = document.getElementById('bd-ship-space');
+  if (!space) { space = document.createElement('div'); space.id = 'bd-ship-space'; space.className = 'ud-hero-space'; const h = scroll.querySelector('.head'); scroll.insertBefore(space, h ? h.nextSibling : scroll.firstChild); }
+  scr.classList.add('ud-hero', 'ud-ship');
+  hero.style.display = ''; space.style.display = '';
+  let stat = hero.querySelector('.u3d-stat');
+  if (!stat) {
+    hero.insertAdjacentHTML('beforeend', `<div class="u3d-stat"><b></b><span>tier</span></div><div class="u3d-hint">${model.code} · glisser pour tourner</div>`);
+    stat = hero.querySelector('.u3d-stat');
+  }
+  stat.querySelector('b').textContent = tier || 1;
+  requestAnimationFrame(() => {
+    const hb = hero.getBoundingClientRect(), sb = space.getBoundingClientRect();
+    if (hb.height) hero.style.setProperty('--u3d-band', Math.max(0, hb.bottom - sb.bottom) + 'px');
+  });
+  shipHeroGestures('scr-building-detail', () => bdShip3D && bdShip3D.handle);
+  if (bdShip3D && bdShip3D.key === key) return true;
+  if (bdShip3D) { try { bdShip3D.handle.dispose(); } catch (e) {} bdShip3D = null; }
+  scroll.scrollTop = 0;
+  hero.classList.add('u3d-loading');
+  const start = () => {
+    bdShip3D = { key, handle: window.Ship3D.mount(hero, {
+      url: model.url, shiftY: 0.2, ship: window.Ship3D.profiles ? window.Ship3D.profiles[model.profile] : undefined,
+      onReady: () => hero.classList.remove('u3d-loading'),
+      onError: () => { hero.classList.remove('u3d-loading'); hero.classList.add('u3d-fail'); },
+    }) };
+  };
+  if (window.Ship3D) start(); else window.addEventListener('ship3d-ready', start, { once: true });
+  return true;
+}
+function unmountBuildingShip3D() {
+  const scr = document.getElementById('scr-building-detail');
+  const hero = document.getElementById('bd-ship-hero');
+  if (!hero && !bdShip3D) return;                 // jamais monté : ne touche pas aux autres héros (tourelle)
+  if (bdShip3D) { try { bdShip3D.handle.dispose(); } catch (e) {} bdShip3D = null; }
+  if (hero) { hero.classList.remove('u3d-loading', 'u3d-fail'); hero.style.display = 'none'; }
+  const space = document.getElementById('bd-ship-space'); if (space) space.style.display = 'none';
+  if (scr && scr.classList.contains('ud-ship')) {
+    scr.classList.remove('ud-ship');
+    if (!document.getElementById('bd-u3d') || document.getElementById('bd-u3d').style.display === 'none') scr.classList.remove('ud-hero');
+  }
 }
 function unmountUnitShip3D(keepClasses) {
   if (unitShip3D) { try { unitShip3D.handle.dispose(); } catch (e) {} unitShip3D = null; }
@@ -42191,7 +42248,7 @@ if (G.knownTargets && Array.isArray(G.tankerMissions)) {
 <script src="assets/spacemap.js?v=20261012-0030"></script>
 <!-- SPACE MAP niveau B — diorama 3D d'un système (assets/system3d.js, source src/system3d.js) -->
 <script type="module" src="assets/system3d.js?v=20261012-0030"></script>
-<!-- SHIP3D — fiches d'unité 3D du cuirassé KV-01 et de la frégate SR-01 (assets/ship3d.js, sur le moteur partagé window.SB3D) -->
+<!-- SHIP3D — fiches 3D : cuirassé KV-01, frégate SR-01, tanker TK-07, chantier orbital OS-01 (assets/ship3d.js, sur le moteur partagé window.SB3D) -->
 <script type="module" src="assets/ship3d.js?v=20261012-0030"></script>
 </body>
 </html>
