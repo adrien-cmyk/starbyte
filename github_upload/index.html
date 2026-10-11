@@ -8512,6 +8512,7 @@ var EXTRA_SAVE_KEYS = [
   'tutorialArtefactSeen', 'tutorialBombSeen', 'tutorialHyperSeen', 'tutorialMegaSeen',
   'mpDeals',   // MP_DOCKS_V0 — marchés entre commandants (séquestre et règlement)
   'botState',  // BOTS_1110 — stocks des commandants automates après pillage
+  'mpGrowthMilestone',  // RUMORS_1110 — dernier palier de niveau annoncé au comptoir
 ];
 
 // Sauvegarde G complet dans localStorage. Appelé fréquemment, doit être rapide.
@@ -8811,6 +8812,39 @@ function mpWorldSnapshot() {
     stocks,
     buildings: built.map(p => ({ key: p.building, lvl: p.lvl || 1, state: p.damaged || p.state === 'damaged' ? 'damaged' : 'built' })),
   };
+}
+
+// INCOMING_1110 — flottes hostiles en approche : bandeau permanent (tous écrans) jusqu'à l'impact
+var _mpIncoming = [];
+function mpRenderIncoming(list) {
+  if (Array.isArray(list)) _mpIncoming = list.filter(r => Date.parse(r.arrives_at) > Date.now());
+  else _mpIncoming = _mpIncoming.filter(r => Date.parse(r.arrives_at) > Date.now());
+  let el = document.getElementById('mp-incoming');
+  if (!_mpIncoming.length) { if (el) el.remove(); return; }
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'mp-incoming';
+    el.style.cssText = 'position:fixed;left:50%;transform:translateX(-50%);top:calc(env(safe-area-inset-top, 0px) + 8px);z-index:9000;max-width:92vw;padding:8px 14px;border-radius:20px;background:rgba(60,10,10,.88);border:1px solid rgba(255,90,70,.6);color:#ffd6cf;font-size:12px;letter-spacing:.02em;box-shadow:0 0 18px rgba(255,60,40,.35);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis';
+    el.onclick = () => {
+      const r = _mpIncoming[0];
+      if (r) toast(`${r.attacker_pseudo}${r.fleet_name ? ' · ' + r.fleet_name : ''} arrive à ${new Date(Date.parse(r.arrives_at)).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}. Renforce ta défense ou déploie une flotte en orbite.`);
+    };
+    document.body.appendChild(el);
+  }
+  const r = _mpIncoming.slice().sort((a, b) => Date.parse(a.arrives_at) - Date.parse(b.arrives_at))[0];
+  const min = Math.max(1, Math.ceil((Date.parse(r.arrives_at) - Date.now()) / 60000));
+  el.innerHTML = `⚠ Flotte hostile · <strong>${r.attacker_pseudo}</strong> · impact dans ${min} min${_mpIncoming.length > 1 ? ` · +${_mpIncoming.length - 1}` : ''}`;
+}
+setInterval(() => { try { mpRenderIncoming(); } catch (e) {} }, 30000);
+
+// RUMORS_1110 — chaque palier de 10 niveaux de monde fait parler le comptoir (une fois)
+function mpGrowthCheck(level, planetName) {
+  const milestone = Math.floor((level || 0) / 10) * 10;
+  if (G.mpGrowthMilestone === undefined) { G.mpGrowthMilestone = milestone; return; }   // installation : pas d'annonce rétroactive
+  if (milestone >= 10 && milestone > G.mpGrowthMilestone) {
+    G.mpGrowthMilestone = milestone;
+    if (window.SBMP && window.SBMP.ready()) window.SBMP.reportEvent('world_growth', planetName || null, { level: milestone });
+  }
 }
 
 // Déménagement unique vers la zone de test (ou alignement sur l'adresse du registre).
@@ -9148,6 +9182,93 @@ function mpRepairParcel(idx, opts) {
   if (bd && !bd.classList.contains('hidden')) renderBuildingDetail();
 }
 
+// PAVILLONS_1110 — pavillons reçus (relevés par le registre)
+var MP_FLAG_CONTEXT = { orbit: 'depuis son tanker en orbite', dock: 'au bar d\'un dock', raid: 'après le raid' };
+function mpIngestFlags(rows) {
+  if (!Array.isArray(rows) || !rows.length) return [];
+  if (!G.reports) G.reports = [];
+  const fresh = [];
+  for (const f of rows) {
+    const known = G.reports.find(r => r.mpFlagId === f.id);
+    if (known) { known.flag.replied = known.flag.replied || !!f.replied; continue; }
+    const def = MP_FLAG_BY_KEY[f.flag_key];
+    if (!def) continue;
+    G.reports.unshift({
+      id: 'rpt-flag-' + f.id, kind: 'flag', mpFlagId: f.id,
+      fleetName: '⚑ ' + (f.from_pseudo || 'Commandant'), targetName: def.label,
+      intent: { label: MP_FLAG_CONTEXT[f.context] || '', icon: '' }, doctrine: { color: def.color },
+      returnedAt: Date.parse(f.created_at) || Date.now(), read: !!f.seen,
+      flag: { from: f.from_pseudo, address: f.from_address || null, planet: f.from_planet || null, key: f.flag_key, context: f.context, at: Date.parse(f.created_at) || Date.now(), replied: !!f.replied },
+    });
+    if (f.from_address && typeof mergeRealWorlds === 'function') {
+      const sysKey = String(f.from_address).split('-').slice(0, 3).join('-');
+      mergeRealWorlds(sysKey, [{ address: f.from_address, pseudo: f.from_pseudo, planet_name: f.from_planet, level_estimate: 1 }]);
+    }
+    if (!f.seen) fresh.push(f);
+  }
+  if (fresh.length) {
+    const f = fresh[0];
+    toast(`⚑ ${f.from_pseudo} hisse un pavillon : « ${(MP_FLAG_BY_KEY[f.flag_key] || {}).label || ''} »${fresh.length > 1 ? ` (+${fresh.length - 1})` : ''}`);
+    if (typeof saveGame === 'function') saveGame();
+    if (typeof refreshCurrentScreen === 'function') refreshCurrentScreen();
+  }
+  return fresh;
+}
+function _mpFlagChips(onclickFn, disabledKeys) {
+  return PLAYER_MESSAGE_FLAGS.map(f => {
+    const key = MP_FLAG_KEY[f.id];
+    const off = disabledKeys && disabledKeys.includes(key);
+    return `<div ${off ? '' : `onclick="${onclickFn}('${key}')"`} style="padding:10px 12px;margin-bottom:6px;background:rgba(20,25,30,.9);border:1px solid ${f.color}40;border-radius:8px;${off ? 'opacity:.45' : 'cursor:pointer'}">
+      <div style="font-size:12px;color:${f.color};font-weight:600">${f.label}</div>
+      <div style="font-size:10px;color:var(--mut);margin-top:2px">${f.desc}</div></div>`;
+  }).join('');
+}
+function renderFlagReportDetail(r) {
+  const fl = r.flag || {};
+  const def = MP_FLAG_BY_KEY[fl.key] || {};
+  document.getElementById('report-detail-title').textContent = 'PAVILLON';
+  document.getElementById('report-detail-meta').textContent = `${fl.from || '?'} · ${new Date(fl.at || r.returnedAt).toLocaleString('fr-FR')}`;
+  const el = document.getElementById('report-detail-content');
+  if (!el) return;
+  const canReply = !fl.replied && Date.now() - (fl.at || 0) < 24 * 3600e3 && window.SBMP && window.SBMP.ready();
+  el.innerHTML = `
+    <div style="margin:0 16px 14px;padding:22px 18px;border:1px solid ${(def.color || '#5fffe8')}55;border-radius:12px;background:rgba(20,25,30,.6);text-align:center">
+      <div style="font-size:10px;color:var(--mut);letter-spacing:.16em;text-transform:uppercase">Pavillon hissé ${MP_FLAG_CONTEXT[fl.context] || ''}</div>
+      <div style="font-size:22px;color:${def.color || '#e6f0ff'};font-weight:700;margin:12px 0 6px;font-family:'Charter','Iowan Old Style',Georgia,serif">« ${def.label || fl.key} »</div>
+      <div style="font-size:13px;color:#e6f0ff">${fl.from || 'Un commandant'}${fl.planet ? ` · ${fl.planet}` : ''}</div>
+      ${fl.address ? `<div style="font-size:10px;color:var(--mut);font-family:'SF Mono',monospace;margin-top:4px">${fl.address} · ajouté à ton carnet</div>` : ''}
+    </div>
+    <div style="margin:0 16px 14px">
+      ${fl.replied ? `<div style="font-size:12px;color:var(--mut);font-style:italic;text-align:center;padding:10px">Tu as répondu à ce pavillon.</div>`
+        : canReply ? `<div style="font-size:10px;color:var(--mut);letter-spacing:.12em;text-transform:uppercase;margin-bottom:8px">Répondre · une fois, dans les 24 h</div>${_mpFlagChips(`mpReplyFlag.bind(null,'${r.id}')`)}`
+        : `<div style="font-size:12px;color:var(--mut);font-style:italic;text-align:center;padding:10px">${Date.now() - (fl.at || 0) >= 24 * 3600e3 ? 'Le délai de réponse est passé. Envoie un tanker en vigie chez lui pour rouvrir le canal.' : 'Registre hors ligne pour le moment.'}</div>`}
+    </div>`;
+}
+async function mpReplyFlag(reportId, key) {
+  const r = (G.reports || []).find(x => x.id === reportId);
+  if (!r || !r.flag || r.flag.replied || !window.SBMP) return;
+  try {
+    await window.SBMP.replyFlag(r.mpFlagId, key);
+    r.flag.replied = true;
+    toast(`Réponse hissée : « ${(MP_FLAG_BY_KEY[key] || {}).label || key} »`);
+    if (typeof saveGame === 'function') saveGame();
+  } catch (e) { toast(_mpFlagErr(e)); if (/already_replied/.test(String(e && e.message))) r.flag.replied = true; }
+  renderFlagReportDetail(r);
+}
+// Défenseur → assaillant, depuis le rapport de défense
+async function mpFlagAttacker(reportId, key) {
+  const r = (G.reports || []).find(x => x.id === reportId);
+  const d = r && r.defense;
+  if (!d || d.flagSent || !d.attackerAddress || !window.SBMP) return;
+  try {
+    await window.SBMP.sendFlag(d.attackerAddress, key, 'raid');
+    d.flagSent = key;
+    toast(`Pavillon « ${(MP_FLAG_BY_KEY[key] || {}).label || key} » envoyé à ${d.attacker}`);
+    if (typeof saveGame === 'function') saveGame();
+  } catch (e) { toast(_mpFlagErr(e)); }
+  renderDefenseReportDetail(r);
+}
+
 function renderDefenseReportDetail(r) {
   const d = r.defense || {};
   document.getElementById('report-detail-title').textContent = (d.won ? 'RAID REPOUSSÉ' : 'RAID SUBI');
@@ -9172,7 +9293,11 @@ function renderDefenseReportDetail(r) {
     </div>
     <div style="margin:0 16px 14px;font-size:11px;color:var(--mut);font-style:italic;line-height:1.6">
       ${d.won ? 'Le registre accorde 12 h de bouclier à ton monde.' : 'Le registre accorde 12 h de bouclier à ton monde. Renforce ta défense planétaire' + (d.damagedName ? ' et répare ' + d.damagedName + ' (une partie de match-3 depuis sa fiche).' : '.')}
-    </div>`;
+    </div>
+    ${d.attackerAddress ? `<div style="margin:0 16px 14px">
+      <div style="font-size:10px;color:var(--mut);letter-spacing:.12em;text-transform:uppercase;margin-bottom:8px">Répondre à ${d.attacker || 'l\'assaillant'} · un pavillon</div>
+      ${d.flagSent ? `<div style="font-size:12px;color:var(--mut);font-style:italic">Pavillon envoyé : « ${(MP_FLAG_BY_KEY[d.flagSent] || {}).label || d.flagSent} »</div>` : _mpFlagChips(`mpFlagAttacker.bind(null,'${r.id}')`)}
+    </div>` : ''}`;
 }
 // ═══ fin MP_RAIDS_V0 ═══
 
@@ -9438,9 +9563,9 @@ function _mpRumorText(r) {
   switch (r.kind) {
     case 'raid_victory': return `On raconte que ${r.actor} a pillé ${r.target}${s}. Les quais en parlent encore.`;
     case 'raid_repelled': return `${r.target} a renvoyé la flotte de ${r.actor} dans le vide${s}.`;
-    case 'route_legendary': return `Une route de ${r.actor} est devenue légendaire.`;
-    case 'world_growth': return `Le monde de ${r.actor} grossit vite. Trop vite, disent certains.`;
-    case 'rare_discovery': return `${r.actor} aurait trouvé quelque chose de rare${s}.`;
+    case 'route_legendary': return r.target ? `La route « ${r.target} » de ${r.actor} est devenue légendaire. Les équipages se la disputent.` : `Une route de ${r.actor} est devenue légendaire.`;
+    case 'world_growth': return `Le monde de ${r.actor}${r.target ? ` (${r.target})` : ''} grossit vite. Trop vite, disent certains.`;
+    case 'rare_discovery': return r.target ? `${r.actor} aurait trouvé ${r.target}${s}. Personne ne sait encore où.` : `${r.actor} aurait trouvé quelque chose de rare${s}.`;
     default: return '';
   }
 }
@@ -9576,11 +9701,30 @@ function _mpRerenderConvoySheet() {
         <div style="display:flex;justify-content:space-between;padding:5px 0;font-size:11px;border-bottom:1px solid var(--border)"><span style="color:var(--mut)">Équipage</span><span style="color:${crew.color};font-style:italic">${crew.label}</span></div>
         <div style="display:flex;justify-content:space-between;padding:5px 0;font-size:11px"><span style="color:var(--mut)">Quitte le dock</span><span style="color:#e6f0ff">dans ${_formatDuration(left)}</span></div>
       </div>
+      <div style="font-size:10px;color:var(--mut);letter-spacing:.12em;text-transform:uppercase;margin-bottom:8px">Pavillon · 1 par séjour</div>
+      ${(mission.mpFlagged || {})[c.presence_id] ? `<div style="padding:10px 12px;border:1px solid var(--border);border-radius:8px;font-size:12px;color:#e6f0ff;margin-bottom:14px">Pavillon hissé : « ${(MP_FLAG_BY_KEY[(mission.mpFlagged || {})[c.presence_id]] || {}).label || ''} »</div>`
+        : `<div style="margin-bottom:14px">${_mpFlagChips(`mpFlagConvoy.bind(null,'${c.presence_id}')`)}<div style="font-size:10px;color:var(--mut);font-style:italic;line-height:1.5">Un pavillon te présente : il recevra l'adresse de ta colonie.</div></div>`}
       <div style="font-size:10px;color:var(--mut);letter-spacing:.12em;text-transform:uppercase;margin-bottom:8px">Marché · 1 par séjour</div>
       ${actions}
       <button onclick="closeMpConvoySheet()" style="margin-top:18px;width:100%;padding:11px;background:transparent;border:1px solid var(--border);color:var(--mut);border-radius:6px;font-family:inherit;font-size:12px;letter-spacing:.08em;cursor:pointer">FERMER</button>
     </div>`;
   document.body.appendChild(modal);
+}
+async function mpFlagConvoy(presenceId, key) {
+  const mission = (G.tankerMissions || []).find(m => m.id === _activeDockMissionId);
+  if (!mission || !window.SBMP) return;
+  const mine = window.SBMP.presenceFor(mission.id);
+  if (!mine) { toast('Ton convoi n\'est pas encore inscrit au registre du dock'); return; }
+  try {
+    await window.SBMP.sendFlagDock(mine, presenceId, key);
+    mission.mpFlagged = Object.assign({}, mission.mpFlagged, { [presenceId]: key });
+    toast(`Pavillon « ${(MP_FLAG_BY_KEY[key] || {}).label || key} » hissé`);
+    if (typeof saveGame === 'function') saveGame();
+  } catch (e) {
+    toast(_mpFlagErr(e));
+    if (/already_flagged/.test(String(e && e.message))) mission.mpFlagged = Object.assign({}, mission.mpFlagged, { [presenceId]: '?' });
+  }
+  _mpRerenderConvoySheet();
 }
 function closeMpConvoySheet() {
   _mpOpenConvoyId = null;
@@ -23203,6 +23347,7 @@ function openTankerCompose(planetCoord) {
     planetType,
     planetName: planet.name || planetCoord,
     planetPlayerName: planet.playerName || null,  // ← Si non-null = planète occupée par joueur
+    realPlayer: planet.isReal ? { address: planet.mpAddress || planetCoord, pseudo: planet.playerName } : null,
     tankerSelected: defaultTier,
     cargo: {
       soldiers: { garde: 0, lourd: 0 },
@@ -23376,6 +23521,7 @@ function renderTankerComposeCargo() {
         <div style="font-size:10px;color:var(--mut);margin-top:8px;font-style:italic;line-height:1.4">
           Pour une action offensive, compose une flotte d'attaque depuis l'écran Flotte.
         </div>
+        ${c.realPlayer ? `<div style="font-size:11px;color:#5fffe8;margin-top:8px;line-height:1.5">Commandant réel : ton tanker se met en <strong>vigie orbitale</strong> et ouvre le canal. Depuis la fiche de sa planète, tu pourras lui hisser un pavillon.</div>` : ''}
       </div>
     `;
   } else {
@@ -23547,6 +23693,7 @@ function adjustComposeCargoSoldier(sk, delta) {
 function adjustComposeCargoResource(rk, delta) {
   const c = G.tankerComposing;
   if (!c) return;
+  if (c.realPlayer) { toast('Vers un commandant : vigie seulement pour l\'instant, la cale part vide'); return; }
   const r = G.res?.[rk];
   if (!r) return;
   const cargoMax = SHIP_TIERS.tanker[c.tankerSelected]?.cargo || 0;
@@ -23976,7 +24123,10 @@ function handleTankerDropoffArrival(mission) {
 
   if (typeof toast === 'function') {
     if (isEmptyVigil) {
-      toast(`${mission.tankerName} : veille orbitale active sur ${mission.destinationPlanetCoord}`);
+      const _pl = typeof findPlanetByCoord === 'function' ? findPlanetByCoord(mission.destinationPlanetCoord) : null;
+      toast(_pl && _pl.isReal
+        ? `${mission.tankerName} en orbite chez ${_pl.playerName} · canal ouvert : hisse un pavillon depuis sa fiche`
+        : `${mission.tankerName} : veille orbitale active sur ${mission.destinationPlanetCoord}`);
     } else {
       const summary = describeGarrisonShort(garrison);
       toast(`${mission.tankerName} : ${summary} déposé${mission.postArrival === 'orbit_relay' ? ' · balise active' : ''}`);
@@ -24662,6 +24812,7 @@ function renderReportDetail() {
   const r = (G.reports || []).find(r => r.id === selectedReportId);
   if (!r) return;
   if (r.kind === 'defense') { renderDefenseReportDetail(r); return; }
+  if (r.kind === 'flag') { renderFlagReportDetail(r); return; }
 
   document.getElementById('report-detail-title').textContent = r.fleetName.toUpperCase();
   document.getElementById('report-detail-meta').textContent = `Rapport · ${new Date(r.returnedAt).toLocaleString('fr-FR')}`;
@@ -34293,10 +34444,30 @@ function closeMessageOverlay(event) {
   if (overlay) overlay.parentElement.remove();
 }
 
+// PAVILLONS_1110 — clés du registre (table flags)
+var MP_FLAG_KEY = { peace: 'paix', trade: 'commerce', alliance: 'alliance', why_probe: 'sonde', warning: 'avertissement', respect: 'respect' };
+var MP_FLAG_BY_KEY = {};
+PLAYER_MESSAGE_FLAGS.forEach(f => { MP_FLAG_BY_KEY[MP_FLAG_KEY[f.id]] = f; });
+var MP_FLAG_ERRORS = { flag_quota: 'Assez de pavillons pour aujourd\'hui (20 par jour)', target_unknown: 'Ce commandant n\'est plus au registre',
+  already_replied: 'Tu as déjà répondu à ce pavillon', flag_too_old: 'Trop tard pour répondre (24 h)', already_flagged_this_stay: 'Un pavillon par convoi et par séjour',
+  convoy_gone: 'Ce convoi a quitté le dock', not_docked: 'Ton séjour est terminé', no_world: 'Ton monde n\'est pas encore au registre' };
+function _mpFlagErr(e) {
+  const code = (String(e && e.message || e).match(/[a-z_]+/g) || []).find(c => MP_FLAG_ERRORS[c]);
+  return code ? MP_FLAG_ERRORS[code] : 'Le registre ne répond pas, réessaie';
+}
+
 function sendPlayerMessage(planetCoord, flagId) {
   const planet = findPlanetByCoord(planetCoord);
   const flag = PLAYER_MESSAGE_FLAGS.find(f => f.id === flagId);
   if (!planet || !flag) { closeMessageOverlay(); return; }
+  if (planet.isReal) {   // vrai commandant : le pavillon part au registre
+    closeMessageOverlay();
+    if (!window.SBMP || !window.SBMP.ready()) { toast('Registre hors ligne : réessaie dans un instant'); return; }
+    window.SBMP.sendFlag(planet.mpAddress || planetCoord, MP_FLAG_KEY[flag.id], 'orbit')
+      .then(() => toast(`Pavillon « ${flag.label} » hissé devant ${planet.playerName}`))
+      .catch((e) => toast(_mpFlagErr(e)));
+    return;
+  }
 
   // MVP solo : pas de vraie transmission. On stocke un log dans G.sentMessages
   // pour traçabilité future, et on affiche un toast de confirmation.
@@ -35043,9 +35214,9 @@ function renderDefenseUnitDetail(key) {
 
 // ─── SHIP3D : fiche vaisseau en vue héros (3D plein écran derrière la fiche, comme le soldat lourd) ───
 const UNIT_SHIP3D_MODELS = {
-  cuirasse: { url: 'assets/3d/sb_kv01.glb?v=20261011-2020', code: 'KV-01 Kerath' },
-  fregate:  { url: 'assets/3d/sb_sr01.glb?v=20261011-2100', code: 'SR-01 Sentinelle', profile: 'sr01' },
-  tanker:   { url: 'assets/3d/sb_tk07.glb?v=20261011-2300', code: 'TK-07 Tanker', profile: 'tk07' },
+  cuirasse: { url: 'assets/3d/sb_kv01.glb?v=20261012-0030', code: 'KV-01 Kerath' },
+  fregate:  { url: 'assets/3d/sb_sr01.glb?v=20261012-0030', code: 'SR-01 Sentinelle', profile: 'sr01' },
+  tanker:   { url: 'assets/3d/sb_tk07.glb?v=20261012-0030', code: 'TK-07 Tanker', profile: 'tk07' },
 };
 let unitShip3D = null;   // { key, handle }
 function mountUnitShip3D(key, inService) {
@@ -38814,6 +38985,7 @@ function completeExplorationReturn(missionId) {
       discovered: true,
     };
     G.discoveredDocks.push(newDock);
+    if (window.SBMP && window.SBMP.ready()) window.SBMP.reportEvent('rare_discovery', 'un dock secret');   // RUMORS_1110
     result = {
       kind: 'dock_success',
       newDock,
@@ -40036,6 +40208,11 @@ function _completeRouteRunReturn(missionId) {
     if (route.knowledgeLevel < 3) route.knowledgeLevel = Math.min(10, (route.knowledgeLevel || 0) + 1);
     else if (route.knowledgeLevel < 7 && Math.random() < 0.6) route.knowledgeLevel++;
     else if (route.knowledgeLevel < 10 && Math.random() < 0.25) route.knowledgeLevel++;
+    // RUMORS_1110 — une route devenue légendaire fait parler les comptoirs
+    if (route.knowledgeLevel >= 10 && !route.legendAnnounced && window.SBMP && window.SBMP.ready()) {
+      route.legendAnnounced = true;
+      window.SBMP.reportEvent('route_legendary', route.name);
+    }
     // Stabilité : +2% sur passage réussi (modulé par humeur)
     route.stability = Math.min(100, (route.stability || 50) + 2);
     // D5.1 : tracker l'historique de stabilité (max 30 entrées) pour la timeline
@@ -42003,18 +42180,18 @@ if (G.knownTargets && Array.isArray(G.tankerMissions)) {
 
 </script>
 <!-- PLANET3D — carte 3D + boucle antenne (source : sb-build/src/planet3d.js) -->
-<script type="module" src="assets/planet3d.js?v=20261011-2020"></script>
+<script type="module" src="assets/planet3d.js?v=20261012-0030"></script>
 <!-- CLOUD — sauvegarde Supabase (source : sb-build/src/cloud.js) -->
-<script type="module" src="assets/cloud.js?v=20261011-2020"></script>
+<script type="module" src="assets/cloud.js?v=20261012-0030"></script>
 <!-- MATCH3 — Match-3 V2 (assets/match3.js, source src/match3.js + src/m3core.js) : remplace startM3 -->
-<script type="module" src="assets/match3.js?v=20261011-2020"></script>
+<script type="module" src="assets/match3.js?v=20261012-0030"></script>
 <!-- HOME V2 — « monde d'abord » : planète plein écran, ressources en ligne, Flotte / Défense / Prospection (assets/home.js) -->
-<script type="module" src="assets/home.js?v=20261011-2310"></script>
+<script type="module" src="assets/home.js?v=20261012-0030"></script>
 <!-- SPACE MAP v0 — carte du Centre de prospection (assets/spacemap.js, source src/spacemap.js) -->
-<script src="assets/spacemap.js?v=20261011-2020"></script>
+<script src="assets/spacemap.js?v=20261012-0030"></script>
 <!-- SPACE MAP niveau B — diorama 3D d'un système (assets/system3d.js, source src/system3d.js) -->
-<script type="module" src="assets/system3d.js?v=20261011-2020"></script>
+<script type="module" src="assets/system3d.js?v=20261012-0030"></script>
 <!-- SHIP3D — fiches d'unité 3D du cuirassé KV-01 et de la frégate SR-01 (assets/ship3d.js, sur le moteur partagé window.SB3D) -->
-<script type="module" src="assets/ship3d.js?v=20261011-2300"></script>
+<script type="module" src="assets/ship3d.js?v=20261012-0030"></script>
 </body>
 </html>
