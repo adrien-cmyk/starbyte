@@ -35041,7 +35041,10 @@ function renderDefenseUnitDetail(key) {
 }
 
 // ─── SHIP3D : fiche vaisseau en vue héros (3D plein écran derrière la fiche, comme le soldat lourd) ───
-const UNIT_SHIP3D_MODELS = { cuirasse: { url: 'assets/3d/sb_kv01.glb?v=20261011-2020', code: 'KV-01 Kerath' } };
+const UNIT_SHIP3D_MODELS = {
+  cuirasse: { url: 'assets/3d/sb_kv01.glb?v=20261011-2020', code: 'KV-01 Kerath' },
+  fregate:  { url: 'assets/3d/sb_sr01.glb?v=20261011-2100', code: 'SR-01 Sentinelle', profile: 'sr01' },
+};
 let unitShip3D = null;   // { key, handle }
 function mountUnitShip3D(key, inService) {
   const scr = document.getElementById('scr-unit-detail');
@@ -35074,7 +35077,7 @@ function mountUnitShip3D(key, inService) {
   hero.classList.add('u3d-loading');
   const start = () => {
     unitShip3D = { key, handle: window.Ship3D.mount(hero, {
-      url: model.url, shiftY: 0.2,
+      url: model.url, shiftY: 0.2, ship: model.profile && window.Ship3D.profiles ? window.Ship3D.profiles[model.profile] : undefined,
       onReady: () => hero.classList.remove('u3d-loading'),
       onError: () => { hero.classList.remove('u3d-loading'); hero.classList.add('u3d-fail'); },
     }) };
@@ -35104,7 +35107,7 @@ function renderShipUnitDetail(key) {
 
   document.getElementById('ud-title').textContent = meta.name.toUpperCase();
   document.getElementById('ud-banner').style.borderColor = 'rgba(95,255,232,.25)';
-  // SHIP3D — le cuirassé a sa fiche 3D plein cadre : plus de case illustration (décision 11/10/2026)
+  // SHIP3D — cuirassé et frégate ont leur fiche 3D plein cadre : plus de case illustration (décision 11/10/2026)
   if (!(UNIT_SHIP3D_MODELS[key] && mountUnitShip3D(key, total))) unmountUnitShip3D();
   const udIcon = document.getElementById('ud-icon');
   if (PNG_ILLUSTRATIONS[key]) {
@@ -41972,7 +41975,7 @@ if (G.knownTargets && Array.isArray(G.tankerMissions)) {
 <script src="assets/spacemap.js?v=20261011-2020"></script>
 <!-- SPACE MAP niveau B — diorama 3D d'un système (assets/system3d.js, source src/system3d.js) -->
 <script type="module" src="assets/system3d.js?v=20261011-2020"></script>
-<!-- SHIP3D — fiche d'unité 3D du cuirassé KV-01 (assets/ship3d.js, sur le moteur partagé window.SB3D) -->
-<script type="module" src="assets/ship3d.js?v=20261011-2020"></script>
+<!-- SHIP3D — fiches d'unité 3D du cuirassé KV-01 et de la frégate SR-01 (assets/ship3d.js, sur le moteur partagé window.SB3D) -->
+<script type="module" src="assets/ship3d.js?v=20261011-2100"></script>
 </body>
 </html>

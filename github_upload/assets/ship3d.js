@@ -1,6 +1,8 @@
 /* Starbyte — Ship3D : fiche d'unité 3D du cuirassé KV-01 (classe Kerath).
    Source : viewer validé par Adrien (artifact « KV-01 Kerath », 11 oct. 2026) — skill starbyte-ship-showcase.
-   Usage : const h = window.Ship3D.mount(container, { url, onProgress, onReady, onError }); … h.dispose();
+   Usage : const h = window.Ship3D.mount(container, { url, ship, onProgress, onReady, onError }); … h.dispose();
+   `ship` (facultatif) : profil d'un autre vaisseau mis à l'échelle de la scène du KV-01 (V m de scène par m réel,
+   proue glTF recalée sur z = 600) — tuyères, axe de la bulle, table de section de coque (voir PROFIL_KV01).
 */
 // Moteur 3D partagé du jeu (window.SB3D, exposé par planet3d.js) : pas de seconde copie de three.js.
 // MapControls = OrbitControls avec une autre affectation des gestes ; on remet celle d'une orbite.
@@ -10,15 +12,28 @@ function libs() {
            EffectComposer: L.EffectComposer, RenderPass: L.RenderPass, UnrealBloomPass: L.UnrealBloomPass, OutputPass: L.OutputPass };
 }
 
+// Profil du cuirassé KV-01 (référence de la scène : 1 m de scène = 1 m réel)
+const PROFIL_KV01 = {
+  V: 1, bowGltf: 0, axisY: 0.78, engineY: 0.8, engineZ: -7.2, nozzleZ: -655,
+  nozzles: [[100, 21], [52, 17]].flatMap(([y, r]) => [-44, 0, 44].map(x => ({ x, y, r }))),
+  hull: [[0,72,98,50],[48,52,104,72],[70,46,110,74],[140,46,112,78],[146,22,112,70],[162,22,113,82],[248,22,113,86],[252,22,120,88],[282,12,120,91],[440,12,120,91],[456,12,116,86],[544,12,116,84],[548,10,126,92],[582,6,131,95],[788,4,131,98],[792,3,128,108],[1092,4,136,108],[1122,7,133,101],[1141,12,129,94],[1155,17,125,63],[1180,25,118,40],[1260,30,120,70],[2200,0,150,120],[5000,-40,190,170]],
+};
+// Profil de la frégate SR-01 Sentinelle (68 m, ×17 → gabarit de scène du KV-01)
+const PROFIL_SR01 = {
+  V: 17, bowGltf: 34, axisY: 0.84, engineY: 0.75, engineZ: (600 - 72 * 17) * 0.01, nozzleZ: 600 - 68.4 * 17,
+  nozzles: [{ x: -2.3 * 17, y: 4.4 * 17, r: 1.6 * 17 }, { x: 2.3 * 17, y: 4.4 * 17, r: 1.6 * 17 }],
+  hull: [[0,78,85,5],[7,75,90,14],[51,61,105,34],[85,44,122,48],[170,22,141,73],[255,12,150,94],[340,7,156,105],[425,5,162,114],[510,5,165,119],[612,5,167,130],[680,5,158,130],[765,7,146,130],[850,7,148,109],[935,5,146,78],[966,5,143,76],[978,24,136,73],[1020,27,133,65],[1088,29,124,60],[1124,32,119,54],[1165,40,118,85],[1250,45,125,95],[2200,15,160,130],[5000,-30,200,175]],
+};
+
 function mount(container, opts = {}) {
 const { THREE, GLTFLoader, OrbitControls, RoomEnvironment, EffectComposer, RenderPass, UnrealBloomPass, OutputPass } = libs();
 /* ================================================================== réglages */
 const S = 0.01;                                   // 1 unité = 100 m
 const REDUCED = matchMedia('(prefers-reduced-motion: reduce)').matches;
 const ENGINE_COLOR = new THREE.Color(0.50, 0.78, 1.0);   // pleine puissance : bleu-blanc
-const NOZZLES = [];                               // sorties de cloches (repère glTF, m)
-for (const [y, r] of [[100, 21], [52, 17]]) for (const x of [-44, 0, 44]) NOZZLES.push({ x, y, r });
-const NOZZLE_Z = -655;
+const P = Object.assign({}, PROFIL_KV01, opts.ship || {});
+const NOZZLES = P.nozzles;                        // sorties de cloches (m de scène)
+const NOZZLE_Z = P.nozzleZ;
 
 /* ================================================================== moteur de rendu */
 const stage = container;
@@ -133,7 +148,7 @@ const rim = new THREE.DirectionalLight(0x9db8e8, 1.3); rim.position.set(-9, 4, -
 const fill = new THREE.DirectionalLight(0xb8c6e8, 0.8); fill.position.set(3, 10, -4); scene.add(fill);
 scene.add(new THREE.HemisphereLight(0x2c3a58, 0x05060a, 0.55));
 const engineLight = new THREE.PointLight(0x6fa8ff, 0, 10, 1.7);
-engineLight.position.set(0, 0.8, -7.2);
+engineLight.position.set(0, P.engineY, P.engineZ);
 ship.add(engineLight);
 
 /* ================================================================== lookdev : jointures, rainures, roughness, patine
@@ -298,7 +313,7 @@ scene.add(sunGroup);
    Le cuirassé fend un milieu ionisé comme une étrave fend l'eau : une enveloppe paraboloïde part
    devant la proue, épouse la coque et s'ouvre derrière la poupe en sillage. Rendu additif en
    fresnel (lumineux sur les bords, transparent de face), filets de plasma qui défilent vers l'arrière. */
-const BOW_Z = 7.25, WAKE_Z = -19.0, AXIS_Y = 0.78;
+const BOW_Z = 7.25, WAKE_Z = -19.0, AXIS_Y = P.axisY;
 const bubbleR = (d) => 1.18 * Math.pow(Math.max(d, 0.0001), 0.47);          // rayon selon la distance à l'étrave
 function bubbleGeo(scale, segU = 120, segA = 72) {
   const pos = [], uv = [], idx = [];
@@ -362,7 +377,7 @@ ship.add(shock);
 
 // fumée de plasma qui épouse la coque : bouffées émises sur l'enveloppe du vaisseau,
 // entraînées vers l'arrière, qui gonflent, se décollent et se dissipent dans le sillage
-const HULL = [[0,72,98,50],[48,52,104,72],[70,46,110,74],[140,46,112,78],[146,22,112,70],[162,22,113,82],[248,22,113,86],[252,22,120,88],[282,12,120,91],[440,12,120,91],[456,12,116,86],[544,12,116,84],[548,10,126,92],[582,6,131,95],[788,4,131,98],[792,3,128,108],[1092,4,136,108],[1122,7,133,101],[1141,12,129,94],[1155,17,125,63],[1180,25,118,40],[1260,30,120,70],[2200,0,150,120],[5000,-40,190,170]];   // au-delà de la poupe : queue de comète qui s'évase
+const HULL = P.hull;   // au-delà de la poupe : queue de comète qui s'évase
 function hullAt(sm) {                       // station (m depuis la proue) -> [zb, zt, hw] en m
   if (sm <= HULL[0][0]) return HULL[0].slice(1);
   for (let k = 1; k < HULL.length; k++) if (sm <= HULL[k][0]) {
@@ -468,6 +483,12 @@ function loadShip() {
 }
 loadShip().then((gltf) => {
   const m = gltf.scene;
+  if (P.V !== 1 || P.bowGltf) {   // autre vaisseau : géométrie passée en m de scène (le lookdev travaille en repère objet)
+    m.updateMatrixWorld(true);
+    const toScene = new THREE.Matrix4().makeTranslation(0, 0, P.bowGltf ? 600 - P.bowGltf * P.V : 0).multiply(new THREE.Matrix4().makeScale(P.V, P.V, P.V));
+    m.traverse(o => { if (o.isMesh) o.geometry.applyMatrix4(new THREE.Matrix4().multiplyMatrices(toScene, o.matrixWorld)); });
+    m.traverse(o => { if (o !== m) { o.position.set(0, 0, 0); o.rotation.set(0, 0, 0); o.scale.set(1, 1, 1); } });
+  }
   m.scale.setScalar(S);
   m.traverse(o => {
     if (!o.isMesh) return;
@@ -597,6 +618,6 @@ function whenReady(cb) {
   if (window.SB3D) return cb();
   const t = setInterval(() => { if (window.SB3D) { clearInterval(t); cb(); } }, 100);
 }
-window.Ship3D = { mount: (c, o) => { let h = null, dead = false; whenReady(() => { if (!dead) h = mount(c, o); });
+window.Ship3D = { profiles: { kv01: PROFIL_KV01, sr01: PROFIL_SR01 }, mount: (c, o) => { let h = null, dead = false; whenReady(() => { if (!dead) h = mount(c, o); });
   return { dispose() { dead = true; if (h) h.dispose(); } }; } };
 window.dispatchEvent(new Event('ship3d-ready'));
