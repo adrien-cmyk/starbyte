@@ -8545,6 +8545,7 @@ var EXTRA_SAVE_KEYS = [
   'mpDeals',   // MP_DOCKS_V0 — marchés entre commandants (séquestre et règlement)
   'botState',  // BOTS_1110 — stocks des commandants automates après pillage
   'mpGrowthMilestone',  // RUMORS_1110 — dernier palier de niveau annoncé au comptoir
+  'mpDiplo',   // AMBASSADES_1210 — ambassades vues et dernière image des pactes
 ];
 
 // Sauvegarde G complet dans localStorage. Appelé fréquemment, doit être rapide.
@@ -8997,6 +8998,7 @@ var MP_RAID_ERRORS = {
   target_unknown: 'Ce monde n\'est plus au registre',
   target_other_season: 'Ce monde appartient à une autre saison',
   no_world: 'Ton monde n\'est pas encore au registre',
+  pact_active: 'Pacte de non-agression en cours avec ce commandant',   // AMBASSADES_1210
 };
 
 var _mpLaunching = false;
@@ -9301,6 +9303,435 @@ async function mpFlagAttacker(reportId, key) {
   renderDefenseReportDetail(r);
 }
 
+// AMBASSADES_1210 — ambassades orbitales, livraisons et pactes de non-agression
+var MP_DIPLO_ERRORS = {
+  no_world: 'Ton monde n\'est pas encore au registre',
+  target_unknown: 'Ce monde n\'est plus au registre',
+  target_self: 'C\'est ton propre monde',
+  orbit_quota: 'Trop d\'ambassades ouvertes (12 au plus)',
+  orbit_rate: 'Trop d\'ambassades aujourd\'hui (3 par monde, 10 en tout)',
+  cargo_invalid: 'Cale illisible pour le registre',
+  orbit_unknown: 'Cette ambassade n\'existe plus',
+  orbit_gone: 'Le tanker a déjà quitté ton orbite',
+  cargo_already_answered: 'Tu as déjà répondu à cette cale',
+  no_embassy: 'Il faut un tanker en orbite chez lui : son ambassade est fermée',
+  pact_exists: 'Un pacte est déjà proposé ou en cours avec ce commandant',
+  pact_unknown: 'Ce pacte n\'existe plus',
+  pact_closed: 'Ce pacte est déjà clos',
+  raid_en_route: 'Une flotte est en route entre vous : impossible de signer maintenant',
+};
+function _mpDiploErr(e) {
+  const code = (String(e && e.message || e).match(/[a-z_]+/g) || []).find(c => MP_DIPLO_ERRORS[c]);
+  return code ? MP_DIPLO_ERRORS[code] : 'Le registre ne répond pas, réessaie';
+}
+function _mpDiplo() {
+  if (!G.mpDiplo || typeof G.mpDiplo !== 'object') G.mpDiplo = {};
+  if (!G.mpDiplo.seen) G.mpDiplo.seen = {};
+  if (!G.mpDiplo.pacts) G.mpDiplo.pacts = {};
+  return G.mpDiplo;
+}
+// Pacte ouvert (proposé ou actif) avec le commandant de cette adresse — dernière image connue du registre
+function mpPactWith(address) {
+  if (!address) return null;
+  const all = Object.values(_mpDiplo().pacts);
+  return all.find(k => k.status === 'active' && k.otherAddress === address)
+      || all.find(k => k.status === 'proposed' && k.otherAddress === address) || null;
+}
+function _mpCargoSum(c) { return ['metal', 'energie', 'cristal'].reduce((s, k) => s + Math.max(0, Math.floor(Number(c && c[k]) || 0)), 0); }
+var _mpDiploBusy = new Set();
+var _mpOrbitRegistering = new Set();
+
+var MP_DIPLO_TYPES = {
+  embassy_in:     { title: 'AMBASSADE EN ORBITE', list: 'Ambassade en orbite', sub: 'tanker d\'un commandant au-dessus de ta colonie', color: '#5fffe8' },
+  cargo_accepted: { title: 'CALE LIVRÉE',         list: 'Cale acceptée',       sub: 'livraison remise', color: '#7ed080' },
+  cargo_refused:  { title: 'CALE REFUSÉE',        list: 'Cale refusée',        sub: 'la cale rentrera avec le tanker', color: '#ffa844' },
+  pact_proposed:  { title: 'PACTE PROPOSÉ',       list: 'Pacte proposé',       sub: 'pacte de non-agression', color: '#5fffe8' },
+  pact_signed:    { title: 'PACTE SIGNÉ',         list: 'Pacte signé',         sub: 'pacte de non-agression actif', color: '#7ed080' },
+  pact_broken:    { title: 'PACTE ROMPU',         list: 'Pacte rompu',         sub: 'les raids redeviennent possibles', color: '#ff8a8a' },
+  pact_declined:  { title: 'PACTE DÉCLINÉ',       list: 'Pacte décliné',       sub: 'proposition refusée', color: '#cececd' },
+};
+function _mpDiploReport(type, d, key) {
+  if (!G.reports) G.reports = [];
+  const id = 'rpt-diplo-' + key;
+  const known = G.reports.find(r => r.id === id);
+  if (known) return known;
+  const T = MP_DIPLO_TYPES[type];
+  const r = {
+    id, kind: 'diplo', fleetName: '⚑ ' + (d.pseudo || 'Commandant'), targetName: T.list,
+    intent: { label: T.sub, icon: '' }, doctrine: { color: T.color },
+    returnedAt: Date.now(), read: false, diplo: Object.assign({ type }, d),
+  };
+  G.reports.unshift(r);
+  return r;
+}
+function _mpMergeSender(address, pseudo) {
+  if (!address || typeof mergeRealWorlds !== 'function') return;
+  mergeRealWorlds(String(address).split('-').slice(0, 3).join('-'), [{ address, pseudo, planet_name: null, level_estimate: 1 }]);
+}
+// Créditer une cale acceptée dans MA partie — une seule fois (registre local + drapeau du registre)
+function mpCreditOrbitCargo(o) {
+  const key = 'orb:' + o.id;
+  const L = _mpLedger(key);
+  if (L && L.settled) {
+    // déjà crédité ici : on s'assure que le registre le sait (le drapeau protège les autres appareils)
+    if (o.cargo_applied) { if (!L.applied) _mpLedgerSet(key, { applied: true }); }
+    else if (window.SBMP) window.SBMP.orbitApplied(o.id);
+    return false;
+  }
+  if (o.cargo_applied) { _mpLedgerSet(key, { settled: true, applied: true }); return false; }
+  _mpPay(o.cargo, +1, true);
+  _mpLedgerSet(key, { settled: true });
+  if (typeof saveGame === 'function') saveGame();
+  if (window.SBMP) window.SBMP.orbitApplied(o.id);
+  return true;
+}
+// Inscrire au registre un tanker arrivé en orbite chez un commandant (réessayé à chaque relève)
+async function mpOrbitRegister(mission) {
+  if (!mission || mission.mpPresenceId || !mission.mpTarget || mission.status !== 'orbital_relay') return;
+  if (_mpOrbitRegistering.has(mission.id) || !window.SBMP || !window.SBMP.ready()) return;
+  _mpOrbitRegistering.add(mission.id);
+  try {
+    const res = mission.mpOffered || (mission.cargo && mission.cargo.resources) || {};
+    const pid = await window.SBMP.orbitArrive(mission.mpTarget.address, mission.id, mission.tankerName, {
+      metal: res.metal || 0, energie: res.energie || 0, cristal: res.cristal || 0 });
+    mission.mpPresenceId = pid;
+    // rappelé pendant l'inscription : on ferme aussitôt l'ambassade au registre
+    if (mission.status !== 'orbital_relay') { try { await window.SBMP.orbitLeave(pid); } catch (e) {} }
+    if (typeof saveGame === 'function') saveGame();
+  } catch (e) {
+    const msg = String(e && e.message || e);
+    if (/target_unknown|target_self|orbit_rate|orbit_quota/.test(msg)) {
+      // monde disparu du registre, ou trop d'ambassades : le tanker fait demi-tour avec sa cale
+      const now = Date.now();
+      mission.status = 'returning';
+      mission.cancelledAt = now;
+      mission.returnArrivalAt = now + Math.max(60000, (mission.arrivalAt || now) - (mission.departedAt || now));
+      toast(`${mission.tankerName} : ${_mpDiploErr(e)} · retour avec la cale`);
+      if (typeof startTankerCountdownTicker === 'function') startTankerCountdownTicker();
+      if (typeof saveGame === 'function') saveGame();
+    } else console.warn('[ambassade] inscription :', msg);
+  } finally { _mpOrbitRegistering.delete(mission.id); }
+}
+// Arrivée d'un tanker chez un vrai commandant : l'ambassade ouvre, la cale est offerte
+function mpOrbitArrival(mission) {
+  // La voie (taxe, rencontre) ne s'applique qu'à ce qui est livré : refusée ou rappelée, la cale rentre intacte
+  const f = typeof computeRouteLootFactor === 'function' ? computeRouteLootFactor(mission) : 1;
+  const res = (mission.cargo && mission.cargo.resources) || {};
+  mission.mpOffered = {};
+  for (const rk of ['metal', 'energie', 'cristal']) mission.mpOffered[rk] = Math.max(0, Math.floor((res[rk] || 0) * f));
+  mission.status = 'orbital_relay';
+  const hasCargo = _mpCargoSum(mission.mpOffered) > 0;
+  toast(`${mission.tankerName} en orbite chez ${mission.mpTarget.pseudo} · ambassade ouverte${hasCargo ? ' · cale offerte' : ''}`);
+  mpOrbitRegister(mission);
+}
+// Relève du registre : ambassades (les miennes et celles chez moi) et pactes
+async function mpIngestOrbits(orbits, pacts, meId) {
+  const D = _mpDiplo();
+  let dirty = false;
+  const missions = G.tankerMissions || [];
+  // 1. Mes ambassades
+  for (const m of missions) {
+    if (m.status !== 'orbital_relay' || !m.mpTarget || m.mpPresenceId) continue;
+    const o = orbits.find(x => x.user_id === meId && x.mission_id === m.id);
+    if (o) { m.mpPresenceId = o.id; dirty = true; } else mpOrbitRegister(m);
+  }
+  for (const o of orbits) {
+    if (o.user_id !== meId) continue;
+    const m = missions.find(x => x.id === o.mission_id);
+    if (m && m.mpTarget) {
+      if (o.cargo_state === 'accepted' && !m.mpCargoDelivered) {
+        m.mpCargoDelivered = true;
+        const res = Object.assign({}, m.mpOffered || (m.cargo && m.cargo.resources) || {});
+        if (m.cargo) m.cargo.resources = { metal: 0, energie: 0, cristal: 0 };
+        _mpDiploReport('cargo_accepted', { pseudo: o.target_pseudo, address: o.target_address, tanker: o.tanker_name, cargo: o.cargo || res }, 'acc-' + o.id);
+        toast(`${o.target_pseudo} a accepté la cale de ${o.tanker_name} : ${_mpResLine(o.cargo || res)} livrés`);
+        dirty = true;
+      } else if (o.cargo_state === 'refused' && !o.left_at && !m.mpCargoRefused) {
+        m.mpCargoRefused = true;
+        _mpDiploReport('cargo_refused', { pseudo: o.target_pseudo, address: o.target_address, tanker: o.tanker_name, cargo: o.cargo }, 'ref-' + o.id);
+        toast(`${o.target_pseudo} a refusé la cale de ${o.tanker_name} · rappelle le tanker pour la récupérer`);
+        dirty = true;
+      }
+    }
+  }
+  // 2. Ambassades chez moi
+  for (const o of orbits) {
+    if (o.target_id !== meId) continue;
+    if (!D.seen['o:' + o.id]) {
+      D.seen['o:' + o.id] = Date.now();
+      dirty = true;
+      if (!o.left_at) {
+        _mpMergeSender(o.owner_address, o.owner_pseudo);
+        _mpDiploReport('embassy_in', { presenceId: o.id, pseudo: o.owner_pseudo, address: o.owner_address, tanker: o.tanker_name, cargo: o.cargo, state: o.cargo_state, gone: false }, 'in-' + o.id);
+        toast(`⚑ ${o.owner_pseudo} : tanker ${o.tanker_name} en orbite${o.cargo_state === 'offered' ? ' · une cale t\'est offerte' : ''}`);
+      }
+    }
+    let rep = (G.reports || []).find(r => r.id === 'rpt-diplo-in-' + o.id);
+    if (!rep && !o.left_at && o.cargo_state === 'offered') {   // rapport évincé (60 au plus) : la cale reste à portée de réponse
+      rep = _mpDiploReport('embassy_in', { presenceId: o.id, pseudo: o.owner_pseudo, address: o.owner_address, tanker: o.tanker_name, cargo: o.cargo, state: o.cargo_state, gone: false }, 'in-' + o.id);
+      dirty = true;
+    }
+    if (rep && (rep.diplo.state !== o.cargo_state || rep.diplo.gone !== !!o.left_at)) { rep.diplo.state = o.cargo_state; rep.diplo.gone = !!o.left_at; dirty = true; }
+    if (o.cargo_state === 'accepted' && mpCreditOrbitCargo(o)) dirty = true;
+  }
+  // 3. Pactes — les pactes ouverts arrivent tous : un pacte ouvert ici mais plus au registre est clos
+  const openIds = new Set(pacts.filter(k => k.status === 'proposed' || k.status === 'active').map(k => k.id));
+  const seenIds = new Set(pacts.map(k => k.id));
+  for (const v of Object.values(D.pacts)) {
+    if ((v.status === 'active' || v.status === 'proposed') && !openIds.has(v.id) && !seenIds.has(v.id)) { v.status = 'closed'; v.endedAt = Date.now(); dirty = true; }
+  }
+  for (const k of pacts) {
+    const mine = k.proposer_id === meId;
+    const prev = D.pacts[k.id];
+    const snap = {
+      id: k.id, status: k.status, mine, anchor: k.anchor_presence,
+      otherPseudo: mine ? k.partner_pseudo : k.proposer_pseudo, otherAddress: mine ? k.partner_address : k.proposer_address,
+      createdAt: Date.parse(k.created_at) || Date.now(), activeAt: Date.parse(k.active_at) || null, endedAt: Date.parse(k.ended_at) || null,
+      reason: k.end_reason || null, endedByMe: !!k.ended_by && k.ended_by === meId,
+    };
+    D.pacts[k.id] = snap;
+    const rep = (G.reports || []).find(r => r.id === 'rpt-diplo-prop-' + k.id);
+    if (rep && rep.diplo.state !== k.status) { rep.diplo.state = k.status; dirty = true; }
+    if (prev && prev.status === k.status) continue;
+    dirty = true;
+    const d = { pseudo: snap.otherPseudo, address: snap.otherAddress, pactId: k.id, reason: snap.reason };
+    if (k.status === 'proposed' && !mine) {
+      _mpMergeSender(snap.otherAddress, snap.otherPseudo);
+      _mpDiploReport('pact_proposed', Object.assign({ state: 'proposed' }, d), 'prop-' + k.id);
+      toast(`⚑ ${snap.otherPseudo} te propose un pacte de non-agression`);
+    } else if (k.status === 'active') {
+      _mpDiploReport('pact_signed', d, 'sig-' + k.id);
+      toast(`Pacte de non-agression signé avec ${snap.otherPseudo}`);
+    } else if (k.status === 'broken' && prev && !snap.endedByMe) {
+      _mpDiploReport('pact_broken', d, 'brk-' + k.id);
+      toast(`⚠ ${snap.otherPseudo} a rompu votre pacte de non-agression`);
+    } else if (k.status === 'declined' && mine && prev) {
+      _mpDiploReport('pact_declined', d, 'dec-' + k.id);
+      toast(`${snap.otherPseudo} a décliné ton pacte`);
+    }
+  }
+  // Ménage : souvenirs de plus de 30 jours
+  const old = Date.now() - 30 * 864e5;
+  for (const [k, v] of Object.entries(D.seen)) if (v < old) delete D.seen[k];
+  for (const [k, v] of Object.entries(D.pacts)) if (v.status !== 'active' && v.status !== 'proposed' && (v.endedAt || v.createdAt) < old) delete D.pacts[k];
+  if (dirty) {
+    if (typeof saveGame === 'function') saveGame();
+    _mpDiploRefresh();
+  }
+}
+function _mpDiploRefresh() {
+  if (typeof refreshCurrentScreen === 'function') refreshCurrentScreen();
+  const rd = document.getElementById('scr-report-detail');
+  if (rd && !rd.classList.contains('hidden') && typeof renderReportDetail === 'function') renderReportDetail();
+  const rl = document.getElementById('scr-reports');
+  if (rl && !rl.classList.contains('hidden') && typeof renderReportsList === 'function') renderReportsList();
+}
+async function _mpDiploResync() {
+  if (window.SBMP && window.SBMP.ready()) { try { await window.SBMP.pollOrbits(); } catch (e) {} }
+  _mpDiploRefresh();
+}
+
+// Le destinataire répond à la cale offerte
+async function mpAnswerOrbit(reportId, accept) {
+  const r = (G.reports || []).find(x => x.id === reportId);
+  const d = r && r.diplo;
+  if (!d || d.state !== 'offered' || d.gone || _mpDiploBusy.has(reportId) || !window.SBMP) return;
+  if (!window.SBMP.ready()) { toast('Registre hors ligne : réessaie dans un instant'); return; }
+  _mpDiploBusy.add(reportId);
+  try {
+    const cargo = await window.SBMP.orbitAnswer(d.presenceId, accept);
+    d.state = accept ? 'accepted' : 'refused';
+    if (accept) {
+      mpCreditOrbitCargo({ id: d.presenceId, cargo, cargo_applied: false });
+      toast(`Cale de ${d.pseudo} acceptée : +${_mpResLine(cargo)}`);
+    } else toast(`Cale refusée : elle repartira avec le tanker de ${d.pseudo}`);
+    if (typeof saveGame === 'function') saveGame();
+  } catch (e) {
+    toast(_mpDiploErr(e));
+    await _mpDiploResync();
+  } finally { _mpDiploBusy.delete(reportId); }
+  renderReportDetail();
+}
+// Proposer un pacte depuis son ambassade (fiche de la planète)
+async function mpProposePact(missionId) {
+  const m = (G.tankerMissions || []).find(x => x.id === missionId);
+  if (!m || !m.mpTarget || m.status !== 'orbital_relay' || _mpDiploBusy.has(missionId)) return;
+  if (!m.mpPresenceId) { toast('Ambassade pas encore inscrite au registre : réessaie dans un instant'); mpOrbitRegister(m); return; }
+  if (!window.SBMP || !window.SBMP.ready()) { toast('Registre hors ligne : réessaie dans un instant'); return; }
+  const ok = await sbConfirmWarning('Pacte de non-agression',
+    `Proposer un pacte à <strong>${m.mpTarget.pseudo}</strong> ?<br><br>Tant que <strong>${m.tankerName}</strong> reste en orbite chez lui, aucun de vous deux ne pourra attaquer l'autre.<br><br>Rappeler le tanker romprait le pacte, et tout le comptoir le saurait.<br><br><em>Il a 48 h pour signer.</em>`, 'Proposer');
+  if (!ok) return;
+  _mpDiploBusy.add(missionId);
+  try {
+    await window.SBMP.pactPropose(m.mpPresenceId);
+    toast(`Pacte proposé à ${m.mpTarget.pseudo}`);
+  } catch (e) { toast(_mpDiploErr(e)); }
+  finally { _mpDiploBusy.delete(missionId); }
+  await _mpDiploResync();
+}
+// Signer ou décliner (partenaire)
+async function mpAnswerPact(pactId, accept) {
+  if (_mpDiploBusy.has(pactId) || !window.SBMP) return;
+  if (!window.SBMP.ready()) { toast('Registre hors ligne : réessaie dans un instant'); return; }
+  _mpDiploBusy.add(pactId);
+  try {
+    const st = await window.SBMP.pactAnswer(pactId, accept);
+    toast(st === 'active' ? 'Pacte signé' : st === 'expired' ? 'La proposition a expiré (48 h)' : st === 'withdrawn' ? 'Son ambassade est fermée : proposition retirée' : 'Pacte décliné');
+  } catch (e) { toast(_mpDiploErr(e)); }
+  finally { _mpDiploBusy.delete(pactId); }
+  await _mpDiploResync();
+}
+// Dénoncer un pacte actif (l'un ou l'autre) ou retirer sa proposition
+async function mpEndPact(pactId) {
+  const k = _mpDiplo().pacts[pactId];
+  if (!k || _mpDiploBusy.has(pactId) || !window.SBMP) return;
+  if (!window.SBMP.ready()) { toast('Registre hors ligne : réessaie dans un instant'); return; }
+  const ok = k.status === 'active'
+    ? await sbConfirmWarning('Dénoncer le pacte', `Dénoncer le pacte avec <strong>${k.otherPseudo}</strong> ?<br><br>Les raids redeviennent possibles entre vous, dans les deux sens.<br><br><em>Le comptoir saura que c'est toi.</em>`, 'Dénoncer')
+    : await sbConfirmWarning('Retirer la proposition', `Retirer ta proposition de pacte à <strong>${k.otherPseudo}</strong> ?`, 'Retirer');
+  if (!ok) return;
+  _mpDiploBusy.add(pactId);
+  try {
+    const st = await window.SBMP.pactEnd(pactId);
+    if (st === 'broken') { k.status = 'broken'; k.endedByMe = true; }
+    toast(st === 'broken' ? `Pacte avec ${k.otherPseudo} dénoncé` : 'Proposition retirée');
+  } catch (e) { toast(_mpDiploErr(e)); }
+  finally { _mpDiploBusy.delete(pactId); }
+  await _mpDiploResync();
+}
+// Rappel d'un tanker en ambassade : inscrit au registre (la cale non acceptée rentre, le pacte tombe)
+async function mpRecallEmbassy(mission) {
+  if (_mpDiploBusy.has(mission.id)) return;
+  const pseudo = mission.mpTarget.pseudo;
+  const pact = mission.mpPresenceId ? Object.values(_mpDiplo().pacts).find(k => k.anchor === mission.mpPresenceId && (k.status === 'active' || k.status === 'proposed')) : null;
+  const res = (mission.cargo && mission.cargo.resources) || {};
+  const hasCargo = !mission.mpCargoDelivered && _mpCargoSum(res) > 0;
+  if (_mpOrbitRegistering.has(mission.id)) { toast('Inscription au registre en cours : réessaie dans un instant'); return; }
+  if (!(window.SBMP && window.SBMP.ready())) { toast('Registre hors ligne : le rappel doit être inscrit au registre, réessaie dans un instant'); return; }
+  const returnMs = Math.max(60000, (mission.arrivalAt || 0) - (mission.departedAt || 0));
+  const ok = await sbConfirmWarning('Rappeler le tanker',
+    `Rappeler <strong>${mission.tankerName}</strong> de chez <strong>${pseudo}</strong> ?<br><br>L'ambassade ferme : plus de canal ni de pavillons.`
+    + (hasCargo ? `<br><br>La cale non acceptée (${_mpResLine(res)}) rentre avec lui.` : '')
+    + (pact && pact.status === 'active' ? `<br><br><strong style="color:var(--red)">Le pacte de non-agression avec ${pseudo} sera rompu.</strong> Tout le comptoir saura que c'est toi.` : pact ? `<br><br>Ta proposition de pacte sera retirée.` : '')
+    + `<br><br><em>Retour dans ~${Math.ceil(returnMs / 60000)} min.</em>`, 'Rappeler');
+  if (!ok) return;
+  _mpDiploBusy.add(mission.id);
+  let state = '';
+  try {
+    // jamais inscrite (ou réponse perdue) : l'inscription est idempotente, elle rend l'ambassade existante s'il y en a une
+    if (!mission.mpPresenceId) {
+      const off = mission.mpOffered || res;
+      try { mission.mpPresenceId = await window.SBMP.orbitArrive(mission.mpTarget.address, mission.id, mission.tankerName, { metal: off.metal || 0, energie: off.energie || 0, cristal: off.cristal || 0 }); }
+      catch (e) { if (!/orbit_rate|orbit_quota|target_unknown|target_self/.test(String(e && e.message))) throw e; }   // aucune ambassade n'a pu exister
+    }
+    if (mission.mpPresenceId) state = await window.SBMP.orbitLeave(mission.mpPresenceId);
+  } catch (e) {
+    if (!/orbit_unknown/.test(String(e && e.message))) { toast(_mpDiploErr(e)); _mpDiploBusy.delete(mission.id); return; }
+  }
+  _mpDiploBusy.delete(mission.id);
+  if (mission.status !== 'orbital_relay') return;
+  const now = Date.now();
+  if (state === 'accepted' || mission.mpCargoDelivered) {
+    mission.mpCargoDelivered = true;
+    if (mission.cargo) mission.cargo.resources = { metal: 0, energie: 0, cristal: 0 };
+  }
+  if (mission.cargo) mission.cargo.soldiers = { garde: 0, lourd: 0 };
+  mission.status = 'returning';
+  mission.cancelledAt = now;
+  mission.returnArrivalAt = now + returnMs;
+  if (pact && pact.status === 'active') { pact.status = 'broken'; pact.endedByMe = true; }
+  if (typeof startTankerCountdownTicker === 'function') startTankerCountdownTicker();
+  toast(`${mission.tankerName} quitte l'orbite de ${pseudo}${pact && pact.status === 'broken' ? ' · pacte rompu' : ''}`);
+  if (typeof saveGame === 'function') saveGame();
+  if (typeof refreshCurrentScreen === 'function') refreshCurrentScreen();
+}
+
+function _mpDiploBtn(label, onclick, tone) {
+  const c = tone === 'red' ? '255,138,138' : tone === 'mut' ? '206,206,205' : '95,255,232';
+  return `<button onclick="${onclick}" style="flex:1;padding:12px;background:rgba(${c},.07);border:1px solid rgba(${c},.45);color:rgb(${c});border-radius:8px;font-family:inherit;font-size:12px;letter-spacing:.06em;cursor:pointer">${label}</button>`;
+}
+function renderDiploReportDetail(r) {
+  const d = r.diplo || {};
+  const T = MP_DIPLO_TYPES[d.type] || MP_DIPLO_TYPES.embassy_in;
+  document.getElementById('report-detail-title').textContent = T.title;
+  document.getElementById('report-detail-meta').textContent = `${d.pseudo || '?'} · ${new Date(r.returnedAt).toLocaleString('fr-FR')}`;
+  const el = document.getElementById('report-detail-content');
+  if (!el) return;
+  const box = (inner) => `<div style="margin:0 16px 14px;padding:18px;border:1px solid ${T.color}55;border-radius:12px;background:rgba(20,25,30,.6);font-size:13px;line-height:1.6;color:#e6f0ff">${inner}</div>`;
+  const addr = d.address ? `<div style="font-size:10px;color:var(--mut);font-family:'SF Mono',monospace;margin-top:6px">${d.address} · dans ton carnet</div>` : '';
+  const cargoLine = _mpCargoSum(d.cargo) > 0 ? _mpResLine(d.cargo) : '';
+  const k = d.pactId ? _mpDiplo().pacts[d.pactId] : null;
+  let html = '';
+  if (d.type === 'embassy_in') {
+    html += box(`Le tanker <strong>${d.tanker || '?'}</strong> de <strong>${d.pseudo}</strong> a pris orbite au-dessus de ta colonie. Tant qu'il reste, son ambassade est ouverte : il peut te hisser des pavillons et te proposer un pacte.${addr}`);
+    let cargoHtml;
+    if (!cargoLine) cargoHtml = `<div style="font-size:12px;color:var(--mut);font-style:italic;text-align:center;padding:8px">Cale vide : une simple présence.</div>`;
+    else if (d.state === 'accepted') cargoHtml = `<div style="font-size:12px;color:var(--green);text-align:center;padding:8px">Cale acceptée : +${cargoLine}</div>`;
+    else if (d.state === 'refused') cargoHtml = `<div style="font-size:12px;color:var(--mut);font-style:italic;text-align:center;padding:8px">Cale refusée (${cargoLine}) : elle repart avec le tanker.</div>`;
+    else if (d.gone || d.state === 'withdrawn') cargoHtml = `<div style="font-size:12px;color:var(--mut);font-style:italic;text-align:center;padding:8px">Le tanker est reparti avec sa cale.</div>`;
+    else cargoHtml = `<div style="font-size:10px;color:var(--mut);letter-spacing:.12em;text-transform:uppercase;margin-bottom:8px">Cale offerte</div>
+      <div style="font-size:15px;color:#ffc864;margin-bottom:12px">${cargoLine}</div>
+      <div style="display:flex;gap:8px">${_mpDiploBtn('Accepter', `mpAnswerOrbit('${r.id}',true)`)}${_mpDiploBtn('Refuser', `mpAnswerOrbit('${r.id}',false)`, 'mut')}</div>`;
+    html += `<div style="margin:0 16px 14px">${cargoHtml}</div>`;
+    if (d.gone) html += `<div style="margin:0 16px 14px;font-size:11px;color:var(--mut);font-style:italic">L'ambassade est fermée.</div>`;
+  } else if (d.type === 'pact_proposed') {
+    html += box(`<strong>${d.pseudo}</strong> te propose un <strong>pacte de non-agression</strong>.<br><br>Tant que son tanker reste en orbite chez toi, aucun de vous deux ne peut attaquer l'autre. S'il le rappelle, le pacte tombe, et tout le comptoir le saura. Tu peux aussi le dénoncer à tout moment.${addr}`);
+    const st = (k && k.status) || d.state;
+    html += `<div style="margin:0 16px 14px">${st === 'proposed'
+      ? `<div style="display:flex;gap:8px">${_mpDiploBtn('Signer le pacte', `mpAnswerPact('${d.pactId}',true)`)}${_mpDiploBtn('Décliner', `mpAnswerPact('${d.pactId}',false)`, 'mut')}</div>`
+      : `<div style="font-size:12px;color:var(--mut);font-style:italic;text-align:center;padding:8px">${st === 'active' ? 'Pacte signé.' : st === 'declined' ? 'Tu as décliné ce pacte.' : st === 'broken' ? 'Ce pacte a été rompu.' : st === 'expired' ? 'La proposition a expiré.' : 'Proposition retirée : son ambassade est fermée.'}</div>`}</div>`;
+  } else if (d.type === 'pact_signed') {
+    html += box(`Pacte de non-agression avec <strong>${d.pseudo}</strong>. Aucun raid n'est possible entre vous tant que l'ambassade reste en orbite.${addr}`);
+    if (k && k.status === 'active') html += `<div style="margin:0 16px 14px;display:flex">${_mpDiploBtn('Dénoncer le pacte', `mpEndPact('${d.pactId}')`, 'red')}</div>`;
+    else if (k) html += `<div style="margin:0 16px 14px;font-size:12px;color:var(--mut);font-style:italic;text-align:center">Ce pacte n'est plus en vigueur.</div>`;
+  } else if (d.type === 'pact_broken') {
+    html += box(`<strong>${d.pseudo}</strong> ${d.reason === 'recall' ? 'a rappelé son ambassade' : 'a dénoncé votre pacte'}. Les raids redeviennent possibles entre vous.${addr}`);
+  } else if (d.type === 'pact_declined') {
+    html += box(`<strong>${d.pseudo}</strong> a décliné ton pacte de non-agression.${addr}`);
+  } else if (d.type === 'cargo_accepted') {
+    html += box(`<strong>${d.pseudo}</strong> a accepté la cale de ${d.tanker || 'ton tanker'} : <span style="color:var(--green)">${cargoLine || 'rien'}</span> livrés. Le tanker reste en orbite : l'ambassade est toujours ouverte.${addr}`);
+  } else if (d.type === 'cargo_refused') {
+    html += box(`<strong>${d.pseudo}</strong> a refusé la cale de ${d.tanker || 'ton tanker'}${cargoLine ? ` (${cargoLine})` : ''}. Elle reste à bord : rappelle le tanker pour la récupérer.${addr}`);
+  }
+  el.innerHTML = html;
+}
+
+// Bloc « Ambassade » sur la fiche d'une planète tenue par un vrai commandant
+function mpEmbassyBlockHtml(p) {
+  if (!p || !p.isReal) return '';
+  const addr = p.mpAddress || p.coord;
+  const m = (G.tankerMissions || []).find(x => x.status === 'orbital_relay' && x.mpTarget && x.destinationPlanetCoord === p.coord);
+  const k = mpPactWith(addr);
+  if (!m && !k) return '';
+  const rows = [];
+  if (m) {
+    const res = (m.cargo && m.cargo.resources) || {};
+    const off = m.mpOffered || res;
+    const cargo = m.mpCargoDelivered ? 'cale livrée' : _mpCargoSum(res) > 0 ? (m.mpCargoRefused ? `cale refusée (${_mpResLine(res)}) · rappelle-le pour la récupérer` : `cale offerte : ${_mpResLine(off)}`) : 'cale vide';
+    rows.push(`<div style="font-size:12px;color:#e6f0ff">${m.tankerName} en orbite${m.mpPresenceId ? '' : ' · inscription au registre…'}</div><div style="font-size:11px;color:var(--mut);margin-top:2px">${cargo}</div>`);
+  }
+  let action = '';
+  if (k && k.status === 'active') {
+    const since = k.activeAt ? new Date(k.activeAt).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' }) : '';
+    const held = m && k.anchor === m.mpPresenceId ? `tenu par ${m.tankerName}` : k.mine ? 'tenu par ton tanker' : 'tenu par son tanker en orbite chez toi';
+    rows.push(`<div style="font-size:12px;color:var(--green);margin-top:8px">Pacte de non-agression actif${since ? ' depuis le ' + since : ''}</div><div style="font-size:11px;color:var(--mut);margin-top:2px">${held}</div>`);
+    action = _mpDiploBtn('Dénoncer le pacte', `mpEndPact('${k.id}')`, 'red');
+  } else if (k && k.status === 'proposed' && k.mine) {
+    rows.push(`<div style="font-size:12px;color:#5fffe8;margin-top:8px">Pacte proposé · en attente de sa signature</div>`);
+    action = _mpDiploBtn('Retirer la proposition', `mpEndPact('${k.id}')`, 'mut');
+  } else if (k && k.status === 'proposed') {
+    rows.push(`<div style="font-size:12px;color:#5fffe8;margin-top:8px">${p.playerName} te propose un pacte de non-agression</div>`);
+    action = `${_mpDiploBtn('Signer', `mpAnswerPact('${k.id}',true)`)}${_mpDiploBtn('Décliner', `mpAnswerPact('${k.id}',false)`, 'mut')}`;
+  } else if (m && m.mpPresenceId) {
+    action = _mpDiploBtn('Proposer un pacte de non-agression', `mpProposePact('${m.id}')`);
+  }
+  return `<div style="margin-bottom:10px;padding:12px 14px;border:1px solid rgba(95,255,232,.3);border-radius:8px;background:rgba(95,255,232,.04)">
+    <div style="font-size:10px;color:var(--mut);letter-spacing:.14em;text-transform:uppercase;margin-bottom:8px">Ambassade</div>
+    ${rows.join('')}
+    ${action ? `<div style="display:flex;gap:8px;margin-top:10px">${action}</div>` : ''}
+  </div>`;
+}
+
 function renderDefenseReportDetail(r) {
   const d = r.defense || {};
   document.getElementById('report-detail-title').textContent = (d.won ? 'RAID REPOUSSÉ' : 'RAID SUBI');
@@ -9427,7 +9858,7 @@ function _mpPruneLedger() {
   for (const [k, v] of Object.entries(G.mpDeals)) {
     if (k.startsWith('pending:')) {
       if ((v.at || 0) < Date.now() - 864e5) { if (v.escrow) _mpPay(v.escrow, +1); delete G.mpDeals[k]; }   // jamais confirmé : rendu
-    } else if (v.settled && (v.at || 0) < old) delete G.mpDeals[k];
+    } else if (v.settled && (v.at || 0) < old && (!k.startsWith('orb:') || v.applied)) delete G.mpDeals[k];   // AMBASSADES_1210
   }
 }
 // Offre envoyée mais app fermée pendant l'attente : on rattache le séquestre au marché retrouvé
@@ -9597,6 +10028,10 @@ function _mpRumorText(r) {
     case 'raid_repelled': return `${r.target} a renvoyé la flotte de ${r.actor} dans le vide${s}.`;
     case 'route_legendary': return r.target ? `La route « ${r.target} » de ${r.actor} est devenue légendaire. Les équipages se la disputent.` : `Une route de ${r.actor} est devenue légendaire.`;
     case 'world_growth': return `Le monde de ${r.actor}${r.target ? ` (${r.target})` : ''} grossit vite. Trop vite, disent certains.`;
+    case 'pact_signed': return `${r.actor} et ${r.target} ont signé un pacte de non-agression${s}. Reste à voir combien de temps il tiendra.`;
+    case 'pact_broken': return (r.payload && r.payload.reason === 'recall')
+      ? `${r.actor} a rappelé son ambassade de chez ${r.target}${s}. Le pacte est rompu.`
+      : `${r.actor} a dénoncé son pacte avec ${r.target}${s}. Les quais retiennent leur souffle.`;
     case 'rare_discovery': return r.target ? `${r.actor} aurait trouvé ${r.target}${s}. Personne ne sait encore où.` : `${r.actor} aurait trouvé quelque chose de rare${s}.`;
     default: return '';
   }
@@ -10409,6 +10844,7 @@ function renderTankerMissionCard(mission, opts) {
             <span style="font-size:10px;color:var(--mut);font-family:'SF Mono',monospace">${orbitLabel}</span>
           </div>
           <div style="font-family:'SF Mono',monospace;font-size:10px;color:var(--mut);margin-bottom:6px;letter-spacing:.04em">⊙ ${destTxt}</div>
+          ${m.mpTarget ? (() => { const _k = mpPactWith(m.mpTarget.address); const _r = (m.cargo && m.cargo.resources) || {}; const _c = m.mpCargoDelivered ? 'cale livrée' : _mpCargoSum(_r) > 0 ? (m.mpCargoRefused ? 'cale refusée' : 'cale offerte') : 'présence'; return `<div style="font-size:10px;color:#5fffe8;margin-bottom:6px">Ambassade chez ${m.mpTarget.pseudo} · ${_c}${_k && _k.status === 'active' ? ' · <span style="color:var(--green)">pacte actif</span>' : _k ? ' · pacte proposé' : ''}</div>`; })() : ''}
           <button onclick="event.stopPropagation();recallOrbitalTanker('${m.id}')"
                   style="margin-top:4px;width:100%;padding:7px 10px;background:transparent;border:1px solid rgba(255,200,100,.35);color:#ffc864;font-size:10px;letter-spacing:.12em;text-transform:uppercase;border-radius:5px;cursor:pointer;font-family:inherit">
             Rappeler le tanker
@@ -11267,6 +11703,16 @@ function _carnetTargetFromPlanet(p) {
   // par le serveur (fonction resolve-raids) avec sa vraie défense et ses vrais stocks.
   if (p.isReal) {
     const online = !!(window.SBMP && window.SBMP.ready && window.SBMP.ready());
+    const _pact = mpPactWith(p.mpAddress || p.coord);   // AMBASSADES_1210
+    if (_pact && _pact.status === 'active') {
+      return Object.assign(base, {
+        name: p.name || p.coord, level: p.playerLevel || 1, profile: 'Commandant · ' + p.playerName,
+        kind: 'player', mp: true, mpAddress: p.mpAddress || p.coord, mpPseudo: p.playerName,
+        targetable: false, defense: 0, garrison: 0, resources: {},
+        hint: 'Pacte de non-agression en cours : dénonce-le d\'abord (fiche de sa planète)',
+        description: 'Pacte de non-agression actif.',
+      });
+    }
     return Object.assign(base, {
       name: p.name || p.coord, level: p.playerLevel || 1, profile: 'Commandant · ' + p.playerName,
       kind: 'player', mp: true, mpAddress: p.mpAddress || p.coord, mpPseudo: p.playerName,
@@ -23465,7 +23911,7 @@ function handleTankerReturnFromCancellation(missionId) {
     for (const rk of ['metal', 'energie', 'cristal']) {
       const qty = m.cargo.resources[rk] || 0;
       if (qty > 0 && G.res[rk]) {
-        G.res[rk].v = Math.min(G.res[rk].max, G.res[rk].v + qty);
+        G.res[rk].v = m.mpTarget ? G.res[rk].v + qty : Math.min(G.res[rk].max, G.res[rk].v + qty);   // AMBASSADES_1210 : cale offerte rendue intacte
         const info = tileInfo(rk);
         restituted.push(`${fmt(qty)} ${info?.label?.toLowerCase() || rk}`);
       }
@@ -23792,7 +24238,7 @@ function renderTankerComposeCargo() {
         <div style="font-size:10px;color:var(--mut);margin-top:8px;font-style:italic;line-height:1.4">
           Pour une action offensive, compose une flotte d'attaque depuis l'écran Flotte.
         </div>
-        ${c.realPlayer ? `<div style="font-size:11px;color:#5fffe8;margin-top:8px;line-height:1.5">Commandant réel : ton tanker se met en <strong>vigie orbitale</strong> et ouvre le canal. Depuis la fiche de sa planète, tu pourras lui hisser un pavillon.</div>` : ''}
+        ${c.realPlayer ? `<div style="font-size:11px;color:#5fffe8;margin-top:8px;line-height:1.5">Commandant réel : ton tanker ouvre une <strong>ambassade orbitale</strong>. Sa cale lui est <strong>offerte</strong> : il l'accepte ou la refuse (refusée, elle rentre avec le tanker). Depuis sa fiche : pavillons et pacte de non-agression.</div>` : ''}
       </div>
     `;
   } else {
@@ -23964,7 +24410,6 @@ function adjustComposeCargoSoldier(sk, delta) {
 function adjustComposeCargoResource(rk, delta) {
   const c = G.tankerComposing;
   if (!c) return;
-  if (c.realPlayer) { toast('Vers un commandant : vigie seulement pour l\'instant, la cale part vide'); return; }
   const r = G.res?.[rk];
   if (!r) return;
   const cargoMax = SHIP_TIERS.tanker[c.tankerSelected]?.cargo || 0;
@@ -23996,6 +24441,24 @@ function renderTankerComposeIntent() {
   const c = G.tankerComposing;
   const used = computeComposeCargoUsed();
   const isEmpty = used === 0;
+  // AMBASSADES_1210 — vers un vrai commandant : toujours une ambassade (le tanker attend sa réponse en orbite)
+  if (c.realPlayer) {
+    c.postArrival = 'orbit_relay';
+    list.innerHTML = `
+    <div style="padding:0 16px">
+      <div style="padding:10px 12px;background:rgba(95,255,232,.06);border:1px solid rgba(95,255,232,.45);border-radius:6px">
+        <div style="display:flex;align-items:center;gap:10px">
+          ${icon('satellite', {size:18, color:'#5fffe8'})}
+          <div style="flex:1">
+            <div style="font-size:12px;color:#5fffe8;font-weight:600">Ambassade orbitale</div>
+            <div style="font-size:10px;color:var(--mut);margin-top:2px">${isEmpty ? 'Présence et canal ouverts : pavillons, pacte de non-agression.' : 'Cale offerte à ' + _escapeHtml(c.realPlayer.pseudo || '') + '. Le tanker reste en orbite : canal ouvert, pacte possible.'}</div>
+          </div>
+          <div style="color:#5fffe8">${icon('check', {size:14})}</div>
+        </div>
+      </div>
+    </div>`;
+    return;
+  }
   // Si cale vide, le mode "Déposer et rentrer" n'a aucun sens (rien à déposer)
   // — on désactive visuellement le second bouton et on force orbit_relay.
   list.innerHTML = `
@@ -24026,6 +24489,7 @@ function renderTankerComposeIntent() {
 
 function setComposeIntent(intent) {
   if (!G.tankerComposing) return;
+  if (G.tankerComposing.realPlayer && intent !== 'orbit_relay') return;   // AMBASSADES_1210
   // Bloquer le mode 'return' si la cale est vide (rien à déposer)
   if (intent === 'return' && computeComposeCargoUsed() === 0) {
     if (typeof toast === 'function') toast('Cale vide — orbite-balise uniquement');
@@ -24044,8 +24508,8 @@ function renderTankerComposeRoute() {
   const c = G.tankerComposing;
   const current = c.routeType || 'beacon';
 
-  // Calcul des durées affichées (estimation visuelle, basée sur durée nominale de 5 min)
-  const baseDurationMs = 5 * 60 * 1000;
+  // Calcul des durées affichées (estimation visuelle, basée sur durée nominale de 5 min ; vrai trajet vers un commandant)
+  const baseDurationMs = (c.realPlayer && typeof mpRaidTravelMs === 'function') ? mpRaidTravelMs({ mpAddress: c.realPlayer.address }) : 5 * 60 * 1000;
   const beaconDuration = baseDurationMs * ROUTE_TYPES.beacon.durationFactor;
   const directDuration = baseDurationMs * ROUTE_TYPES.direct.durationFactor;
 
@@ -24172,13 +24636,15 @@ function updateTankerComposeConfirmBtn() {
   // Décision 16/05 : un tanker vide peut partir, mais UNIQUEMENT en mode "orbite-balise".
   // Utilité : observer une planète, recevoir des alertes (futur), maintenir un canal
   // de communication avec un autre joueur. Si cale vide, on force postArrival = 'orbit_relay'.
-  if (used === 0 && c.postArrival !== 'orbit_relay') {
+  if ((used === 0 || c.realPlayer) && c.postArrival !== 'orbit_relay') {
     c.postArrival = 'orbit_relay';
   }
   // canLaunch toujours vrai désormais (un tanker peut partir vide en orbite-balise)
   btn.style.opacity = '1';
   btn.style.pointerEvents = 'auto';
-  if (used === 0) {
+  if (c.realPlayer) {
+    btn.textContent = used === 0 ? 'Ouvrir l\'ambassade' : 'Ouvrir l\'ambassade et offrir la cale';
+  } else if (used === 0) {
     btn.textContent = 'Lancer en orbite (cale vide)';
   } else {
     btn.textContent = 'Lancer la mission';
@@ -24191,9 +24657,11 @@ function confirmTankerComposition() {
   if (!c) return;
   const used = computeComposeCargoUsed();
   // Si cale vide, force orbite-balise (sécurité finale au cas où l'UI a glissé)
-  if (used === 0 && c.postArrival !== 'orbit_relay') {
+  if ((used === 0 || c.realPlayer) && c.postArrival !== 'orbit_relay') {
     c.postArrival = 'orbit_relay';
   }
+  // AMBASSADES_1210 — jamais de soldats vers un commandant (sécurité finale)
+  if (c.realPlayer || c.planetPlayerName) c.cargo.soldiers = { garde: 0, lourd: 0 };
 
   // Décompter les ressources immédiatement (elles partent)
   for (const rk of ['metal', 'energie', 'cristal']) {
@@ -24207,7 +24675,8 @@ function confirmTankerComposition() {
   // Générer un nom de tanker
   const tankerName = pickTankerName();
   const now = Date.now();
-  const durationMs = 5 * 60 * 1000;  // 5 min
+  // AMBASSADES_1210 — vers un vrai commandant : vrai trajet (même règle que les raids, aller simple)
+  const durationMs = (c.realPlayer && typeof mpRaidTravelMs === 'function') ? mpRaidTravelMs({ mpAddress: c.realPlayer.address }) : 5 * 60 * 1000;
 
   // Créer la mission
   const mission = {
@@ -24226,6 +24695,7 @@ function confirmTankerComposition() {
     cargoOriginal: JSON.parse(JSON.stringify(c.cargo)),  // ← Copie figée du cargo au départ (avant route factor) — utilisée par le bilan trajet pour afficher les pertes/bonus exacts à l'arrivée
     postArrival: c.postArrival,
     riskLossPct: 0,  // pas de risque sur planète verrouillée
+    mpTarget: c.realPlayer ? { address: c.realPlayer.address, pseudo: c.realPlayer.pseudo } : null,   // AMBASSADES_1210
   };
 
   // ─── Routes Duales : ajuster durée et tirer rencontre éventuelle ───
@@ -24269,6 +24739,7 @@ function pickTankerName() {
 // Si planète mortelle : cargo détruit, tanker rentre avec narration tragique.
 // Sinon : crée G.garrisons entry. Si orbit_relay → tanker reste. Sinon il rentre.
 function handleTankerDropoffArrival(mission) {
+  if (mission.mpTarget) { mpOrbitArrival(mission); return; }   // AMBASSADES_1210 — chez un vrai commandant
   const ptype = PLANET_TYPES[mission.destinationPlanetType];
   const isDeadly = !ptype?.deployable;
 
@@ -24504,6 +24975,7 @@ async function recallOrbitalTanker(missionId) {
     if (typeof toast === 'function') toast('Tanker pas en orbite');
     return;
   }
+  if (mission.mpTarget) return mpRecallEmbassy(mission);   // AMBASSADES_1210
 
   // Y a-t-il une garnison rattachée ?
   const garrison = (G.garrisons || []).find(g => g.contactingMissionId === missionId);
@@ -25086,6 +25558,7 @@ function renderReportDetail() {
   if (!r) return;
   if (r.kind === 'defense') { renderDefenseReportDetail(r); return; }
   if (r.kind === 'flag') { renderFlagReportDetail(r); return; }
+  if (r.kind === 'diplo') { renderDiploReportDetail(r); return; }   // AMBASSADES_1210
 
   document.getElementById('report-detail-title').textContent = r.fleetName.toUpperCase();
   document.getElementById('report-detail-meta').textContent = `Rapport · ${new Date(r.returnedAt).toLocaleString('fr-FR')}`;
@@ -34549,10 +35022,8 @@ function renderPlanetDetailScreen() {
     // Option B Adrien : bouton visible UNIQUEMENT si tanker dispo (émergence pure)
     const stat = G.fleet?.stationed?.tanker || {};
     const totalTankers = (stat.t1 || 0) + (stat.t2 || 0) + (stat.t3 || 0);
-    const tankerEngaged = (G.tankerMissions || []).filter(m =>
-      m.status === 'in_transit' || m.status === 'orbital_relay' || m.status === 'returning'
-    ).length;
-    const availableTankers = totalTankers - tankerEngaged;
+    // AMBASSADES_1210 — même règle de réservation que partout (missions, ambassades, quais)
+    const availableTankers = typeof tankerAvailability === 'function' ? tankerAvailability(null) : totalTankers;
     const showTankerBtn = availableTankers > 0;
 
     // Bloc garnison si présente
@@ -34580,6 +35051,7 @@ function renderPlanetDetailScreen() {
 
     actionsEl.innerHTML = `
       ${garrisonBlock}
+      ${p.isReal ? mpEmbassyBlockHtml(p) : ''}
       <button class="btn-primary ${canResond ? '' : 'disabled'}" style="width:100%;padding:14px;margin-bottom:8px" onclick="resondPlanet('${p.coord}')">${canResond ? 'Sonder à nouveau' : 'Sonde en mission'}</button>
       ${showTankerBtn ? `
         <button class="btn-primary" style="width:100%;padding:14px;margin-bottom:8px;border-color:rgba(255,200,100,.4);background:rgba(255,200,100,.06);color:#ffc864" onclick="openTankerCompose('${p.coord}')">Envoyer un tanker</button>
@@ -35494,9 +35966,9 @@ function renderDefenseUnitDetail(key) {
 
 // ─── SHIP3D : fiche vaisseau en vue héros (3D plein écran derrière la fiche, comme le soldat lourd) ───
 const UNIT_SHIP3D_MODELS = {
-  cuirasse: { url: 'assets/3d/sb_kv01.glb?v=20261012-0030', code: 'KV-01 Kerath' },
-  fregate:  { url: 'assets/3d/sb_sr01.glb?v=20261012-0030', code: 'SR-01 Sentinelle', profile: 'sr01' },
-  tanker:   { url: 'assets/3d/sb_tk07.glb?v=20261012-0030', code: 'TK-07 Tanker', profile: 'tk07' },
+  cuirasse: { url: 'assets/3d/sb_kv01.glb?v=20261012-1600', code: 'KV-01 Kerath' },
+  fregate:  { url: 'assets/3d/sb_sr01.glb?v=20261012-1600', code: 'SR-01 Sentinelle', profile: 'sr01' },
+  tanker:   { url: 'assets/3d/sb_tk07.glb?v=20261012-1600', code: 'TK-07 Tanker', profile: 'tk07' },
 };
 let unitShip3D = null;   // { key, handle }
 function mountUnitShip3D(key, inService) {
@@ -35585,9 +36057,9 @@ function hasShipyardBuilt() {
   return !!(typeof G !== 'undefined' && G.planet && G.planet.parcels && G.planet.parcels.some(p => p && p.building === 'shipyard' && p.state === 'built'));
 }
 const DOCK_MODELS = {
-  tanker:   { url: 'assets/3d/sb_tk07_lod.glb?v=20261012-0100', engine: [1.0, 0.7, 0.4] },
-  fregate:  { url: 'assets/3d/sb_sr01_lod.glb?v=20261012-0100', engine: [0.5, 0.78, 1.0] },
-  cuirasse: { url: 'assets/3d/sb_kv01_lod.glb?v=20261012-0100', engine: [0.5, 0.78, 1.0] },
+  tanker:   { url: 'assets/3d/sb_tk07_lod.glb?v=20261012-1600', engine: [1.0, 0.7, 0.4] },
+  fregate:  { url: 'assets/3d/sb_sr01_lod.glb?v=20261012-1600', engine: [0.5, 0.78, 1.0] },
+  cuirasse: { url: 'assets/3d/sb_kv01_lod.glb?v=20261012-1600', engine: [0.5, 0.78, 1.0] },
 };
 function fleetStationedCount(k) {
   const c = (G.fleet && G.fleet.stationed && G.fleet.stationed[k]) || {};
@@ -35679,7 +36151,7 @@ function unmountFleetStation3D() {
 })();
 
 // ─── SHIP3D : fiche bâtiment en vue héros (chantier orbital OS-01) ───
-const BUILDING_SHIP3D = { shipyard: { url: 'assets/3d/sb_os01.glb?v=20261011-2340', code: 'OS-01 Chantier orbital', profile: 'os01' } };
+const BUILDING_SHIP3D = { shipyard: { url: 'assets/3d/sb_os01.glb?v=20261012-1600', code: 'OS-01 Chantier orbital', profile: 'os01' } };
 let bdShip3D = null;   // { key, handle }
 function mountBuildingShip3D(key, tier) {
   const scr = document.getElementById('scr-building-detail');
@@ -42615,20 +43087,20 @@ if (G.knownTargets && Array.isArray(G.tankerMissions)) {
 
 </script>
 <!-- PLANET3D — carte 3D + boucle antenne (source : sb-build/src/planet3d.js) -->
-<script type="module" src="assets/planet3d.js?v=20261012-0030"></script>
+<script type="module" src="assets/planet3d.js?v=20261012-1600"></script>
 <!-- CLOUD — sauvegarde Supabase (source : sb-build/src/cloud.js) -->
-<script type="module" src="assets/cloud.js?v=20261012-0030"></script>
+<script type="module" src="assets/cloud.js?v=20261012-1600"></script>
 <!-- MATCH3 — Match-3 V2 (assets/match3.js, source src/match3.js + src/m3core.js) : remplace startM3 -->
-<script type="module" src="assets/match3.js?v=20261012-0030"></script>
+<script type="module" src="assets/match3.js?v=20261012-1600"></script>
 <!-- HOME V2 — « monde d'abord » : planète plein écran, ressources en ligne, Flotte / Défense / Prospection (assets/home.js) -->
-<script type="module" src="assets/home.js?v=20261012-1510"></script>
+<script type="module" src="assets/home.js?v=20261012-1600"></script>
 <!-- SPACE MAP v0 — carte du Centre de prospection (assets/spacemap.js, source src/spacemap.js) -->
-<script src="assets/spacemap.js?v=20261012-1430"></script>
+<script src="assets/spacemap.js?v=20261012-1600"></script>
 <!-- SPACE MAP niveau B — diorama 3D d'un système (assets/system3d.js, source src/system3d.js) -->
-<script type="module" src="assets/system3d.js?v=20261012-0030"></script>
+<script type="module" src="assets/system3d.js?v=20261012-1600"></script>
 <!-- SHIP3D — fiches 3D : cuirassé KV-01, frégate SR-01, tanker TK-07, chantier orbital OS-01 (assets/ship3d.js, sur le moteur partagé window.SB3D) -->
-<script type="module" src="assets/ship3d.js?v=20261012-0900"></script>
+<script type="module" src="assets/ship3d.js?v=20261012-1600"></script>
 <!-- FORMATION3D — flotte déployée en orbite, vue de haut en formation (remplace la vue orbite) -->
-<script src="assets/formation3d.js?v=20261012-1000"></script>
+<script src="assets/formation3d.js?v=20261012-1600"></script>
 </body>
 </html>
