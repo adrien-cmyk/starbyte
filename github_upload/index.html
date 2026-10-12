@@ -9976,6 +9976,17 @@ document.addEventListener('scroll', (e) => {
   const t = e.target;
   if (t && t.classList && t.classList.contains('screen-scroll')) updateHeroScrim(t);
 }, true);
+// PROSPECTION = ANTENNE (12/10/2026, décision d'Adrien) : comme « pas de chantier orbital → pas d'orbite »,
+// pas d'antenne → pas de Centre de prospection. C'est l'antenne terminée qui ouvre la porte.
+// Les parties qui ont déjà prospecté (rapports ou missions) restent ouvertes, pour ne rien retirer aux testeurs.
+function prospectLocked() {
+  const a = (window.SBAntenna && typeof SBAntenna.data === 'function') ? SBAntenna.data() : (G && G.antenna);
+  if (!a) return false;                                   // pas d'état d'antenne connu : on ne bloque pas
+  if (a.built && !a.building) return false;               // antenne opérationnelle
+  if ((G.probeReports || []).length || (G.probeMissions || []).length || (G.tankerMissions || []).length) return false;
+  return true;
+}
+
 function goto(scr, opts) {
   setTimeout(() => { const el = document.getElementById('scr-' + scr); const sc = el && el.querySelector('.screen-scroll'); if (sc) updateHeroScrim(sc); }, 60);
   opts = opts || {};
@@ -9984,6 +9995,11 @@ function goto(scr, opts) {
   if (scr === 'shipyard' && typeof getShipyardTier === 'function' && getShipyardTier() === 0) {
     if (typeof toast === 'function') toast('Construis le chantier orbital pour accéder à la construction navale');
     scr = 'planet';
+  }
+  if ((scr === 'prospect' || scr === 'universe') && prospectLocked()) {
+    if (typeof toast === 'function') toast("Construis l'antenne de prospection pour capter les premiers signaux");
+    scr = 'planet';
+    setTimeout(() => { const a = G.antenna; if (a && a.parcel != null && window.Planet3D && Planet3D.ready) Planet3D.focus(a.parcel); }, 300);
   }
   // D5.3 fix scroll bloqué : cleanup proactif des modaux orphelins à chaque navigation.
   // Sur iOS, un modal qui n'a pas été nettoyé bloque le scroll de la page entière.
@@ -42605,7 +42621,7 @@ if (G.knownTargets && Array.isArray(G.tankerMissions)) {
 <!-- MATCH3 — Match-3 V2 (assets/match3.js, source src/match3.js + src/m3core.js) : remplace startM3 -->
 <script type="module" src="assets/match3.js?v=20261012-0030"></script>
 <!-- HOME V2 — « monde d'abord » : planète plein écran, ressources en ligne, Flotte / Défense / Prospection (assets/home.js) -->
-<script type="module" src="assets/home.js?v=20261012-0030"></script>
+<script type="module" src="assets/home.js?v=20261012-1510"></script>
 <!-- SPACE MAP v0 — carte du Centre de prospection (assets/spacemap.js, source src/spacemap.js) -->
 <script src="assets/spacemap.js?v=20261012-1430"></script>
 <!-- SPACE MAP niveau B — diorama 3D d'un système (assets/system3d.js, source src/system3d.js) -->
