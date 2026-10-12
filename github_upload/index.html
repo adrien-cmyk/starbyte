@@ -1753,6 +1753,22 @@ svg.map {
 #scr-unit-detail.ud-ship .ud-hero-space, #scr-building-detail.ud-ship .ud-hero-space, #scr-fleet.ud-ship .ud-hero-space { touch-action: none; }
 /* écran Flotte en vue héros : la station OS-01 et la flotte à quai derrière les cartes */
 #scr-fleet.ud-hero > .stars, #scr-fleet.ud-hero > .glow, #scr-fleet.ud-hero .bld-banner { display: none; }
+/* fiche d'une flotte en orbite : la formation en 3D derrière la fiche */
+#scr-fleet-detail.ud-hero > .stars, #scr-fleet-detail.ud-hero > .glow, #scr-fleet-detail.ud-hero .bld-banner { display: none; }
+#scr-fleet-detail:not(.ud-hero) > .u3d-hero, #scr-fleet-detail:not(.ud-hero) .ud-hero-space { display: none; }
+#scr-fleet-detail.ud-hero .screen-scroll { position: relative; z-index: 2; touch-action: pan-y; }
+#scr-fleet-detail.ud-hero .head { text-shadow: 0 2px 12px rgba(0,0,0,.8); }
+#scr-fleet-detail.ud-hero .dash-section-card, #scr-fleet-detail.ud-hero #fleet-detail-composition > *, #scr-fleet-detail.ud-hero #fleet-detail-doctrine > * { background: rgba(8,12,18,.86); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); }
+#scr-fleet-detail.ud-ship .ud-hero-space { touch-action: none; }
+#fd-form-hero .u3d-canvas { touch-action: none; }
+#fd-form-hero .fd-sel { position: absolute; left: 16px; right: 16px; bottom: calc(var(--u3d-band, 40%) + 30px); z-index: 2; pointer-events: none;
+  padding: 10px 14px; border-radius: 10px; border: 1px solid rgba(255,190,90,.35); background: rgba(8,12,18,.78); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+  opacity: 0; transform: translateY(6px); transition: opacity .25s ease, transform .25s ease; }
+#fd-form-hero .fd-sel.on { opacity: 1; transform: none; }
+#fd-form-hero .fd-sel-name { font-size: 12px; letter-spacing: .16em; text-transform: uppercase; color: #eef4f8; margin-bottom: 6px; }
+#fd-form-hero .fd-sel-name span { color: var(--amber); margin-left: 6px; }
+#fd-form-hero .fd-sel-stats { display: flex; gap: 14px; font-size: 9px; letter-spacing: .16em; color: rgba(190,208,220,.75); }
+#fd-form-hero .fd-sel-stats b { font-family: var(--font-mono, monospace); font-size: 12px; margin-left: 4px; letter-spacing: 0; }
 #scr-fleet:not(.ud-hero) > .u3d-hero, #scr-fleet:not(.ud-hero) .ud-hero-space { display: none; }
 #scr-fleet.ud-hero .screen-scroll { position: relative; z-index: 2; touch-action: pan-y; }
 #scr-fleet.ud-hero .head { text-shadow: 0 2px 12px rgba(0,0,0,.8); }
@@ -12400,6 +12416,55 @@ function renderFleetDetail() {
   if (primaryEl) primaryEl.innerHTML = primaryHtml;
   if (reportEl) reportEl.innerHTML = reportHtml;
   actionsEl.innerHTML = actionsHtml;
+  // FORMATION3D — flotte en orbite : vue arrière 3/4 de la formation en plein écran, la fiche défile par-dessus
+  setTimeout(() => { if (isDeployed) mountFleetFormation3D(fleet); else unmountFleetFormation3D(); }, 0);
+}
+
+// ─── FORMATION3D : fiche d'une flotte en orbite en vue héros ───
+let fleetFormation3D = null;   // { id, sig, handle }
+function mountFleetFormation3D(fleet) {
+  const scr = document.getElementById('scr-fleet-detail');
+  const scroll = scr && scr.querySelector('.screen-scroll');
+  if (!scr || !scroll || !window.WebGLRenderingContext) return false;
+  let hero = document.getElementById('fd-form-hero');
+  if (!hero) { hero = document.createElement('div'); hero.id = 'fd-form-hero'; hero.className = 'u3d u3d-hero'; scr.insertBefore(hero, scroll); }
+  let space = document.getElementById('fd-form-space');
+  if (!space) { space = document.createElement('div'); space.id = 'fd-form-space'; space.className = 'ud-hero-space'; const h = scroll.querySelector('.head'); scroll.insertBefore(space, h ? h.nextSibling : scroll.firstChild); }
+  scr.classList.add('ud-hero', 'ud-ship');
+  hero.style.display = ''; space.style.display = '';
+  if (!hero.querySelector('.u3d-hint')) hero.insertAdjacentHTML('beforeend', `<div class="fd-sel" id="fd-sel"></div><div class="u3d-hint">En orbite · touche un vaisseau</div>`);
+  requestAnimationFrame(() => {
+    const hb = hero.getBoundingClientRect(), sb = space.getBoundingClientRect();
+    if (hb.height) hero.style.setProperty('--u3d-band', Math.max(0, hb.bottom - sb.bottom) + 'px');
+  });
+  shipHeroGestures('scr-fleet-detail', () => fleetFormation3D && fleetFormation3D.handle, (hit) => showFormationSelection(hit));
+  const sig = JSON.stringify(fleet.composition);
+  if (fleetFormation3D && fleetFormation3D.id === fleet.id && fleetFormation3D.sig === sig) return true;
+  unmountFleetFormation3D(true);
+  hero.classList.add('u3d-loading');
+  fleetFormation3D = { id: fleet.id, sig, handle: window.Formation3D.mount(hero, { fleet, shiftY: 0.2, onReady: () => hero.classList.remove('u3d-loading') }) };
+  return true;
+}
+function showFormationSelection(hit) {
+  const box = document.getElementById('fd-sel');
+  if (!box || !fleetFormation3D) return;
+  if (!hit || (box.dataset.idx === String(hit.index) && box.classList.contains('on'))) {   // second toucher : désélection
+    box.classList.remove('on'); box.dataset.idx = ''; fleetFormation3D.handle.select(null); return;
+  }
+  fleetFormation3D.handle.select(hit.index);
+  const meta = SHIP_UNITS[hit.type] || {}, td = (SHIP_TIERS[hit.type] || {})[hit.tier] || {};
+  box.dataset.idx = String(hit.index);
+  box.innerHTML = `<div class="fd-sel-name">${(meta.name || hit.type)} <span>T${hit.tier}</span></div>
+    <div class="fd-sel-stats"><span>ATK <b style="color:var(--red)">${fmt(td.atk || 0)}</b></span><span>DEF <b style="color:var(--teal, #5fffe8)">${fmt(td.def || 0)}</b></span>${td.cargo ? `<span>CARGO <b style="color:var(--amber)">${fmt(td.cargo)}</b></span>` : ''}</div>`;
+  box.classList.add('on');
+}
+function unmountFleetFormation3D(keepClasses) {
+  if (fleetFormation3D) { try { fleetFormation3D.handle.dispose(); } catch (e) {} fleetFormation3D = null; }
+  const box = document.getElementById('fd-sel'); if (box) { box.classList.remove('on'); box.dataset.idx = ''; }
+  if (keepClasses) return;
+  const hero = document.getElementById('fd-form-hero'); if (hero) hero.style.display = 'none';
+  const space = document.getElementById('fd-form-space'); if (space) space.style.display = 'none';
+  const scr = document.getElementById('scr-fleet-detail'); if (scr) scr.classList.remove('ud-hero', 'ud-ship');
 }
 
 function editCurrentFleet() {
@@ -12429,8 +12494,7 @@ function deployFleetToOrbit() {
   fleet.status = 'deployed';
   fleet.deployedAt = Date.now();
   // ORBITE = ARMER : la flotte qui quitte le dock se regarde en orbite (récompense visuelle, North Star §24)
-  // → vue de haut de tous ses vaisseaux en formation (remplace l'ancienne vue orbite)
-  if (window.Formation3D) setTimeout(() => { try { Formation3D.open(fleet); } catch (e) { console.warn(e); } }, 400);
+  // → la fiche de la flotte passe en vue « formation en orbite » (vue arrière 3/4, la fiche par-dessus)
   toast(`${fleet.name} en orbite`);
   refreshCurrentScreen();
 }
@@ -42367,6 +42431,6 @@ if (G.knownTargets && Array.isArray(G.tankerMissions)) {
 <!-- SHIP3D — fiches 3D : cuirassé KV-01, frégate SR-01, tanker TK-07, chantier orbital OS-01 (assets/ship3d.js, sur le moteur partagé window.SB3D) -->
 <script type="module" src="assets/ship3d.js?v=20261012-0900"></script>
 <!-- FORMATION3D — flotte déployée en orbite, vue de haut en formation (remplace la vue orbite) -->
-<script src="assets/formation3d.js?v=20261012-0900"></script>
+<script src="assets/formation3d.js?v=20261012-0930"></script>
 </body>
 </html>
