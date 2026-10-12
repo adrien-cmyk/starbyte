@@ -12429,7 +12429,8 @@ function deployFleetToOrbit() {
   fleet.status = 'deployed';
   fleet.deployedAt = Date.now();
   // ORBITE = ARMER : la flotte qui quitte le dock se regarde en orbite (récompense visuelle, North Star §24)
-  if (window.SBOrbit && typeof getShipyardTier === 'function' && getShipyardTier() > 0) setTimeout(() => { try { SBOrbit.open(); } catch (e) {} }, 500);
+  // → vue de haut de tous ses vaisseaux en formation (remplace l'ancienne vue orbite)
+  if (window.Formation3D) setTimeout(() => { try { Formation3D.open(fleet); } catch (e) { console.warn(e); } }, 400);
   toast(`${fleet.name} en orbite`);
   refreshCurrentScreen();
 }
@@ -26727,7 +26728,7 @@ function renderInfoCard(i) {
     ghostHandler = `openBuildingDetail(${i})`;
   } else if (stKey === 'shipyard') {
     // ORBITE = ARMER : le bâtiment mène à l'orbite, où se construisent les vaisseaux
-    primaryHandler = `(window.SBOrbit ? SBOrbit.open() : goto('shipyard'))`;
+    primaryHandler = `(hasShipyardBuilt() ? goto('fleet') : goto('shipyard'))`;   // le chantier mène à la flotte à quai (vue station)
     ghostHandler = `openBuildingDetail(${i})`;
   } else if (stKey === 'turret') {
     primaryHandler = `goto('defense')`;
@@ -42364,6 +42365,8 @@ if (G.knownTargets && Array.isArray(G.tankerMissions)) {
 <!-- SPACE MAP niveau B — diorama 3D d'un système (assets/system3d.js, source src/system3d.js) -->
 <script type="module" src="assets/system3d.js?v=20261012-0030"></script>
 <!-- SHIP3D — fiches 3D : cuirassé KV-01, frégate SR-01, tanker TK-07, chantier orbital OS-01 (assets/ship3d.js, sur le moteur partagé window.SB3D) -->
-<script type="module" src="assets/ship3d.js?v=20261012-0030"></script>
+<script type="module" src="assets/ship3d.js?v=20261012-0900"></script>
+<!-- FORMATION3D — flotte déployée en orbite, vue de haut en formation (remplace la vue orbite) -->
+<script src="assets/formation3d.js?v=20261012-0900"></script>
 </body>
 </html>
