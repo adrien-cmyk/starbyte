@@ -12416,6 +12416,11 @@ function renderFleetDetail() {
   if (primaryEl) primaryEl.innerHTML = primaryHtml;
   if (reportEl) reportEl.innerHTML = reportHtml;
   actionsEl.innerHTML = actionsHtml;
+  // INTÉGRITÉ — carte « Coques » (état, réparation au sol)
+  let integEl = document.getElementById('fleet-detail-integrity-wrap');
+  if (!integEl) { integEl = document.createElement('div'); integEl.id = 'fleet-detail-integrity-wrap'; const comp = document.getElementById('fleet-detail-composition'); comp.parentNode.insertBefore(integEl, comp.previousElementSibling); }
+  integEl.innerHTML = renderFleetIntegrityCard(fleet);
+  if (fleet.repair && primaryEl) primaryEl.innerHTML = `<div style="padding:12px 14px;border-radius:10px;border:1px solid rgba(255,192,96,.35);background:rgba(40,28,8,.55);color:var(--amber);font-size:11px;letter-spacing:.14em;text-transform:uppercase;text-align:center">Réparation au chantier en cours</div>`;
   // FORMATION3D — flotte en orbite : vue arrière 3/4 de la formation en plein écran, la fiche défile par-dessus
   setTimeout(() => { if (isDeployed) mountFleetFormation3D(fleet); else unmountFleetFormation3D(); }, 0);
 }
@@ -12438,7 +12443,8 @@ function mountFleetFormation3D(fleet) {
     if (hb.height) hero.style.setProperty('--u3d-band', Math.max(0, hb.bottom - sb.bottom) + 'px');
   });
   shipHeroGestures('scr-fleet-detail', () => fleetFormation3D && fleetFormation3D.handle, (hit) => showFormationSelection(hit));
-  const sig = JSON.stringify(fleet.composition);
+  syncFleetIntegrity(fleet);
+  const sig = JSON.stringify([fleet.composition, fleet.integrity]);
   if (fleetFormation3D && fleetFormation3D.id === fleet.id && fleetFormation3D.sig === sig) return true;
   unmountFleetFormation3D(true);
   hero.classList.add('u3d-loading');
@@ -12454,8 +12460,11 @@ function showFormationSelection(hit) {
   fleetFormation3D.handle.select(hit.index);
   const meta = SHIP_UNITS[hit.type] || {}, td = (SHIP_TIERS[hit.type] || {})[hit.tier] || {};
   box.dataset.idx = String(hit.index);
-  box.innerHTML = `<div class="fd-sel-name">${(meta.name || hit.type)} <span>T${hit.tier}</span></div>
+  const hp = hit.hp == null ? 100 : hit.hp, hpCol = hp > 66 ? 'var(--green)' : hp > 33 ? 'var(--amber)' : 'var(--red)';
+  box.innerHTML = `<div class="fd-sel-name">${(meta.name || hit.type)} <span>T${hit.tier}</span><em style="float:right;font-style:normal;color:${hpCol}">${hp} %</em></div>
+    <div style="height:5px;border-radius:3px;background:rgba(255,255,255,.08);overflow:hidden;margin:0 0 7px"><div style="height:100%;width:${hp}%;background:${hpCol}"></div></div>
     <div class="fd-sel-stats"><span>ATK <b style="color:var(--red)">${fmt(td.atk || 0)}</b></span><span>DEF <b style="color:var(--teal, #5fffe8)">${fmt(td.def || 0)}</b></span>${td.cargo ? `<span>CARGO <b style="color:var(--amber)">${fmt(td.cargo)}</b></span>` : ''}</div>`;
+  if (hp < 100) box.insertAdjacentHTML('beforeend', `<div style="margin-top:6px;font-size:9px;letter-spacing:.12em;color:rgba(190,208,220,.6)">EFFICACITÉ ${Math.round(shipEfficiency(hp) * 100)} % · ${fleetFormation3D && (G.fleet.prepared.find(f => f.id === fleetFormation3D.id) || {}).status === 'deployed' ? 'RÉPARABLE AU SOL' : 'RÉPARABLE AU CHANTIER'}</div>`);
   box.classList.add('on');
 }
 function unmountFleetFormation3D(keepClasses) {
@@ -12486,6 +12495,7 @@ function editCurrentFleet() {
 function deployFleetToOrbit() {
   const fleet = G.fleet.prepared.find(f => f.id === selectedFleetId);
   if (!fleet) return;
+  if (fleet.repair) { toast('Réparation en cours au chantier'); refreshCurrentScreen(); return; }
   const status = fleet.status || 'prepared';
   if (status !== 'prepared') {
     toast('Flotte déjà déployée');
@@ -12518,6 +12528,8 @@ function recallFleetToGround() {
 async function confirmDissolveFleet() {
   const fleet = G.fleet.prepared.find(f => f.id === selectedFleetId);
   if (!fleet) return;
+  if (fleet.repair) { toast('Attends la fin des réparations'); return; }
+  if (fleetDamageSummary(fleet).damaged) { toast('Répare d\'abord les coques endommagées'); return; }
   const status = fleet.status || 'prepared';
   // Garde-fou : refuser absolument de dissoudre une flotte en mission
   if (status === 'in_mission') {
@@ -12947,6 +12959,149 @@ function distributeShipLosses(engagedByTier, totalToLose) {
 
 // ─── MOTEUR DE COMBAT PRINCIPAL ───
 // Prend une flotte et une cible, retourne un objet combatResult détaillé
+// ═══════════════════════════════════════════════════════════════
+// INTÉGRITÉ DES VAISSEAUX (décision 12/10/2026)
+// - chaque vaisseau d'une flotte a une intégrité 0–100 % (fleet.integrity[type]['tN'] = [..])
+// - la destruction directe du combat est conservée ; en plus, les survivants engagés prennent des avaries,
+//   un vaisseau qui tombe à 0 % est perdu
+// - efficacité dégressive : un vaisseau endommagé frappe moins fort (35 % à 0, 100 % à 100)
+// - réparation uniquement au sol (flotte rappelée) : métal + temps au chantier, plus rapide aux tiers supérieurs
+// ═══════════════════════════════════════════════════════════════
+const INTEGRITY = {
+  EFF_FLOOR: 0.35,                                   // efficacité d'une coque à 0 %
+  REPAIR_METAL_PCT: 0.4,                             // réparer 0 → 100 % coûte 40 % du métal de construction
+  REPAIR_SEC_PER_PT: { tanker: 4, fregate: 6, cuirasse: 18 },   // secondes par point d'intégrité (tier 1)
+  TIER_TIME: { 1: 1, 2: 1.5, 3: 2 },
+  YARD_SPEED: { 1: 1, 2: 0.75, 3: 0.5 },             // le tier du chantier accélère les réparations
+};
+const SHIP_TYPES_ALL = ['tanker', 'fregate', 'cuirasse'];
+function syncFleetIntegrity(fleet) {
+  if (!fleet || !fleet.composition) return;
+  if (!fleet.integrity) fleet.integrity = {};
+  for (const type of SHIP_TYPES_ALL) {
+    if (!fleet.integrity[type]) fleet.integrity[type] = { t1: [], t2: [], t3: [] };
+    for (const tk of ['t1', 't2', 't3']) {
+      let arr = fleet.integrity[type][tk] || [];
+      const n = fleet.composition[type]?.[tk] || 0;
+      arr = arr.slice().sort((a, b) => b - a);           // les plus abîmés partent en premier quand l'effectif baisse
+      while (arr.length > n) arr.pop();
+      while (arr.length < n) arr.push(100);
+      fleet.integrity[type][tk] = arr;
+    }
+  }
+}
+function shipEfficiency(hp) { return INTEGRITY.EFF_FLOOR + (1 - INTEGRITY.EFF_FLOOR) * Math.max(0, Math.min(100, hp)) / 100; }
+// facteur d'attaque orbitale dû aux avaries (pondéré par l'ATK de chaque vaisseau)
+function fleetIntegrityEfficiency(fleet) {
+  syncFleetIntegrity(fleet);
+  let full = 0, eff = 0;
+  for (const type of ['fregate', 'cuirasse']) for (let t = 1; t <= 3; t++) {
+    const atk = SHIP_TIERS[type]?.[t]?.atk || 0;
+    for (const hp of fleet.integrity[type]['t' + t]) { full += atk; eff += atk * shipEfficiency(hp); }
+  }
+  return full > 0 ? eff / full : 1;
+}
+function fleetDamageSummary(fleet) {
+  syncFleetIntegrity(fleet);
+  let ships = 0, damaged = 0, sum = 0, missing = {};
+  for (const type of SHIP_TYPES_ALL) for (let t = 1; t <= 3; t++) for (const hp of fleet.integrity[type]['t' + t]) {
+    ships++; sum += hp;
+    if (hp < 100) { damaged++; missing[type + t] = (missing[type + t] || 0) + (100 - hp); }
+  }
+  return { ships, damaged, avg: ships ? Math.round(sum / ships) : 100, missing };
+}
+function fleetRepairQuote(fleet) {
+  const s = fleetDamageSummary(fleet);
+  let metal = 0, sec = 0;
+  const yard = INTEGRITY.YARD_SPEED[getShipyardTier() || 1] || 1;
+  for (const type of SHIP_TYPES_ALL) for (let t = 1; t <= 3; t++) {
+    const pts = s.missing[type + t] || 0;
+    if (!pts) continue;
+    metal += pts / 100 * (SHIP_TIERS[type]?.[t]?.cost?.metal || 0) * INTEGRITY.REPAIR_METAL_PCT;
+    sec += pts * INTEGRITY.REPAIR_SEC_PER_PT[type] * INTEGRITY.TIER_TIME[t];
+  }
+  return { metal: Math.ceil(metal), sec: Math.ceil(sec * yard), damaged: s.damaged, avg: s.avg };
+}
+function fmtDuration(sec) {
+  sec = Math.max(0, Math.round(sec));
+  const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), s = sec % 60;
+  return h ? `${h} h ${String(m).padStart(2, '0')}` : (m ? `${m} min ${String(s).padStart(2, '0')}` : `${s} s`);
+}
+// avaries après un combat : les survivants des types engagés prennent des dégâts (même en victoire)
+function applyIntegrityDamage(fleet, result) {
+  syncFleetIntegrity(fleet);
+  const p1 = result.phases && result.phases.phase1;
+  if (!p1) return;
+  const base = Math.min(80, 6 + (p1.lossPct || 0) * 110);          // intensité du combat (en points)
+  let hit = 0, wrecked = 0, dmgSum = 0;
+  for (const type of ['fregate', 'cuirasse']) for (const tk of ['t1', 't2', 't3']) {
+    const arr = fleet.integrity[type][tk];
+    const keep = [];
+    for (const hp of arr) {
+      const d = Math.round(base * (0.4 + Math.random() * 1.1) * (type === 'cuirasse' ? 0.7 : 1));   // le cuirassé encaisse mieux
+      const nhp = hp - d;
+      if (nhp <= 0) {                                                // avarie fatale : vaisseau perdu
+        wrecked++;
+        fleet.composition[type][tk] = Math.max(0, fleet.composition[type][tk] - 1);
+        loseShips(type, tk, 1);
+        result.finalLosses.ships[type][tk] = (result.finalLosses.ships[type][tk] || 0) + 1;
+      } else { keep.push(nhp); if (d > 0) { hit++; dmgSum += d; } }
+    }
+    fleet.integrity[type][tk] = keep;
+  }
+  result.integrity = { hit, wrecked, avgDmg: hit ? Math.round(dmgSum / hit) : 0, avgAfter: fleetDamageSummary(fleet).avg };
+}
+function startFleetRepair(fleetId) {
+  const fleet = G.fleet.prepared.find(f => f.id === fleetId);
+  if (!fleet) return;
+  if ((fleet.status || 'prepared') !== 'prepared') { toast('Rappelle d\'abord la flotte au sol'); return; }
+  if (!getShipyardTier()) { toast('Il faut un chantier orbital pour réparer'); return; }
+  if (fleet.repair) return;
+  const q = fleetRepairQuote(fleet);
+  if (!q.damaged) { toast('Aucune avarie'); return; }
+  if ((G.res.metal?.v || 0) < q.metal) { toast(`Métal insuffisant (${fmt(q.metal)} requis)`); return; }
+  G.res.metal.v -= q.metal;
+  fleet.repair = { startedAt: Date.now(), endsAt: Date.now() + q.sec * 1000, metal: q.metal };
+  if (typeof saveGame === 'function') saveGame();
+  toast(`Réparation lancée — ${fmtDuration(q.sec)}`);
+  refreshCurrentScreen();
+}
+function tickFleetRepairs() {
+  if (typeof G === 'undefined' || !G.fleet || !G.fleet.prepared) return;
+  let done = false;
+  for (const f of G.fleet.prepared) {
+    if (f.repair && Date.now() >= f.repair.endsAt) {
+      syncFleetIntegrity(f);
+      for (const type of SHIP_TYPES_ALL) for (const tk of ['t1', 't2', 't3']) f.integrity[type][tk] = f.integrity[type][tk].map(() => 100);
+      delete f.repair; done = true;
+      toast(`${f.name} : coques réparées`);
+    }
+  }
+  if (done) { if (typeof saveGame === 'function') saveGame(); if (typeof refreshCurrentScreen === 'function') refreshCurrentScreen(); }
+  // compte à rebours affiché sur la fiche
+  const el = document.getElementById('fd-repair-timer');
+  if (el && el.dataset.ends) el.textContent = fmtDuration((+el.dataset.ends - Date.now()) / 1000);
+}
+setInterval(tickFleetRepairs, 1000);
+// carte « Coques » de la fiche flotte (au sol : réparation ; en orbite : état)
+function renderFleetIntegrityCard(fleet) {
+  const s = fleetDamageSummary(fleet);
+  if (!s.ships) return '';
+  const status = fleet.status || 'prepared';
+  const bar = (v) => `<div style="height:6px;border-radius:3px;background:rgba(255,255,255,.08);overflow:hidden;margin:6px 0 2px"><div style="height:100%;width:${v}%;background:${v > 66 ? 'var(--green)' : v > 33 ? 'var(--amber)' : 'var(--red)'}"></div></div>`;
+  let body = `<div style="display:flex;justify-content:space-between;font-size:11px"><span style="color:var(--mut);letter-spacing:.12em;text-transform:uppercase">Intégrité moyenne</span><b style="font-family:var(--font-mono,monospace)">${s.avg} %</b></div>${bar(s.avg)}
+    <div style="font-size:10px;color:var(--mut);margin-top:4px">${s.damaged ? `${s.damaged} vaisseau${s.damaged > 1 ? 'x' : ''} endommagé${s.damaged > 1 ? 's' : ''} · efficacité au combat ${Math.round(fleetIntegrityEfficiency(fleet) * 100)} %` : 'Aucune avarie'}</div>`;
+  if (fleet.repair) {
+    body += `<div style="margin-top:10px;font-size:11px;color:var(--amber)">Réparation au chantier · <span id="fd-repair-timer" data-ends="${fleet.repair.endsAt}">${fmtDuration((fleet.repair.endsAt - Date.now()) / 1000)}</span></div>`;
+  } else if (s.damaged && status === 'prepared') {
+    const q = fleetRepairQuote(fleet);
+    body += `<button onclick="startFleetRepair('${fleet.id}')" style="margin-top:10px;width:100%;padding:11px;border-radius:9px;border:1px solid rgba(255,192,96,.45);background:rgba(60,40,10,.5);color:var(--amber);font-size:11px;letter-spacing:.14em;text-transform:uppercase">Réparer · ${fmt(q.metal)} métal · ${fmtDuration(q.sec)}</button>`;
+  } else if (s.damaged && status === 'deployed') {
+    body += `<div style="margin-top:8px;font-size:10px;color:var(--mut)">Rappelle la flotte au sol pour la réparer au chantier.</div>`;
+  }
+  return `<div class="section-label">Coques</div><div class="dash-section-card" id="fleet-detail-integrity" style="margin:0 16px 14px">${body}</div>`;
+}
+
 function resolveCombat(fleet, target) {
   if (!fleet || !target) return null;
 
@@ -12969,7 +13124,7 @@ function resolveCombat(fleet, target) {
   };
 
   // ═══ PHASE 1 — BATAILLE ORBITALE ═══
-  const atkOrbital = computeFleetOrbitalAttack(composition);
+  const atkOrbital = computeFleetOrbitalAttack(composition) * fleetIntegrityEfficiency(fleet);   // avaries : efficacité dégressive
   const defOrbital = target.defense || 0;
   const atkEffective = atkOrbital * combatRand(COMBAT_CONSTS.RAND_MIN, COMBAT_CONSTS.RAND_MAX);
   const defEffective = defOrbital * combatRand(COMBAT_CONSTS.RAND_MIN, COMBAT_CONSTS.RAND_MAX);
@@ -24693,6 +24848,8 @@ function applyCombatResult(fleet, result, target) {
       loseShips(type, tier, destroyed);
     }
   }
+  // 1-bis. Avaries des survivants (intégrité) ; une coque à 0 % est perdue
+  applyIntegrityDamage(fleet, result);
 
   // 2. Soustraire les pertes de soldats (flotte ET effectif possédé)
   loseSoldiers('garde', Math.min(result.finalLosses.soldiers.garde || 0, fleet.soldiers?.garde || 0));
@@ -25070,6 +25227,9 @@ function _renderCombatPhases(r) {
                   + sRec.fregate.t1 + sRec.fregate.t2 + sRec.fregate.t3
                   + sRec.cuirasse.t1 + sRec.cuirasse.t2 + sRec.cuirasse.t3);
 
+  if (c.integrity && c.integrity.hit) {
+    html += `<div style="margin-top:10px;font-size:11px;line-height:1.8"><span style="color:var(--mut)">Coques touchées      :</span> <span style="color:var(--amber)">${c.integrity.hit}</span> <span style="color:var(--mut)">· avaries moyennes −${c.integrity.avgDmg} % · intégrité ${c.integrity.avgAfter} %</span>${c.integrity.wrecked ? `<br><span style="color:var(--mut)">Perdus par avaries    :</span> <span style="color:var(--red)">${c.integrity.wrecked}</span>` : ''}</div>`;
+  }
   if (totalLost > 0 || totalRec > 0 || c.finalLosses.heroesDead.length > 0) {
     html += `
       <div style="margin-top:14px;padding-top:10px;border-top:1px dashed rgba(255,80,64,.25)">
@@ -42431,6 +42591,6 @@ if (G.knownTargets && Array.isArray(G.tankerMissions)) {
 <!-- SHIP3D — fiches 3D : cuirassé KV-01, frégate SR-01, tanker TK-07, chantier orbital OS-01 (assets/ship3d.js, sur le moteur partagé window.SB3D) -->
 <script type="module" src="assets/ship3d.js?v=20261012-0900"></script>
 <!-- FORMATION3D — flotte déployée en orbite, vue de haut en formation (remplace la vue orbite) -->
-<script src="assets/formation3d.js?v=20261012-0930"></script>
+<script src="assets/formation3d.js?v=20261012-1000"></script>
 </body>
 </html>

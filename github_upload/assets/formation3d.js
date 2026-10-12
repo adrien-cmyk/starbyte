@@ -18,12 +18,17 @@
   const cache = {};
 
   // liste des vaisseaux affichés, par type puis par tier (les plus hauts tiers d'abord)
-  function roster(comp) {
-    const out = [];
+  // hp : intégrité de coque (0–100) lue dans fleet.integrity[type]['tN'][i] (triée du plus sain au plus abîmé)
+  function roster(fleet) {
+    const out = [], comp = fleet && fleet.composition, integ = (fleet && fleet.integrity) || {};
     for (const type of ['cuirasse', 'fregate', 'tanker']) {
       const c = (comp && comp[type]) || {};
       let k = 0;
-      for (const tier of [3, 2, 1]) for (let i = 0; i < (c['t' + tier] || 0) && k < MAX[type]; i++, k++) out.push({ type, tier });
+      for (const tier of [3, 2, 1]) for (let i = 0; i < (c['t' + tier] || 0) && k < MAX[type]; i++, k++) {
+        const arr = integ[type] && integ[type]['t' + tier];
+        const hp = arr && typeof arr[i] === 'number' ? Math.max(0, Math.min(100, arr[i])) : 100;
+        out.push({ type, tier, hp });
+      }
     }
     return out;
   }
@@ -42,7 +47,7 @@
 
   function mount(container, opts = {}) {
     const { THREE, GLTFLoader, RoomEnvironment, EffectComposer, RenderPass, UnrealBloomPass, OutputPass } = window.SB3D;
-    const list = place(roster(opts.fleet && opts.fleet.composition));
+    const list = place(roster(opts.fleet));
     const W = () => Math.max(1, container.clientWidth), H = () => Math.max(1, container.clientHeight);
     const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
     renderer.setPixelRatio(Math.min(devicePixelRatio || 1, 2)); renderer.setSize(W(), H());
@@ -96,6 +101,8 @@
       g.fillStyle = r; g.fillRect(0, 0, 64, 64); return new THREE.CanvasTexture(c);
     };
     const glowTex = radial([[0, 'rgba(255,255,255,1)'], [.25, 'rgba(255,255,255,.55)'], [1, 'rgba(255,255,255,0)']]);
+    const smokeTex = radial([[0, 'rgba(255,255,255,.55)'], [.45, 'rgba(255,255,255,.22)'], [1, 'rgba(255,255,255,0)']]);
+    const smoke = [];   // fumées des coques endommagées (repère monde, suivent leur vaisseau)
     // anneau de sélection (ambre, à plat sous le vaisseau)
     const ringTex = (() => {
       const c = document.createElement('canvas'); c.width = c.height = 128; const g = c.getContext('2d');
@@ -118,12 +125,14 @@
       const gltf = await get(M.url);
       if (!alive) return;
       const g = gltf.scene.clone(true);
+      const hp = s.hp, dmg = 1 - hp / 100;
       g.traverse(o => {
         if (!o.isMesh) return;
         o.material = o.material.clone();
         const m = o.material, gl = GLOSS[m.name];
-        if (gl) { m.roughness = gl[0]; m.metalness = gl[1]; m.envMapIntensity = 0.9; }
-        if (m.name === 'M_KV_GLOW_MOTEUR') { m.emissive = new THREE.Color(M.color); m.emissiveIntensity = 4; }
+        if (gl) { m.roughness = Math.min(0.9, gl[0] + dmg * 0.35); m.metalness = gl[1]; m.envMapIntensity = 0.9 - dmg * 0.4; }
+        if (m.name === 'M_KV_GLOW_MOTEUR') { m.emissive = new THREE.Color(M.color); m.emissiveIntensity = 4 * (0.35 + 0.65 * hp / 100); }
+        else if (dmg > 0 && m.color && !(m.emissiveIntensity > 0 && m.emissive && m.emissive.getHex())) m.color.multiplyScalar(1 - dmg * 0.55);   // coque noircie
         o.userData.idx = i;
       });
       g.scale.setScalar(M.scale);
@@ -135,6 +144,22 @@
       holder.position.set(s.x, 0, s.z); holder.rotation.y = Math.PI;      // cap vers −Z
       holder.userData = { ph: i * 1.7, x: s.x, z: s.z, idx: i };
       fleetG.add(holder); ships[i] = holder;
+      holder.userData.hp = hp;
+      if (hp < 80) {                                                    // fumées + feu au-dessous de 35 %
+        holder.updateMatrixWorld(true);
+        const b = new THREE.Box3().setFromObject(holder), sz = b.getSize(new THREE.Vector3());
+        const n = hp < 35 ? 4 : hp < 60 ? 3 : 2;
+        for (let j = 0; j < n; j++) {
+          const off = new THREE.Vector3((Math.random() - 0.5) * sz.x * 0.6, b.max.y - holder.position.y - sz.y * 0.15, (Math.random() - 0.5) * sz.z * 0.6);
+          const base = Math.max(sz.x, sz.z) * 0.12 + 10;
+          const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: smokeTex, color: 0x5a5650, transparent: true, depthWrite: false, opacity: 0 }));
+          fleetG.add(sp); smoke.push({ sp, ship: holder, off, base, ph: Math.random(), rate: 0.18 + Math.random() * 0.1, fire: null });
+          if (hp < 35 && j < 2) {
+            const f = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex, color: 0xff3a14, blending: THREE.AdditiveBlending, transparent: true, depthWrite: false }));
+            f.scale.setScalar(base * 0.7); fleetG.add(f); smoke[smoke.length - 1].fire = f;
+          }
+        }
+      }
     })).catch(e => console.warn('[Formation3D]', e)).finally(() => { if (alive && opts.onReady) opts.onReady(); });
 
     const composer = new EffectComposer(renderer);
@@ -174,6 +199,16 @@
         s.rotation.z = Math.sin(t * 0.25 + p) * 0.03;
         s.traverse(o => { if (o.isSprite) o.material.opacity = 0.75 + 0.25 * Math.sin(t * 23 + p * 5); });
       }
+      for (const p of smoke) {                                           // fumée qui monte et part vers l'arrière
+        const s = p.ship, u = (t * p.rate + p.ph) % 1;
+        p.sp.position.set(s.position.x + p.off.x, s.position.y + p.off.y + u * p.base * 2.2, s.position.z + p.off.z + u * p.base * 3.5);
+        p.sp.scale.setScalar(p.base * (0.6 + u * 1.8));
+        p.sp.material.opacity = Math.sin(u * Math.PI) * 0.55;
+        if (p.fire) {
+          p.fire.position.set(s.position.x + p.off.x, s.position.y + p.off.y, s.position.z + p.off.z);
+          p.fire.material.opacity = 0.55 + 0.45 * Math.abs(Math.sin(t * 9 + p.ph * 20)) * (0.6 + 0.4 * Math.sin(t * 2.3 + p.ph * 7));
+        }
+      }
       if (sel !== null && ships[sel]) {
         const s = ships[sel], r = MODELS[list[sel].type].ring * 2;
         selRing.visible = true; selRing.position.set(s.position.x, s.position.y - 6, s.position.z); selRing.scale.setScalar(r * (1 + 0.04 * Math.sin(t * 4)));
@@ -196,7 +231,7 @@
         const hit = raycaster.intersectObjects(fleetG.children, true).find(h => h.object.userData.idx !== undefined);
         if (!hit) return null;
         const i = hit.object.userData.idx;
-        return { index: i, type: list[i].type, tier: list[i].tier };
+        return { index: i, type: list[i].type, tier: list[i].tier, hp: list[i].hp };
       },
       select(i) { sel = (i === null || i === undefined) ? null : i; },
       dispose() {
