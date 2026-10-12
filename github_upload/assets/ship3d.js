@@ -46,6 +46,16 @@ const PROFIL_OS01 = {
   hull: [[0,0,10,10],[1,0,10,10]],
 };
 
+// antenne de prospection : bâtiment au sol (ciel de crépuscule, régolithe, tête qui balaie en azimut)
+const PROFIL_PA01 = {
+  V: 8, bowGltf: 0, center: true, axisY: 5, engineY: 0, engineZ: 0, nozzleZ: 0, targetY: 5.0,
+  nozzles: [], plasma: false, planet: false, ground: true, scan: ['PA01_Tourelle', 'PA01_Parabole'], spin: 0, dustSpeed: 0, fit: 1.45,
+  engineColor: [0.3, 0.75, 1.0], plume: [0x48c8ff, 0x48c8ff, 0x48c8ff, 0xffffff, 0x9ccaff, 0x5cc8ff],
+  gloss: { M_KV_ARMOR_WHITE: [0.40, 0.05], M_KV_GUNMETAL: [0.26, 0.85], M_KV_STRUCT_BLACK: [0.30, 0.55], M_TK_GRAPHITE: [0.30, 0.6] }, glossEnv: 0.95,
+  tint: { M_KV_ARMOR_WHITE: [0.66, 0.70, 0.77] },
+  hull: [[0,0,10,10],[1,0,10,10]],
+};
+
 function mount(container, opts = {}) {
 const { THREE, GLTFLoader, OrbitControls, RoomEnvironment, EffectComposer, RenderPass, UnrealBloomPass, OutputPass } = libs();
 /* ================================================================== réglages */
@@ -127,6 +137,57 @@ const sky = new THREE.Mesh(new THREE.SphereGeometry(300, 48, 32), new THREE.Shad
     }`
 }));
 scene.add(sky);
+if (P.ground) {                                    // bâtiment au sol : crépuscule sur Kerath, régolithe, dalle
+  sky.material = new THREE.ShaderMaterial({
+    side: THREE.BackSide, depthWrite: false, fog: false,
+    vertexShader: `varying vec3 vDir; void main(){ vDir = normalize(position); gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }`,
+    fragmentShader: `varying vec3 vDir;
+      float h(vec3 p){ p = fract(p*0.3183099+.1); p *= 17.0; return fract(p.x*p.y*p.z*(p.x+p.y+p.z)); }
+      float n(vec3 x){ vec3 i=floor(x), f=fract(x); f=f*f*(3.0-2.0*f);
+        return mix(mix(mix(h(i),h(i+vec3(1,0,0)),f.x),mix(h(i+vec3(0,1,0)),h(i+vec3(1,1,0)),f.x),f.y),
+                   mix(mix(h(i+vec3(0,0,1)),h(i+vec3(1,0,1)),f.x),mix(h(i+vec3(0,1,1)),h(i+vec3(1,1,1)),f.x),f.y),f.z); }
+      float fbm(vec3 p){ float a=.5, s=0.; for(int i=0;i<5;i++){ s+=a*n(p); p=p*2.03+vec3(1.7,9.2,3.1); a*=.5; } return s; }
+      void main(){
+        vec3 d = normalize(vDir); vec3 sun = normalize(vec3(-0.92, 0.24, -0.30));
+        float up = clamp(d.y, -0.2, 1.0), sd = max(dot(d, sun), 0.0);
+        vec3 col = mix(vec3(.24,.16,.20), vec3(.035,.045,.11), smoothstep(0.0, .18, up));
+        col = mix(col, vec3(.006,.010,.030), smoothstep(.15, .7, up));
+        col += vec3(1.0,.55,.28) * pow(sd, 6.0) * .55 * (1.0 - smoothstep(0.0, .5, up));
+        col += vec3(1.0,.75,.5) * pow(sd, 90.0) * 2.5;
+        col += mix(vec3(.10,.15,.45), vec3(.35,.12,.45), fbm(d * 2.0)) * smoothstep(.45, .85, fbm(d * 3.0 + 2.0)) * smoothstep(.1, .6, up) * .18;
+        gl_FragColor = vec4(col, 1.0);
+      }`
+  });
+  const K = P.V * S;                               // m réels → unités de scène
+  const g = new THREE.PlaneGeometry(4000, 4000, 200, 200); g.rotateX(-Math.PI / 2);
+  const pa = g.attributes.position;
+  const hh = (x, z) => Math.sin(x * .021 + Math.sin(z * .013) * 2.0) * Math.cos(z * .017 + x * .004) * 7 + Math.sin(x * .07 + z * .05) * 1.2;
+  for (let i = 0; i < pa.count; i++) {
+    const x = pa.getX(i), z = pa.getZ(i), r = Math.hypot(x, z);
+    pa.setXYZ(i, x * K, (hh(x, z) * THREE.MathUtils.smoothstep(r, 90, 300) - 0.05) * K, z * K);
+  }
+  g.computeVertexNormals();
+  const gm = new THREE.MeshStandardMaterial({ color: 0x3c3b3d, roughness: 0.94, metalness: 0.0 });
+  gm.onBeforeCompile = (sh) => {
+    sh.uniforms.uK = { value: K };
+    sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nvarying vec3 vGP;').replace('#include <begin_vertex>', '#include <begin_vertex>\nvGP = position;');
+    sh.fragmentShader = sh.fragmentShader.replace('#include <common>', `#include <common>
+      varying vec3 vGP; uniform float uK;
+      float h2(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+      float n2(vec2 x){ vec2 i=floor(x), f=fract(x); f=f*f*(3.0-2.0*f); return mix(mix(h2(i),h2(i+vec2(1,0)),f.x),mix(h2(i+vec2(0,1)),h2(i+vec2(1,1)),f.x),f.y); }`)
+      .replace('#include <color_fragment>', `#include <color_fragment>
+      vec2 q = vGP.xz / uK * .1;                         // en dizaines de mètres
+      float t = n2(q * .08) * .5 + n2(q * .5) * .3 + n2(q * 3.0) * .2;
+      diffuseColor.rgb *= .62 + .55 * t;
+      diffuseColor.rgb = mix(diffuseColor.rgb, vec3(.33,.28,.26), smoothstep(.55, .8, n2(q * .03)) * .45);
+      float r = length(q);
+      diffuseColor.rgb *= mix(.55, 1.0, smoothstep(5.0, 9.0, r));
+      diffuseColor.rgb *= mix(.7, 1.0, smoothstep(5.4, 5.6, r));`);
+  };
+  const gr = new THREE.Mesh(g, gm); gr.receiveShadow = true; scene.add(gr);
+  const ring = new THREE.Mesh(new THREE.RingGeometry(60 * K, 60.8 * K, 128), new THREE.MeshBasicMaterial({ color: 0x3fb6e6, transparent: true, opacity: .5 }));
+  ring.rotation.x = -Math.PI / 2; ring.position.y = 0.01; scene.add(ring);
+}
 if (P.planet) {                                    // planète sous la station : limbe à contre-jour + atmosphère
   const PR = 165, PPOS = new THREE.Vector3(25, -PR - 2.5, 135), SD = new THREE.Vector3(-0.42, 0.03, 0.91).normalize();
   const planet = new THREE.Mesh(new THREE.SphereGeometry(PR, 96, 72), new THREE.ShaderMaterial({
@@ -185,6 +246,7 @@ for (let i = 0; i < DUST_N; i++) dustPos.set([(Math.random() - .5) * DUST_BOX, (
 dustGeo.setAttribute('position', new THREE.BufferAttribute(dustPos, 3));
 const dust = new THREE.Points(dustGeo, new THREE.PointsMaterial({ size: 0.03, color: 0x8ea4c8, transparent: true, opacity: .4, depthWrite: false, fog: false }));
 scene.add(dust);
+if (P.ground) dust.visible = false;
 
 /* ================================================================== lumière cinématique */
 const ship = new THREE.Group();
@@ -198,6 +260,10 @@ key.shadow.mapSize.set(2048, 2048);
 Object.assign(key.shadow.camera, { left: -8, right: 8, top: 8, bottom: -8, near: 1, far: 40 });
 key.shadow.bias = -0.0004; key.shadow.normalBias = 0.015;
 key.target = ship;
+if (P.ground) {                                    // soleil bas sur la gauche, ombres sur le sol
+  key.position.set(-0.92, 0.24, -0.30).normalize().multiplyScalar(30); key.intensity = 2.3; key.color.set(0xffe2c4);
+  Object.assign(key.shadow.camera, { left: -9, right: 9, top: 12, bottom: -4, near: 1, far: 80 }); key.shadow.camera.updateProjectionMatrix();
+}
 scene.add(key);
 const rim = new THREE.DirectionalLight(0x9db8e8, 1.3); rim.position.set(-9, 4, -10); scene.add(rim);   // contre-jour froid
 const fill = new THREE.DirectionalLight(0xb8c6e8, 0.8); fill.position.set(3, 10, -4); scene.add(fill);
@@ -534,6 +600,7 @@ ship.add(shockLight);
 
 /* ================================================================== chargement du modèle (glb gzip + base64) */
 const navMats = [];
+let scanParts = [];
 const loader = new GLTFLoader();
 function prepMats(root, engineColor, engineInt) {
   root.traverse(o => {
@@ -544,11 +611,13 @@ function prepMats(root, engineColor, engineInt) {
       const gl = P.gloss && P.gloss[mat.name];   // brillance par vaisseau : rugosité, métal, reflets
       mat.envMapIntensity = gl ? (mat.name === 'M_SR_VERRIERE' ? 2.0 : P.glossEnv) : 0.45;
       if (gl) { mat.roughness = gl[0]; mat.metalness = gl[1]; }
+      const tn = P.tint && P.tint[mat.name];       // teinte propre au modèle (acier bleuté de l'antenne)
+      if (tn && !mat.userData.tinted) { mat.userData.tinted = 1; mat.color.multiply(new THREE.Color(...tn)); }
       const look = LOOK[mat.name];
       if (look && !mat.userData.kv) { mat.userData.kv = 1; premium(mat, look); }
       if (mat.name === 'M_KV_GLOW_MOTEUR') { mat.emissive.copy(engineColor); mat.emissiveIntensity = engineInt; mat.color.copy(engineColor); }
       else if (mat.name === 'M_KV_GLOW_ORANGE') { mat.emissiveIntensity = 2.2; }
-      else if (mat.name === 'M_KV_GLOW_BLUE') { mat.emissiveIntensity = 1.8; }
+      else if (mat.name === 'M_KV_GLOW_BLUE') { if (P.ground) { mat.emissive = new THREE.Color(0x48c8ff); mat.emissiveIntensity = 1.3; } else mat.emissiveIntensity = 1.8; }
       else if (mat.name.startsWith('M_KV_NAV_')) { if (!navMats.includes(mat)) navMats.push(mat); }
     }
   });
@@ -594,6 +663,7 @@ loadShip().then((gltf) => {
   m.scale.setScalar(S);
   prepMats(m, ENGINE_COLOR, 5.5);
   ship.add(m);
+  if (P.scan) scanParts = P.scan.map(n => m.getObjectByName(n)).filter(Boolean);   // tête qui balaie en azimut
   if (opts.dock && opts.dock.length) loadDock(opts.dock).catch(e => console.warn('[Ship3D] quai', e));
   // occulteur invisible (profondeur seule) dans la scène d'effets : la coque masque les filaments passant derrière
   const occ = m.clone(true);
@@ -608,7 +678,7 @@ loadShip().then((gltf) => {
 const TARGET = new THREE.Vector3(0, P.targetY, P.center ? 0 : (W() / H() < 0.8 ? -1.8 : -0.2));   // vaisseau : cible vers la poupe en portrait ; station : centre
 {
   const d = fitDistance();
-  camera.position.copy(TARGET).add(new THREE.Vector3(0.55, 0.24, -0.80).normalize().multiplyScalar(d));
+  camera.position.copy(TARGET).add((P.ground ? new THREE.Vector3(-0.45, 0.24, 0.86) : new THREE.Vector3(0.55, 0.24, -0.80)).normalize().multiplyScalar(d));   // antenne : face à la parabole
 }
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.target.copy(TARGET);
@@ -618,7 +688,7 @@ controls.rotateSpeed = 0.55; controls.zoomSpeed = 0.9;
 controls.minDistance = 3.0;
 controls.maxDistance = fitDistance() * 1.6;
 controls.minPolarAngle = Math.PI * 0.10;
-controls.maxPolarAngle = Math.PI * 0.86;
+controls.maxPolarAngle = Math.PI * (P.ground ? 0.52 : 0.86);
 controls.touches = { ONE: THREE.TOUCH.ROTATE, TWO: THREE.TOUCH.DOLLY_ROTATE };
 controls.mouseButtons = { LEFT: THREE.MOUSE.ROTATE, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: THREE.MOUSE.ROTATE };
 controls.screenSpacePanning = true;
@@ -657,7 +727,9 @@ function frame() {
   if (container.offsetParent === null) { clock.getDelta(); if (alive) raf = requestAnimationFrame(frame); return; }   // fiche masquée : pause
   const dt = Math.min(clock.getDelta(), 0.05), t = clock.elapsedTime;
   const amp = REDUCED ? 0.25 : 1;
-  if (P.spin) {                                    // station : rotation lente sur son axe
+  if (P.ground) {                                  // bâtiment au sol : immobile, la tête balaie le ciel
+    for (const o of scanParts) o.rotation.y = Math.sin(t * 0.07) * 0.45 * amp;
+  } else if (P.spin) {                             // station : rotation lente sur son axe
     ship.rotation.y = t * P.spin * amp; ship.position.y = Math.sin(t * 0.21) * 0.03 * amp;
     for (const g of dockGroup.children) g.position.y = g.userData.hold + Math.sin(t * 0.3 + g.userData.ph) * 0.004;
   } else {
@@ -694,7 +766,7 @@ function frame() {
   }
   smoothOrbit();
   controls.update();
-  updateHaze();
+  if (!P.ground) updateHaze(); else { const d = camera.position.distanceTo(controls.target); scene.fog.color.set(0x161b2a); scene.fog.near = d + 6; scene.fog.far = d + 120; }
   composer.render();
   if (alive) raf = requestAnimationFrame(frame);
 }
@@ -739,7 +811,7 @@ function whenReady(cb) {
   if (window.SB3D) return cb();
   const t = setInterval(() => { if (window.SB3D) { clearInterval(t); cb(); } }, 100);
 }
-window.Ship3D = { profiles: { kv01: PROFIL_KV01, sr01: PROFIL_SR01, tk07: PROFIL_TK07, os01: PROFIL_OS01 }, mount: (c, o) => { let h = null, dead = false; whenReady(() => { if (!dead) h = mount(c, o); });
+window.Ship3D = { profiles: { kv01: PROFIL_KV01, sr01: PROFIL_SR01, tk07: PROFIL_TK07, os01: PROFIL_OS01, pa01: PROFIL_PA01 }, mount: (c, o) => { let h = null, dead = false; whenReady(() => { if (!dead) h = mount(c, o); });
   return {
     pick(x, y) { return h ? h.pick(x, y) : null; }, begin() { if (h) h.begin(); }, orbit(dx, dy) { if (h) h.orbit(dx, dy); }, dolly(k) { if (h) h.dolly(k); }, end() { if (h) h.end(); },
     dispose() { dead = true; if (h) h.dispose(); },
