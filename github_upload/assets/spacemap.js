@@ -114,7 +114,7 @@
     if (_candCache[ck]) return _candCache[ck];
     const d = Math.min(3, Math.max(0, _sectorDistance(mySector(), sector) | 0));
     const [r0, r1] = BAND_RINGS[d];
-    const band = CELLS.filter(c => c.ring >= Math.max(3, r0) && c.ring <= r1);   // mon secteur : à partir de l'anneau 3 (gros doigts)
+    const band = CELLS.filter(c => c.ring >= Math.max(2, r0) && c.ring <= r1);   // mon secteur : à partir de l'anneau 2 (l'anneau 1 = mon système)
     let list = band.filter(c => sectorOfCell(c) === sector);
     if (!list.length) {
       const side = sector.charCodeAt(0) >= mySector().charCodeAt(0) ? 1 : -1;
@@ -192,7 +192,8 @@
     add(home, { known: true, isMine: true });
     const occ = new Map();            // idx de case → { kind, key }
     const cell = {};                  // 'sys:KEY' | 'sig:ID' | 'tgt:KEY' | 'pl:COORD' → idx
-    for (const c of CELLS) if (c.ring <= 1) occ.set(c.idx, { kind: 'home', key: home });
+    // 12/10 (Adrien) : ma planète n'occupe que la case centrale ; l'anneau 1 autour est MON système (ses échos y apparaissent)
+    occ.set(0, { kind: 'home', key: home });
     cell['sys:' + home] = 0;
     const keys = Object.keys(systems).filter(k => k !== home).sort();
     for (const k of keys) {
@@ -215,9 +216,9 @@
       ];
       if (!items.length) continue;
       const isHome = k === home;
-      let free = freeAround(CELLS[ci], isHome ? 2 : 1, isHome ? 3 : 2, occ, k);
+      let free = freeAround(CELLS[ci], 1, isHome ? 1 : 2, occ, k);
       for (const it of items) {
-        if (!free.length) free = freeAround(CELLS[ci], isHome ? 2 : 1, 6, occ, k);
+        if (!free.length) free = freeAround(CELLS[ci], 1, 6, occ, k);
         const c = free.shift();
         if (!c) break;
         occ.set(c.idx, { kind: it.kind, key: it.key });
@@ -316,6 +317,18 @@
       else act = _sigOff(st.why);
       return `<div class="sm-panel"><div class="sm-ptitle">Secteur ${esc(s.sector)} · zone inexplorée</div><div class="sm-psub">Rien de connu ici.</div>${act}</div>`;
     }
+    if (s.kind === 'orbit') {
+      // anneau autour de ma planète : c'est mon propre système
+      const name = (G.planet && G.planet.name) || (G.profile && G.profile.planetName) || 'ma planète';
+      const st = (typeof _probeTierStatus === 'function') ? _probeTierStatus('radar') : { ok: false, build: true, why: 'Aucune Radar prête' };
+      const scanning = (G.probeMissions || []).find(x => x.status === 'in_transit' && String(x.targetCoords || '').startsWith(mySystemKey()));
+      let act;
+      if (scanning) act = _sigOff(`Radar en route · arrivée dans ${formatTankerDuration(Math.max(0, (scanning.arrivalAt || 0) - Date.now()))}`);
+      else if (st.ok) act = _sigBtn(COL.radar, 'Balayer mon système', `SBMap.sweep('${esc(mySystemKey())}')`, `Radar · ${esc(mySystemKey())} · ${PROBE_TIER_CONFIG.radar.duration}`);
+      else if (st.build) act = _sigBtn(COL.radar, 'Construire une Radar', `openProbeDetail('radar')`, `${PROBE_TIER_CONFIG.radar.cost.metal} Métal · puis reviens balayer`, true);
+      else act = _sigOff(st.why);
+      return `<div class="sm-panel"><div class="sm-ptitle">Système de ${esc(name)}</div><div class="sm-psub">Rien de relevé ici.</div>${act}</div>`;
+    }
     if (s.kind === 'home') {
       const name = (G.planet && G.planet.name) || (G.profile && G.profile.planetName) || 'Ma planète';
       const insp = window.SBSystem ? _sigBtn(COL.cyan, 'Inspecter le système', `SBSystem.open('${esc(mySystemKey())}')`, '', true) : '';
@@ -328,7 +341,11 @@
       if (n) bits.push(`${n} signature${n > 1 ? 's' : ''}`);
       if (tn) bits.push(`${tn} cible${tn > 1 ? 's' : ''}`);
       if (pn) bits.push(`${pn} planète${pn > 1 ? 's' : ''}`);
-      if (sys && sys.scanning && !sys.known) bits.push('balayage en cours');
+      if (sys && sys.scanning) {
+        // la sonde y va vraiment : on le dit, avec l'heure d'arrivée
+        const m = (G.probeMissions || []).find(x => x.status === 'in_transit' && String(x.targetCoords || '').startsWith(s.key));
+        bits.push(m ? `Radar en route · arrivée dans ${formatTankerDuration(Math.max(0, (m.arrivalAt || 0) - Date.now()))}` : 'balayage en cours');
+      }
       const st = (typeof _probeTierStatus === 'function') ? _probeTierStatus('radar') : { ok: false };
       let act = '';
       if (sys && sys.known) {
@@ -644,8 +661,8 @@
     // Ma planète : la vraie Kerath, posée au-dessus du centre du plateau
     _home() {
       const T = this.T, g = new T.Group();
-      const ball = new T.Mesh(new T.SphereGeometry(25, 48, 32), new T.MeshStandardMaterial({ color: 0x3f86a2, roughness: 0.85, metalness: 0 }));
-      ball.position.y = 40; g.add(ball);
+      const ball = new T.Mesh(new T.SphereGeometry(11, 48, 32), new T.MeshStandardMaterial({ color: 0x3f86a2, roughness: 0.85, metalness: 0 }));
+      ball.position.y = 15; g.add(ball);
       const load = (u) => new Promise((ok, ko) => new T.TextureLoader().load(u, ok, undefined, ko));
       Promise.all([load('assets/3d/kerath_albedo.jpg'), load('assets/3d/kerath_lights.jpg')]).then(([a, l]) => {
         a.colorSpace = T.SRGBColorSpace; l.colorSpace = T.SRGBColorSpace;
@@ -654,13 +671,13 @@
         ball.material.needsUpdate = true;
       }).catch(() => {});
       const atmo = new T.Sprite(new T.SpriteMaterial({ map: this.halo, color: 0x5fb8ff, transparent: true, opacity: 0.35, depthWrite: false, blending: T.AdditiveBlending }));
-      atmo.position.y = 40; atmo.scale.setScalar(82); g.add(atmo);
+      atmo.position.y = 15; atmo.scale.setScalar(36); g.add(atmo);
       // Anneau d'orbite au sol (cyan : c'est le point de navigation « chez moi »)
-      const ring = new T.Mesh(this.G.ring(70, 71.6), this.M.add(0x5fffe8, 0.4)); ring.position.y = 1.9; g.add(ring);
-      const ring2 = new T.Mesh(this.G.ring(40, 40.8), this.M.add(0x5fffe8, 0.18)); ring2.position.y = 1.9; g.add(ring2);
+      const ring = new T.Mesh(this.G.ring(19, 19.9), this.M.add(0x5fffe8, 0.42)); ring.position.y = 1.9; g.add(ring);
+      const ring2 = new T.Mesh(this.G.ring(13.5, 14), this.M.add(0x5fffe8, 0.18)); ring2.position.y = 1.9; g.add(ring2);
       this.homeBall = ball; this.homeRing = ring;
       const name = (G.planet && G.planet.name) || (G.profile && G.profile.planetName) || 'Ma planète';
-      const lab = this._label(String(name).toUpperCase(), '#5fffe8', 1.2); lab.position.set(0, 86, 0); g.add(lab);
+      const lab = this._label(String(name).toUpperCase(), '#5fffe8', 0.8); lab.position.set(0, 33, 0); g.add(lab);
       this.scene.add(g);
     },
 
@@ -725,9 +742,9 @@
         }
         if (s.scanning) {
           for (let k = 0; k < 2; k++) {
-            const w = new T.Mesh(this.G.ring(8, 9), this.M.add(0xe6f0ff, 0.5)); w.position.y = 2.1; g.add(w);
+            const w = new T.Mesh(this.G.ring(8, 8.8), this.M.add(0xe6f0ff, 0.4)); w.position.y = 2.1; g.add(w);
             const ph = k * 0.5;
-            A.push((t) => { const u = (t * 0.45 + ph) % 1; w.scale.setScalar(0.4 + u * 2.6); w.material.opacity = 0.55 * (1 - u); });
+            A.push((t) => { const u = (t * 0.45 + ph) % 1; w.scale.setScalar(0.4 + u * 1.7); w.material.opacity = 0.42 * (1 - u); });
           }
         }
         g.userData.cell = ci; this.content.add(g);
@@ -793,7 +810,7 @@
         const H = 24;
         const a = f.from === 0 ? new T.Vector3(0, H, 0) : at(f.from, H), b = f.to === 0 ? new T.Vector3(0, H, 0) : at(f.to, H);
         // ne pas partir du cœur de la planète : départ au bord de l'anneau
-        const out = (p, q) => { const d = q.clone().sub(p); d.y = 0; const L = d.length(); return L > 80 ? p.clone().addScaledVector(d.normalize(), 44) : p; };
+        const out = (p, q) => { const d = q.clone().sub(p); d.y = 0; const L = d.length(); return L > 30 ? p.clone().addScaledVector(d.normalize(), 14) : p; };
         if (f.from === 0) a.copy(out(a, b)); if (f.to === 0) b.copy(out(b, a));
         const route = new T.Line(new T.BufferGeometry().setFromPoints([a, b]), new T.LineDashedMaterial({ color: c, dashSize: 4, gapSize: 5, transparent: true, opacity: 0.3 }));
         route.computeLineDistances(); this.content.add(route);
@@ -927,6 +944,7 @@
     const o = st.occ.get(idx);
     if (o) { _sel = { kind: o.kind, key: o.key }; return refresh(true); }
     const sector = sectorOfCell(c);
+    if (c.ring === 1) { _sel = { kind: 'orbit', cell: idx }; return refresh(true); }   // autour de ma planète : mon propre système
     if (c.ring > st.lit) { _sel = { kind: 'far', sector, cell: idx }; return refresh(true); }
     _sel = { kind: 'dark', sector, sysKey: pickSystemForCell(c), cell: idx };
     refresh(true);
