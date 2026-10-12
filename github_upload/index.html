@@ -1774,6 +1774,11 @@ svg.map {
 #scr-fleet.ud-hero .head { text-shadow: 0 2px 12px rgba(0,0,0,.8); }
 #scr-fleet.ud-hero .dash-section-card, #scr-fleet.ud-hero .fleet-stats > *, #scr-fleet.ud-hero .bld-cta-banner { background: rgba(8,12,18,.86); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); }
 #fleet-ship-hero .u3d-canvas { touch-action: none; }
+/* voile de lecture : quand les cartes remontent sur la 3D, la scène s'assombrit (--hs : 0 → 1 selon le défilement) */
+.u3d.u3d-hero > .u3d-scrim { position: absolute; inset: 0; z-index: 6; pointer-events: none;
+  background: rgba(3,5,9,.84); opacity: var(--hs, 0); }
+.u3d-hero .u3d-canvas { filter: saturate(calc(1 - var(--hs, 0) * .5)); }
+.ud-hero .screen-scroll .section-label { text-shadow: 0 1px 8px rgba(0,0,0,.9); }
 .w-nav [data-sys="fleet"].sb-off { opacity: .32; filter: grayscale(1); }
 #scr-unit-detail.ud-ship #ud-u3d { display: none; }
 #ud-ship-hero .u3d-canvas, #bd-ship-hero .u3d-canvas { touch-action: none; }
@@ -9955,7 +9960,24 @@ function cleanupOrphanModals() {
   if (typeof _explorationLeadId !== 'undefined') _explorationLeadId = null;
 }
 
+// voile de lecture des vues héros 3D : plus on fait défiler la fiche, plus la scène derrière s'assombrit
+function updateHeroScrim(scroll) {
+  const scr = scroll && scroll.closest && scroll.closest('.screen');
+  if (!scr) return;
+  const hero = scr.querySelector(':scope > .u3d-hero');
+  if (!hero) return;
+  if (!hero.querySelector(':scope > .u3d-scrim')) hero.insertAdjacentHTML('beforeend', '<div class="u3d-scrim"></div>');
+  const space = scroll.querySelector('.ud-hero-space');
+  const h = (space && space.offsetHeight) || scroll.clientHeight * 0.5;
+  const v = Math.max(0, Math.min(1, (scroll.scrollTop - h * 0.12) / (h * 0.45)));
+  scr.style.setProperty('--hs', v.toFixed(3));
+}
+document.addEventListener('scroll', (e) => {
+  const t = e.target;
+  if (t && t.classList && t.classList.contains('screen-scroll')) updateHeroScrim(t);
+}, true);
 function goto(scr, opts) {
+  setTimeout(() => { const el = document.getElementById('scr-' + scr); const sc = el && el.querySelector('.screen-scroll'); if (sc) updateHeroScrim(sc); }, 60);
   opts = opts || {};
   // ORBITE = ARMER (10/10/2026) : la construction navale n'existe qu'avec le chantier orbital.
   // Cf. North Star §12 : « pas de chantier orbital → pas de vue orbite ».
