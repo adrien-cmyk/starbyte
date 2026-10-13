@@ -26158,6 +26158,8 @@ function getTotalEngagedGarrisonSoldiers(soldierKey) {
 // Modifie la flotte (composition, soldiers, heroes) et ajoute le butin aux stocks.
 function applyCombatResult(fleet, result, target) {
   if (!fleet || !result) return;
+  // BRINGUE_1310 — flotte rentrée victorieuse : la caserne fait la fête 1 h (assets/fete_caserne.js)
+  try { if (window.SBBringue) SBBringue.onVictory(result.outcome); } catch (e) { console.warn('[bringue]', e); }
 
   // 1. Soustraire les pertes de vaisseaux DÉTRUITS (les récupérés rentrent au hangar)
   for (const type of ['tanker', 'fregate', 'cuirasse']) {
@@ -36798,9 +36800,9 @@ function renderDefenseUnitDetail(key) {
 
 // ─── SHIP3D : fiche vaisseau en vue héros (3D plein écran derrière la fiche, comme le soldat lourd) ───
 const UNIT_SHIP3D_MODELS = {
-  cuirasse: { url: 'assets/3d/sb_kv01.glb?v=20261013-1400', code: 'KV-01 Kerath' },
-  fregate:  { url: 'assets/3d/sb_sr01.glb?v=20261013-1400', code: 'SR-01 Sentinelle', profile: 'sr01' },
-  tanker:   { url: 'assets/3d/sb_tk07.glb?v=20261013-1400', code: 'TK-07 Tanker', profile: 'tk07' },
+  cuirasse: { url: 'assets/3d/sb_kv01.glb?v=20261013-1630', code: 'KV-01 Kerath' },
+  fregate:  { url: 'assets/3d/sb_sr01.glb?v=20261013-1630', code: 'SR-01 Sentinelle', profile: 'sr01' },
+  tanker:   { url: 'assets/3d/sb_tk07.glb?v=20261013-1630', code: 'TK-07 Tanker', profile: 'tk07' },
 };
 let unitShip3D = null;   // { key, handle }
 function mountUnitShip3D(key, inService) {
@@ -36889,9 +36891,9 @@ function hasShipyardBuilt() {
   return !!(typeof G !== 'undefined' && G.planet && G.planet.parcels && G.planet.parcels.some(p => p && p.building === 'shipyard' && p.state === 'built'));
 }
 const DOCK_MODELS = {
-  tanker:   { url: 'assets/3d/sb_tk07_lod.glb?v=20261013-1400', engine: [1.0, 0.7, 0.4] },
-  fregate:  { url: 'assets/3d/sb_sr01_lod.glb?v=20261013-1400', engine: [0.5, 0.78, 1.0] },
-  cuirasse: { url: 'assets/3d/sb_kv01_lod.glb?v=20261013-1400', engine: [0.5, 0.78, 1.0] },
+  tanker:   { url: 'assets/3d/sb_tk07_lod.glb?v=20261013-1630', engine: [1.0, 0.7, 0.4] },
+  fregate:  { url: 'assets/3d/sb_sr01_lod.glb?v=20261013-1630', engine: [0.5, 0.78, 1.0] },
+  cuirasse: { url: 'assets/3d/sb_kv01_lod.glb?v=20261013-1630', engine: [0.5, 0.78, 1.0] },
 };
 function fleetStationedCount(k) {
   const c = (G.fleet && G.fleet.stationed && G.fleet.stationed[k]) || {};
@@ -36983,7 +36985,7 @@ function unmountFleetStation3D() {
 })();
 
 // ─── SHIP3D : fiche bâtiment en vue héros (chantier orbital OS-01) ───
-const BUILDING_SHIP3D = { shipyard: { url: 'assets/3d/sb_os01.glb?v=20261013-1400', code: 'OS-01 Chantier orbital', profile: 'os01' } };
+const BUILDING_SHIP3D = { shipyard: { url: 'assets/3d/sb_os01.glb?v=20261013-1630', code: 'OS-01 Chantier orbital', profile: 'os01' } };
 let bdShip3D = null;   // { key, handle }
 function mountBuildingShip3D(key, tier) {
   const scr = document.getElementById('scr-building-detail');
@@ -43921,22 +43923,23 @@ if (G.knownTargets && Array.isArray(G.tankerMissions)) {
 
 </script>
 <!-- PLANET3D — carte 3D + boucle antenne (source : sb-build/src/planet3d.js) -->
-<script type="module" src="assets/planet3d.js?v=20261013-1530"></script>
+<script type="module" src="assets/planet3d.js?v=20261013-1630"></script>
 <!-- CLOUD — sauvegarde Supabase (source : sb-build/src/cloud.js) -->
-<script type="module" src="assets/cloud.js?v=20261013-1400"></script>
+<script type="module" src="assets/cloud.js?v=20261013-1630"></script>
 <!-- MATCH3 — Match-3 V2 (assets/match3.js, source src/match3.js + src/m3core.js) : remplace startM3 -->
-<script type="module" src="assets/match3.js?v=20261013-1500"></script>
+<script type="module" src="assets/match3.js?v=20261013-1630"></script>
 <!-- HOME V2 — « monde d'abord » : planète plein écran, ressources en ligne, Flotte / Défense / Prospection (assets/home.js) -->
-<script type="module" src="assets/home.js?v=20261013-1400"></script>
+<script type="module" src="assets/home.js?v=20261013-1630"></script>
 <!-- SPACE MAP v0 — carte du Centre de prospection (assets/spacemap.js, source src/spacemap.js) -->
-<script src="assets/spacemap.js?v=20261013-1400"></script>
+<script src="assets/spacemap.js?v=20261013-1630"></script>
 <!-- SPACE MAP niveau B — diorama 3D d'un système (assets/system3d.js, source src/system3d.js) -->
-<script type="module" src="assets/system3d.js?v=20261013-1400"></script>
+<script type="module" src="assets/system3d.js?v=20261013-1630"></script>
 <!-- SHIP3D — fiches 3D : cuirassé KV-01, frégate SR-01, tanker TK-07, chantier orbital OS-01 (assets/ship3d.js, sur le moteur partagé window.SB3D) -->
-<script src="assets/aftermath.js?v=20261013-1530"></script>
-<script src="assets/radio.js?v=20261013-1400"></script>
-<script type="module" src="assets/ship3d.js?v=20261013-1400"></script>
+<script src="assets/aftermath.js?v=20261013-1630"></script>
+<script src="assets/fete_caserne.js?v=20261013-1630"></script>
+<script src="assets/radio.js?v=20261013-1630"></script>
+<script type="module" src="assets/ship3d.js?v=20261013-1630"></script>
 <!-- FORMATION3D — flotte déployée en orbite, vue de haut en formation (remplace la vue orbite) -->
-<script src="assets/formation3d.js?v=20261013-1610"></script>
+<script src="assets/formation3d.js?v=20261013-1630"></script>
 </body>
 </html>

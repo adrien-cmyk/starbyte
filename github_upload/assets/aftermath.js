@@ -87,12 +87,18 @@
     font-size:10px; letter-spacing:.12em; text-transform:uppercase; cursor:pointer; }
   #sb-party { position:fixed; left:12px; right:12px; top:calc(var(--sat, env(safe-area-inset-top, 0px)) + 150px); z-index:30; display:none;
     padding:9px 12px; border-radius:10px; border:1px solid rgba(120,230,160,.45); background:rgba(6,30,18,.8); color:#d8ffe6;
-    backdrop-filter:blur(6px); -webkit-backdrop-filter:blur(6px); font-size:12px; text-align:center; letter-spacing:.06em; }`;
+    backdrop-filter:blur(6px); -webkit-backdrop-filter:blur(6px); font-size:12px; letter-spacing:.06em; align-items:center; gap:10px; }
+  #sb-party span { flex:1; min-width:0; text-align:center; }
+  #sb-party .sb-x { flex-shrink:0; width:26px; height:26px; border-radius:50%; border:1px solid rgba(255,255,255,.28); background:rgba(0,0,0,.3);
+    color:inherit; font-size:15px; line-height:22px; text-align:center; cursor:pointer; padding:0; }`;
   document.head.appendChild(css);
   const ban = document.createElement('div'); ban.id = 'sb-devast';
   ban.innerHTML = `<span>Planète dévastée · <b>0 %</b></span><span class="bar"><i></i></span><button>Secours</button>`;
   ban.addEventListener('click', startRelief);
   const party = document.createElement('div'); party.id = 'sb-party';
+  // 13/10 (Adrien) : pas de minuteur, bandeau fermable (la fête continue sur la carte)
+  party.innerHTML = '<span>🎉 Raid repoussé · la colonie fait la fête</span><button class="sb-x" aria-label="Fermer">×</button>';
+  party.querySelector('.sb-x').addEventListener('click', (e) => { e.stopPropagation(); const s = st(); if (s) { s.partyHidden = s.partyAt; save(); } refresh(); });
   document.body.appendChild(ban); document.body.appendChild(party);
 
   function onPlanet() { const s = document.getElementById('scr-planet'); return !!s && !s.classList.contains('hidden'); }
@@ -100,8 +106,8 @@
     const d = dev(), ph = partyPhase(), on = onPlanet();
     ban.style.display = on && d >= 1 ? 'flex' : 'none';
     if (d >= 1) { ban.querySelector('b').textContent = Math.round(d) + ' %'; ban.querySelector('.bar i').style.width = d + '%'; }
-    party.style.display = on && ph && d < 1 ? 'block' : 'none';
-    if (ph) { const left = Math.ceil((BANNERS_MS - ph.t) / 60000); party.textContent = `🎉 Raid repoussé · la colonie fait la fête (${left} min)`; }
+    const s0 = st();
+    party.style.display = on && ph && d < 1 && !(s0 && s0.partyHidden && s0.partyHidden === s0.partyAt) ? 'flex' : 'none';
     // rapport en attente : ouvert automatiquement dès que la carte est à l'écran
     const s = st();
     if (on && s && s.pendingReport && typeof openReportDetail === 'function') {
