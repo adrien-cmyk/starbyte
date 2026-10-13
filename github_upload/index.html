@@ -8123,7 +8123,8 @@ function totalDefense() {
   for (const [key, u] of Object.entries(G.defense.units)) {
     const inDeployedFleets = getSoldiersInDeployedFleets(key);
     const inMissionFleets = getSoldiersInMissionFleets(key);
-    const groundUnits = Math.max(0, u.qty - inDeployedFleets - inMissionFleets - soldiersCommittedElsewhere(key));
+    // PERTES DÉFENSE (13/10) : une unité endommagée est hors service jusqu'à sa réparation
+    const groundUnits = Math.max(0, u.qty - (u.dmg || 0) - inDeployedFleets - inMissionFleets - soldiersCommittedElsewhere(key));
     total += groundUnits * DEFENSE_UNITS[key].defPerUnit;
   }
   // Défense passive des bâtiments (Caserne, Bunker)
@@ -8227,13 +8228,16 @@ function getOrbitalDefenseFromFleets() {
   let total = 0;
   for (const fleet of G.fleet.prepared) {
     if ((fleet.status || 'prepared') !== 'deployed') continue;
+    if (typeof syncFleetIntegrity === 'function') syncFleetIntegrity(fleet);
     for (const shipKey of ['tanker', 'fregate', 'cuirasse']) {
       for (let tier = 1; tier <= 3; tier++) {
         const qty = fleet.composition?.[shipKey]?.['t' + tier] || 0;
         if (qty === 0) continue;
         const td = SHIP_TIERS[shipKey]?.[tier];
         if (!td) continue;
-        total += qty * (td.def || 0);
+        // coques avariées : défendent selon leur efficacité (35 % à 0 d'intégrité)
+        const hps = fleet.integrity?.[shipKey]?.['t' + tier] || [];
+        for (let i = 0; i < qty; i++) total += (td.def || 0) * (typeof shipEfficiency === 'function' && typeof hps[i] === 'number' ? shipEfficiency(hps[i]) : 1);
       }
     }
   }
@@ -9235,6 +9239,73 @@ function _mpFinishRaid(fleet, raid) {
   toast(`${fleet.name} : ${labels[combat.outcome] || 'Mission terminée'} sur ${target.name}`);
 }
 
+// ─── PERTES DE LA DÉFENSE (décision d'Adrien 13/10/2026 : « pertes fortes », endommagées hors service) ───
+// Orbite perdue : 40–75 % des tourelles et des vaisseaux en orbite touchés (plus le rapport de force est écrasant, plus ça fait mal).
+// Sol pris : 60–90 % des soldats au sol. Raid repoussé / débarquement repoussé : 10–25 % (plus c'était serré, plus on perd).
+// Moitié détruite, moitié endommagée (réparable à la caserne, hors service d'ici là).
+// Vaisseaux en orbite : moitié détruits, moitié avariés (intégrité 15–45 %, réparables au chantier).
+var DEF_LOSS = { ORBIT_LOST: [0.40, 0.75], GROUND_LOST: [0.60, 0.90], HELD: [0.10, 0.25], DESTROYED_SHARE: 0.5 };
+var DEF_TURRETS = ['tourelle', 'tourelle_lourde'], DEF_SOLDIERS = ['garde', 'lourd'];
+function _defLossPct(range, ratio, held) {
+  const k = held ? Math.max(0, Math.min(1, ratio)) : Math.max(0, Math.min(1, (ratio - 1) / 2));
+  return range[0] + (range[1] - range[0]) * k;
+}
+function _defHitUnits(keys, pct, out) {
+  for (const key of keys) {
+    const u = G.defense && G.defense.units && G.defense.units[key];
+    if (!u || !u.qty) continue;
+    const away = getSoldiersInDeployedFleets(key) + getSoldiersInMissionFleets(key) + soldiersCommittedElsewhere(key);
+    const inService = Math.max(0, u.qty - (u.dmg || 0) - away);
+    const hit = Math.round(inService * pct);
+    if (!hit) continue;
+    const destroyed = Math.round(hit * DEF_LOSS.DESTROYED_SHARE), damaged = hit - destroyed;
+    u.qty = Math.max(0, u.qty - destroyed);
+    u.dmg = Math.min(u.qty, (u.dmg || 0) + damaged);
+    out.units[key] = { destroyed, damaged };
+  }
+}
+function _defHitOrbitalFleets(pct, out) {
+  for (const fleet of (G.fleet && G.fleet.prepared) || []) {
+    if ((fleet.status || 'prepared') !== 'deployed') continue;
+    syncFleetIntegrity(fleet);
+    for (const type of SHIP_TYPES_ALL) {
+      const n = countShipsByType(fleet.composition, type), hit = Math.round(n * pct);
+      if (!hit) continue;
+      const destroyed = Math.round(hit * DEF_LOSS.DESTROYED_SHARE);
+      distributeShipLosses(fleet.composition[type], destroyed);
+      syncFleetIntegrity(fleet);
+      let left = hit - destroyed, damaged = 0;
+      for (const tk of ['t3', 't2', 't1']) for (let i = 0; i < fleet.integrity[type][tk].length && left > 0; i++, left--, damaged++)
+        fleet.integrity[type][tk][i] = Math.min(fleet.integrity[type][tk][i], 15 + Math.round(Math.random() * 30));
+      const o = out.ships[type] || (out.ships[type] = { destroyed: 0, damaged: 0 });
+      o.destroyed += destroyed; o.damaged += damaged;
+    }
+  }
+}
+function mpApplyDefenseLosses(combat, raidWon) {
+  const out = { units: {}, ships: {} };
+  const ph1 = combat && combat.phases && combat.phases.phase1, ph2 = combat && combat.phases && combat.phases.phase2;
+  if (!ph1) return out;
+  try {
+    const r1 = ph1.defEffective > 0 ? ph1.atkEffective / ph1.defEffective : 9;
+    const p1 = (raidWon || ph1.won) ? _defLossPct(DEF_LOSS.ORBIT_LOST, r1, false) : _defLossPct(DEF_LOSS.HELD, r1, true);
+    _defHitUnits(DEF_TURRETS, p1, out);
+    _defHitOrbitalFleets(p1, out);
+    if (ph2) {
+      const r2 = ph2.defEffective > 0 ? ph2.atkEffective / ph2.defEffective : 9;
+      _defHitUnits(DEF_SOLDIERS, ph2.won ? _defLossPct(DEF_LOSS.GROUND_LOST, r2, false) : _defLossPct(DEF_LOSS.HELD, r2, true), out);
+    }
+  } catch (e) { console.warn('[MP] pertes défense', e); }
+  return out;
+}
+function _defLossLines(L) {
+  if (!L) return [];
+  const rows = [], SN = { tanker: 'Tankers en orbite', fregate: 'Frégates en orbite', cuirasse: 'Cuirassés en orbite' };
+  for (const [k, v] of Object.entries(L.units || {})) rows.push([(DEFENSE_UNITS[k] && DEFENSE_UNITS[k].name) || k, v]);
+  for (const [k, v] of Object.entries(L.ships || {})) rows.push([SN[k] || k, v]);
+  return rows;
+}
+
 // ─── Côté défenseur : un raid m'a frappé pendant mon absence ───
 var _MP_BUILDING_LABEL = (k) => (typeof BUILDINGS !== 'undefined' && BUILDINGS[k] && BUILDINGS[k].name) || k;
 
@@ -9255,6 +9326,7 @@ function mpApplyRaidAgainstMe(raid) {
     if (p) { mpDamageParcel(p, raid.attacker_pseudo); damagedName = p.n || _MP_BUILDING_LABEL(p.building); }
   }
   const combat = res.combat || null;
+  const defLosses = mpApplyDefenseLosses(combat, won);
   if (!G.reports) G.reports = [];
   G.reports.unshift({
     id: 'rpt-def-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6),
@@ -9265,7 +9337,7 @@ function mpApplyRaidAgainstMe(raid) {
     startedAt: Date.parse(raid.departed_at) || null, returnedAt: Date.parse(raid.resolved_at) || Date.now(), read: false,
     defense: {
       won: !won, attacker: raid.attacker_pseudo, attackerAddress: raid.attacker_address, fleetName: raid.fleet_name || '',
-      loot, damagedName,
+      loot, damagedName, losses: defLosses,
       atk: combat && combat.phases && combat.phases.phase1 ? combat.phases.phase1.atkEffective : null,
       def: combat && combat.phases && combat.phases.phase1 ? combat.phases.phase1.defEffective : null,
       landed: !!(combat && combat.phases && combat.phases.phase2 && combat.phases.phase2.won),
@@ -10459,6 +10531,11 @@ function renderDefenseReportDetail(r) {
       ${lootRows}
       <div class="dash-stat-row"><span class="lbl">Bâtiment abîmé</span><span class="val" style="color:${d.damagedName ? 'var(--red)' : 'var(--mut)'}">${d.damagedName || 'aucun'}</span></div>
     </div>
+    ${_defLossLines(d.losses).length ? `<div class="dash-section-card" style="margin:0 16px 14px">
+      <div style="font-size:10px;letter-spacing:.14em;color:var(--mut);text-transform:uppercase;margin-bottom:6px">Pertes de la défense</div>
+      ${_defLossLines(d.losses).map(([n, v]) => `<div class="dash-stat-row"><span class="lbl">${n}</span><span class="val" style="color:var(--red)">${v.destroyed ? '−' + v.destroyed + ' détruit' + (v.destroyed > 1 ? 's' : '') : ''}${v.destroyed && v.damaged ? ' · ' : ''}${v.damaged ? '<span style="color:var(--amber)">' + v.damaged + ' endommagé' + (v.damaged > 1 ? 's' : '') + '</span>' : ''}</span></div>`).join('')}
+      <div style="font-size:11px;color:var(--mut);margin-top:6px;line-height:1.5">Les unités endommagées ne défendent plus : répare-les depuis leur fiche ; les vaisseaux avariés, au chantier.</div>
+    </div>` : ''}
     <div style="margin:0 16px 14px;font-size:11px;color:var(--mut);font-style:italic;line-height:1.6">
       ${d.won ? 'Le registre accorde 12 h de bouclier à ton monde.' : 'Le registre accorde 12 h de bouclier à ton monde. Renforce ta défense planétaire' + (d.damagedName ? ' et lance les secours sanitaires pour réparer ' + d.damagedName + '.' : '.')}
     </div>
