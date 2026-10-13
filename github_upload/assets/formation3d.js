@@ -159,7 +159,9 @@
     const PT = { value: 0 };   // horloge des shaders de plasma
     const W = () => Math.max(1, container.clientWidth), H = () => Math.max(1, container.clientHeight);
     const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
-    renderer.setPixelRatio(Math.min(devicePixelRatio || 1, 2)); renderer.setSize(W(), H());
+    // opts.lite : fond décoratif (écran d'accueil) — résolution réduite, effets allégés
+    const LITE = !!opts.lite;
+    renderer.setPixelRatio(Math.min(devicePixelRatio || 1, LITE ? 1.25 : 2)); renderer.setSize(W(), H());
     renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.toneMappingExposure = 0.95;
     if (THREE.SRGBColorSpace) renderer.outputColorSpace = THREE.SRGBColorSpace;
     renderer.domElement.className = 'u3d-canvas';
@@ -256,12 +258,12 @@
         const L = sz.z, bow = bb.max.z + L * 0.1, hw = sz.x / 2, hhh = sz.y / 2;
         const R0 = Math.max(0.31 * L, 1.35 * Math.max(hw, hhh / 0.78));
         const shock = new THREE.Group();
-        [[1.0, .55, 2.2, 1.6], [1.12, .28, 3.2, 1.1], [0.9, .22, 1.6, 2.4]].forEach(([sc, gain, fr, sp]) => {
+        (LITE ? [[1.0, .7, 2.2, 1.6]] : [[1.0, .55, 2.2, 1.6], [1.12, .28, 3.2, 1.1], [0.9, .22, 1.6, 2.4]]).forEach(([sc, gain, fr, sp]) => {
           const m = new THREE.Mesh(bubbleGeo(THREE, bow, c.y, L, R0, sc), shockMat(THREE, PT, gain * (hp > 0 ? 1 : .5), fr, sp));
           m.renderOrder = 2; m.frustumCulled = false; shock.add(m);
         });
         holder.add(shock);
-        holder.add(filaments(THREE, PT, FIL_N[s.type], bb.max.z, c.y, hw, hhh, L));
+        holder.add(filaments(THREE, PT, Math.round(FIL_N[s.type] * (LITE ? .4 : 1)), bb.max.z, c.y, hw, hhh, L));
         // panaches : 4 couches par tuyère (cœur blanc, corps, gaine, halo)
         const pal = M.color === 0xffb070 ? PLUMES.amber : PLUMES.blue, thrust = 0.45 + 0.55 * hp / 100;
         for (const [x, y, z] of M.glow) {
@@ -358,9 +360,9 @@
       };
       // grand tunnel : plus large que la zone de zoom de la caméra → visible surtout depuis l'arrière
       const RT = ext / Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)) * 1.15 * 1.8 * 1.15;
-      tunnel({ N: 1500, rMin: RT, rMax: RT * 2.6, span: RT * 9, near: RT * 1.2, speed: RT * 2.2, len: RT * .75, w: RT * .0075, gain: 1, gate: true });
+      tunnel({ N: LITE ? 700 : 1500, rMin: RT, rMax: RT * 2.6, span: RT * 9, near: RT * 1.2, speed: RT * 2.2, len: RT * .75, w: RT * .0075, gain: 1, gate: true });
       // effet rapproché d'origine, en complément discret (7,5 % de son intensité)
-      tunnel({ N: 900, rMin: ext * .45, rMax: ext * 4, span: ext * 16, near: ext * 3.5, speed: ext * 7, len: ext * 2.2, w: ext * .02, gain: .075, gate: false });
+      if (!LITE) tunnel({ N: 900, rMin: ext * .45, rMax: ext * 4, span: ext * 16, near: ext * 3.5, speed: ext * 7, len: ext * 2.2, w: ext * .02, gain: .075, gate: false });
     }
 
     const composer = new EffectComposer(renderer);

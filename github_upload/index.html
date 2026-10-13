@@ -4451,11 +4451,22 @@ svg.map {
   <div style="position:absolute;left:0;right:0;bottom:calc(env(safe-area-inset-bottom, 0px) + 10px);z-index:2;text-align:center;font-size:9px;letter-spacing:.08em;color:rgba(220,228,240,.55);pointer-events:none">© Adrien Thétaz - 2026</div>
   <div style="position:absolute;inset:0;z-index:0;pointer-events:none;background:rgba(0,0,0,.5)"></div>
 
-  <div class="screen-scroll" style="position:relative;z-index:1;display:flex;flex-direction:column;justify-content:center;min-height:100vh;padding:24px 20px">
+  <div class="screen-scroll" style="position:relative;z-index:1;display:flex;flex-direction:column;justify-content:flex-start;min-height:100vh;padding:calc(env(safe-area-inset-top, 0px) + 28px) 20px calc(env(safe-area-inset-bottom, 0px) + 34px)">
 
-    <div style="text-align:center;margin-bottom:36px">
+    <div style="text-align:center;margin-bottom:0">
       <div style="font-size:10px;letter-spacing:.32em;color:#b9c6d8;margin-bottom:10px;text-transform:uppercase;text-shadow:0 1px 6px rgba(0,0,0,.8)">Bienvenue dans</div>
-      <img src="assets/starbyte-logo.svg" alt="Starbyte" style="display:block;width:min(260px,72vw);height:auto;margin:6px auto 18px;filter:drop-shadow(0 0 18px rgba(150,120,255,.35))">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 190 53.3" fill="#fff" role="img" aria-label="Starbyte" style="display:block;width:min(260px,72vw);height:auto;margin:6px auto 18px;position:relative">
+  <g>
+    <path d="M31.4,28.1h0v10c0,1.1.9,2.1,2.1,2.1h.4c1.1,0,2.1-.9,2.1-2.1v-10h4.8c2.5,0,4.5-2,4.5-4.5H14c-1.1,0-2.1.9-2.1,2.1v2.5h19.5Z"/>
+    <path d="M48.1,40.1h0c2.5,0,4.5-2,4.5-4.5v-1.6h9.4v1.6c0,2.5,2,4.5,4.5,4.5h0v-14.1c0-.4,0-.8-.3-1.1-.3-.8-1-1.4-1.9-1.4h-16.2v2.5h0s0,14.1,0,14.1ZM52.7,29.4v-1.3h9.4v1.3s-9.4,0-9.4,0Z"/>
+    <path d="M74.4,35.6v-7.5h11c0-2.5-2-4.5-4.5-4.5h-11v2.5h0v14.1h0c2.5,0,4.5-2,4.5-4.5h0Z"/>
+    <path d="M19.5,29.7h-7.5v2.4c0,1.1.9,2.1,2.1,2.1h7.6v-2.5c0-1.1-.9-2.1-2.1-2.1h-.1Z"/>
+    <path d="M166.5,35.5h-17v2.5c0,1.1.9,2.1,2.1,2.1h19.5c0-2.5-2-4.6-4.6-4.6Z"/>
+    <path d="M0,40.1h19.5c1.1,0,2.1-.9,2.1-2.1v-2.5H4.6c-2.6,0-4.6,2.1-4.6,4.6Z"/>
+    <path d="M161.4,28.1c1.1,0,2.1-.9,2.1-2.1v-.4c0-1.1-.9-2.1-2.1-2.1h-32.9c-.5,0-1,.3-1.3.6l-4.7,5.1-5.4-5c-.3-.3-.7-.5-1.1-.5-.3-.2-.6-.3-1-.3h-30l6.7,4.5h0v1.3h0v4.5h0v1.6h-2.1c-1.4,0-2.8.5-3.8,1.5l-3.2,3h23.4c1,0,1.8-.7,2-1.7,0-.2.2-.5.2-.8v-9.5h6.1l5.5,5.1v4.8c0,1.1.9,2.1,2.1,2.1h.4c1.1,0,2.1-.9,2.1-2.1v-4.1l5.4-5.8h7.3v10c0,1.1.9,2.1,2.1,2.1h.4c1.1,0,2.1-.9,2.1-2.1v-10h8v6.1h12c1.1,0,2.1-.9,2.1-2.1v-.4c0-1.1-.9-2.1-2.1-2.1h-7.4v-1.6h7.4l-.3.4ZM103.5,35.5h-7.8v-1.6h7.8v1.6ZM103.5,29.4h-7.8v-1.3h7.8v1.3Z"/>
+  </g>
+  <polygon points="176.6 34 190 31.4 180.5 28.5 175.4 27.8 173.3 28.9 175 27.4 177.9 25.7 183.3 15.3 172 22.9 163.4 0 165.3 22.7 166.7 23.4 167.6 27.3 171 29.5 170.8 33.7 173.8 35.8 174.4 41.2 186.3 53.3 176.6 34"/>
+</svg>
       <div style="font-size:13px;letter-spacing:.34em;text-transform:uppercase;color:#d9ccff;margin-bottom:12px;text-shadow:0 0 14px rgba(150,110,255,.6)">Rejoins l'histoire</div>
       <div style="font-size:11px;color:#b7c4d4;font-style:italic;line-height:1.6;max-width:280px;margin:0 auto">
         Une planète sans nom flotte dans le vide.<br>
@@ -4463,7 +4474,9 @@ svg.map {
       </div>
     </div>
 
-    <div style="max-width:340px;margin:0 auto;width:100%;padding:20px 18px 18px;border-radius:14px;background:rgba(4,6,14,.62);border:1px solid rgba(150,170,255,.18);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);box-shadow:0 10px 40px rgba(0,0,0,.45)">
+    <div id="welcome-fleet-gap" style="flex:1 1 auto;min-height:150px" aria-hidden="true"></div>
+
+    <div style="max-width:340px;margin:0 auto;width:100%;padding:20px 18px 18px;border-radius:14px;background:rgba(4,6,14,.5);border:1px solid rgba(150,170,255,.18)">
 
       <div style="margin-bottom:22px">
         <label for="welcome-captain" style="display:block;font-size:11px;font-weight:600;letter-spacing:.16em;text-transform:uppercase;color:#dfe8f5;margin-bottom:8px;text-shadow:0 1px 6px rgba(0,0,0,.8)">Nom de capitaine</label>
@@ -37884,7 +37897,7 @@ function mountWelcomeHero() {
   if (!host || _welcomeHero) return;
   if (!window.Formation3D || !window.SB3D) { setTimeout(mountWelcomeHero, 200); return; }
   const fleet = { id: 'welcome', status: 'in_mission', composition: { cuirasse: { t1: 2, t2: 0, t3: 0 }, fregate: { t1: 6, t2: 0, t3: 0 }, tanker: { t1: 3, t2: 0, t3: 0 } } };
-  _welcomeHero = window.Formation3D.mount(host, { fleet, mode: 'mission', az: 0, el: 0.34, zoom: 0.72, spin: 0, shiftY: -0.2 });
+  _welcomeHero = window.Formation3D.mount(host, { fleet, mode: 'mission', az: 0, el: 0.16, zoom: 0.78, spin: 0, shiftY: 0.13, lite: true });
 }
 function unmountWelcomeHero() {
   if (_welcomeHero) { try { _welcomeHero.dispose(); } catch (e) {} _welcomeHero = null; }
@@ -44152,6 +44165,6 @@ if (G.knownTargets && Array.isArray(G.tankerMissions)) {
 <script src="assets/radio.js?v=20261013-1630"></script>
 <script type="module" src="assets/ship3d.js?v=20261013-1630"></script>
 <!-- FORMATION3D — flotte déployée en orbite, vue de haut en formation (remplace la vue orbite) -->
-<script src="assets/formation3d.js?v=20261013-1910"></script>
+<script src="assets/formation3d.js?v=20261013-1920"></script>
 </body>
 </html>
