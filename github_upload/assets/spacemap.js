@@ -38,7 +38,7 @@
   const BAND_RINGS = [[0, 5], [6, 8], [9, 11], [12, 14]];
   const BOARD = 14, RIM = 3;                         // cases jouables, puis bord qui se dissout
   const TOP = 0.36;                                  // dessus des dalles (KIT_PLATE)
-  const DIST_DEF = 620, DIST_MIN = 170, DIST_MAX = 2300;
+  const DIST_DEF = 620, DIST_MIN = 95, DIST_MAX = 2600;
   const COL = {
     radar: '#e6f0ff', light: '#5fcc8a', medium: '#9a8aff', tanker: '#ffc864',
     cyan: '#5fffe8', mut: '#6a7a72', sig: '#8fc4ff', sys: '#c8fff4',
@@ -205,25 +205,23 @@
       occ.set(placed.idx, { kind: 'system', key: k });
       cell['sys:' + k] = placed.idx;
     }
-    // Satellites : cases voisines libres (autour de ma planète : jamais à moins de 2 cases)
+    // 13/10 (Adrien) — zoom sémantique : chaque objet vit DANS la case de son système, sur une orbite.
+    // De loin on ne voit qu'un point par système ; de près, la case s'ouvre et montre le système.
+    const items = {};                 // clé de système → [{ kind, key, ck, orbit, ang }]
     for (const k of [home, ...keys]) {
       const s = systems[k], ci = cell['sys:' + k];
       if (ci === undefined) continue;
-      const items = [
-        ...s.sigs.map(sig => ({ kind: 'sig', key: sig.id, ck: 'sig:' + sig.id })),
-        ...s.targets.map(t => ({ kind: 'target', key: t.key, ck: 'tgt:' + t.key })),
-        ...s.planets.map(pl => ({ kind: 'planet', key: pl.coord, ck: 'pl:' + pl.coord })),
+      const list = [
+        ...s.sigs.map(sig => ({ kind: 'sig', key: sig.id, ck: 'sig:' + sig.id, obj: sig })),
+        ...s.targets.map(t => ({ kind: 'target', key: t.key, ck: 'tgt:' + t.key, obj: t })),
+        ...s.planets.map(pl => ({ kind: 'planet', key: pl.coord, ck: 'pl:' + pl.coord, obj: pl })),
       ];
-      if (!items.length) continue;
-      const isHome = k === home;
-      let free = freeAround(CELLS[ci], 1, isHome ? 1 : 2, occ, k);
-      for (const it of items) {
-        if (!free.length) free = freeAround(CELLS[ci], 1, 6, occ, k);
-        const c = free.shift();
-        if (!c) break;
-        occ.set(c.idx, { kind: it.kind, key: it.key });
-        cell[it.ck] = c.idx;
-      }
+      list.forEach((it, n) => {
+        it.orbit = n;
+        it.ang = _mulberry32(_hashSeed('SM3o:' + it.key))() * Math.PI * 2;
+        cell[it.ck] = ci;
+      });
+      items[k] = list;
     }
 
     // Missions en vol
@@ -234,7 +232,7 @@
       let to;
       if (/^SIG-/.test(tc)) to = cell['sig:' + tc];
       else if (/^[A-Z]-[A-Z]-\d{4}/.test(tc)) to = cell['sys:' + tc.split('-').slice(0, 3).join('-')];
-      if (to !== undefined) flights.push({ kind: 'probe', tier: m.tier, id: m.id, label: `Sonde ${m.probeName || ''}`.trim(), from: 0, to, departedAt: m.departedAt, arrivalAt: m.arrivalAt, target: tc });
+      if (to !== undefined) flights.push({ kind: 'probe', tier: m.tier, id: m.id, label: `Sonde ${m.probeName || ''}`.trim(), from: 0, to, toCk: /^SIG-/.test(tc) ? 'sig:' + tc : null, departedAt: m.departedAt, arrivalAt: m.arrivalAt, target: tc });
     }
     for (const m of (G.tankerMissions || [])) {
       if (!(m.status === 'in_transit' || m.status === 'returning' || m.status === 'exploring')) continue;
@@ -247,7 +245,7 @@
       flights.push({ kind: 'tanker', id: m.id, label: m.tankerName || 'Tanker', from: back ? at : 0, to: back ? 0 : at,
         departedAt: back ? (m.returnDepartedAt || m.arrivalAt || m.departedAt) : m.departedAt, arrivalAt: back ? (m.returnArrivalAt || m.arrivalAt) : m.arrivalAt, target: tc, back });
     }
-    return { systems, flights, occ, cell, lit: litRing() };
+    return { systems, flights, occ, cell, items, lit: litRing() };
   }
 
   // Empreinte : ce qui change le plateau (pas le temps qui passe)
@@ -258,6 +256,7 @@
       o.push((s.known ? 'K' : '') + (s.scanning ? 'S' : '') + s.key);
       for (const t of s.targets) o.push(t.key + ':' + (t.kt.status || ''));
       for (const g of s.sigs) o.push(g.id + ':' + (g.resolved ? 1 : 0));
+      for (const pl of s.planets) o.push('P' + pl.coord + (pl.playerName ? '@' + pl.playerName : ''));
     }
     for (const f of st.flights) o.push('F' + f.id + f.from + '>' + f.to);
     return st.lit + '|' + o.sort().join(',');
@@ -414,8 +413,53 @@
     }, 120);
   });
 
-  // Recul de départ : en portrait (plein écran), on recule pour voir mon secteur entier
   function homeDist() { const a = E.camera ? E.camera.aspect : 1; return a < 0.8 ? 980 : DIST_DEF; }
+
+  // ── Zoom sémantique (13/10, Adrien) ──────────────────────────────────────
+  // Loin : l'immensité — une grille fine qui se perd, un point à peine visible par système.
+  // Mi-distance : les systèmes deviennent de petites étoiles, un repère de couleur signale l'intérêt.
+  // Près : la case s'ouvre — étoile, orbites, planètes, échos, veines, chacun touchable (vue système fusionnée).
+  const LOD = { FAR: 1700, MID: 820, NEAR_IN: 300, NEAR_OUT: 560, LABEL_IN: 520, LABEL_OUT: 900 };
+  const sstep = (a, b, x) => { const t = Math.max(0, Math.min(1, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
+  const ORBIT = (n, home) => home ? Math.min(23, 12.5 + n * 2.6) : Math.min(22, 7 + n * 3.1);
+
+  const BOARD_VS = `
+    varying vec2 vP;
+    void main() { vP = position.xz; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`;
+  const BOARD_FS = `
+    uniform float uCell, uR0, uR1, uGrid, uDot, uFadeR, uMacro;
+    uniform vec2 uT;
+    uniform vec3 uLine, uBase;
+    varying vec2 vP;
+    // distance au bord de la case hexagonale (pointe en haut) de taille C ; renvoie (dist bord, pas pixel)
+    vec3 hexd(vec2 P, float C) {
+      float H = 0.8660254;
+      float r = P.y / (C * H), q = P.x / C - r * 0.5, s = -q - r;
+      float rq = floor(q + .5), rr = floor(r + .5), rs = floor(s + .5);
+      float dq = abs(rq - q), dr = abs(rr - r), ds = abs(rs - s);
+      if (dq > dr && dq > ds) rq = -rr - rs; else if (dr > ds) rr = -rq - rs;
+      vec2 p = P - vec2(C * (rq + rr * .5), C * H * rr);
+      float e = max(abs(p.x), max(abs(dot(p, vec2(.5, H))), abs(dot(p, vec2(.5, -H)))));
+      float R = C / 1.7320508, a = atan(p.y, p.x);
+      float va = 0.5235988 + floor((a - 0.5235988) / 1.0471976 + .5) * 1.0471976;
+      return vec3(C * .5 - e, max(fwidth(e), 1e-4), length(p - R * vec2(cos(va), sin(va))));
+    }
+    void main() {
+      vec3 f = hexd(vP, uCell);
+      float px = f.y;
+      float line = 1. - smoothstep(px * .35, px * 1.1, f.x);
+      float dots = 1. - smoothstep(px * .7, px * 1.5, f.z);             // ~1,5 px quel que soit le zoom
+      float lod = smoothstep(9., 34., uCell / px);                       // la grille fine apparaît en s'approchant
+      vec3 m = hexd(vP, uCell * 4.0);                                     // macro-grille : la carte vue de très haut
+      float mline = 1. - smoothstep(m.y * .35, m.y * 1.1, m.x);
+      float rad = length(vP) / uCell;
+      float edge = 1. - smoothstep(uR0, uR1, rad);
+      float foc = 1. - smoothstep(uFadeR * .35, uFadeR, length(vP - uT));
+      float n = sin(vP.x * .0041 + 1.3) * sin(vP.y * .0053 - .7) + .5 * sin((vP.x + vP.y) * .0023);
+      vec3 base = uBase * (0.82 + 0.28 * n);
+      float la = (line * uGrid * lod + dots * uDot * lod + mline * uMacro) * edge * foc;
+      gl_FragColor = vec4(base * edge + uLine * la, max(edge * 0.9, la));
+    }`;
 
   const E = {
     ready: false, loading: null,
@@ -431,21 +475,19 @@
       r.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.75));
       r.outputColorSpace = T.SRGBColorSpace;
       r.toneMapping = T.AgXToneMapping;
-      r.toneMappingExposure = 1.2;
+      r.toneMappingExposure = 1.15;
 
-      const BG = 0x03070b;
+      const BG = 0x02050a;
       const scene = this.scene = new T.Scene();
       scene.background = new T.Color(BG);
-      scene.fog = new T.Fog(BG, 700, 2000);
-      scene.add(new T.HemisphereLight(0x4d6f99, 0x05080a, 0.8));
-      const sun = new T.DirectionalLight(0xcfe0ff, 1.7);
+      scene.add(new T.HemisphereLight(0x5a7ca8, 0x05080a, 0.9));
+      const sun = new T.DirectionalLight(0xdfe8ff, 1.6);
       sun.position.set(-260, 420, 300);
       scene.add(sun);
       scene.environment = this._env(r);
-      scene.environmentIntensity = 0.55;
+      scene.environmentIntensity = 0.5;
 
-      // Caméra : exactement celle de la planète (longue focale, 48°, pas de rotation)
-      const cam = this.camera = new T.PerspectiveCamera(28, 1, 5, 12000);
+      const cam = this.camera = new T.PerspectiveCamera(28, 1, 2, 14000);
       const el = T.MathUtils.degToRad(48);
       this.camDir = new T.Vector3(0, Math.sin(el), Math.cos(el));
       cam.position.set(0, 0, 0).addScaledVector(this.camDir, DIST_DEF);
@@ -457,29 +499,24 @@
       ctl.minDistance = DIST_MIN; ctl.maxDistance = DIST_MAX;
       ctl.zoomToCursor = true;
       const LIM = (BOARD + 0.5) * CELL;
-      ctl.addEventListener('change', () => {          // rester au-dessus du plateau
+      ctl.addEventListener('change', () => {
         const t = ctl.target, d = Math.hypot(t.x, t.z);
         if (d > LIM) { const k = LIM / d; const nx = t.x * k, nz = t.z * k; cam.position.x += nx - t.x; cam.position.z += nz - t.z; t.x = nx; t.z = nz; }
       });
 
+      // Bloom très retenu : seul ce qui dépasse 1 (sélection, ma planète) brille. Les étoiles restent des points.
       const comp = this.composer = new S.EffectComposer(r);
       comp.addPass(new S.RenderPass(scene, cam));
-      this.bloom = new S.UnrealBloomPass(new T.Vector2(256, 256), 0.5, 0.45, 0.92);
+      this.bloom = new S.UnrealBloomPass(new T.Vector2(256, 256), 0.28, 0.35, 1.0);
       comp.addPass(this.bloom);
       comp.addPass(new S.OutputPass());
-
-      // Le même kit de parcelles que la planète
-      const kit = await new S.GLTFLoader().loadAsync('assets/3d/sb_kit.glb');
-      const geo = (name) => { let g = null; kit.scene.getObjectByName(name).traverse(o => { if (!g && o.isMesh) g = o.geometry; }); return g; };
-      this.gPlate = geo('KIT_PLATE'); this.gFrame = geo('KIT_FRAME'); this.gNodes = geo('KIT_NODES');
-      this._planarUV(this.gPlate);
 
       this._materials();
       this._stars();
       this._board();
       this.content = new T.Group(); scene.add(this.content);
       this.fx = new T.Group(); scene.add(this.fx);
-      this.anims = []; this.flights = [];
+      this.anims = []; this.flights = []; this.bodies = {}; this.labelsLod = []; this.nearGroups = []; this.ticks = [];
       this._home();
       this._selection();
 
@@ -491,13 +528,185 @@
       this._picking(r.domElement);
       new ResizeObserver(() => this._resize()).observe(host);
       this._resize();
-      this.moveTo(0, 0, homeDist(), 1);   // portrait plein écran : plus de recul, comme la planète
+      this.moveTo(0, 0, homeDist(), 1);
       this._t = 0; this._last = performance.now(); this._check = 0;
-      // « Réduire les animations » (iOS) : plateau immobile, seuls les vaisseaux avancent (c'est une information)
       try { this.still = window.matchMedia('(prefers-reduced-motion: reduce)').matches; } catch (e) { this.still = false; }
       r.setAnimationLoop(() => this._frame());
       this.ready = true;
-      console.log('[SpaceMap] plateau 3D prêt');
+      console.log('[SpaceMap] plateau stratégique prêt');
+    },
+
+    dist() { return this.camera ? this.camera.position.distanceTo(this.controls.target) : DIST_DEF; },
+
+    _materials() {
+      const T = this.T;
+      const fade = (m) => { m.transparent = true; m.depthWrite = false; m.userData.base = m.opacity; return m; };
+      this.M = {
+        add: (c, o = 1) => new T.MeshBasicMaterial({ color: c, transparent: true, opacity: o, depthWrite: false, blending: T.AdditiveBlending }),
+      };
+      this.halo = this._canvasTex(128, 128, (g, s) => {
+        const gr = g.createRadialGradient(s / 2, s / 2, 0, s / 2, s / 2, s / 2);
+        gr.addColorStop(0, 'rgba(255,255,255,1)'); gr.addColorStop(0.2, 'rgba(255,255,255,.45)'); gr.addColorStop(0.55, 'rgba(255,255,255,.08)'); gr.addColorStop(1, 'rgba(255,255,255,0)');
+        g.fillStyle = gr; g.fillRect(0, 0, s, s);
+      });
+      this.G = {
+        ring: (a, b, seg = 64) => { const g = new T.RingGeometry(a, b, seg); g.rotateX(-Math.PI / 2); return g; },
+        hexLine: (R) => { const pts = []; for (let i = 0; i <= 6; i++) { const a = Math.PI / 6 + i * Math.PI / 3; pts.push(new T.Vector3(Math.cos(a) * R, 0, Math.sin(a) * R)); } return new T.BufferGeometry().setFromPoints(pts); },
+        hexFill: (R) => { const g = new T.CircleGeometry(R, 6); g.rotateX(-Math.PI / 2); g.rotateY(Math.PI / 6); return g; },
+        circle: (R, seg = 96) => { const pts = []; for (let i = 0; i <= seg; i++) { const a = i / seg * Math.PI * 2; pts.push(new T.Vector3(Math.cos(a) * R, 0, Math.sin(a) * R)); } return new T.BufferGeometry().setFromPoints(pts); },
+        sphere: new T.SphereGeometry(1, 24, 16),
+        sphereLo: new T.SphereGeometry(1, 12, 8),
+        ico: new T.IcosahedronGeometry(1, 0),
+        octa: new T.OctahedronGeometry(1, 0),
+        rock: new T.DodecahedronGeometry(1, 0),
+      };
+      // Matériaux « près » partagés : leur opacité suit le zoom (un seul réglage par image)
+      const NEAR = this.NEAR = {
+        orbit: fade(new T.LineBasicMaterial({ color: 0x9cc6e4, opacity: 0.32 })),
+        orbitDash: fade(new T.LineDashedMaterial({ color: 0x5fcc8a, dashSize: 1.2, gapSize: 1.1, opacity: 0.75 })),
+        sigWire: fade(new T.MeshBasicMaterial({ color: 0x9fd0ff, wireframe: true, opacity: 0.6 })),
+        sigCore: fade(new T.MeshBasicMaterial({ color: 0xbfe0ff, opacity: 1 })),
+        sigPing: fade(new T.MeshBasicMaterial({ color: 0x8fc4ff, opacity: 0.5, blending: T.AdditiveBlending })),
+        ident: fade(new T.MeshStandardMaterial({ color: 0x5fcc8a, roughness: 0.6, opacity: 0.3 })),
+        identWire: fade(new T.MeshBasicMaterial({ color: 0x7fe0a4, wireframe: true, opacity: 0.4 })),
+        vein: fade(new T.MeshStandardMaterial({ color: 0x2a1c08, emissive: 0xc9a06a, emissiveIntensity: 0.4, metalness: 0.4, roughness: 0.35, flatShading: true, opacity: 1 })),
+        veinOff: fade(new T.MeshStandardMaterial({ color: 0x1c1c1c, emissive: 0x3a3a3a, emissiveIntensity: 0.5, flatShading: true, opacity: 1 })),
+        rock: fade(new T.MeshStandardMaterial({ color: 0x5c6066, roughness: 0.9, flatShading: true, opacity: 1 })),
+        corona: fade(new T.SpriteMaterial({ map: this.halo, color: 0xfff1d8, opacity: 0.16, blending: T.AdditiveBlending })),
+        player: fade(new T.MeshBasicMaterial({ color: 0xff7a6a, opacity: 0.9 })),
+      };
+      this.planetMat = {};
+      for (const [k, c] of Object.entries(PLANET_COLS)) this.planetMat[k] = fade(new T.MeshStandardMaterial({ color: c, roughness: 0.85, opacity: 1 }));
+      Object.values(this.planetMat).forEach((m) => { NEAR['pl_' + m.uuid] = m; });
+      // Repères d'intérêt (mi-distance) : un point de couleur à côté de l'étoile
+      this.TICK = {
+        sig: fade(new T.MeshBasicMaterial({ color: 0x8fc4ff, opacity: 1 })),
+        target: fade(new T.MeshBasicMaterial({ color: 0xffc864, opacity: 1 })),
+        planet: fade(new T.MeshBasicMaterial({ color: 0xb4a8ff, opacity: 1 })),
+        player: fade(new T.MeshBasicMaterial({ color: 0xff7a6a, opacity: 1 })),
+      };
+      // Étoiles : un matériau par couleur, luminosité réglée par le zoom (à peine visibles de loin)
+      this.starMat = STAR_COLS.map((c) => { const m = new T.MeshBasicMaterial({ color: c }); m.userData.base = new T.Color(c); return m; });
+      this.starHalo = STAR_COLS.map((c) => fade(new T.SpriteMaterial({ map: this.halo, color: c, opacity: 0.3, blending: T.AdditiveBlending })));
+      this.dimStar = new T.MeshBasicMaterial({ color: 0x6c7a80 });
+      this.fillMat = {
+        known: fade(new T.MeshBasicMaterial({ color: 0x6fa6d6, opacity: 0.03, blending: T.AdditiveBlending })),
+        scan: fade(new T.MeshBasicMaterial({ color: 0xe6f0ff, opacity: 0.03, blending: T.AdditiveBlending })),
+        home: fade(new T.MeshBasicMaterial({ color: 0x5fffe8, opacity: 0.05, blending: T.AdditiveBlending })),
+      };
+    },
+
+    // Le plateau : une seule surface, une grille hexagonale continue (shader), qui se dissout au bord
+    _board() {
+      const T = this.T, R = (BOARD + RIM + 2) * CELL;
+      const g = new T.PlaneGeometry(R * 2, R * 2, 1, 1); g.rotateX(-Math.PI / 2);
+      this.boardU = {
+        uCell: { value: CELL }, uR0: { value: BOARD + 0.2 }, uR1: { value: BOARD + RIM + 0.5 },
+        uGrid: { value: 0.5 }, uDot: { value: 0.6 }, uFadeR: { value: 900 }, uMacro: { value: 0.1 },
+        uT: { value: new T.Vector2() },
+        uLine: { value: new T.Color(0x4f7fae) }, uBase: { value: new T.Color(0x07111b) },
+      };
+      const m = new T.ShaderMaterial({ uniforms: this.boardU, vertexShader: BOARD_VS, fragmentShader: BOARD_FS, transparent: true, depthWrite: false });
+      const mesh = new T.Mesh(g, m); mesh.renderOrder = -2; mesh.frustumCulled = false;
+      this.scene.add(mesh);
+      this.fills = new T.Group(); this.fills.renderOrder = -1; this.scene.add(this.fills);
+      this.labels = new T.Group(); this.scene.add(this.labels);
+    },
+
+    // Cases explorées : un voile à peine perceptible — la carte raconte la progression
+    paint(st) {
+      const T = this.T;
+      while (this.fills.children.length) this.fills.remove(this.fills.children[0]);
+      if (!this._hexG) this._hexG = this.G.hexFill(24.6);
+      for (const [idx, o] of st.occ) {
+        const sys = st.systems[o.key];
+        if (o.kind === 'home') continue;
+        const mat = sys && sys.known ? this.fillMat.known : this.fillMat.scan;
+        const f = new T.Mesh(this._hexG, mat); f.position.set(CELLS[idx].x, 0.15, CELLS[idx].z); f.renderOrder = -1;
+        this.fills.add(f);
+      }
+      this._sectorLabels(st);
+      this._sweepFan(st);
+    },
+
+    _sectorLabels(st) {
+      const T = this.T;
+      while (this.labels.children.length) { const o = this.labels.children.pop(); o.material.map.dispose(); o.material.dispose(); }
+      const tex = this._canvasTex(512, 96, (g, w, h) => {
+        g.font = '600 50px "Space Grotesk", system-ui, sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle';
+        g.fillStyle = '#bfe4ff'; g.fillText(('SECTEUR ' + mySector()).split('').join(' '), w / 2, h / 2 + 2);
+      });
+      const m = new T.Mesh(new T.PlaneGeometry(120, 22), new T.MeshBasicMaterial({ map: tex, transparent: true, opacity: 0.09, depthWrite: false }));
+      m.rotation.x = -Math.PI / 2; m.position.set(CELL * 4 * 0.5, 0.4, CELL * 4 * 0.8660254); m.renderOrder = 2;
+      this.labels.add(m);
+    },
+
+    _sweepFan(st) {
+      const T = this.T;
+      if (this.fan) { this.fx.remove(this.fan); this.fan.traverse(o => o.geometry && o.geometry.dispose()); this.fan = null; }
+      return;   // 13/10 : éventail retiré (trop lumineux) — chaque sonde a son trajet pointillé
+      const R = (BOARD + 0.5) * CELL, g = new T.Group();
+      const a = new T.CircleGeometry(R, 48, 0, 0.5); a.rotateX(-Math.PI / 2);
+      g.add(new T.Mesh(a, this.M.add(0x9fb4c8, 0.005)));
+      const b = new T.CircleGeometry(R, 48, 0, 0.1); b.rotateX(-Math.PI / 2);
+      g.add(new T.Mesh(b, this.M.add(0xb8c8dc, 0.01)));
+      g.position.y = 0.6; g.renderOrder = 3;
+      this.fan = g; this.fx.add(g);
+    },
+
+    // Ma planète : Kerath, au centre de sa case ; de près, ses échos tournent autour d'elle
+    _home() {
+      const T = this.T, g = new T.Group();
+      const ball = new T.Mesh(new T.SphereGeometry(6.5, 48, 32), new T.MeshStandardMaterial({ color: 0x3f86a2, roughness: 0.85, metalness: 0 }));
+      ball.position.y = 7; g.add(ball);
+      const load = (u) => new Promise((ok, ko) => new T.TextureLoader().load(u, ok, undefined, ko));
+      Promise.all([load('assets/3d/kerath_albedo.jpg'), load('assets/3d/kerath_lights.jpg')]).then(([a, l]) => {
+        a.colorSpace = T.SRGBColorSpace; l.colorSpace = T.SRGBColorSpace;
+        ball.material.map = a; ball.material.color.set(0xffffff);
+        ball.material.emissiveMap = l; ball.material.emissive = new T.Color(0xffc27a); ball.material.emissiveIntensity = 1.3;
+        ball.material.needsUpdate = true;
+      }).catch(() => {});
+      const atmo = new T.Sprite(new T.SpriteMaterial({ map: this.halo, color: 0x5fb8ff, transparent: true, opacity: 0.32, depthWrite: false, blending: T.AdditiveBlending }));
+      atmo.position.y = 7; atmo.scale.setScalar(22); g.add(atmo);
+      // Repère « chez moi » (cyan = navigation) : un anneau fin, lisible même de loin
+      const ring = new T.Mesh(this.G.ring(23.75, 24, 96), this.M.add(0x5fffe8, 0.24)); ring.position.y = 0.5; g.add(ring);
+      this.homeBall = ball; this.homeRing = ring;
+      const name = (G.planet && G.planet.name) || (G.profile && G.profile.planetName) || 'Ma planète';
+      const lab = this._label(String(name).toUpperCase(), '#5fffe8', 0.3); lab.position.set(0, 19, 0); g.add(lab);
+      this.homeLabel = lab;
+      this.scene.add(g);
+    },
+
+    _selection() {
+      const T = this.T, g = new T.Group();
+      // sélection : pas de dalle ni de contour plein — six petits crochets cyan aux sommets
+      const pts = [];
+      for (let i = 0; i < 6; i++) {
+        const a = Math.PI / 6 + i * Math.PI / 3, R = 24.8, L = 4.2;
+        const vx = Math.cos(a) * R, vz = Math.sin(a) * R;
+        for (const da of [-1, 1]) {
+          const b = a + da * (Math.PI / 3 + Math.PI / 3);           // direction vers le sommet voisin
+          const nb = Math.PI / 6 + (i + da) * Math.PI / 3, nx = Math.cos(nb) * R, nz = Math.sin(nb) * R;
+          const dx = nx - vx, dz = nz - vz, l = Math.hypot(dx, dz);
+          pts.push(new T.Vector3(vx, 0, vz), new T.Vector3(vx + dx / l * L, 0, vz + dz / l * L));
+        }
+      }
+      const ticks = new T.LineSegments(new T.BufferGeometry().setFromPoints(pts), new T.LineBasicMaterial({ color: 0x5fffe8, transparent: true, opacity: 0.55 }));
+      ticks.position.y = 0.6; g.add(ticks);
+      g.visible = false; this.selGroup = g; this.selIdx = -1; this.selFill = ticks;
+      this.scene.add(g);
+      // anneau autour d'un objet sélectionné à l'intérieur d'un système
+      const ob = new T.Line(this.G.circle(3.4, 40), new T.LineDashedMaterial({ color: 0x5fffe8, dashSize: 0.9, gapSize: 0.7, transparent: true, opacity: 0.6 })); ob.computeLineDistances(); ob.visible = false;
+      this.objRing = ob; this.scene.add(ob);
+    },
+
+    setSelection(idx, objCk) {
+      this.selIdx = (idx == null || idx < 0) ? -1 : idx;
+      this.selCk = objCk || null;
+      if (this.selIdx < 0 || (this.selIdx === 0 && !objCk)) { this.selGroup.visible = false; this.selIdx = -1; }
+      else { const cl = CELLS[this.selIdx]; this.selGroup.position.set(cl.x, 0, cl.z); this.selGroup.visible = this.selIdx !== 0; }
+      this.objRing.visible = !!(this.selCk && this.bodies[this.selCk]);
+      if (this.starMeshes) this._lod(true);
     },
 
     _env(renderer) {
@@ -510,14 +719,6 @@
       const pm = new T.PMREMGenerator(renderer), rt = pm.fromScene(s, 0.04); pm.dispose();
       return rt.texture;
     },
-
-    _planarUV(geom) {
-      if (geom.attributes.uv) return;
-      const T = this.T, pos = geom.attributes.position, uv = new Float32Array(pos.count * 2);
-      for (let i = 0; i < pos.count; i++) { uv[i * 2] = pos.getX(i); uv[i * 2 + 1] = pos.getZ(i); }
-      geom.setAttribute('uv', new T.BufferAttribute(uv, 2));
-    },
-
     _canvasTex(w, h, draw, repeat) {
       const T = this.T, c = document.createElement('canvas'); c.width = w; c.height = h;
       draw(c.getContext('2d'), w, h);
@@ -525,38 +726,6 @@
       if (repeat) { t.wrapS = t.wrapT = T.RepeatWrapping; t.repeat.set(1 / repeat, 1 / repeat); }
       return t;
     },
-
-    _materials() {
-      const T = this.T;
-      // Dalle « pont spatial » : panneaux sombres, joints fins (la terre de la planète devient du métal)
-      const deck = this._canvasTex(256, 256, (g, s) => {
-        const n = 4, cell = s / n, rnd = _mulberry32(_hashSeed('SM3:deck'));
-        for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) {
-          const v = 15 + Math.floor(rnd() * 7);
-          g.fillStyle = `rgb(${v},${v + 5},${v + 10})`; g.fillRect(x * cell, y * cell, cell, cell);
-          g.fillStyle = 'rgba(160,200,255,.035)'; g.fillRect(x * cell + 5, y * cell + 5, cell - 10, 1.5);
-        }
-        g.strokeStyle = '#07090c'; g.lineWidth = 3;
-        for (let k = 0; k <= n; k++) { g.beginPath(); g.moveTo(k * cell, 0); g.lineTo(k * cell, s); g.stroke(); g.beginPath(); g.moveTo(0, k * cell); g.lineTo(s, k * cell); g.stroke(); }
-      }, 12);
-      this.M = {
-        plate: new T.MeshStandardMaterial({ map: deck, metalness: 0.55, roughness: 0.42 }),
-        frame: new T.MeshStandardMaterial({ color: 0x3e454b, metalness: 0.7, roughness: 0.45 }),   // = MAT_ARMOR_DARK
-        nodes: new T.MeshBasicMaterial({ color: 0xffffff }),
-        add: (c, o = 1) => new T.MeshBasicMaterial({ color: c, transparent: true, opacity: o, depthWrite: false, blending: T.AdditiveBlending }),
-      };
-      this.halo = this._canvasTex(128, 128, (g, s) => {
-        const gr = g.createRadialGradient(s / 2, s / 2, 0, s / 2, s / 2, s / 2);
-        gr.addColorStop(0, 'rgba(255,255,255,1)'); gr.addColorStop(0.22, 'rgba(255,255,255,.5)'); gr.addColorStop(0.6, 'rgba(255,255,255,.1)'); gr.addColorStop(1, 'rgba(255,255,255,0)');
-        g.fillStyle = gr; g.fillRect(0, 0, s, s);
-      });
-      this.G = {
-        ring: (a, b) => { const g = new T.RingGeometry(a, b, 64); g.rotateX(-Math.PI / 2); return g; },
-        hexLine: (R) => { const pts = []; for (let i = 0; i <= 6; i++) { const a = Math.PI / 6 + i * Math.PI / 3; pts.push(new T.Vector3(Math.cos(a) * R, 0, Math.sin(a) * R)); } return new T.BufferGeometry().setFromPoints(pts); },
-      };
-    },
-
-    // Fond : étoiles sous et autour du plateau (parallaxe naturelle quand on se déplace), nébuleuses lointaines
     _stars() {
       const T = this.T, rnd = _mulberry32(_hashSeed('SM3:stars'));
       const layer = (n, y0, y1, spread, size, op) => {
@@ -581,106 +750,6 @@
         this.scene.add(s);
       }
     },
-
-    // Le plateau : toutes les cases en instances (dalle + cadre + lumières), comme les parcelles de la planète
-    _board() {
-      const T = this.T, n = CELLS.length, m4 = new T.Matrix4();
-      const mk = (g, mat) => { const im = new T.InstancedMesh(g, mat, n); im.frustumCulled = false; return im; };
-      this.iPlate = mk(this.gPlate, this.M.plate);
-      this.iFrame = mk(this.gFrame, this.M.frame);
-      this.iNodes = mk(this.gNodes, this.M.nodes);
-      CELLS.forEach((c, i) => {
-        m4.makeTranslation(c.x, 0, c.z);
-        this.iPlate.setMatrixAt(i, m4); this.iFrame.setMatrixAt(i, m4); this.iNodes.setMatrixAt(i, m4);
-      });
-      const black = new T.Color(0, 0, 0);
-      for (let i = 0; i < n; i++) { this.iPlate.setColorAt(i, black); this.iFrame.setColorAt(i, black); this.iNodes.setColorAt(i, black); }
-      this.scene.add(this.iPlate, this.iFrame, this.iNodes);
-      this.nodeBase = new Float32Array(n * 3);
-      this.labels = new T.Group(); this.scene.add(this.labels);
-    },
-
-    // Couleurs des cases selon la portée et le contenu (rappelé à chaque changement d'état)
-    paint(st) {
-      const T = this.T, c = new T.Color(), lit = st.lit;
-      const tint = { system: [1.0, 1.15, 1.25], sig: [0.55, 0.85, 1.6], target: [1.6, 1.05, 0.35], planet: [1.05, 0.85, 1.7], home: [0.4, 1.3, 1.25] };
-      CELLS.forEach((cl, i) => {
-        const o = st.occ.get(i);
-        let plate, frame, node;
-        if (cl.ring > BOARD) {                       // bord : se dissout dans le vide
-          const k = Math.max(0, 1 - (cl.ring - BOARD) / (RIM + 0.5));
-          plate = [0.35 * k, 0.35 * k, 0.4 * k]; frame = [0.45 * k, 0.45 * k, 0.5 * k]; node = [0, 0.02 * k, 0.04 * k];
-        } else {
-          // Décision d'Adrien (10/10, nuit) : aucune bordure visible — ni secteur, ni portée.
-          // Toutes les cases jouables se ressemblent ; on découvre les autres zones en parcourant la carte
-          // (toucher une case dit « Secteur X · zone inexplorée » ou « Trop loin »).
-          plate = [1, 1, 1]; frame = [1, 1, 1]; node = [0.16, 0.48, 0.95];
-          if (o) { const t = tint[o.kind] || tint.system; node = t; plate = [1.35, 1.4, 1.5]; }
-        }
-        this.iPlate.setColorAt(i, c.setRGB(plate[0], plate[1], plate[2]));
-        this.iFrame.setColorAt(i, c.setRGB(frame[0], frame[1], frame[2]));
-        this.nodeBase[i * 3] = node[0]; this.nodeBase[i * 3 + 1] = node[1]; this.nodeBase[i * 3 + 2] = node[2];
-        this.iNodes.setColorAt(i, c.setRGB(node[0], node[1], node[2]));
-      });
-      this.iPlate.instanceColor.needsUpdate = this.iFrame.instanceColor.needsUpdate = this.iNodes.instanceColor.needsUpdate = true;
-      this._sectorLabels(st);
-      this._sweepFan(st);
-    },
-
-    // Noms de secteurs couchés sur le plateau, comme sur une table de jeu
-    _sectorLabels(st) {
-      const T = this.T;
-      while (this.labels.children.length) { const o = this.labels.children.pop(); o.material.map.dispose(); o.material.dispose(); }
-      const put = (txt, x, z, lit) => {
-        const tex = this._canvasTex(512, 96, (g, w, h) => {
-          g.font = '600 52px "Space Grotesk", system-ui, sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle';
-          g.fillStyle = '#bfe4ff'; g.fillText(txt.split('').join(' '), w / 2, h / 2 + 2);
-        });
-        const m = new T.Mesh(new T.PlaneGeometry(190, 36), new T.MeshBasicMaterial({ map: tex, transparent: true, opacity: lit ? 0.2 : 0.09, depthWrite: false }));
-        m.rotation.x = -Math.PI / 2; m.position.set(x, 1.9, z); m.renderOrder = 2;
-        this.labels.add(m);
-      };
-      // seul mon secteur est nommé : les autres se découvrent en les touchant
-      put('SECTEUR ' + mySector(), 0, CELL * SQ3 / 2 * 4.5, true);
-    },
-
-    _sweepFan(st) {
-      const T = this.T;
-      if (this.fan) { this.fx.remove(this.fan); this.fan.traverse(o => o.geometry && o.geometry.dispose()); this.fan = null; }
-      const anyRadar = st.flights.some(f => f.kind === 'probe' && f.tier === 'radar');
-      if (!anyRadar) return;
-      const R = (BOARD + 0.5) * CELL, g = new T.Group();   // l'éventail ne trahit pas la portée
-      const a = new T.CircleGeometry(R, 48, 0, 0.55); a.rotateX(-Math.PI / 2);
-      g.add(new T.Mesh(a, this.M.add(0x9fb4c8, 0.006)));
-      const b = new T.CircleGeometry(R, 48, 0, 0.12); b.rotateX(-Math.PI / 2);
-      g.add(new T.Mesh(b, this.M.add(0xb8c8dc, 0.012)));
-      g.position.y = 2.2; g.renderOrder = 3;
-      this.fan = g; this.fx.add(g);
-    },
-
-    // Ma planète : la vraie Kerath, posée au-dessus du centre du plateau
-    _home() {
-      const T = this.T, g = new T.Group();
-      const ball = new T.Mesh(new T.SphereGeometry(11, 48, 32), new T.MeshStandardMaterial({ color: 0x3f86a2, roughness: 0.85, metalness: 0 }));
-      ball.position.y = 15; g.add(ball);
-      const load = (u) => new Promise((ok, ko) => new T.TextureLoader().load(u, ok, undefined, ko));
-      Promise.all([load('assets/3d/kerath_albedo.jpg'), load('assets/3d/kerath_lights.jpg')]).then(([a, l]) => {
-        a.colorSpace = T.SRGBColorSpace; l.colorSpace = T.SRGBColorSpace;
-        ball.material.map = a; ball.material.color.set(0xffffff);
-        ball.material.emissiveMap = l; ball.material.emissive = new T.Color(0xffc27a); ball.material.emissiveIntensity = 1.4;
-        ball.material.needsUpdate = true;
-      }).catch(() => {});
-      const atmo = new T.Sprite(new T.SpriteMaterial({ map: this.halo, color: 0x5fb8ff, transparent: true, opacity: 0.35, depthWrite: false, blending: T.AdditiveBlending }));
-      atmo.position.y = 15; atmo.scale.setScalar(36); g.add(atmo);
-      // Anneau d'orbite au sol (cyan : c'est le point de navigation « chez moi »)
-      const ring = new T.Mesh(this.G.ring(19, 19.9), this.M.add(0x5fffe8, 0.42)); ring.position.y = 1.9; g.add(ring);
-      const ring2 = new T.Mesh(this.G.ring(13.5, 14), this.M.add(0x5fffe8, 0.18)); ring2.position.y = 1.9; g.add(ring2);
-      this.homeBall = ball; this.homeRing = ring;
-      const name = (G.planet && G.planet.name) || (G.profile && G.profile.planetName) || 'Ma planète';
-      const lab = this._label(String(name).toUpperCase(), '#5fffe8', 0.8); lab.position.set(0, 33, 0); g.add(lab);
-      this.scene.add(g);
-    },
-
     _label(txt, color, scale = 1) {
       const T = this.T;
       const tex = this._canvasTex(512, 96, (g, w, h) => {
@@ -688,150 +757,13 @@
         g.shadowColor = 'rgba(0,0,0,.9)'; g.shadowBlur = 8;
         g.fillStyle = color; g.fillText(txt.split('').join(' '), w / 2, h / 2);
       });
-      const s = new T.Sprite(new T.SpriteMaterial({ map: tex, transparent: true, depthWrite: false, fog: false }));
-      s.scale.set(84 * scale, 15.75 * scale, 1); s.renderOrder = 5;
+      const s = new T.Sprite(new T.SpriteMaterial({ map: tex, transparent: true, depthWrite: false, fog: false, sizeAttenuation: false }));
+      // taille fixe à l'écran (≈ 10–11 px de texte sur iPhone), quelle que soit la distance
+      const k = 0.0165 * (scale >= 0.3 ? 1.1 : 1);
+      s.scale.set(k * 512 / 96, k, 1); s.renderOrder = 5;
       s.userData.tex = tex;
       return s;
     },
-
-    _selection() {
-      const T = this.T, g = new T.Group();
-      const hx = new T.Line(this.G.hexLine(26.5), new T.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.85 }));
-      hx.position.y = 2.0; g.add(hx);
-      const r1 = new T.Mesh(this.G.ring(31, 31.8), this.M.add(0xffffff, 0.25)); r1.position.y = 2.0; g.add(r1);
-      g.visible = false; this.selGroup = g; this.selIdx = -1;
-      this.scene.add(g);
-    },
-
-    setSelection(idx) {
-      const T = this.T, c = new T.Color();
-      if (this.selIdx >= 0) { const b = this.selIdx * 3; this.iNodes.setColorAt(this.selIdx, c.setRGB(this.nodeBase[b], this.nodeBase[b + 1], this.nodeBase[b + 2])); this.iNodes.instanceColor.needsUpdate = true; }
-      this.selIdx = (idx == null || idx < 0) ? -1 : idx;
-      if (this.selIdx < 0 || this.selIdx === 0) { this.selGroup.visible = false; if (this.selIdx === 0) this.selIdx = -1; return; }
-      const cl = CELLS[this.selIdx];
-      this.selGroup.position.set(cl.x, 0, cl.z); this.selGroup.visible = true;
-    },
-
-    // Les objets posés sur les cases
-    build(st) {
-      const T = this.T;
-      while (this.content.children.length) {
-        const o = this.content.children.pop();
-        o.traverse(x => { if (x.userData.tex) x.userData.tex.dispose(); if (x.isMesh || x.isLine) x.geometry.dispose(); });
-      }
-      this.anims = []; this.flights = [];
-      const at = (idx, y = 0) => new T.Vector3(CELLS[idx].x, y, CELLS[idx].z);
-      const A = this.anims;
-
-      for (const s of Object.values(st.systems)) {
-        if (s.key === mySystemKey()) continue;
-        const ci = st.cell['sys:' + s.key];
-        if (ci === undefined) continue;
-        const far = CELLS[ci].ring > st.lit;
-        const g = new T.Group(); g.position.copy(at(ci));
-        const col = STAR_COLS[Math.floor(_mulberry32(_hashSeed('SM3:star:' + s.key))() * STAR_COLS.length)];
-        const known = s.known;
-        const star = new T.Mesh(new T.SphereGeometry(known ? 4 : 2.6, 20, 14), new T.MeshBasicMaterial({ color: new T.Color(col).multiplyScalar(known ? 1.9 : 0.8) }));
-        star.position.y = 16; g.add(star);
-        const halo = new T.Sprite(new T.SpriteMaterial({ map: this.halo, color: col, transparent: true, opacity: known ? 0.32 : 0.14, depthWrite: false, blending: T.AdditiveBlending }));
-        halo.position.y = 16; halo.scale.setScalar(known ? 30 : 18); g.add(halo);
-        if (known) {
-          const o1 = new T.Mesh(this.G.ring(11, 11.5), this.M.add(0xc8fff4, 0.16)); o1.position.y = 1.9; g.add(o1);
-          const o2 = new T.Mesh(this.G.ring(18, 18.4), this.M.add(0xc8fff4, 0.08)); o2.position.y = 1.9; g.add(o2);
-          const lab = this._label(s.key.split('-').slice(1).join('-'), far ? '#55625e' : '#8fa49e', 0.62); lab.position.set(0, 3, 30); g.add(lab);
-        }
-        if (s.scanning) {
-          for (let k = 0; k < 2; k++) {
-            const w = new T.Mesh(this.G.ring(8, 8.8), this.M.add(0xe6f0ff, 0.4)); w.position.y = 2.1; g.add(w);
-            const ph = k * 0.5;
-            A.push((t) => { const u = (t * 0.45 + ph) % 1; w.scale.setScalar(0.4 + u * 1.7); w.material.opacity = 0.42 * (1 - u); });
-          }
-        }
-        g.userData.cell = ci; this.content.add(g);
-      }
-
-      for (const s of Object.values(st.systems)) {
-        for (const sig of s.sigs) {
-          const ci = st.cell['sig:' + sig.id]; if (ci === undefined) continue;
-          const g = new T.Group(); g.position.copy(at(ci));
-          if (!sig.resolved) {
-            // Écho : on ne devine pas une planète — un icosaèdre filaire qui respire
-            const ico = new T.Mesh(new T.IcosahedronGeometry(6.5, 0), new T.MeshBasicMaterial({ color: new T.Color(0x8fc4ff).multiplyScalar(1.7), wireframe: true, transparent: true, opacity: 0.9 }));
-            ico.position.y = 14; g.add(ico);
-            const core = new T.Mesh(new T.SphereGeometry(2, 12, 8), new T.MeshBasicMaterial({ color: new T.Color(0x8fc4ff).multiplyScalar(1.8) })); core.position.y = 14; g.add(core);
-            const w = new T.Mesh(this.G.ring(9, 10), this.M.add(0x8fc4ff, 0.5)); w.position.y = 2.1; g.add(w);
-            const ph = _mulberry32(_hashSeed(sig.id))();
-            A.push((t) => { ico.rotation.y = t * 0.5 + ph * 6; ico.rotation.x = t * 0.3; const u = (t * 0.42 + ph) % 1; w.scale.setScalar(0.5 + u * 1.7); w.material.opacity = 0.5 * (1 - u); core.scale.setScalar(0.8 + 0.35 * Math.sin(t * 2.6 + ph * 6)); });
-          } else {
-            // Corps identifié : silhouette translucide + cercle pointillé vert
-            const body = new T.Mesh(new T.SphereGeometry(6, 20, 14), new T.MeshStandardMaterial({ color: 0x5fcc8a, transparent: true, opacity: 0.22, roughness: 0.6, depthWrite: false }));
-            body.position.y = 14; g.add(body);
-            const wire = new T.Mesh(new T.SphereGeometry(6.2, 12, 8), new T.MeshBasicMaterial({ color: new T.Color(0x5fcc8a).multiplyScalar(1.4), wireframe: true, transparent: true, opacity: 0.35 })); wire.position.y = 14; g.add(wire);
-            const pts = []; for (let i = 0; i <= 64; i++) { const a = i / 64 * Math.PI * 2; pts.push(new T.Vector3(Math.cos(a) * 15, 2.1, Math.sin(a) * 15)); }
-            const dl = new T.Line(new T.BufferGeometry().setFromPoints(pts), new T.LineDashedMaterial({ color: 0x5fcc8a, dashSize: 3, gapSize: 2.4, transparent: true, opacity: 0.8 }));
-            dl.computeLineDistances(); g.add(dl);
-            A.push((t) => { wire.rotation.y = t * 0.2; });
-          }
-          g.userData.cell = ci; this.content.add(g);
-        }
-        for (const tg of s.targets) {
-          const ci = st.cell['tgt:' + tg.key]; if (ci === undefined) continue;
-          const engaged = tg.kt.status === 'engaged';
-          const g = new T.Group(); g.position.copy(at(ci));
-          const gem = new T.Mesh(new T.OctahedronGeometry(6, 0), new T.MeshStandardMaterial({ color: 0x2a1c08, emissive: engaged ? 0x3a3a3a : 0xffb347, emissiveIntensity: engaged ? 0.5 : 1.3, metalness: 0.4, roughness: 0.35, flatShading: true }));
-          gem.position.y = 13; gem.scale.y = 1.35; g.add(gem);
-          const rnd = _mulberry32(_hashSeed('SM3:rocks:' + tg.key));
-          for (let k = 0; k < 6; k++) {
-            const rk = new T.Mesh(new T.DodecahedronGeometry(1.2 + rnd() * 2.2, 0), new T.MeshStandardMaterial({ color: 0x55585e, roughness: 0.9, flatShading: true }));
-            const a = rnd() * Math.PI * 2, d = 9 + rnd() * 9; rk.position.set(Math.cos(a) * d, 4 + rnd() * 8, Math.sin(a) * d); rk.rotation.set(rnd() * 3, rnd() * 3, 0); g.add(rk);
-          }
-          if (!engaged) { const h = new T.Sprite(new T.SpriteMaterial({ map: this.halo, color: 0xffc864, transparent: true, opacity: 0.22, depthWrite: false, blending: T.AdditiveBlending })); h.position.y = 13; h.scale.setScalar(28); g.add(h); }
-          A.push((t) => { gem.rotation.y = t * 0.6; });
-          g.userData.cell = ci; this.content.add(g);
-        }
-        for (const pl of s.planets) {
-          const ci = st.cell['pl:' + pl.coord]; if (ci === undefined) continue;
-          const g = new T.Group(); g.position.copy(at(ci));
-          const cls = PLANET_COLS[pl.type] ? pl.type : (SIG_CLASS[(pl.fromSig || {}).fixedClass] || 'type2');
-          const big = cls === 'type4' ? 10 : cls === 'type3' ? 8.5 : 7;
-          const ball = new T.Mesh(new T.SphereGeometry(big, 32, 20), new T.MeshStandardMaterial({ color: PLANET_COLS[cls], roughness: 0.85 }));
-          ball.position.y = 16; g.add(ball);
-          const h = new T.Sprite(new T.SpriteMaterial({ map: this.halo, color: 0x9a8aff, transparent: true, opacity: 0.3, depthWrite: false, blending: T.AdditiveBlending })); h.position.y = 16; h.scale.setScalar(big * 4.4); g.add(h);
-          const rr = new T.Mesh(this.G.ring(16, 16.6), this.M.add(0x9a8aff, 0.4)); rr.position.y = 2; g.add(rr);
-          const lab = this._label(String(pl.name || '').toUpperCase(), '#b4a8ff', 0.7); lab.position.set(0, 3, 30); g.add(lab);
-          A.push((t) => { ball.rotation.y = t * 0.12; });
-          g.userData.cell = ci; this.content.add(g);
-        }
-      }
-
-      // Vaisseaux en vol : route pointillée, traînée, marqueur
-      for (const f of st.flights) {
-        const c = f.kind === 'tanker' ? 0xffc864 : (f.tier === 'radar' ? 0xe6f0ff : f.tier === 'medium' ? 0x9a8aff : 0x5fcc8a);
-        const H = 24;
-        const a = f.from === 0 ? new T.Vector3(0, H, 0) : at(f.from, H), b = f.to === 0 ? new T.Vector3(0, H, 0) : at(f.to, H);
-        // ne pas partir du cœur de la planète : départ au bord de l'anneau
-        const out = (p, q) => { const d = q.clone().sub(p); d.y = 0; const L = d.length(); return L > 30 ? p.clone().addScaledVector(d.normalize(), 14) : p; };
-        if (f.from === 0) a.copy(out(a, b)); if (f.to === 0) b.copy(out(b, a));
-        const route = new T.Line(new T.BufferGeometry().setFromPoints([a, b]), new T.LineDashedMaterial({ color: c, dashSize: 4, gapSize: 5, transparent: true, opacity: 0.3 }));
-        route.computeLineDistances(); this.content.add(route);
-        const tgeo = new T.BufferGeometry().setFromPoints([a.clone(), a.clone()]);
-        const trail = new T.Line(tgeo, new T.LineBasicMaterial({ color: new T.Color(c).multiplyScalar(1.6), transparent: true, opacity: 0.7 }));
-        this.content.add(trail);
-        const ship = new T.Group();
-        const mesh = f.kind === 'tanker'
-          ? new T.Mesh(new T.BoxGeometry(5, 3.2, 8), new T.MeshBasicMaterial({ color: new T.Color(c).multiplyScalar(2.2) }))
-          : new T.Mesh(new T.ConeGeometry(2.6, 8, 4), new T.MeshBasicMaterial({ color: new T.Color(c).multiplyScalar(2.4) }));
-        if (f.kind !== 'tanker') mesh.rotation.x = Math.PI / 2;
-        ship.add(mesh);
-        const glow = new T.Sprite(new T.SpriteMaterial({ map: this.halo, color: c, transparent: true, opacity: 0.6, depthWrite: false, blending: T.AdditiveBlending })); glow.scale.setScalar(16); glow.material.opacity = 0.45; ship.add(glow);
-        const hit = new T.Mesh(new T.SphereGeometry(14, 8, 6), new T.MeshBasicMaterial({ visible: false })); ship.add(hit);
-        ship.userData.flight = f.id;
-        this.content.add(ship);
-        this.flights.push({ ship, trail, a, b, t0: f.departedAt || 0, t1: f.arrivalAt || 0 });
-      }
-      this._tickFlights();
-    },
-
     _tickFlights() {
       const now = Date.now(), T = this.T, tmp = new T.Vector3();
       for (const f of this.flights) {
@@ -845,7 +777,6 @@
         f.trail.geometry.computeBoundingSphere();
       }
     },
-
     _resize() {
       if (!this.host) return;
       const w = this.host.clientWidth || 360, h = this.host.clientHeight || 420;
@@ -853,35 +784,6 @@
       this.composer.setSize(w, h); this.bloom.setSize(w, h);
       this.camera.aspect = w / h; this.camera.updateProjectionMatrix();
     },
-
-    _picking(el) {
-      const T = this.T, ray = new T.Raycaster(), ndc = new T.Vector2(), plane = new T.Plane(new T.Vector3(0, 1, 0), -TOP), hit = new T.Vector3();
-      let down = null;
-      el.addEventListener('pointerdown', (e) => { if (e.isPrimary) down = { x: e.clientX, y: e.clientY, t: performance.now() }; });
-      el.addEventListener('pointerup', (e) => {
-        if (!down || !e.isPrimary) return;
-        const moved = Math.hypot(e.clientX - down.x, e.clientY - down.y), dt = performance.now() - down.t;
-        down = null;
-        if (moved > 8 || dt > 450) return;                  // glisser ou appui long : pas un toucher (comme la planète)
-        const rect = el.getBoundingClientRect();
-        ndc.set(((e.clientX - rect.left) / rect.width) * 2 - 1, -((e.clientY - rect.top) / rect.height) * 2 + 1);
-        ray.setFromCamera(ndc, this.camera);
-        // 1) un vaisseau en vol ?
-        const ships = this.content.children.filter(o => o.userData.flight);
-        const sh = ray.intersectObjects(ships, true)[0];
-        if (sh) { let o = sh.object; while (o && !o.userData.flight) o = o.parent; if (o) return onPick({ kind: 'flight', key: o.userData.flight }); }
-        // 2) un objet en hauteur (planète, étoile) : on remonte à sa case
-        const objs = ray.intersectObjects(this.content.children.filter(o => o.userData.cell !== undefined), true)
-          .filter(h => h.object.isMesh && !(h.object.material && h.object.material.transparent && h.object.material.opacity < 0.3));
-        if (objs.length) { let o = objs[0].object; while (o && o.userData.cell === undefined) o = o.parent; if (o) return onPickCell(o.userData.cell); }
-        if (this.homeBall && ray.intersectObject(this.homeBall).length) return onPickCell(0);
-        // 3) sinon : la case sous le doigt
-        if (!ray.ray.intersectPlane(plane, hit)) return;
-        const c = cellAtWorld(hit.x, hit.z);
-        onPickCell(c ? c.idx : -1);
-      });
-    },
-
     moveTo(x, z, dist, ms = 800) {
       const T = this.T;
       const from = this.controls.target.clone(), to = new T.Vector3(x, 0, z);
@@ -893,10 +795,221 @@
         if (k >= 1) this._anim = null;
       };
     },
-
     visible() {
       const h = this.host;
       return !!(h && h.isConnected && h.offsetParent !== null && !h.closest('.screen.hidden') && !document.hidden);
+    },
+
+    // Les systèmes : un point de loin, un système complet de près
+    build(st) {
+      const T = this.T, Gm = this.G;
+      while (this.content.children.length) {
+        const o = this.content.children.pop();
+        o.traverse(x => { if (x.userData.tex) x.userData.tex.dispose(); if ((x.isMesh || x.isLine) && !x.userData.shared) x.geometry.dispose(); });
+      }
+      this.anims = []; this.flights = []; this.bodies = {}; this.labelsLod = []; this.nearGroups = []; this.ticks = []; this.starMeshes = [];
+      const A = this.anims;
+      const home = mySystemKey();
+      const mark = (o) => { o.userData.shared = true; return o; };
+
+      for (const s of Object.values(st.systems)) {
+        const ci = st.cell['sys:' + s.key];
+        if (ci === undefined) continue;
+        const isHome = s.key === home;
+        const g = new T.Group(); g.position.set(CELLS[ci].x, 0, CELLS[ci].z);
+        g.userData.cell = ci;
+        const list = (st.items && st.items[s.key]) || [];
+
+        if (!isHome) {
+          const ci2 = Math.floor(_mulberry32(_hashSeed('SM3:star:' + s.key))() * STAR_COLS.length);
+          const known = s.known;
+          const star = mark(new T.Mesh(Gm.sphere, known ? this.starMat[ci2] : this.dimStar));
+          star.scale.setScalar(known ? 2.1 : 1.3); star.position.y = 5; star.userData.star = true; star.userData.base = known ? 2.1 : 1.3; g.add(star);
+          this.starMeshes.push({ mesh: star, cell: ci, halo: null });
+          const halo = new T.Sprite(this.starHalo[ci2]); halo.position.y = 5; halo.scale.setScalar(known ? 11 : 6); g.add(halo);
+          this.starMeshes[this.starMeshes.length - 1].halo = halo;
+          if (known) {
+            const lab = this._label(s.key.split('-').slice(1).join('-'), '#9fb3bf', 0.27); lab.position.set(0, 1, 12); g.add(lab);
+            this.labelsLod.push(lab);
+          }
+          if (s.scanning) {
+            for (let k = 0; k < 2; k++) {
+              const w = new T.Mesh(Gm.ring(5, 5.35, 48), this.M.add(0xcfdcea, 0.2)); w.position.y = 0.6; g.add(w);
+              const ph = k * 0.5;
+              A.push((t) => { const u = (t * 0.45 + ph) % 1; w.scale.setScalar(0.5 + u * 2.4); w.material.opacity = 0.2 * (1 - u); });
+            }
+          }
+          // repère d'intérêt (mi-distance) : la couleur la plus importante de ce que contient le système
+          const has = (k) => list.some((it) => it.kind === k && !(k === 'sig' && it.obj.resolved));
+          const hasPlayer = list.some((it) => it.kind === 'planet' && it.obj.playerName);
+          const tk = hasPlayer ? 'player' : has('sig') ? 'sig' : has('target') ? 'target' : list.some((it) => it.kind === 'planet') ? 'planet' : null;
+          if (tk) {
+            const tick = mark(new T.Mesh(Gm.sphereLo, this.TICK[tk])); tick.scale.setScalar(1.1); tick.position.set(4.2, 5, -2.4); g.add(tick);
+            this.ticks.push(tick);
+          }
+        }
+
+        // ── Détail « près » : orbites et corps, à l'intérieur de la case ──
+        if (list.length) {
+          const near = new T.Group(); near.visible = false; g.add(near); this.nearGroups.push(near);
+          if (!isHome) { const cor = new T.Sprite(this.NEAR.corona); cor.position.y = 5; cor.scale.setScalar(13); near.add(cor); }
+          list.forEach((it) => {
+            const R = ORBIT(it.orbit, isHome);
+            const orb = new T.Line(this._circleG || (this._circleG = Gm.circle(1)), this.NEAR.orbit); mark(orb);
+            orb.scale.setScalar(R); orb.position.y = 0.5; near.add(orb);
+            const piv = new T.Group(); piv.rotation.y = it.ang; near.add(piv);
+            const body = new T.Group(); body.position.set(R, 4, 0); piv.add(body);
+            const speed = 0.05 / Math.max(1, R / 8);
+            if (!this.still) A.push((t) => { piv.rotation.y = it.ang + t * speed; });
+            this._body(it, body, A);
+            // zone de toucher généreuse
+            const hit = new T.Mesh(Gm.sphereLo, new T.MeshBasicMaterial({ visible: false })); hit.scale.setScalar(4.2); mark(hit);
+            hit.userData.pick = { kind: it.kind, key: it.key }; body.add(hit);
+            this.bodies[it.ck] = body;
+          });
+        }
+        this.content.add(g);
+      }
+
+      // Vaisseaux en vol : fins, discrets ; ils filent vers le corps visé quand il est connu
+      const wp = new T.Vector3();
+      for (const f of st.flights) {
+        const c = f.kind === 'tanker' ? 0xffc864 : (f.tier === 'radar' ? 0xe6f0ff : f.tier === 'medium' ? 0x9a8aff : 0x5fcc8a);
+        const H = 9;
+        const pos = (idx, ck) => {
+          if (ck && this.bodies[ck]) { this.content.updateMatrixWorld(true); this.bodies[ck].getWorldPosition(wp); return new T.Vector3(wp.x, H, wp.z); }
+          return idx === 0 ? new T.Vector3(0, H, 0) : new T.Vector3(CELLS[idx].x, H, CELLS[idx].z);
+        };
+        const a = pos(f.from, null), b = pos(f.to, f.toCk);
+        const out = (p, q) => { const d = q.clone().sub(p); d.y = 0; const L = d.length(); return L > 20 ? p.clone().addScaledVector(d.normalize(), 9) : p; };
+        if (f.from === 0) a.copy(out(a, b)); if (f.to === 0) b.copy(out(b, a));
+        const route = new T.Line(new T.BufferGeometry().setFromPoints([a, b]), new T.LineDashedMaterial({ color: c, dashSize: 3, gapSize: 4, transparent: true, opacity: 0.22 }));
+        route.computeLineDistances(); this.content.add(route);
+        const trail = new T.Line(new T.BufferGeometry().setFromPoints([a.clone(), a.clone()]), new T.LineBasicMaterial({ color: c, transparent: true, opacity: 0.6 }));
+        this.content.add(trail);
+        const ship = new T.Group();
+        const mesh = f.kind === 'tanker'
+          ? new T.Mesh(new T.BoxGeometry(2.4, 1.6, 4), new T.MeshBasicMaterial({ color: c }))
+          : new T.Mesh(new T.ConeGeometry(1.3, 4, 4), new T.MeshBasicMaterial({ color: c }));
+        if (f.kind !== 'tanker') mesh.rotation.x = Math.PI / 2;
+        ship.add(mesh);
+        const glow = new T.Sprite(new T.SpriteMaterial({ map: this.halo, color: c, transparent: true, opacity: 0.18, depthWrite: false, blending: T.AdditiveBlending })); glow.scale.setScalar(5); ship.add(glow);
+        const hit = new T.Mesh(new T.SphereGeometry(9, 8, 6), new T.MeshBasicMaterial({ visible: false })); ship.add(hit);
+        ship.userData.flight = f.id;
+        this.content.add(ship);
+        this.flights.push({ ship, trail, a, b, t0: f.departedAt || 0, t1: f.arrivalAt || 0 });
+      }
+      this._tickFlights();
+      this._lod(true);
+    },
+
+    // Un corps à l'intérieur d'un système (échelle « près »)
+    _body(it, g, A) {
+      const T = this.T, Gm = this.G, N = this.NEAR;
+      const mark = (o) => { o.userData.shared = true; return o; };
+      if (it.kind === 'sig' && !it.obj.resolved) {
+        // écho : on ne devine pas une planète — un icosaèdre filaire qui respire
+        const ico = mark(new T.Mesh(Gm.ico, N.sigWire)); ico.scale.setScalar(1.25); g.add(ico);
+        const core = mark(new T.Mesh(Gm.sphereLo, N.sigCore)); core.scale.setScalar(0.32); g.add(core);
+        const ph = _mulberry32(_hashSeed(it.key))();
+        A.push((t) => { ico.rotation.y = t * 0.5 + ph * 6; ico.rotation.x = t * 0.3; core.scale.setScalar(0.28 + 0.08 * Math.sin(t * 2.6 + ph * 6)); });
+      } else if (it.kind === 'sig') {
+        const body = mark(new T.Mesh(Gm.sphere, N.ident)); body.scale.setScalar(1.8); g.add(body);
+        const wire = mark(new T.Mesh(Gm.sphereLo, N.identWire)); wire.scale.setScalar(1.9); g.add(wire);
+        A.push((t) => { wire.rotation.y = t * 0.2; });
+      } else if (it.kind === 'target') {
+        const engaged = it.obj.kt && it.obj.kt.status === 'engaged';
+        const gem = mark(new T.Mesh(Gm.octa, engaged ? N.veinOff : N.vein)); gem.scale.set(1.5, 2.0, 1.5); g.add(gem);
+        const rnd = _mulberry32(_hashSeed('SM3:rocks:' + it.key));
+        for (let k = 0; k < 5; k++) {
+          const rk = mark(new T.Mesh(Gm.rock, N.rock)); rk.scale.setScalar(0.35 + rnd() * 0.6);
+          const a = rnd() * Math.PI * 2, d = 2.4 + rnd() * 2.2; rk.position.set(Math.cos(a) * d, (rnd() - 0.5) * 1.6, Math.sin(a) * d); rk.rotation.set(rnd() * 3, rnd() * 3, 0); g.add(rk);
+        }
+        A.push((t) => { gem.rotation.y = t * 0.6; });
+      } else if (it.kind === 'planet') {
+        const pl = it.obj;
+        const cls = PLANET_COLS[pl.type] ? pl.type : (SIG_CLASS[(pl.fromSig || {}).fixedClass] || 'type2');
+        const big = cls === 'type4' ? 2.8 : cls === 'type3' ? 2.3 : 1.9;
+        const ball = mark(new T.Mesh(Gm.sphere, this.planetMat[cls])); ball.scale.setScalar(big); g.add(ball);
+        A.push((t) => { ball.rotation.y = t * 0.12; });
+        if (pl.playerName) {
+          // monde habité par un autre commandant : un liseré rouge et son nom
+          const rr = mark(new T.Mesh(Gm.sphereLo, N.player)); rr.scale.setScalar(0.55); rr.position.set(0, big + 1.1, 0); g.add(rr);
+        }
+        const lab = this._label(String(pl.playerName || pl.name || '').toUpperCase(), pl.playerName ? '#ff9a8a' : '#c4b8ff', 0.28);
+        lab.position.set(0, -big - 1.6, 0); g.add(lab); this.labelsLod.push(lab); lab.userData.near = true;
+      }
+    },
+
+    // Niveaux de détail selon la distance de la caméra
+    _lod(force) {
+      const d = this.dist();
+      if (!force && this._lastD !== undefined && Math.abs(d - this._lastD) < 1) return;
+      this._lastD = d;
+      const far = sstep(LOD.FAR, LOD.MID, d);            // 0 très loin → 1 à mi-distance
+      const near = sstep(LOD.NEAR_OUT, LOD.NEAR_IN, d);  // 0 → 1 en s'approchant
+      const lab = sstep(LOD.LABEL_OUT, LOD.LABEL_IN, d);
+      // étoiles : à peine visibles de loin, nettes de près
+      const k = (0.22 + 0.78 * far) * (1 - 0.45 * near);
+      this.starMat.forEach((m) => m.color.copy(m.userData.base).multiplyScalar(k));
+      this.starHalo.forEach((m) => { m.opacity = (0.04 + 0.22 * far) * (1 - 0.85 * near); });
+      this.dimStar.color.setRGB(0.42 * k, 0.48 * k, 0.5 * k);
+      for (const m of Object.values(this.TICK)) m.opacity = far * (1 - near);
+      for (const m of Object.values(this.NEAR)) m.opacity = (m.userData.base == null ? 1 : m.userData.base) * near;
+      for (const m of Object.values(this.fillMat)) m.opacity = m.userData.base * (0.5 + 0.5 * far) * (1 - near);
+      this.nearGroups.forEach((g) => { g.visible = near > 0.01; });
+      // de près, seul le système ouvert garde son étoile ; les voisines deviennent de simples points
+      const focus = this.selIdx >= 0 ? this.selIdx : -1;
+      for (const sm of this.starMeshes || []) {
+        const f = sm.cell === focus ? 1 : 1 - 0.75 * near;
+        sm.mesh.scale.setScalar(sm.mesh.userData.base * f);
+        if (sm.halo) sm.halo.visible = sm.cell === focus || near < 0.5;
+      }
+      // l'anneau « chez moi » s'efface de près : les orbites prennent le relais
+      if (this.homeRing) this.homeRing.visible = near < 0.97;
+      this._homeNear = near;
+      // noms de systèmes : à mi-distance seulement (de près, la fiche donne le nom ; les corps ont le leur)
+      this.labelsLod.forEach((s) => { s.material.opacity = s.userData.near ? near : lab * (1 - near); s.visible = s.material.opacity > 0.01; });
+      if (this.homeLabel) this.homeLabel.material.opacity = (0.35 + 0.35 * far);
+      // la grille : discrète de loin (l'immensité), plus lisible de près
+      this.boardU.uGrid.value = 0.2 * far;                 // de loin : pas de nid d'abeille, l'immensité
+      this.boardU.uDot.value = 0.3 * far;
+      this.boardU.uMacro.value = (0.07 + 0.05 * (1 - far)) * (1 - near);   // structure de secteur jusqu'au niveau système  // de très haut : la macro-grille seule
+      this.boardU.uFadeR.value = Math.max(420, d * 1.05);
+      this.objRing.material.opacity = 0.6 * near;
+    },
+
+    _picking(el) {
+      const T = this.T, ray = new T.Raycaster(), ndc = new T.Vector2(), plane = new T.Plane(new T.Vector3(0, 1, 0), 0), hit = new T.Vector3();
+      let down = null;
+      el.addEventListener('pointerdown', (e) => { if (e.isPrimary) down = { x: e.clientX, y: e.clientY, t: performance.now() }; });
+      el.addEventListener('pointerup', (e) => {
+        if (!down || !e.isPrimary) return;
+        const moved = Math.hypot(e.clientX - down.x, e.clientY - down.y), dt = performance.now() - down.t;
+        down = null;
+        if (moved > 8 || dt > 450) return;
+        const rect = el.getBoundingClientRect();
+        ndc.set(((e.clientX - rect.left) / rect.width) * 2 - 1, -((e.clientY - rect.top) / rect.height) * 2 + 1);
+        ray.setFromCamera(ndc, this.camera);
+        // 1) un vaisseau en vol
+        const ships = this.content.children.filter(o => o.userData.flight);
+        const sh = ray.intersectObjects(ships, true)[0];
+        if (sh) { let o = sh.object; while (o && !o.userData.flight) o = o.parent; if (o) return onPick({ kind: 'flight', key: o.userData.flight }); }
+        // 2) de près : un corps dans un système
+        const visNear = this.nearGroups.filter(g => g.visible);
+        if (visNear.length) {
+          const hb = ray.intersectObjects(visNear, true).find(h => h.object.userData.pick);
+          if (hb) return onPick(Object.assign({}, hb.object.userData.pick));
+        }
+        // 3) une étoile, ma planète
+        const st = ray.intersectObjects(this.content.children.filter(o => o.userData.cell !== undefined), true).find(h => h.object.userData.star);
+        if (st) { let o = st.object; while (o && o.userData.cell === undefined) o = o.parent; if (o) return onPickCell(o.userData.cell); }
+        if (this.homeBall && ray.intersectObject(this.homeBall).length) return onPickCell(0);
+        // 4) la case sous le doigt
+        if (!ray.ray.intersectPlane(plane, hit)) return;
+        const c = cellAtWorld(hit.x, hit.z);
+        onPickCell(c ? c.idx : -1);
+      });
     },
 
     _frame() {
@@ -905,21 +1018,18 @@
       this._last = now; this._t += dt; const t = this._t;
       if (this._anim) this._anim(now);
       this.controls.update();
-      // brouillard réglé sur la distance : le plateau se perd au loin quel que soit le zoom
-      const dist = this.camera.position.distanceTo(this.controls.target);
-      this.scene.fog.near = dist * 1.05; this.scene.fog.far = dist * 2.9;
+      const tg = this.controls.target; this.boardU.uT.value.set(tg.x, tg.z);
+      this._lod(false);
       if (!this.still) for (const f of this.anims) f(t);
       if (this.homeBall && !this.still) this.homeBall.rotation.y = t * 0.05;
-      if (this.homeRing && !this.still) this.homeRing.material.opacity = 0.3 + 0.15 * Math.sin(t * 1.6);
+      if (this.homeRing) this.homeRing.material.opacity = (this.still ? 0.2 : 0.18 + 0.06 * Math.sin(t * 1.6)) * (1 - (this._homeNear || 0));
       if (this.fan && !this.still) this.fan.rotation.y = -t * 1.05;
-      if (this.selIdx > 0) {
-        const k = this.still ? 3 : 2.6 + Math.sin(t * 4) * 1.2;
-        this.iNodes.setColorAt(this.selIdx, this._c || (this._c = new this.T.Color()).setRGB(0.8 * k, 0.95 * k, 1.0 * k));
-        this.iNodes.instanceColor.needsUpdate = true;
-        this.selGroup.children[1].rotation.y = t * 0.6;
+      if (this.selGroup.visible && !this.still) this.selFill.material.opacity = 0.45 + 0.15 * Math.sin(t * 2.4);
+      if (this.objRing.visible && this.selCk && this.bodies[this.selCk]) {
+        const b = this.bodies[this.selCk]; b.getWorldPosition(this.objRing.position); this.objRing.position.y = 0.7;
+        if (!this.still) this.objRing.rotation.y = t * 0.8;
       }
       if (this.flights.length) this._tickFlights();
-      // une fois par seconde : l'état du jeu a-t-il changé (arrivée d'une sonde, nouveau rapport) ?
       if (t - this._check > 1) { this._check = t; try { refreshIfChanged(); } catch (e) {} }
       this.composer.render();
     },
@@ -935,6 +1045,15 @@
     return i === undefined ? -1 : i;
   }
 
+  function selCk() {
+    if (!_sel) return null;
+    const m = { sig: 'sig:', target: 'tgt:', planet: 'pl:' }[_sel.kind];
+    return m ? m + _sel.key : null;
+  }
+  // de loin, toucher un système fait plonger la caméra dessus : la case s'ouvre et montre son contenu
+  const NEAR_DIST = 210;
+  function diveTo(idx) { if (E.ready && idx >= 0 && E.dist() > 420) E.moveTo(CELLS[idx].x, CELLS[idx].z, NEAR_DIST, 750); }
+
   function onPick(sel) { _sel = sel; refresh(true); }
 
   function onPickCell(idx) {
@@ -942,7 +1061,7 @@
     const c = idx >= 0 ? CELLS[idx] : null;
     if (!c || c.ring > BOARD) { _sel = null; return refresh(true); }
     const o = st.occ.get(idx);
-    if (o) { _sel = { kind: o.kind, key: o.key }; return refresh(true); }
+    if (o) { _sel = { kind: o.kind, key: o.key }; refresh(true); return diveTo(idx); }
     const sector = sectorOfCell(c);
     if (c.ring === 1) { _sel = { kind: 'orbit', cell: idx }; return refresh(true); }   // autour de ma planète : mon propre système
     if (c.ring > st.lit) { _sel = { kind: 'far', sector, cell: idx }; return refresh(true); }
@@ -957,10 +1076,10 @@
     const fp = fingerprint(st);
     const changed = fp !== _sigStr;
     _state = st;
-    if (changed) { _sigStr = fp; E.paint(st); E.build(st); if (E.selIdx >= 0) { const k = E.selIdx; E.selIdx = -1; E.setSelection(k); } }
+    if (changed) { _sigStr = fp; E.paint(st); E.build(st); }
     // une sélection qui a disparu (signature résolue, cible expirée) est remplacée par le résumé
     if (_sel && ['sig', 'target', 'planet', 'system', 'flight'].includes(_sel.kind) && selCell(st) < 0 && _sel.kind !== 'flight') _sel = null;
-    E.setSelection(selCell(st));
+    E.setSelection(selCell(st), selCk());
     if (panelToo || changed) renderPanel(st);
   }
   function refreshIfChanged() { if (_root && _root.isConnected) refresh(false); }
@@ -1018,7 +1137,8 @@
     const st = _state || collect();
     _sel = sel; refresh(true);
     const i = selCell(st);
-    if (i >= 0) E.moveTo(CELLS[i].x, CELLS[i].z, Math.min(560, E.camera.position.distanceTo(E.controls.target)), 800);
+    // « Voir sur la carte » : on arrive au plus près, système ouvert, objet entouré
+    if (i >= 0) E.moveTo(CELLS[i].x, CELLS[i].z, ['system', 'home', 'sig', 'target', 'planet'].includes(sel.kind) ? NEAR_DIST : Math.min(560, E.dist()), 900);
   }
 
   function sweep(sysKey) {
@@ -1073,7 +1193,7 @@
       // renderProspectScreen() continue de la tenir à jour
       const sub = document.getElementById('prospect-banner-sub'); if (sub) { sub.classList.add('smw-sub'); top.appendChild(sub); }
       // Indication discrète pour un nouveau joueur, quand rien n'est sélectionné (remplace « Touche un objet, ou le noir pour balayer »)
-      const hint = this.hint = document.createElement('div'); hint.className = 'smw-hint'; hint.textContent = 'Touche une case · une case noire se balaye';
+      const hint = this.hint = document.createElement('div'); hint.className = 'smw-hint'; hint.textContent = 'Touche un système pour l’ouvrir';
       scr.appendChild(hint);
       // la croix de retour est celle de tous les écrans détaillés (home.js : .w-screen-x → planète)
       const tools = document.createElement('div'); tools.className = 'smw-tools';
@@ -1171,8 +1291,7 @@
         const sysN = Object.values(st.systems).filter(s => s.known && s.key !== mySystemKey()).length;
         const sigN = Object.values(G.signatures || {}).filter(s => !s.resolved && !s.ignored).length;
         const bits = [`${sysN} système${sysN > 1 ? 's' : ''}`];
-        if (sigN) bits.push(`<b style="color:${COL.sig}">${sigN} signature${sigN > 1 ? 's' : ''}</b>`);
-        if (st.flights.length) bits.push(`<b style="color:${COL.tanker}">${st.flights.length} en vol</b>`);
+        if (sigN) bits.push(`${sigN} signature${sigN > 1 ? 's' : ''}`);
         meta.innerHTML = bits.join(' · ');
       }
       const inn = this.card && this.card.querySelector('.smw-card-in');
