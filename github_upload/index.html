@@ -23681,7 +23681,10 @@ function handleProbeReturn(missionId) {
 // ═══════════════════════════════════════════════════════════════
 
 // Constantes de tuning V0.5 (à ajuster après tests iPhone)
-const BEACON_DETECTION_CHANCE_PER_TICK = 0.12;   // 12% de chance par tick (10s)
+const BEACON_DETECTION_CHANCE_PER_TICK = 0.12;   // (historique, remplacé par le budget global ci-dessous)
+// PATCH_1310_BOTS (Adrien : « beaucoup trop de bots ») — budget global de contacts PNJ, toutes balises confondues
+const BEACON_NPC_PER_HOUR = 1.5;                 // contacts par heure pour 1 balise ; × √n pour n balises
+const BEACON_NPC_MIN_GAP_MS = 6 * 60 * 1000;     // jamais deux contacts PNJ à moins de 6 min
 const BEACON_DETECTION_WINDOW_MS = 12 * 60 * 1000; // 12 min de fenêtre d'interception
 const BEACON_DETECTION_MAX_PER_MIN = 2;          // anti-spam : max 2 dét/minute/balise
 
@@ -23709,9 +23712,13 @@ function tickActiveBeacons() {
   const now = Date.now();
   if (!Array.isArray(G.beaconReports)) G.beaconReports = [];
 
-  for (const b of beacons) {
-    // Dé de détection
-    if (Math.random() > BEACON_DETECTION_CHANCE_PER_TICK) continue;
+  // PATCH_1310_BOTS — un seul tirage par tick pour toutes les balises, puis une balise au hasard
+  if (now - (G._lastNpcBeaconAt || 0) < BEACON_NPC_MIN_GAP_MS) return;
+  const _perTick = BEACON_NPC_PER_HOUR * Math.sqrt(beacons.length) / 360;   // 360 ticks de 10 s par heure
+  if (Math.random() > _perTick) return;
+  const _pick = beacons[Math.floor(Math.random() * beacons.length)];
+  G._lastNpcBeaconAt = now;
+  for (const b of [_pick]) {
 
     // Anti-spam : pas plus de N détections par minute sur la même balise
     const recentDetections = G.beaconReports.filter(d =>
