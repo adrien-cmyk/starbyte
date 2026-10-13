@@ -4446,13 +4446,15 @@ svg.map {
      UI sobre, ambiance spatiale, cohérente avec le reste du jeu. -->
 <div id="scr-welcome" class="screen hidden">
   <!-- ACCUEIL (13/10) : flotte en hyperespace vue de l'arrière, voilée de noir à 50 % pour la lisibilité -->
+  <style>#scr-welcome input::placeholder{color:rgba(200,214,232,.55)} #scr-welcome input:focus{border-color:rgba(160,200,255,.9)!important;box-shadow:0 0 0 3px rgba(120,160,255,.18)}</style>
   <div id="welcome-hero" style="position:absolute;inset:0;z-index:0;pointer-events:none;overflow:hidden"></div>
+  <div style="position:absolute;left:0;right:0;bottom:calc(env(safe-area-inset-bottom, 0px) + 10px);z-index:2;text-align:center;font-size:9px;letter-spacing:.08em;color:rgba(220,228,240,.55);pointer-events:none">© Adrien Thétaz - 2026</div>
   <div style="position:absolute;inset:0;z-index:0;pointer-events:none;background:rgba(0,0,0,.5)"></div>
 
   <div class="screen-scroll" style="position:relative;z-index:1;display:flex;flex-direction:column;justify-content:center;min-height:100vh;padding:24px 20px">
 
     <div style="text-align:center;margin-bottom:36px">
-      <div style="font-size:10px;letter-spacing:.32em;color:var(--mut);margin-bottom:10px;text-transform:uppercase">Bienvenue dans</div>
+      <div style="font-size:10px;letter-spacing:.32em;color:#b9c6d8;margin-bottom:10px;text-transform:uppercase;text-shadow:0 1px 6px rgba(0,0,0,.8)">Bienvenue dans</div>
       <img src="assets/starbyte-logo.svg" alt="Starbyte" style="display:block;width:min(260px,72vw);height:auto;margin:6px auto 18px;filter:drop-shadow(0 0 18px rgba(150,120,255,.35))">
       <div style="font-size:13px;letter-spacing:.34em;text-transform:uppercase;color:#d9ccff;margin-bottom:12px;text-shadow:0 0 14px rgba(150,110,255,.6)">Rejoins l'histoire</div>
       <div style="font-size:11px;color:#b7c4d4;font-style:italic;line-height:1.6;max-width:280px;margin:0 auto">
@@ -4461,29 +4463,29 @@ svg.map {
       </div>
     </div>
 
-    <div style="max-width:340px;margin:0 auto;width:100%">
+    <div style="max-width:340px;margin:0 auto;width:100%;padding:20px 18px 18px;border-radius:14px;background:rgba(4,6,14,.62);border:1px solid rgba(150,170,255,.18);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);box-shadow:0 10px 40px rgba(0,0,0,.45)">
 
       <div style="margin-bottom:22px">
-        <label for="welcome-captain" style="display:block;font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--mut);margin-bottom:8px">Nom de capitaine</label>
+        <label for="welcome-captain" style="display:block;font-size:11px;font-weight:600;letter-spacing:.16em;text-transform:uppercase;color:#dfe8f5;margin-bottom:8px;text-shadow:0 1px 6px rgba(0,0,0,.8)">Nom de capitaine</label>
         <input
           type="text"
           id="welcome-captain"
           maxlength="20"
           placeholder="ex: Adrien, Bersek89, Korr_Lord..."
-          style="width:100%;padding:13px 14px;background:rgba(255,255,255,.03);border:1px solid rgba(95,168,232,.30);border-radius:6px;color:#e6f0ff;font-family:'SF Mono',monospace;font-size:14px;outline:none">
-        <div style="font-size:9px;color:var(--mut);margin-top:6px;letter-spacing:.04em">Comment t'appellent les autres dans l'univers</div>
+          style="width:100%;padding:13px 14px;background:rgba(8,12,24,.85);border:1px solid rgba(120,180,240,.55);border-radius:8px;color:#f2f7ff;font-family:'SF Mono',monospace;font-size:14px;outline:none">
+        <div style="font-size:10.5px;color:#aebdd0;margin-top:7px;letter-spacing:.03em;text-shadow:0 1px 4px rgba(0,0,0,.8)">Comment t'appellent les autres dans l'univers</div>
       </div>
 
       <div style="margin-bottom:30px">
-        <label for="welcome-planet" style="display:block;font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--mut);margin-bottom:8px">Nom de ta planète</label>
+        <label for="welcome-planet" style="display:block;font-size:11px;font-weight:600;letter-spacing:.16em;text-transform:uppercase;color:#dfe8f5;margin-bottom:8px;text-shadow:0 1px 6px rgba(0,0,0,.8)">Nom de ta planète</label>
         <input
           type="text"
           id="welcome-planet"
           maxlength="20"
           placeholder="ex: KERATH-VII, NOUVELLE-TERRE..."
           value="KERATH-VII"
-          style="width:100%;padding:13px 14px;background:rgba(255,255,255,.03);border:1px solid rgba(95,168,232,.30);border-radius:6px;color:#e6f0ff;font-family:'SF Mono',monospace;font-size:14px;outline:none;text-transform:uppercase">
-        <div style="font-size:9px;color:var(--mut);margin-top:6px;letter-spacing:.04em">Apparaîtra dans les rapports et sur la carte galactique</div>
+          style="width:100%;padding:13px 14px;background:rgba(8,12,24,.85);border:1px solid rgba(120,180,240,.55);border-radius:8px;color:#f2f7ff;font-family:'SF Mono',monospace;font-size:14px;outline:none;text-transform:uppercase">
+        <div style="font-size:10.5px;color:#aebdd0;margin-top:7px;letter-spacing:.03em;text-shadow:0 1px 4px rgba(0,0,0,.8)">Apparaîtra dans les rapports et sur la carte galactique</div>
       </div>
 
       <button
@@ -4493,7 +4495,7 @@ svg.map {
         Initier la terraformisation
       </button>
 
-      <div style="text-align:center;font-size:9px;color:var(--mut);margin-top:18px;font-style:italic;letter-spacing:.04em">
+      <div style="text-align:center;font-size:10.5px;color:#aebdd0;margin-top:16px;font-style:italic;letter-spacing:.04em">
         Tu pourras renommer plus tard.
       </div>
 
