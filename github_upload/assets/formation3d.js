@@ -309,45 +309,58 @@
           const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: tx, blending: THREE.AdditiveBlending, depthWrite: false, transparent: true, opacity: op, rotation: rot || 0, fog: false }));
           sp.scale.set(sz, sz * sy, 1); sp.position.copy(at); scene.add(sp);
         });
-      const N = 1400, span = ext * 16;
-      const base = new THREE.PlaneGeometry(1, 1); base.translate(.5, 0, 0);   // x ∈ [0,1] le long de la traînée, y ∈ [−.5,.5] en travers
-      const g = new THREE.InstancedBufferGeometry(); g.index = base.index; g.attributes.position = base.attributes.position;
-      const aP = new Float32Array(N * 4), aC = new Float32Array(N * 3);
-      const PAL = [[.55, .35, 1.0], [.86, .38, 1.0], [.38, .82, 1.0], [.92, .86, 1.0], [.7, .45, 1.0]];
-      for (let i = 0; i < N; i++) {
-        const r = ext * (.45 + Math.pow(Math.random(), .7) * 3.6);
-        aP.set([Math.random() * Math.PI * 2, r, Math.random(), .55 + Math.random() * .9], i * 4);
-        aC.set(PAL[Math.floor(Math.random() * PAL.length)], i * 3);
-      }
-      g.setAttribute('aP', new THREE.InstancedBufferAttribute(aP, 4)); g.setAttribute('aC', new THREE.InstancedBufferAttribute(aC, 3));
-      g.instanceCount = N;
-      const m = new THREE.ShaderMaterial({
-        transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
-        uniforms: { uT: HYPER, uSpan: { value: span }, uNear: { value: ext * 3.5 }, uV: { value: ext * 7 }, uLen: { value: ext * 2.2 }, uW: { value: ext * .02 }, uExt: { value: ext } },
-        vertexShader: `attribute vec4 aP; attribute vec3 aC; uniform float uT, uSpan, uNear, uV, uLen, uW, uExt;
-          varying vec2 vC; varying vec3 vCol; varying float vF;
-          void main(){
-            float zz = fract(aP.z + uT * uV * aP.w / uSpan);              // 0 : au loin, 1 : dépasse la caméra
-            float z = uNear - uSpan * (1.0 - zz);
-            vec3 head = vec3(cos(aP.x) * aP.y, sin(aP.x) * aP.y * .8, z);
-            float len = uLen * aP.w * (.5 + 1.3 * zz * zz);              // s'étire en approchant (vitesse apparente)
-            vec4 h = viewMatrix * vec4(head, 1.0), tl = viewMatrix * vec4(head - vec3(0.0, 0.0, len), 1.0);
-            vec3 side = normalize(cross(tl.xyz - h.xyz, -h.xyz));
-            float w = uW * (.6 + .7 * aP.w) * (.5 + zz);
-            vec3 p = mix(h.xyz, tl.xyz, position.x) + side * w * position.y * 2.0;
-            vC = vec2(position.x, position.y * 2.0); vCol = aC;
-            vF = smoothstep(0.0, .3, zz) * (1.0 - smoothstep(.9, 1.0, zz)) * smoothstep(uExt * .9, uExt * 2.4, -h.z);   // rien ne frôle l'objectif
-            gl_Position = projectionMatrix * vec4(p, 1.0);
-          }`,
-        fragmentShader: `varying vec2 vC; varying vec3 vCol; varying float vF;
-          void main(){
-            float across = exp(-vC.y * vC.y * 3.2);                      // profil gaussien : flou, sans arête
-            float along = pow(1.0 - vC.x, 1.6) * smoothstep(0.0, .06, vC.x + .02);
-            float a = across * along * vF;
-            gl_FragColor = vec4(mix(vCol, vec3(1.0), across * along * .2) * .85 * a, a * .7);
-          }`,
-      });
-      const tun = new THREE.Mesh(g, m); tun.frustumCulled = false; tun.renderOrder = 1; scene.add(tun);
+      // un tunnel de traînées : rayon [rMin, rMax], profondeur span, gain d'intensité ;
+      // gate = l'effet ne se voit que lorsque la caméra regarde dans l'axe de la course (vue arrière)
+      const tunnel = ({ N, rMin, rMax, span, near, speed, len, w, gain, gate }) => {
+        const base = new THREE.PlaneGeometry(1, 1); base.translate(.5, 0, 0);   // x ∈ [0,1] le long de la traînée, y ∈ [−.5,.5] en travers
+        const g = new THREE.InstancedBufferGeometry(); g.index = base.index; g.attributes.position = base.attributes.position;
+        const aP = new Float32Array(N * 4), aC = new Float32Array(N * 3);
+        const PAL = [[.55, .35, 1.0], [.86, .38, 1.0], [.38, .82, 1.0], [.92, .86, 1.0], [.7, .45, 1.0]];
+        for (let i = 0; i < N; i++) {
+          const r = rMin + Math.pow(Math.random(), .7) * (rMax - rMin);
+          aP.set([Math.random() * Math.PI * 2, r, Math.random(), .55 + Math.random() * .9], i * 4);
+          aC.set(PAL[Math.floor(Math.random() * PAL.length)], i * 3);
+        }
+        g.setAttribute('aP', new THREE.InstancedBufferAttribute(aP, 4)); g.setAttribute('aC', new THREE.InstancedBufferAttribute(aC, 3));
+        g.instanceCount = N;
+        const m = new THREE.ShaderMaterial({
+          transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
+          uniforms: { uT: HYPER, uSpan: { value: span }, uNear: { value: near }, uV: { value: speed }, uLen: { value: len }, uW: { value: w },
+                      uNearFade: { value: ext }, uGain: { value: gain }, uGate: { value: gate ? 1 : 0 } },
+          vertexShader: `attribute vec4 aP; attribute vec3 aC; uniform float uT, uSpan, uNear, uV, uLen, uW, uNearFade, uGate;
+            varying vec2 vC; varying vec3 vCol; varying float vF;
+            void main(){
+              float zz = fract(aP.z + uT * uV * aP.w / uSpan);              // 0 : au loin, 1 : dépasse la caméra
+              float z = uNear - uSpan * (1.0 - zz);
+              vec3 head = vec3(cos(aP.x) * aP.y, sin(aP.x) * aP.y * .8, z);
+              float len = uLen * aP.w * (.5 + 1.3 * zz * zz);               // s'étire en approchant (vitesse apparente)
+              vec4 h = viewMatrix * vec4(head, 1.0), tl = viewMatrix * vec4(head - vec3(0.0, 0.0, len), 1.0);
+              vec3 side = normalize(cross(tl.xyz - h.xyz, -h.xyz));
+              float w = uW * (.6 + .7 * aP.w) * (.5 + zz);
+              vec3 p = mix(h.xyz, tl.xyz, position.x) + side * w * position.y * 2.0;
+              vC = vec2(position.x, position.y * 2.0); vCol = aC;
+              vF = smoothstep(0.0, .3, zz) * (1.0 - smoothstep(.9, 1.0, zz)) * smoothstep(uNearFade * .9, uNearFade * 2.4, -h.z);
+              // vue arrière seulement : la caméra doit regarder vers l'avant de la course (−Z)
+              vec3 fwd = -vec3(viewMatrix[0][2], viewMatrix[1][2], viewMatrix[2][2]);
+              vF *= mix(1.0, smoothstep(.35, .85, -fwd.z), uGate);
+              gl_Position = projectionMatrix * vec4(p, 1.0);
+            }`,
+          fragmentShader: `varying vec2 vC; varying vec3 vCol; varying float vF; uniform float uGain;
+            void main(){
+              float across = exp(-vC.y * vC.y * 3.2);                      // profil gaussien : flou, sans arête
+              float along = pow(1.0 - vC.x, 1.6) * smoothstep(0.0, .06, vC.x + .02);
+              float a = across * along * vF * uGain;
+              if (a < .002) discard;
+              gl_FragColor = vec4(mix(vCol, vec3(1.0), across * along * .2) * .85 * a, a * .7);
+            }`,
+        });
+        const tun = new THREE.Mesh(g, m); tun.frustumCulled = false; tun.renderOrder = 1; scene.add(tun);
+      };
+      // grand tunnel : plus large que la zone de zoom de la caméra → visible surtout depuis l'arrière
+      const RT = ext / Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)) * 1.15 * 1.8 * 1.15;
+      tunnel({ N: 1500, rMin: RT, rMax: RT * 2.6, span: RT * 9, near: RT * 1.2, speed: RT * 2.2, len: RT * .75, w: RT * .0075, gain: 1, gate: true });
+      // effet rapproché d'origine, en complément discret (7,5 % de son intensité)
+      tunnel({ N: 900, rMin: ext * .45, rMax: ext * 4, span: ext * 16, near: ext * 3.5, speed: ext * 7, len: ext * 2.2, w: ext * .02, gain: .075, gate: false });
     }
 
     const composer = new EffectComposer(renderer);
