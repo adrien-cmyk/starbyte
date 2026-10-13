@@ -130,6 +130,31 @@
     return { cands, k };
   }
 
+  // Tracé d'une route sur la grille (13/10) : plus court chemin entre deux cases, en contournant les cases bloquées.
+  // A* (coût 1 par case) ; à coût égal, on préfère la case la plus proche de la ligne droite → tracé net.
+  const HEX_DIRS = [[1, 0], [1, -1], [0, -1], [-1, 0], [-1, 1], [0, 1]];
+  function hexPath(from, to, blocked) {
+    if (from === to) return [from];
+    const T = CELLS[to], open = [[0, 0, from]], g = new Map([[from, 0]]), prev = new Map();
+    const h = (c) => hexDist(c, T), straight = (c) => Math.hypot(c.x - T.x, c.z - T.z) / 1e5;
+    while (open.length) {
+      open.sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+      const [, , cur] = open.shift();
+      if (cur === to) break;
+      const c = CELLS[cur];
+      for (const [dq, dr] of HEX_DIRS) {
+        const ni = CELL_AT.get((c.q + dq) + ',' + (c.r + dr));
+        if (ni === undefined || CELLS[ni].ring > BOARD || (blocked && blocked.has(ni) && ni !== to)) continue;
+        const ng = g.get(cur) + 1;
+        if (ng < (g.has(ni) ? g.get(ni) : Infinity)) { g.set(ni, ng); prev.set(ni, cur); open.push([ng + h(CELLS[ni]), straight(CELLS[ni]), ni]); }
+      }
+    }
+    if (!prev.has(to)) return null;
+    const path = [to]; let k = to;
+    while (k !== from) { k = prev.get(k); path.push(k); }
+    return path.reverse();
+  }
+
   // Cases libres autour d'une case, de la plus proche à la plus lointaine (ordre déterministe)
   function freeAround(center, minD, maxD, occ, salt) {
     const out = [];
@@ -238,6 +263,24 @@
       items[k] = list;
     }
 
+    // Routes entre mes balises (13/10) : tracé sur la grille, en contournant les systèmes à éviter
+    const routes = [];
+    const beaconAt = (bid) => {
+      const b = (G.probesPool || []).find(x => x.id === bid && x.tier === 'beacon');
+      if (!b || b.state !== 'deployed') return null;
+      const m = String(b.deployedSystem || '').toUpperCase().match(/^([A-Z])-([A-Z])-(\d{4})/);
+      if (!m) return null;
+      const k = `${m[1]}-${m[2]}-${m[3]}`, ci = cell['sys:' + k];
+      return ci === undefined ? null : { ci, key: k };
+    };
+    for (const r of (G.beaconRoutes || [])) {
+      const A = beaconAt(r.a), B = beaconAt(r.b);
+      if (!A || !B) { routes.push({ r, broken: true, path: [], a: A, b: B }); continue; }
+      const blocked = new Set((r.avoid || []).map(k => cell['sys:' + k]).filter(i => i !== undefined && i !== A.ci && i !== B.ci));
+      const path = hexPath(A.ci, B.ci, blocked);
+      routes.push({ r, broken: !path, path: path || [], a: A, b: B });
+    }
+
     // Missions en vol
     const flights = [];
     for (const m of (G.probeMissions || [])) {
@@ -259,7 +302,7 @@
       flights.push({ kind: 'tanker', id: m.id, label: m.tankerName || 'Tanker', from: back ? at : 0, to: back ? 0 : at,
         departedAt: back ? (m.returnDepartedAt || m.arrivalAt || m.departedAt) : m.departedAt, arrivalAt: back ? (m.returnArrivalAt || m.arrivalAt) : m.arrivalAt, target: tc, back });
     }
-    return { systems, flights, occ, cell, items, lit: litRing() };
+    return { systems, flights, occ, cell, items, routes, lit: litRing() };
   }
 
   // Empreinte : ce qui change le plateau (pas le temps qui passe)
@@ -273,6 +316,7 @@
       for (const pl of s.planets) o.push('P' + pl.coord + (pl.playerName ? '@' + pl.playerName : ''));
     }
     for (const f of st.flights) o.push('F' + f.id + f.from + '>' + f.to);
+    for (const rt of st.routes || []) o.push('R' + rt.r.id + rt.r.color + (rt.r.avoid || []).join('/') + (rt.broken ? 'x' : '') + rt.path.join('.'));
     return st.lit + '|' + o.sort().join(',');
   }
 
@@ -417,6 +461,11 @@
       }
       const act = _sigBtn(COL.cyan, 'Voir corps céleste', `openPlanetDetail('${esc(s.key)}')`, '', true);
       return `<div class="sm-panel"><div class="sm-ptitle">${esc((pl && (pl.customName || pl.name)) || 'Planète')}</div><div class="sm-psub mono">${esc(s.key)}${pl && pl.type ? ' · ' + esc((typeof PLANET_TYPES !== 'undefined' && PLANET_TYPES[pl.type] && PLANET_TYPES[pl.type].label) || pl.type) : ''}</div>${act}</div>`;
+    }
+    if (s.kind === 'route') {
+      const h = routeCard(state, s.key);
+      if (!h) { _sel = null; return panelMarkup(state); }
+      return h;
     }
     if (s.kind === 'flight') {
       const f = state.flights.find(x => x.id === s.key);
@@ -940,7 +989,59 @@
         this.flights.push({ ship, trail, a, b, t0: f.departedAt || 0, t1: f.arrivalAt || 0 });
       }
       this._tickFlights();
+      this._routes(st);
       this._lod(true);
+    },
+
+    // Routes entre balises : un ruban fin de la couleur choisie, posé sur le plateau, case à case
+    _routes(st) {
+      const T = this.T;
+      if (!this.routeGroup) { this.routeGroup = new T.Group(); this.scene.add(this.routeGroup); this.routeFx = new T.Group(); this.scene.add(this.routeFx); }
+      while (this.routeGroup.children.length) { const o = this.routeGroup.children.pop(); o.geometry.dispose(); o.material.dispose(); }
+      this.routeMeshes = {};
+      for (const rt of st.routes || []) {
+        if (rt.broken || rt.path.length < 2) {
+          if (rt.a && rt.b) {   // tracé impossible : pointillé gris entre les balises
+            const l = new T.Line(new T.BufferGeometry().setFromPoints([new T.Vector3(CELLS[rt.a.ci].x, 0.9, CELLS[rt.a.ci].z), new T.Vector3(CELLS[rt.b.ci].x, 0.9, CELLS[rt.b.ci].z)]),
+              new T.LineDashedMaterial({ color: 0x8a96a0, dashSize: 4, gapSize: 4, transparent: true, opacity: 0.45 }));
+            l.computeLineDistances(); this.routeGroup.add(l);
+          }
+          continue;
+        }
+        const pts = rt.path.map(i => new T.Vector2(CELLS[i].x, CELLS[i].z));
+        const mesh = new T.Mesh(this._ribbon(pts, 1.1), new T.MeshBasicMaterial({ color: rt.r.color, transparent: true, opacity: 0.55, depthWrite: false, side: T.DoubleSide }));
+        mesh.position.y = 0.9; mesh.renderOrder = 3; mesh.userData.route = rt.r.id;
+        this.routeGroup.add(mesh); this.routeMeshes[rt.r.id] = mesh;
+        // jalons : un petit point à chaque case traversée
+        const dots = new T.Points(new T.BufferGeometry().setFromPoints(rt.path.slice(1, -1).map(i => new T.Vector3(CELLS[i].x, 1.0, CELLS[i].z))),
+          new T.PointsMaterial({ color: rt.r.color, size: 3, sizeAttenuation: false, transparent: true, opacity: 0.8, depthWrite: false }));
+        this.routeGroup.add(dots);
+      }
+    },
+    _ribbon(pts, w) {
+      const T = this.T, v = [];
+      for (let i = 0; i < pts.length - 1; i++) {
+        const a = pts[i], b = pts[i + 1], dx = b.x - a.x, dz = b.y - a.y, L = Math.hypot(dx, dz) || 1, nx = -dz / L * w, nz = dx / L * w;
+        v.push(a.x + nx, 0, a.y + nz, a.x - nx, 0, a.y - nz, b.x - nx, 0, b.y - nz, a.x + nx, 0, a.y + nz, b.x - nx, 0, b.y - nz, b.x + nx, 0, b.y + nz);
+      }
+      const g = new T.BufferGeometry(); g.setAttribute('position', new T.Float32BufferAttribute(v, 3)); return g;
+    },
+    // Route sélectionnée : plus visible ; ses systèmes évités cerclés de rouge
+    highlightRoute(id, st) {
+      if (!this.routeGroup) return;
+      for (const [rid, m] of Object.entries(this.routeMeshes || {})) { m.material.opacity = rid === id ? 0.95 : (id ? 0.25 : 0.55); m.scale.y = 1; }
+      while (this.routeFx.children.length) { const o = this.routeFx.children.pop(); if (o.geometry && !o.userData.shared) o.geometry.dispose(); }
+      const rt = id && st && (st.routes || []).find(x => x.r.id === id);
+      if (!rt) return;
+      const T = this.T;
+      for (const k of rt.r.avoid || []) {
+        const ci = st.cell['sys:' + k]; if (ci === undefined) continue;
+        const ring = new T.Mesh(this.G.ring(10, 10.8, 48), this.M.add(0xff6a5a, 0.55)); ring.position.set(CELLS[ci].x, 0.7, CELLS[ci].z); this.routeFx.add(ring);
+      }
+      for (const end of [rt.a, rt.b]) {
+        if (!end) continue;
+        const ring = new T.Mesh(this.G.ring(13, 13.6, 48), new T.MeshBasicMaterial({ color: rt.r.color, transparent: true, opacity: 0.7, depthWrite: false })); ring.position.set(CELLS[end.ci].x, 0.7, CELLS[end.ci].z); this.routeFx.add(ring);
+      }
     },
 
     // Un corps à l'intérieur d'un système (échelle « près »)
@@ -1095,10 +1196,30 @@
   const NEAR_DIST = 210;
   function diveTo(idx) { if (E.ready && idx >= 0 && E.dist() > 420) E.moveTo(CELLS[idx].x, CELLS[idx].z, NEAR_DIST, 750); }
 
-  function onPick(sel) { _sel = sel; refresh(true); }
+  function onPick(sel) {
+    // en mode « éviter un système », toucher un corps céleste vaut toucher son système
+    if (_pickAvoid) {
+      const st = _state || collect();
+      const ck = sel && ({ planet: 'pl:', sig: 'sig:', target: 'tgt:' }[sel.kind] || '') + sel.key;
+      const ci = ck ? st.cell[ck] : undefined;
+      return onPickCell(ci === undefined ? -1 : ci);
+    }
+    _sel = sel; refresh(true);
+  }
 
   function onPickCell(idx) {
     const st = _state || collect();
+    if (_pickAvoid) {
+      // mode « éviter un système » : le système touché entre (ou sort) de la liste d'évitement de la route
+      const rid = _pickAvoid; _pickAvoid = null;
+      const o = idx >= 0 ? st.occ.get(idx) : null, r = routeById(rid);
+      if (r && o && o.kind === 'system') {
+        r.avoid = r.avoid || [];
+        if (r.avoid.includes(o.key)) r.avoid = r.avoid.filter(k => k !== o.key); else r.avoid.push(o.key);
+        if (typeof saveGame === 'function') saveGame();
+      } else if (typeof toast === 'function') toast('Ce n’est pas un système : rien à éviter ici');
+      return selectRoute(rid);   // on recadre sur le nouveau tracé
+    }
     const c = idx >= 0 ? CELLS[idx] : null;
     if (!c || c.ring > BOARD) { _sel = null; return refresh(true); }
     const o = st.occ.get(idx);
@@ -1121,6 +1242,7 @@
     // une sélection qui a disparu (signature résolue, cible expirée) est remplacée par le résumé
     if (_sel && ['sig', 'target', 'planet', 'system', 'flight'].includes(_sel.kind) && selCell(st) < 0 && _sel.kind !== 'flight') _sel = null;
     E.setSelection(selCell(st), selCk());
+    E.highlightRoute(_sel && _sel.kind === 'route' ? _sel.key : null, st);
     if (panelToo || changed) renderPanel(st);
   }
   function refreshIfChanged() { if (_root && _root.isConnected) refresh(false); }
@@ -1222,7 +1344,7 @@
     const here = (G.probesPool || []).find(b => b.tier === 'beacon' && b.state === 'deployed' && String(b.deployedSystem || '').toUpperCase().startsWith(sysKey));
     if (here) {
       const n = here.detectionCount || 0;
-      return _sigBtn(BEACON_COL, 'Rappeler la balise', `SBMap.recallBeacon('${esc(here.id)}')`, `Balise en surveillance · ${n} détection${n > 1 ? 's' : ''}`, true);
+      return routesBlock(here) + _sigBtn(BEACON_COL, 'Rappeler la balise', `SBMap.recallBeacon('${esc(here.id)}')`, `Balise en surveillance · ${n} détection${n > 1 ? 's' : ''}`, true);
     }
     const going = (G.probeMissions || []).find(m => m.tier === 'beacon' && m.status === 'in_transit' && String(m.targetCoords || '').startsWith(sysKey));
     if (going) return _sigOff(`Balise en route · arrivée dans ${formatTankerDuration(Math.max(0, (going.arrivalAt || 0) - Date.now()))}`);
@@ -1241,11 +1363,118 @@
     if (typeof toast === 'function') toast('Balise en route vers ' + sysKey);
     refresh(true);
   }
-  function recallBeaconFromMap(id) {
+  async function recallBeaconFromMap(id) {
+    // une balise qui porte des routes : rappeler la balise rompt ces routes (étape 3 : flottes orphelines, réputation)
+    const used = (G.beaconRoutes || []).filter(r => r.a === id || r.b === id);
+    if (used.length && typeof sbConfirmWarning === 'function') {
+      const ok = await sbConfirmWarning('Rompre des routes', `Cette balise porte ${used.length} route${used.length > 1 ? 's' : ''} (${used.map(r => esc(r.name)).join(', ')}). La rappeler les rompra.`, 'Rappeler quand même');
+      if (!ok) return;
+    }
     if (typeof recallBeacon === 'function') recallBeacon(id);
     if (typeof saveGame === 'function') saveGame();
     refresh(true);
   }
+
+  /* ─── Routes entre balises (étape 1, 13/10) : tracé, évitement, couleur ─── */
+  const ROUTE_COLS = [['Ambre', '#ffc864'], ['Rose', '#ff8fb0'], ['Violet', '#b48cff'], ['Vert', '#6fdc9a'], ['Orange', '#ff9f5a'], ['Bleu', '#6fb0ff']];
+  let _pickAvoid = null;
+  const myBeacons = () => (G.probesPool || []).filter(b => b.tier === 'beacon' && b.state === 'deployed');
+  const beaconSys = (b) => String((b && b.deployedSystem) || '').toUpperCase().split('-').slice(0, 3).join('-');
+  const routeById = (id) => (G.beaconRoutes || []).find(r => r.id === id);
+  function routesBlock(beacon) {
+    if (!beacon) return '';
+    const rows = (G.beaconRoutes || []).filter(r => r.a === beacon.id || r.b === beacon.id).map(r => {
+      const other = myBeacons().find(b => b.id === (r.a === beacon.id ? r.b : r.a));
+      return `<button class="sm-rt" onclick="event.stopPropagation();SBMap.selectRoute('${esc(r.id)}')"><i style="background:${r.color}"></i><b>${esc(r.name)}</b><span>${other ? '→ ' + esc(beaconSys(other)) : 'rompue'}</span></button>`;
+    }).join('');
+    const open = myBeacons().length >= 2
+      ? _sigBtn('#b48cff', 'Ouvrir une route', `SBMap.openRoute('${esc(beacon.id)}')`, 'Vers une autre de tes balises · tracé et évitement au choix', true)
+      : _sigOff('Pose une 2ᵉ balise pour ouvrir une route');
+    return (rows ? `<div class="sm-rts">${rows}</div>` : '') + open;
+  }
+  async function openRoute(fromId) {
+    const from = myBeacons().find(b => b.id === fromId);
+    if (!from) return;
+    const st = _state || collect(), fc = st.cell['sys:' + beaconSys(from)];
+    const items = myBeacons().filter(b => b.id !== fromId).map(b => {
+      const tc = st.cell['sys:' + beaconSys(b)];
+      const d = (fc !== undefined && tc !== undefined) ? hexDist(CELLS[fc], CELLS[tc]) : null;
+      return { b, label: beaconSys(b), sub: d != null ? `${d} case${d > 1 ? 's' : ''} en ligne droite` : '' };
+    });
+    if (!items.length) return;
+    const it = items.length === 1 ? items[0] : await _mpChoose('Route vers…', items);
+    if (!it) return;
+    const col = await _mpChoose('Couleur de la route', ROUTE_COLS.map(([n, c]) => ({ c, label: `<span style="color:${c}">━━</span>&nbsp; ${n}` })));
+    if (!col) return;
+    const r = { id: 'rt' + Date.now().toString(36), name: 'Route ' + ((G.beaconRoutes || []).length + 1), color: col.c, a: fromId, b: it.b.id, avoid: [], createdAt: Date.now() };
+    G.beaconRoutes = (G.beaconRoutes || []).concat([r]);
+    if (typeof saveGame === 'function') saveGame();
+    selectRoute(r.id);
+  }
+  function selectRoute(id) {
+    _sel = { kind: 'route', key: id };
+    refresh(true);
+    const rt = ((_state && _state.routes) || []).find(x => x.r.id === id);
+    if (E.ready && rt && rt.path.length) {
+      const pts = rt.path.map(i => CELLS[i]);
+      const cx = pts.reduce((a, c) => a + c.x, 0) / pts.length, cz = pts.reduce((a, c) => a + c.z, 0) / pts.length;
+      const span = Math.max(...pts.map(c => Math.hypot(c.x - cx, c.z - cz)));
+      E.moveTo(cx, cz, Math.max(360, Math.min(DIST_MAX, span * 3.2 + 200)), 800);
+    }
+  }
+  function routeAvoid(id) { _pickAvoid = id; if (typeof toast === 'function') toast('Touche le système à éviter'); }
+  function routeUnavoid(id, key) {
+    const r = routeById(id); if (!r) return;
+    r.avoid = (r.avoid || []).filter(k => k !== key);
+    if (typeof saveGame === 'function') saveGame();
+    refresh(true);
+  }
+  async function routeColor(id) {
+    const r = routeById(id); if (!r) return;
+    const col = await _mpChoose('Couleur de la route', ROUTE_COLS.map(([n, c]) => ({ c, label: `<span style="color:${c}">━━</span>&nbsp; ${n}` })));
+    if (!col) return;
+    r.color = col.c; if (typeof saveGame === 'function') saveGame(); refresh(true);
+  }
+  async function routeRename(id) {
+    const r = routeById(id); if (!r || typeof sbPrompt !== 'function') return;
+    const v = await sbPrompt({ title: 'Nom de la route', placeholder: r.name, defaultValue: r.name, maxLength: 28 });
+    if (!v || !String(v).trim()) return;
+    r.name = String(v).trim().slice(0, 28); if (typeof saveGame === 'function') saveGame(); refresh(true);
+  }
+  async function routeDelete(id) {
+    const r = routeById(id); if (!r) return;
+    const ok = typeof sbConfirmDanger === 'function' ? await sbConfirmDanger('Supprimer la route', `« ${esc(r.name)} » sera effacée. Tes balises restent en place.`, 'Supprimer') : true;
+    if (!ok) return;
+    G.beaconRoutes = (G.beaconRoutes || []).filter(x => x.id !== id);
+    if (typeof saveGame === 'function') saveGame();
+    _sel = null; refresh(true);
+  }
+  function routeCard(state, id) {
+    const rt = (state.routes || []).find(x => x.r.id === id);
+    if (!rt) return null;
+    const r = rt.r, n = Math.max(0, rt.path.length - 1);
+    const sub = rt.broken
+      ? `<span style="color:#ff8a8a">${(!rt.a || !rt.b) ? 'Rompue : une balise a été rappelée' : 'Tracé impossible : trop de systèmes évités'}</span>`
+      : `<span class="mono">${esc(rt.a.key)} → ${esc(rt.b.key)}</span> · ${n} case${n > 1 ? 's' : ''}`;
+    const av = (r.avoid || []).map(k => `<button class="sm-av" onclick="event.stopPropagation();SBMap.routeUnavoid('${esc(r.id)}','${esc(k)}')" title="Ne plus éviter">${esc(k.split('-').slice(1).join('-'))} ✕</button>`).join('');
+    const tool = (l, fn) => `<button class="sm-tag" style="--c:${r.color}" onclick="event.stopPropagation();SBMap.${fn}('${esc(r.id)}')">${l}</button>`;
+    return `<div class="sm-panel"><div class="sm-ptitle" style="color:${r.color}">${esc(r.name)}</div><div class="sm-psub">${sub}</div>`
+      + (av ? `<div class="sm-avs"><span>Évite</span>${av}</div>` : '')
+      + `<div class="sm-tags">${tool('Éviter un système', 'routeAvoid')}${tool('Couleur', 'routeColor')}</div>`
+      + `<div class="sm-tags">${tool('Renommer', 'routeRename')}${tool('Supprimer', 'routeDelete')}</div>`
+      + _sigOff('Emprunter la route : prochaine étape', 'Flottes et tankers, détection par les balises sur le tracé')
+      + `</div>`;
+  }
+  function routesSheetHtml() {
+    const st = _state || collect();
+    const rs = st.routes || [];
+    if (!rs.length) return '';
+    return `<div class="smw-fl-h">Mes routes · ${rs.length}</div>` + rs.map(rt => `<button class="smw-fl" onclick="SBMap.showRoute('${esc(rt.r.id)}')">
+        <span class="t" style="color:${rt.r.color}">${esc(rt.r.name)}</span>
+        <span class="g">${rt.a ? esc(rt.a.key) : '—'} → ${rt.b ? esc(rt.b.key) : '—'}</span>
+        <span class="e">${rt.broken ? 'rompue' : (rt.path.length - 1) + ' cases'}</span></button>`).join('');
+  }
+  function showRoute(id) { W.closeSheet(); selectRoute(id); }
 
   /* ─── « En vol » dans la feuille Sondes : chaque sonde mène à sa cible sur la carte ─── */
   function flightsHtml() {
@@ -1398,7 +1627,7 @@
       // feuille Sondes : les sondes en vol d'abord, chacune mène à sa cible sur la carte
       let fl = this.sheet.querySelector('.smw-flights');
       if (!fl) { fl = document.createElement('div'); fl.className = 'smw-flights'; this.sheet.querySelector('.smw-sh-body').prepend(fl); }
-      fl.innerHTML = tab === 'sondes' ? flightsHtml() : '';
+      fl.innerHTML = tab === 'sondes' ? flightsHtml() + routesSheetHtml() : '';
       this.nav.querySelectorAll('button').forEach((b) => b.classList.toggle('on', b.dataset.t === tab));
       this.sheet.classList.add('on');
     },
@@ -1511,6 +1740,13 @@
       .smw-fl .g{flex:1;font:500 11px/1.2 'JetBrains Mono',monospace;color:#cfdbe4}
       .smw-fl .e{font:500 10px/1 'JetBrains Mono',monospace;color:rgba(190,205,215,.6)}
       .smw-flights{margin-bottom:8px}
+      .sm-rts{display:flex;flex-direction:column;gap:5px;margin-top:9px}
+      .sm-rt{display:flex;align-items:center;gap:8px;width:100%;padding:8px 10px;border-radius:7px;border:1px solid rgba(150,170,185,.18);background:rgba(255,255,255,.02);color:#dfe8ee;font:500 11px/1.2 'Space Grotesk',system-ui,sans-serif;cursor:pointer;text-align:left}
+      .sm-rt i{width:14px;height:3px;border-radius:2px;flex:none}
+      .sm-rt b{font-weight:600;letter-spacing:.04em}
+      .sm-rt span{margin-left:auto;font:500 10px/1 'JetBrains Mono',monospace;color:rgba(190,205,215,.6)}
+      .sm-avs{display:flex;flex-wrap:wrap;align-items:center;gap:5px;margin-top:8px;font-size:10px;color:var(--mut)}
+      .sm-av{padding:4px 7px;border-radius:5px;border:1px solid rgba(255,138,138,.35);background:transparent;color:#ff9a8a;font:500 10px/1 'JetBrains Mono',monospace;cursor:pointer}
     `;
     document.head.appendChild(st);
   }
@@ -1519,6 +1755,7 @@
   function panelFor(sel) { const keep = _sel; _sel = sel; let h = ''; try { h = panelMarkup(collect()); } finally { _sel = keep; } return h; }
   const API = {
     render, sweep, panelFor, tag, beacon, recallBeacon: recallBeaconFromMap, showFlight,
+    openRoute, selectRoute, showRoute, routeAvoid, routeUnavoid, routeColor, routeRename, routeDelete,
     select(kind, key) {
       if (_fallback) return;
       const sel = { kind, key };

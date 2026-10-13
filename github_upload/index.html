@@ -8550,7 +8550,7 @@ var EXTRA_SAVE_KEYS = [
   'mpDeals',   // MP_DOCKS_V0 — marchés entre commandants (séquestre et règlement)
   'botState',  // BOTS_1110 — stocks des commandants automates après pillage
   'mpGrowthMilestone',
-  'systemTags', 'mapSeen',   // PATCH_1310_CARTE — marques de systèmes + systèmes déjà vus (survivent aux rapports supprimés)  // RUMORS_1110 — dernier palier de niveau annoncé au comptoir
+  'systemTags', 'mapSeen', 'beaconRoutes',   // + routes entre balises (13/10)   // PATCH_1310_CARTE — marques de systèmes + systèmes déjà vus (survivent aux rapports supprimés)  // RUMORS_1110 — dernier palier de niveau annoncé au comptoir
   'mpDiplo',   // AMBASSADES_1210 — ambassades vues et dernière image des pactes
   'mpNeighbors',   // VOISINS_1310 — voisins déjà signalés
 ];
@@ -9954,7 +9954,7 @@ function _mpOnline() { return !!(window.SBMP && window.SBMP.ready && window.SBMP
 // Balises posées, telles que le registre doit les connaître (3 au plus)
 function mpBeaconList() {
   return (G.probesPool || []).filter(p => p.tier === 'beacon' && p.state === 'deployed' && _mpSys(p.deployedSystem))
-    .slice(0, 3).map(p => ({ local_id: String(p.id), system: _mpSys(p.deployedSystem) }));
+    .slice(0, 21).map(p => ({ local_id: String(p.id), system: _mpSys(p.deployedSystem) }));
 }
 
 // Coordonnée d'un dock : déterministe (même dock = même système pour tous les joueurs), dans la zone de test
@@ -31579,7 +31579,8 @@ const PROBE_TIER_CONFIG = {
     duration: '8 min',
     durationMs: 8 * 60 * 1000,
     behavior: 'persistent',     // ⚡ NOUVEAU comportement : reste sur place après arrivée
-    quotaMax: 3,                 // V1 : max 3 balises (en stock + déployées + voyage)
+    // PATCH_1310_ROUTES — décision d'Adrien : 7 balises, puis 14 (Laboratoire niv. 2), puis 21 (niv. 3)
+    get quotaMax() { const t = (typeof getLaboTier === 'function') ? getLaboTier() : 0; return t >= 3 ? 21 : t >= 2 ? 14 : 7; },
     skillRequired: null,
     accent: '#a370ff',
     accentSoft: 'rgba(163,112,255,.15)',
@@ -43999,7 +44000,7 @@ if (G.knownTargets && Array.isArray(G.tankerMissions)) {
 <!-- HOME V2 — « monde d'abord » : planète plein écran, ressources en ligne, Flotte / Défense / Prospection (assets/home.js) -->
 <script type="module" src="assets/home.js?v=20261013-1630"></script>
 <!-- SPACE MAP v0 — carte du Centre de prospection (assets/spacemap.js, source src/spacemap.js) -->
-<script src="assets/spacemap.js?v=20261013-1900"></script>
+<script src="assets/spacemap.js?v=20261013-2200"></script>
 <!-- SPACE MAP niveau B — diorama 3D d'un système (assets/system3d.js, source src/system3d.js) -->
 <script type="module" src="assets/system3d.js?v=20261013-1630"></script>
 <!-- SHIP3D — fiches 3D : cuirassé KV-01, frégate SR-01, tanker TK-07, chantier orbital OS-01 (assets/ship3d.js, sur le moteur partagé window.SB3D) -->
