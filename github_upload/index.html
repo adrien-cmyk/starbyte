@@ -8181,7 +8181,7 @@ function totalDefense() {
 // Helper : soldats d'un type réservés à des flottes DÉPLOYÉES (à bord, ne défendent plus)
 // AUDIT_1110 — Réservations : les totaux (G.fleet.stationed, G.defense.units[k].qty) sont ce qu'on POSSÈDE ;
 // flottes, garnisons et missions tanker en RÉSERVENT une partie.
-var TANKER_BUSY_STATUSES = ['in_transit', 'docked', 'returning', 'exploring', 'orbital_relay'];
+var TANKER_BUSY_STATUSES = ['in_transit', 'docked', 'returning', 'exploring', 'orbital_relay', 'posted'];   // PATCH_1310_POSTES : + poste de route
 function _tankerMissionTier(m) { return m.tier || m.tankerTier || 0; }
 function _busyTankerMissions() { return (G.tankerMissions || []).filter(m => TANKER_BUSY_STATUSES.includes(m.status)); }
 function _tankersInFleets(t, excludeFleetId) {
@@ -10118,6 +10118,8 @@ function mpEmbassyRender() {
     const rows = [];
     if (m) rows.push(`<div style="font-size:12px;color:#e6f0ff">${_esc(m.tankerName)} en orbite chez ${_esc(pseudo)}</div>`);
     if (inc) rows.push(`<div style="font-size:12px;color:#e6f0ff">Son tanker ${_esc(inc.tanker || '')} est en orbite chez toi</div>`);
+    const _post = typeof _mpPostWith === 'function' ? _mpPostWith(addr) : null;   // PATCH_1310_POSTES
+    if (_post) rows.push(`<div style="font-size:12px;color:#e6f0ff">Vos postes se font face à <span style="font-family:var(--font-mono)">${_post.system}</span></div>`);
     if (!rows.length) rows.push(`<div style="font-size:12px;color:var(--mut)">Aucun tanker en orbite entre vous : l'ambassade est fermée.</div>`);
     status = `<div class="emb-label">Ambassade</div>${rows.join('')}`;
   }
@@ -10332,6 +10334,88 @@ async function _mpConvoyRoute(m, leg) {
     await _mpRpc('mp_convoy_route', { p_mission: m.id, p_leg: leg, p_via: via, p_own: !!m.ownRouteId });
     m.mpRouteSent = Object.assign({}, m.mpRouteSent, { [leg]: true });
   } catch (e) { console.warn('[convoi] tracé :', String(e && e.message || e)); }
+}
+// ── PATCH_1310_POSTES — postes de route ──
+// Un tanker part par ma route vers une de ses balises et y reste en station : une ambassade miniature.
+function _routePostFreeTier() {
+  for (const t of [1, 2, 3]) if (tankerAvailability(t) > 0) return t;
+  return 0;
+}
+function launchRoutePost(routeId, sysKey) {
+  if (!/^[A-Z]-[A-Z]-\d{4}$/.test(String(sysKey || ''))) return;
+  if ((G.tankerMissions || []).some(m => m.kind === 'route_post' && m.targetCoords === sysKey && ['in_transit', 'posted'].includes(m.status))) { toast('Tu as déjà un poste ici'); return; }
+  if ((G.tankerMissions || []).filter(m => m.kind === 'route_post' && ['in_transit', 'posted'].includes(m.status)).length >= 3) { toast('3 postes ouverts au plus : rappelle un tanker d\'abord'); return; }
+  const tier = _routePostFreeTier();
+  if (!tier) { toast('Aucun tanker disponible'); return; }
+  const plan = window.SBMap && SBMap.planFor ? SBMap.planFor(sysKey) : null;
+  const r = plan && plan.routes.find(x => x.id === routeId);
+  if (!r) { toast('Route rompue ou introuvable'); return; }
+  const now = Date.now();
+  const ms = 5 * 60 * 1000 * ROUTE_TYPES.own.durationFactor * Math.max(1, Math.min(3, r.len / Math.max(1, plan.direct.len)));
+  const m = {
+    id: 'tm-' + now + '-' + Math.random().toString(36).slice(2, 6),
+    tankerName: pickTankerName(), tankerTier: tier, kind: 'route_post',
+    targetCoords: sysKey, targetLabel: 'Poste ' + sysKey,
+    departedAt: now, arrivalAt: now + ms, status: 'in_transit', routeType: 'own',
+    ownRouteId: r.id, ownRouteName: r.name, via: r.via.slice(0, 24),
+    cargo: { soldiers: { garde: 0, lourd: 0 }, resources: { metal: 0, energie: 0, cristal: 0 } }, riskLossPct: 0,
+  };
+  if (!Array.isArray(G.tankerMissions)) G.tankerMissions = [];
+  G.tankerMissions.push(m);
+  if (typeof startTankerCountdownTicker === 'function') startTankerCountdownTicker();
+  if (typeof saveGame === 'function') saveGame();
+  toast(`${m.tankerName} part ouvrir un poste à ${sysKey} · ${formatTankerDuration(ms)}`);
+  if (window.SBMap && SBMap.render) { try { SBMap.render(); } catch (e) {} }
+  return m;
+}
+async function recallRoutePost(missionId) {
+  const m = (G.tankerMissions || []).find(x => x.id === missionId && x.kind === 'route_post');
+  if (!m || !['posted', 'in_transit'].includes(m.status)) return;
+  const others = (G._mpPosts || []).filter(o => o.system === m.targetCoords);
+  const ok = await sbConfirm({ title: 'Rappeler ' + m.tankerName + ' ?',
+    body: `Le poste de <strong>${m.targetCoords}</strong> ferme.` + (others.length ? `<br><br>Le canal avec ${others.map(o => _esc(o.pseudo)).join(', ')} se refermera (l'historique reste lisible).` : ''),
+    confirmLabel: 'Rappeler', cancelLabel: 'Garder le poste' });
+  if (!ok) return;
+  const now = Date.now(), back = Math.max(60000, (m.arrivalAt - m.departedAt) || 300000);
+  const elapsed = m.status === 'in_transit' ? Math.max(0, now - m.departedAt) : back;   // demi-tour : le chemin déjà fait
+  m.status = 'returning'; m.returnDepartedAt = now; m.returnArrivalAt = now + Math.min(back, elapsed || back);
+  if (m.mpPostId && _mpOnline()) { try { await _mpRpc('mp_post_close', { p_mission: m.id }); } catch (e) {} }
+  m.mpPostId = null;
+  if (typeof saveGame === 'function') saveGame();
+  toast(`${m.tankerName} rentre du poste de ${m.targetCoords}`);
+  mpPostsPoll(true);
+  if (window.SBMap && SBMap.render) { try { SBMap.render(); } catch (e) {} }
+}
+// inscription des postes au registre (rejouée tant qu'elle n'a pas réussi : hors ligne au moment de l'arrivée)
+async function mpPostSync() {
+  if (!_mpOnline()) return;
+  for (const m of (G.tankerMissions || []).filter(x => x.kind === 'route_post' && x.status === 'posted' && !x.mpPostId)) {
+    try {
+      m.mpPostId = await _mpRpc('mp_post_open', { p_mission: m.id, p_system: m.targetCoords, p_tanker: m.tankerName, p_route: m.ownRouteName || null });
+      if (typeof saveGame === 'function') saveGame();
+    } catch (e) { console.warn('[poste] inscription :', String(e && e.message || e)); }
+  }
+}
+// les postes des autres commandants que je vois (balise ou poste dans le même système)
+var _mpPostsAt = 0;
+async function mpPostsPoll(force) {
+  if (!_mpOnline() || (!force && Date.now() - _mpPostsAt < 55000)) return;
+  _mpPostsAt = Date.now();
+  await mpPostSync();
+  try {
+    const rows = await _mpRpc('mp_posts_visible', {});
+    const clean = (Array.isArray(rows) ? rows : []).filter(r => /^[A-Z]-[A-Z]-\d{4}$/.test(r.system || '') && /^[A-Z]-[A-Z]-\d{4}-\d{1,2}$/.test(r.address || ''))
+      .map(r => ({ system: r.system, pseudo: String(r.pseudo || '').slice(0, 20), address: r.address, tanker: String(r.tanker_name || '').slice(0, 24), openedAt: Date.parse(r.opened_at) || Date.now(), met: !!r.met }));
+    const was = JSON.stringify(G._mpPosts || []);
+    const fresh = clean.filter(r => r.met && !(G._mpPosts || []).some(o => o.met && o.address === r.address && o.system === r.system));
+    G._mpPosts = clean;
+    for (const r of fresh) toast(`⚑ ${r.pseudo} tient un poste à ${r.system} · canal d'ambassade ouvert`);
+    if (was !== JSON.stringify(clean) && window.SBMap && SBMap.render) { try { SBMap.render(); } catch (e) {} }
+  } catch (e) { console.warn('[poste] relève :', String(e && e.message || e)); }
+}
+setInterval(() => { if (document.visibilityState !== 'hidden') mpPostsPoll(); }, 15000);
+function _mpPostWith(addr) {
+  return (G._mpPosts || []).find(o => o.address === addr && o.met) || null;
 }
 function mpConvoyEnd(m, leg) {
   if (!m || !m.mpConvoy || !m.mpConvoy[leg] || m.mpConvoy[leg] === 'failed') return;
@@ -24591,6 +24675,18 @@ function handleTankerReturn(missionId) {
   if (idx === -1) return;
   const mission = G.tankerMissions[idx];
   if (mission.status !== 'in_transit') return;
+
+  // PATCH_1310_POSTES — poste de route : le tanker reste en station au bout de la route
+  if (mission.kind === 'route_post') {
+    mission.status = 'posted';
+    mission.postedAt = Date.now();
+    toast(`${mission.tankerName} a ouvert un poste à ${mission.targetCoords}`);
+    mpPostSync();
+    if (typeof saveGame === 'function') saveGame();
+    if (window.SBMap && SBMap.render) { try { SBMap.render(); } catch (e) {} }
+    if (typeof refreshCurrentScreen === 'function') refreshCurrentScreen();
+    return;
+  }
 
   // ─── Chunk 15/05 : Mission DROPOFF (tanker logistique) ───
   // Si mission.kind === 'dropoff', on délègue à handleTankerDropoffArrival
@@ -44430,9 +44526,9 @@ if (G.knownTargets && Array.isArray(G.tankerMissions)) {
 <!-- HOME V2 — « monde d'abord » : planète plein écran, ressources en ligne, Flotte / Défense / Prospection (assets/home.js) -->
 <script type="module" src="assets/home.js?v=20261013-2000"></script>
 <!-- SPACE MAP v0 — carte du Centre de prospection (assets/spacemap.js, source src/spacemap.js) -->
-<script src="assets/spacemap.js?v=20261013-2000"></script>
+<script src="assets/spacemap.js?v=20261013-2215"></script>
 <!-- SPACE MAP niveau B — diorama 3D d'un système (assets/system3d.js, source src/system3d.js) -->
-<script type="module" src="assets/system3d.js?v=20261013-2000"></script>
+<script type="module" src="assets/system3d.js?v=20261013-2215"></script>
 <!-- SHIP3D — fiches 3D : cuirassé KV-01, frégate SR-01, tanker TK-07, chantier orbital OS-01 (assets/ship3d.js, sur le moteur partagé window.SB3D) -->
 <script src="assets/aftermath.js?v=20261013-2000"></script>
 <script src="assets/fete_caserne.js?v=20261013-2000"></script>

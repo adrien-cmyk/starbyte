@@ -357,9 +357,24 @@ export const SBSystem = {
     if (st.flights.length) bits.push(`${st.flights.length} en approche`);
     const radar = (typeof _probeTierStatus === 'function') ? _probeTierStatus('radar') : { ok: false };
     const sweepBtn = radar.ok ? `<button class="s3-act" onclick="SBSystem.sweep()">Balayer</button>` : radar.build ? `<button class="s3-act dim" onclick="openProbeDetail('radar')">Construire une Radar</button>` : `<button class="s3-act dim" disabled>${esc(radar.why || 'Radar indisponible')}</button>`;
+    // 13/10 (Adrien) : marquer un système se fait ici, dans l'inspection, et nulle part ailleurs
+    const tg = (G.systemTags || {})[k];
+    const chip = (v, l, c) => `<button class="sm-tag${tg === v ? ' on' : ''}" style="--c:${c}" onclick="SBSystem.tag('${v}')">${l}</button>`;
+    const tags = st.isMine ? '' : `<div class="sm-tags s3-tags">${chip('star', 'Intéressant', '#ffc864')}${chip('skip', 'Sans intérêt', '#9aa6ae')}</div>`;
     el.innerHTML = `<div class="s3-counts">${bits.join(' · ') || 'Rien de connu ici.'}</div>
       <div class="s3-hint">Touche un objet</div>
+      ${tags}
       <div class="s3-acts">${sweepBtn}<button class="s3-act" onclick="SBSystem.reports()">Rapports</button></div>`;
+  },
+
+  tag(v) {
+    if (window.SBMap && SBMap.tag) SBMap.tag(this.sysKey, v);
+    else {
+      if (!G.systemTags) G.systemTags = {};
+      if (G.systemTags[this.sysKey] === v) delete G.systemTags[this.sysKey]; else G.systemTags[this.sysKey] = v;
+      if (typeof saveGame === 'function') saveGame();
+    }
+    this._renderSheet();
   },
 
   sweep() {
@@ -431,6 +446,7 @@ css.textContent = `
   #scr-system .s3-counts{font-size:11px;color:var(--txt);letter-spacing:.08em;text-transform:uppercase;font-weight:600}
   #scr-system .s3-hint{font-size:9px;letter-spacing:.16em;text-transform:uppercase;color:rgba(170,190,185,.4);margin-top:3px}
   #scr-system .s3-acts{display:flex;gap:8px;margin-top:10px}
+  #scr-system .s3-tags{margin-top:10px}
   #scr-system .s3-act{flex:1;min-height:42px;border-radius:9px;border:1px solid rgba(230,240,255,.5);background:rgba(230,240,255,.08);color:#e6f0ff;font:600 11px/1 inherit;letter-spacing:.12em;text-transform:uppercase;cursor:pointer;font-family:inherit}
   #scr-system .s3-act.dim{border-color:rgba(230,240,255,.22);color:rgba(230,240,255,.6);background:transparent}
   #scr-system .s3-sel .sm-panel{margin:0;border:none;background:transparent;padding:0;min-height:0}
