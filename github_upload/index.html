@@ -9701,6 +9701,10 @@ async function mpIngestOrbits(orbits, pacts, meId) {
     if (rep && (rep.diplo.state !== o.cargo_state || rep.diplo.gone !== !!o.left_at)) { rep.diplo.state = o.cargo_state; rep.diplo.gone = !!o.left_at; dirty = true; }
     if (o.cargo_state === 'accepted' && mpCreditOrbitCargo(o)) dirty = true;
   }
+  // CHAT_1310 — ambassades ouvertes chez moi : chacune ouvre un canal de discussion
+  _mpEmbIn = orbits.filter(o => o.target_id === meId && !o.left_at && o.owner_address)
+    .map(o => ({ presenceId: o.id, address: o.owner_address, pseudo: o.owner_pseudo, tanker: o.tanker_name, cargoState: o.cargo_state, since: Date.parse(o.arrived_at) || Date.now() }));
+  if (typeof mpEmbassyRefresh === 'function') mpEmbassyRefresh();
   // 3. Pactes — les pactes ouverts arrivent tous : un pacte ouvert ici mais plus au registre est clos
   const openIds = new Set(pacts.filter(k => k.status === 'proposed' || k.status === 'active').map(k => k.id));
   const seenIds = new Set(pacts.map(k => k.id));
@@ -9901,6 +9905,7 @@ function renderDiploReportDetail(r) {
       <div style="display:flex;gap:8px">${_mpDiploBtn('Accepter', `mpAnswerOrbit('${r.id}',true)`)}${_mpDiploBtn('Refuser', `mpAnswerOrbit('${r.id}',false)`, 'mut')}</div>`;
     html += `<div style="margin:0 16px 14px">${cargoHtml}</div>`;
     if (d.gone) html += `<div style="margin:0 16px 14px;font-size:11px;color:var(--mut);font-style:italic">L'ambassade est fermée.</div>`;
+    else if (d.address) html += `<div style="margin:0 16px 14px;display:flex">${_mpDiploBtn('💬 Ouvrir l\'ambassade · discuter' + _mpChatBadge(d.address), `openEmbassy('${d.address}')`)}</div>`;
   } else if (d.type === 'pact_proposed') {
     html += box(`<strong>${d.pseudo}</strong> te propose un <strong>pacte de non-agression</strong>.<br><br>Tant que son tanker reste en orbite chez toi, aucun de vous deux ne peut attaquer l'autre. S'il le rappelle, le pacte tombe, et tout le comptoir le saura. Tu peux aussi le dénoncer à tout moment.${addr}`);
     const st = (k && k.status) || d.state;
@@ -9933,8 +9938,10 @@ function mpEmbassyBlockHtml(p) {
   const addr = p.mpAddress || p.coord;
   const m = (G.tankerMissions || []).find(x => x.status === 'orbital_relay' && x.mpTarget && x.destinationPlanetCoord === p.coord);
   const k = mpPactWith(addr);
-  if (!m && !k) return '';
+  const inc = _mpEmbInFor(addr);
+  if (!m && !k && !inc) return '';
   const rows = [];
+  if (inc) rows.push(`<div style="font-size:12px;color:#e6f0ff">Son tanker ${_esc(inc.tanker || '')} est en orbite chez toi</div>`);
   if (m) {
     const res = (m.cargo && m.cargo.resources) || {};
     const off = m.mpOffered || res;
@@ -9956,11 +9963,277 @@ function mpEmbassyBlockHtml(p) {
   } else if (m && m.mpPresenceId) {
     action = _mpDiploBtn('Proposer un pacte de non-agression', `mpProposePact('${m.id}')`);
   }
+  const talk = (m || inc) && !(typeof getCurrentScreen === 'function' && getCurrentScreen() === 'embassy')
+    ? `<div style="display:flex;margin-top:10px">${_mpDiploBtn('💬 Ouvrir l\'ambassade · discuter' + _mpChatBadge(addr), `openEmbassy('${addr}')`)}</div>` : '';
   return `<div style="margin-bottom:10px;padding:12px 14px;border:1px solid rgba(95,255,232,.3);border-radius:8px;background:rgba(95,255,232,.04)">
     <div style="font-size:10px;color:var(--mut);letter-spacing:.14em;text-transform:uppercase;margin-bottom:8px">Ambassade</div>
     ${rows.join('')}
     ${action ? `<div style="display:flex;gap:8px;margin-top:10px">${action}</div>` : ''}
+    ${talk}
   </div>`;
+}
+
+// CHAT_1310 — AMBASSADE : vue héros (le tanker en orbite au-dessus de la planète, comme le chantier orbital)
+// et chat entre les deux commandants. Le canal est ouvert tant qu'un tanker est en orbite entre eux (dans un sens
+// ou dans l'autre) ; rappel du tanker → canal fermé, l'historique reste lisible. Texte brut, 280 caractères.
+var _mpEmbIn = [];                 // ambassades ouvertes chez moi (relève du registre)
+var _mpChatUnread = {};            // adresse → { n, pseudo, last, lastId }
+var _mpChatToasted = {};           // adresse → dernier message notifié
+var MP_CHAT_ERRORS = { chat_closed: 'Canal fermé : il faut un tanker en orbite entre vous', chat_rate: 'Doucement : 6 messages par minute au plus',
+  chat_quota: '300 messages par jour, c\'est le maximum', chat_too_long: '280 caractères au plus', chat_empty: 'Message vide',
+  target_unknown: 'Ce commandant n\'est plus au registre', target_self: 'Impossible de s\'écrire à soi-même', no_world: 'Ton monde n\'est pas encore au registre' };
+function _mpChatErr(e) {
+  const code = (String(e && e.message || e).match(/[a-z_]+/g) || []).find(c => MP_CHAT_ERRORS[c]);
+  return code ? MP_CHAT_ERRORS[code] : 'Le registre ne répond pas, réessaie';
+}
+function _esc(s) { return String(s == null ? '' : s).replace(/[&<>"'`]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;', '`': '&#96;' }[c])); }
+function _mpEmbInFor(addr) { return (_mpEmbIn || []).find(o => o.address === addr) || null; }
+function _mpEmbMine(addr) { return (G.tankerMissions || []).find(x => x.status === 'orbital_relay' && x.mpTarget && x.mpTarget.address === addr) || null; }
+function _mpChatBadge(addr) {
+  const u = _mpChatUnread[addr];
+  return u && u.n ? ` <span style="display:inline-block;min-width:16px;padding:0 5px;border-radius:9px;background:#ff5a48;color:#fff;font-size:10px;line-height:16px;text-align:center;font-weight:600">${u.n}</span>` : '';
+}
+
+// relève des non-lus (cloud.js toutes les 15 s) : pastilles, bulle flottante, notification du dernier message
+function mpIngestChat(rows) {
+  const prev = _mpChatUnread;
+  _mpChatUnread = {};
+  rows.forEach(r => { _mpChatUnread[r.address] = r; });
+  const open = _emb && _emb.address && getCurrentScreen() === 'embassy';
+  for (const r of rows) {
+    if (open && r.address === _emb.address) { mpEmbassyLoadThread(); continue; }   // déjà sous les yeux
+    if (_mpChatToasted[r.address] === r.lastId) continue;
+    _mpChatToasted[r.address] = r.lastId;
+    if (typeof _mpMergeSender === 'function') _mpMergeSender(r.address, r.pseudo);
+    toast(`💬 <b>${_esc(r.pseudo)}</b> : ${_esc(r.last.length > 70 ? r.last.slice(0, 68) + '…' : r.last)}`);
+    try { if (typeof _vibrate === 'function') _vibrate([40, 60, 40]); } catch (e) {}
+  }
+  const changed = JSON.stringify(Object.keys(prev).map(k => k + prev[k].n)) !== JSON.stringify(Object.keys(_mpChatUnread).map(k => k + _mpChatUnread[k].n));
+  _mpChatBubble();
+  if (changed && !open && typeof refreshCurrentScreen === 'function') {
+    const cur = getCurrentScreen();
+    if (cur === 'fleet' || cur === 'planet-detail') refreshCurrentScreen();
+  }
+}
+// bulle flottante : messages non lus → un toucher ouvre la conversation
+function _mpChatBubble() {
+  let b = document.getElementById('sb-chat-bubble');
+  const list = Object.values(_mpChatUnread).filter(u => u.n > 0).sort((a, c) => String(c.lastAt).localeCompare(String(a.lastAt)));
+  const total = list.reduce((s, u) => s + u.n, 0);
+  const onEmb = getCurrentScreen() === 'embassy';
+  if (!total || onEmb) { if (b) b.style.display = 'none'; return; }
+  if (!b) {
+    b = document.createElement('button'); b.id = 'sb-chat-bubble'; b.setAttribute('aria-label', 'Messages non lus');
+    b.style.cssText = 'position:fixed;right:12px;bottom:calc(env(safe-area-inset-bottom,0px) + 210px);z-index:8000;width:48px;height:48px;border-radius:50%;border:1px solid rgba(95,255,232,.6);background:rgba(8,20,24,.9);color:#5fffe8;font-size:20px;cursor:pointer;box-shadow:0 0 16px rgba(95,255,232,.35);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);padding:0';
+    document.body.appendChild(b);
+  }
+  b.style.display = '';
+  b.innerHTML = `💬<span style="position:absolute;top:-4px;right:-4px;min-width:18px;height:18px;padding:0 5px;border-radius:9px;background:#ff5a48;color:#fff;font-size:11px;line-height:18px;font-weight:600">${total}</span>`;
+  b.onclick = () => openEmbassy(list[0].address);
+}
+
+// ─── écran ───
+var _emb = { address: null, sig: '', busy: false, hero: null, heroKey: '' };
+(function mpEmbassyScreen() {
+  if (document.getElementById('scr-embassy')) return;
+  const st = document.createElement('style');
+  st.textContent = `
+#scr-embassy.ud-hero > .stars, #scr-embassy.ud-hero > .glow { display: none; }
+#scr-embassy:not(.ud-hero) > .u3d-hero, #scr-embassy:not(.ud-hero) .ud-hero-space { display: none; }
+#scr-embassy.ud-hero .screen-scroll { position: relative; z-index: 2; touch-action: pan-y; }
+#scr-embassy.ud-ship .ud-hero-space { touch-action: none; }
+#scr-embassy .head { text-shadow: 0 2px 12px rgba(0,0,0,.8); }
+#emb-hero .u3d-canvas { touch-action: none; }
+.emb-card { margin: 0 16px 12px; padding: 14px; border-radius: 12px; border: 1px solid rgba(95,255,232,.25); background: rgba(8,12,18,.86); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); }
+.emb-label { font-size: 10px; color: var(--mut); letter-spacing: .14em; text-transform: uppercase; margin-bottom: 8px; display: flex; align-items: center; gap: 8px; }
+.emb-label .dot { width: 7px; height: 7px; border-radius: 50%; background: #5fcc8a; box-shadow: 0 0 8px #5fcc8a; }
+.emb-label .dot.off { background: #6a6f78; box-shadow: none; }
+#emb-msgs { display: flex; flex-direction: column; gap: 6px; max-height: 46vh; overflow-y: auto; padding: 2px 0 4px; -webkit-overflow-scrolling: touch; }
+.emb-msg { max-width: 82%; padding: 8px 11px; border-radius: 12px; font-size: 13px; line-height: 1.42; white-space: pre-wrap; word-break: break-word; }
+.emb-msg.me { align-self: flex-end; background: rgba(95,255,232,.12); border: 1px solid rgba(95,255,232,.38); color: #e6fffb; border-bottom-right-radius: 4px; }
+.emb-msg.them { align-self: flex-start; background: rgba(255,200,100,.08); border: 1px solid rgba(255,200,100,.32); color: #fff1d8; border-bottom-left-radius: 4px; }
+.emb-msg .t { display: block; font-size: 9px; color: rgba(200,210,220,.55); margin-top: 3px; letter-spacing: .04em; }
+.emb-msg.me .t { text-align: right; }
+.emb-empty { font-size: 12px; color: var(--mut); font-style: italic; text-align: center; padding: 12px 6px; line-height: 1.5; }
+.emb-day { align-self: center; font-size: 9px; color: var(--mut); letter-spacing: .14em; text-transform: uppercase; margin: 6px 0 2px; }
+#emb-form { display: flex; gap: 8px; align-items: flex-end; margin-top: 10px; }
+#emb-input { flex: 1; min-height: 40px; max-height: 110px; resize: none; padding: 10px 12px; border-radius: 10px; border: 1px solid rgba(95,255,232,.3); background: rgba(0,0,0,.35);
+  color: #eef4f8; font: inherit; font-size: 14px; line-height: 1.35; outline: none; }
+#emb-input:focus { border-color: rgba(95,255,232,.7); }
+#emb-input:disabled { opacity: .45; }
+#emb-send { flex-shrink: 0; height: 40px; padding: 0 14px; border-radius: 10px; border: 1px solid rgba(95,255,232,.55); background: rgba(95,255,232,.12); color: #5fffe8;
+  font: inherit; font-size: 11px; letter-spacing: .12em; text-transform: uppercase; cursor: pointer; }
+#emb-send:disabled { opacity: .4; cursor: default; }
+#emb-count { font-size: 9px; color: var(--mut); text-align: right; margin-top: 4px; letter-spacing: .06em; }
+.emb-actions { display: flex; gap: 8px; margin: 0 16px 12px; }`;
+  document.head.appendChild(st);
+  const el = document.createElement('div');
+  el.id = 'scr-embassy'; el.className = 'screen hidden';
+  el.innerHTML = `<div class="stars"></div><div class="glow"></div>
+    <div class="screen-scroll">
+      <header class="head"><h1>AMBASSADE</h1><div class="meta" id="emb-meta"></div></header>
+      <div class="emb-card" id="emb-status"></div>
+      <div class="emb-card" id="emb-chat">
+        <div class="emb-label"><span class="dot" id="emb-dot"></span><span id="emb-chan">Canal</span></div>
+        <div id="emb-msgs"></div>
+        <div id="emb-form"><textarea id="emb-input" rows="1" maxlength="280" placeholder="Écrire…"></textarea><button id="emb-send">Envoyer</button></div>
+        <div id="emb-count"></div>
+      </div>
+      <div class="emb-actions" id="emb-actions"></div>
+      <div style="height:16px"></div>
+    </div>
+    <footer class="actions"><button class="back" onclick="goBack()">← RETOUR</button></footer>`;
+  document.body.appendChild(el);
+  const input = el.querySelector('#emb-input'), send = el.querySelector('#emb-send');
+  const count = () => { const n = input.value.length; el.querySelector('#emb-count').textContent = n > 200 ? `${n} / 280` : ''; input.style.height = 'auto'; input.style.height = Math.min(110, input.scrollHeight) + 'px'; };
+  input.addEventListener('input', count);
+  input.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); mpEmbassySend(); } });
+  send.addEventListener('click', () => mpEmbassySend());
+  // quitter l'écran : la 3D est libérée, la relève s'arrête
+  new MutationObserver(() => { if (el.classList.contains('hidden')) mpEmbassyUnmount(); }).observe(el, { attributes: true, attributeFilter: ['class'] });
+  setInterval(() => { if (_emb.address && !el.classList.contains('hidden') && document.visibilityState !== 'hidden') mpEmbassyLoadThread(); }, 4000);
+})();
+
+function openEmbassy(address) {
+  if (!/^[A-Z]-[A-Z]-\d{4}-\d{1,2}$/.test(String(address || ''))) { toast('Ambassade introuvable'); return; }
+  _emb.address = address; _emb.sig = ''; _emb.thread = null;
+  goto('embassy');
+  mpEmbassyRender();
+  mpEmbassyLoadThread(true);
+  _mpChatBubble();
+}
+function mpEmbassyRefresh() { if (_emb.address && getCurrentScreen() === 'embassy') mpEmbassyRender(); }
+
+function mpEmbassyRender() {
+  const addr = _emb.address; if (!addr) return;
+  const m = _mpEmbMine(addr), inc = _mpEmbInFor(addr);
+  const planet = typeof findPlanetByCoord === 'function' ? findPlanetByCoord(addr) : null;
+  const pseudo = (m && m.mpTarget && m.mpTarget.pseudo) || (inc && inc.pseudo) || (planet && planet.playerName) || (_emb.thread && _emb.thread.pseudo) || '?';
+  _emb.pseudo = pseudo;
+  document.getElementById('emb-meta').innerHTML = `<span>${_esc(pseudo)}</span><span class="dot"></span><span>${addr}</span>`;
+  // état : mon tanker chez lui, le sien chez moi, la cale, le pacte (bloc commun avec la fiche planète)
+  let status = '';
+  if (planet && planet.isReal && typeof mpEmbassyBlockHtml === 'function') status = mpEmbassyBlockHtml(planet).replace(/^<div style="margin-bottom:10px;padding:12px 14px;border:1px solid rgba\(95,255,232,\.3\);border-radius:8px;background:rgba\(95,255,232,\.04\)">/, '<div>');
+  if (!status) {
+    const rows = [];
+    if (m) rows.push(`<div style="font-size:12px;color:#e6f0ff">${_esc(m.tankerName)} en orbite chez ${_esc(pseudo)}</div>`);
+    if (inc) rows.push(`<div style="font-size:12px;color:#e6f0ff">Son tanker ${_esc(inc.tanker || '')} est en orbite chez toi</div>`);
+    if (!rows.length) rows.push(`<div style="font-size:12px;color:var(--mut)">Aucun tanker en orbite entre vous : l'ambassade est fermée.</div>`);
+    status = `<div class="emb-label">Ambassade</div>${rows.join('')}`;
+  }
+  document.getElementById('emb-status').innerHTML = status;
+  // actions : pavillon, sa planète, rappeler mon tanker
+  const acts = [];
+  if (planet) acts.push(_mpDiploBtn('⚑ Pavillon', `openMessagePlayer('${addr}')`));
+  acts.push(_mpDiploBtn('Sa planète', `openPlanetDetail('${addr}')`, 'mut'));
+  if (m) acts.push(_mpDiploBtn('Rappeler', `recallOrbitalTanker('${m.id}')`, 'red'));
+  document.getElementById('emb-actions').innerHTML = acts.join('');
+  mpEmbassyChannelState();
+  mpEmbassyMountHero(m, inc, pseudo);
+}
+function mpEmbassyChannelState() {
+  const addr = _emb.address;
+  const open = _emb.thread ? _emb.thread.open : !!(_mpEmbMine(addr) || _mpEmbInFor(addr));
+  document.getElementById('emb-dot').classList.toggle('off', !open);
+  document.getElementById('emb-chan').textContent = open ? `Canal ouvert avec ${_emb.pseudo || ''}` : 'Canal fermé · aucun tanker en orbite entre vous';
+  const input = document.getElementById('emb-input');
+  input.disabled = !open; document.getElementById('emb-send').disabled = !open || _emb.busy;
+  input.placeholder = open ? `Message à ${_emb.pseudo || ''}…` : 'Envoie un tanker en orbite pour rouvrir le canal';
+}
+function mpEmbassyRenderMsgs() {
+  const box = document.getElementById('emb-msgs'); if (!box) return;
+  const t = _emb.thread;
+  if (!t) { box.innerHTML = `<div class="emb-empty">Connexion au relais…</div>`; return; }
+  if (!t.messages.length) { box.innerHTML = `<div class="emb-empty">${t.open ? `Le canal est ouvert. ${_esc(_emb.pseudo)} lira ton message à son prochain passage.` : 'Aucun message.'}</div>`; return; }
+  let day = '', html = '';
+  for (const msg of t.messages) {
+    const d = new Date(msg.created_at || Date.now());
+    const dk = d.toLocaleDateString('fr-FR', { weekday: 'short', day: '2-digit', month: 'short' });
+    if (dk !== day) { day = dk; html += `<div class="emb-day">${dk}</div>`; }
+    const hh = d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+    html += `<div class="emb-msg ${msg.mine ? 'me' : 'them'}">${_esc(msg.body)}<span class="t">${hh}${msg.mine && msg.read_at ? ' · lu' : ''}</span></div>`;
+  }
+  const atBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 40;
+  box.innerHTML = html;
+  if (atBottom || !_emb.scrolled) { box.scrollTop = box.scrollHeight; _emb.scrolled = true; }
+}
+async function mpEmbassyLoadThread(first) {
+  const addr = _emb.address;
+  if (!addr || _emb.loading) return;
+  if (!window.SBMP || !window.SBMP.ready()) { if (first) { _emb.thread = { open: !!(_mpEmbMine(addr) || _mpEmbInFor(addr)), pseudo: _emb.pseudo, messages: [] }; mpEmbassyRenderMsgs(); } return; }
+  _emb.loading = true;
+  try {
+    const t = await window.SBMP.chatThread(addr);
+    if (addr !== _emb.address) return;
+    const sig = t.open + ':' + t.messages.map(x => x.id + (x.read_at ? 'r' : '')).join(',');
+    _emb.thread = t;
+    if (t.pseudo && !_emb.pseudo) _emb.pseudo = t.pseudo;
+    if (sig !== _emb.sig) { _emb.sig = sig; mpEmbassyRenderMsgs(); mpEmbassyChannelState(); }
+    if (t.messages.some(x => !x.mine && !x.read_at) || (_mpChatUnread[addr] && _mpChatUnread[addr].n)) {
+      await window.SBMP.chatSeen(addr);
+      delete _mpChatUnread[addr]; _mpChatToasted[addr] = null;
+    }
+  } catch (e) {
+    if (first) { _emb.thread = { open: false, pseudo: _emb.pseudo, messages: [] }; mpEmbassyRenderMsgs(); toast(_mpChatErr(e)); }
+  } finally { _emb.loading = false; }
+}
+async function mpEmbassySend() {
+  const input = document.getElementById('emb-input');
+  const body = (input.value || '').trim();
+  if (!body || _emb.busy || !_emb.address) return;
+  if (!window.SBMP || !window.SBMP.ready()) { toast('Registre hors ligne : réessaie dans un instant'); return; }
+  _emb.busy = true; mpEmbassyChannelState();
+  try {
+    const msg = await window.SBMP.chatSend(_emb.address, body);
+    input.value = ''; input.dispatchEvent(new Event('input'));
+    if (!_emb.thread) _emb.thread = { open: true, pseudo: _emb.pseudo, messages: [] };
+    _emb.thread.messages.push(msg); _emb.sig = '';
+    _emb.scrolled = false; mpEmbassyRenderMsgs();
+  } catch (e) {
+    toast(_mpChatErr(e));
+    if (/chat_closed/.test(String(e && e.message))) { if (_emb.thread) _emb.thread.open = false; }
+  } finally { _emb.busy = false; mpEmbassyChannelState(); }
+}
+
+// vue héros : le tanker TK-07 en orbite, la planète en contrebas (même scène que le chantier orbital), moteurs coupés
+function mpEmbassyMountHero(m, inc, pseudo) {
+  const scr = document.getElementById('scr-embassy');
+  const scroll = scr.querySelector('.screen-scroll');
+  const model = typeof UNIT_SHIP3D_MODELS !== 'undefined' && UNIT_SHIP3D_MODELS.tanker;
+  if (!model || !window.WebGLRenderingContext) { scr.classList.remove('ud-hero', 'ud-ship'); return; }
+  let hero = document.getElementById('emb-hero');
+  if (!hero) { hero = document.createElement('div'); hero.id = 'emb-hero'; hero.className = 'u3d u3d-hero'; scr.insertBefore(hero, scroll); }
+  let space = document.getElementById('emb-space');
+  if (!space) { space = document.createElement('div'); space.id = 'emb-space'; space.className = 'ud-hero-space'; const h = scroll.querySelector('.head'); scroll.insertBefore(space, h); }
+  scr.classList.add('ud-hero', 'ud-ship');
+  hero.style.display = ''; space.style.display = '';
+  if (!hero.querySelector('.u3d-hint')) hero.insertAdjacentHTML('beforeend', '<div class="u3d-hint"></div>');
+  hero.querySelector('.u3d-hint').textContent = m ? `TK-07 ${m.tankerName} · en orbite chez ${pseudo}` : inc ? `TK-07 ${inc.tanker || ''} de ${pseudo} · en orbite chez toi` : `Ambassade de ${pseudo}`;
+  requestAnimationFrame(() => {
+    const hb = hero.getBoundingClientRect(), sb = space.getBoundingClientRect();
+    if (hb.height) hero.style.setProperty('--u3d-band', Math.max(0, hb.bottom - sb.bottom) + 'px');
+  });
+  if (typeof shipHeroGestures === 'function') shipHeroGestures('scr-embassy', () => _emb.hero);
+  if (_emb.hero) return;
+  // une seule grosse scène en mémoire (iPhone) : la station du chantier est remontée au retour
+  if (typeof fleetShip3D !== 'undefined' && fleetShip3D) { try { fleetShip3D.handle.dispose(); } catch (e) {} fleetShip3D = null; }
+  if (typeof bdShip3D !== 'undefined' && bdShip3D) { try { bdShip3D.handle.dispose(); } catch (e) {} bdShip3D = null; }
+  hero.classList.remove('u3d-fail'); hero.classList.add('u3d-loading');
+  const start = () => {
+    if (_emb.hero || document.getElementById('scr-embassy').classList.contains('hidden')) return;
+    const base = window.Ship3D.profiles && window.Ship3D.profiles.tk07;
+    _emb.hero = window.Ship3D.mount(hero, {
+      url: model.url, shiftY: 0.2,
+      ship: Object.assign({}, base || {}, { planet: true, plasma: false, nozzles: [], dustSpeed: 0.35 }),
+      onReady: () => hero.classList.remove('u3d-loading'),
+      onError: () => { hero.classList.remove('u3d-loading'); hero.classList.add('u3d-fail'); },
+    });
+  };
+  if (window.Ship3D) start(); else window.addEventListener('ship3d-ready', start, { once: true });
+}
+function mpEmbassyUnmount() {
+  if (_emb.hero) { try { _emb.hero.dispose(); } catch (e) {} _emb.hero = null; }
+  _mpChatBubble();
 }
 
 // PIRATERIE_1210 — balises & piraterie entre commandants (GDD starbyte_balises_piratage.md : P1 réel, P5-P7)
@@ -11664,7 +11937,7 @@ function renderTankerMissionCard(mission, opts) {
   if (isOrbital) {
     const margin = opts.inline ? '0' : '0 16px 10px';
     const clickable = !opts.inline;
-    const onclickAttr = clickable ? `onclick="openPlanetDetail('${m.destinationPlanetCoord || m.targetCoords}')"` : '';
+    const onclickAttr = clickable ? (m.mpTarget && m.mpTarget.address ? `onclick="openEmbassy('${m.mpTarget.address}')"` : `onclick="openPlanetDetail('${m.destinationPlanetCoord || m.targetCoords}')"`) : '';
     const cursorStyle = clickable ? 'cursor:pointer;' : '';
 
     const tankerIcon = PNG_ILLUSTRATIONS.tanker
@@ -11694,7 +11967,7 @@ function renderTankerMissionCard(mission, opts) {
             <span style="font-size:10px;color:var(--mut);font-family:'SF Mono',monospace">${orbitLabel}</span>
           </div>
           <div style="font-family:'SF Mono',monospace;font-size:10px;color:var(--mut);margin-bottom:6px;letter-spacing:.04em">⊙ ${destTxt}</div>
-          ${m.mpTarget ? (() => { const _k = mpPactWith(m.mpTarget.address); const _r = (m.cargo && m.cargo.resources) || {}; const _c = m.mpCargoDelivered ? 'cale livrée' : _mpCargoSum(_r) > 0 ? (m.mpCargoRefused ? 'cale refusée' : 'cale offerte') : 'présence'; return `<div style="font-size:10px;color:#5fffe8;margin-bottom:6px">Ambassade chez ${m.mpTarget.pseudo} · ${_c}${_k && _k.status === 'active' ? ' · <span style="color:var(--green)">pacte actif</span>' : _k ? ' · pacte proposé' : ''}</div>`; })() : ''}
+          ${m.mpTarget ? (() => { const _k = mpPactWith(m.mpTarget.address); const _r = (m.cargo && m.cargo.resources) || {}; const _c = m.mpCargoDelivered ? 'cale livrée' : _mpCargoSum(_r) > 0 ? (m.mpCargoRefused ? 'cale refusée' : 'cale offerte') : 'présence'; return `<div style="font-size:10px;color:#5fffe8;margin-bottom:6px">Ambassade chez ${m.mpTarget.pseudo} · ${_c}${_k && _k.status === 'active' ? ' · <span style="color:var(--green)">pacte actif</span>' : _k ? ' · pacte proposé' : ''} · 💬 discuter${_mpChatBadge(m.mpTarget.address)}</div>`; })() : ''}
           <button onclick="event.stopPropagation();recallOrbitalTanker('${m.id}')"
                   style="margin-top:4px;width:100%;padding:7px 10px;background:transparent;border:1px solid rgba(255,200,100,.35);color:#ffc864;font-size:10px;letter-spacing:.12em;text-transform:uppercase;border-radius:5px;cursor:pointer;font-family:inherit">
             Rappeler le tanker
@@ -37010,9 +37283,9 @@ function renderDefenseUnitDetail(key) {
 
 // ─── SHIP3D : fiche vaisseau en vue héros (3D plein écran derrière la fiche, comme le soldat lourd) ───
 const UNIT_SHIP3D_MODELS = {
-  cuirasse: { url: 'assets/3d/sb_kv01.glb?v=20261013-1630', code: 'KV-01 Kerath' },
-  fregate:  { url: 'assets/3d/sb_sr01.glb?v=20261013-1630', code: 'SR-01 Sentinelle', profile: 'sr01' },
-  tanker:   { url: 'assets/3d/sb_tk07.glb?v=20261013-1630', code: 'TK-07 Tanker', profile: 'tk07' },
+  cuirasse: { url: 'assets/3d/sb_kv01.glb?v=20261013-2000', code: 'KV-01 Kerath' },
+  fregate:  { url: 'assets/3d/sb_sr01.glb?v=20261013-2000', code: 'SR-01 Sentinelle', profile: 'sr01' },
+  tanker:   { url: 'assets/3d/sb_tk07.glb?v=20261013-2000', code: 'TK-07 Tanker', profile: 'tk07' },
 };
 let unitShip3D = null;   // { key, handle }
 function mountUnitShip3D(key, inService) {
@@ -37101,9 +37374,9 @@ function hasShipyardBuilt() {
   return !!(typeof G !== 'undefined' && G.planet && G.planet.parcels && G.planet.parcels.some(p => p && p.building === 'shipyard' && p.state === 'built'));
 }
 const DOCK_MODELS = {
-  tanker:   { url: 'assets/3d/sb_tk07_lod.glb?v=20261013-1630', engine: [1.0, 0.7, 0.4] },
-  fregate:  { url: 'assets/3d/sb_sr01_lod.glb?v=20261013-1630', engine: [0.5, 0.78, 1.0] },
-  cuirasse: { url: 'assets/3d/sb_kv01_lod.glb?v=20261013-1630', engine: [0.5, 0.78, 1.0] },
+  tanker:   { url: 'assets/3d/sb_tk07_lod.glb?v=20261013-2000', engine: [1.0, 0.7, 0.4] },
+  fregate:  { url: 'assets/3d/sb_sr01_lod.glb?v=20261013-2000', engine: [0.5, 0.78, 1.0] },
+  cuirasse: { url: 'assets/3d/sb_kv01_lod.glb?v=20261013-2000', engine: [0.5, 0.78, 1.0] },
 };
 function fleetStationedCount(k) {
   const c = (G.fleet && G.fleet.stationed && G.fleet.stationed[k]) || {};
@@ -37195,7 +37468,7 @@ function unmountFleetStation3D() {
 })();
 
 // ─── SHIP3D : fiche bâtiment en vue héros (chantier orbital OS-01) ───
-const BUILDING_SHIP3D = { shipyard: { url: 'assets/3d/sb_os01.glb?v=20261013-1630', code: 'OS-01 Chantier orbital', profile: 'os01' } };
+const BUILDING_SHIP3D = { shipyard: { url: 'assets/3d/sb_os01.glb?v=20261013-2000', code: 'OS-01 Chantier orbital', profile: 'os01' } };
 let bdShip3D = null;   // { key, handle }
 function mountBuildingShip3D(key, tier) {
   const scr = document.getElementById('scr-building-detail');
@@ -43597,7 +43870,7 @@ function refreshCurrentScreen() {
   // Si le sheet Commerce est ouvert, le re-render aussi (Chunk C 16/05)
   if (typeof refreshCommerceSheet === 'function') refreshCommerceSheet();
   // Trouve l'écran actuellement visible et le re-render
-  const screens = ['dashboard', 'planet', 'universe', 'prospect', 'resources', 'defense', 'shipyard', 'capital', 'planet-detail', 'unit-detail', 'building-detail', 'fleet', 'fleet-compose', 'fleet-detail', 'probe-detail', 'moving-target-detail', 'commerce', 'dock', 'carnet'];
+  const screens = ['dashboard', 'planet', 'universe', 'prospect', 'resources', 'defense', 'shipyard', 'capital', 'planet-detail', 'unit-detail', 'building-detail', 'fleet', 'fleet-compose', 'fleet-detail', 'probe-detail', 'moving-target-detail', 'commerce', 'dock', 'carnet', 'embassy'];
   for (const s of screens) {
     const el = document.getElementById('scr-' + s);
     if (el && !el.classList.contains('hidden')) {
@@ -43619,6 +43892,7 @@ function refreshCurrentScreen() {
         'moving-target-detail': renderMovingTargetDetailScreen,
         'commerce': renderCommerceScreen,
         'dock': renderDockScreen,
+        'embassy': mpEmbassyRender,
         'carnet': renderCarnetScreen,
       }[s];
       if (fn) fn();
@@ -44148,23 +44422,23 @@ if (G.knownTargets && Array.isArray(G.tankerMissions)) {
 
 </script>
 <!-- PLANET3D — carte 3D + boucle antenne (source : sb-build/src/planet3d.js) -->
-<script type="module" src="assets/planet3d.js?v=20261013-1630"></script>
+<script type="module" src="assets/planet3d.js?v=20261013-2000"></script>
 <!-- CLOUD — sauvegarde Supabase (source : sb-build/src/cloud.js) -->
-<script type="module" src="assets/cloud.js?v=20261013-1630"></script>
+<script type="module" src="assets/cloud.js?v=20261013-2000"></script>
 <!-- MATCH3 — Match-3 V2 (assets/match3.js, source src/match3.js + src/m3core.js) : remplace startM3 -->
-<script type="module" src="assets/match3.js?v=20261013-1810"></script>
+<script type="module" src="assets/match3.js?v=20261013-2000"></script>
 <!-- HOME V2 — « monde d'abord » : planète plein écran, ressources en ligne, Flotte / Défense / Prospection (assets/home.js) -->
-<script type="module" src="assets/home.js?v=20261013-1630"></script>
+<script type="module" src="assets/home.js?v=20261013-2000"></script>
 <!-- SPACE MAP v0 — carte du Centre de prospection (assets/spacemap.js, source src/spacemap.js) -->
-<script src="assets/spacemap.js?v=20261013-2330"></script>
+<script src="assets/spacemap.js?v=20261013-2000"></script>
 <!-- SPACE MAP niveau B — diorama 3D d'un système (assets/system3d.js, source src/system3d.js) -->
-<script type="module" src="assets/system3d.js?v=20261013-1630"></script>
+<script type="module" src="assets/system3d.js?v=20261013-2000"></script>
 <!-- SHIP3D — fiches 3D : cuirassé KV-01, frégate SR-01, tanker TK-07, chantier orbital OS-01 (assets/ship3d.js, sur le moteur partagé window.SB3D) -->
-<script src="assets/aftermath.js?v=20261013-1810"></script>
-<script src="assets/fete_caserne.js?v=20261013-1800"></script>
-<script src="assets/radio.js?v=20261013-1630"></script>
-<script type="module" src="assets/ship3d.js?v=20261013-1630"></script>
+<script src="assets/aftermath.js?v=20261013-2000"></script>
+<script src="assets/fete_caserne.js?v=20261013-2000"></script>
+<script src="assets/radio.js?v=20261013-2000"></script>
+<script type="module" src="assets/ship3d.js?v=20261013-2000"></script>
 <!-- FORMATION3D — flotte déployée en orbite, vue de haut en formation (remplace la vue orbite) -->
-<script src="assets/formation3d.js?v=20261013-1920"></script>
+<script src="assets/formation3d.js?v=20261013-2000"></script>
 </body>
 </html>
