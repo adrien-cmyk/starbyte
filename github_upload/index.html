@@ -8539,6 +8539,7 @@ function _deserializeSets(obj) {
 // AUDIT_1110 — état de progression hors du cœur historique de la sauvegarde
 // (fonction-constante en var : lue par saveGame/loadGame, déclarée avant tout appel)
 var EXTRA_SAVE_KEYS = [
+  'aftermath',   // APRÈS L'ATTAQUE (13/10) : indice de dévastation, fête, rapport en attente
   'openLeads', 'rumorJournal', 'purchasedIntel', 'visitedDocks', 'encounteredPavillons',
   'discoveredDocks', 'wantedTargets', 'navigationData', 'ambientReports', 'marketSeason',
   'tutorialArtefactSeen', 'tutorialBombSeen', 'tutorialHyperSeen', 'tutorialMegaSeen',
