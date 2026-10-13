@@ -8838,7 +8838,7 @@ function mpWorldSnapshot() {
   for (const k of ['metal', 'energie', 'cristal']) stocks[k] = Math.max(0, Math.floor((G.res && G.res[k] && G.res[k].v) || 0));
   const home = (G.knownSystems || {})[`${MY_ADDRESS.cluster}-${MY_ADDRESS.sector}-${MY_ADDRESS.system}`];
   const mine = home && (home.planets || []).find(p => p.isMine);
-  let planetName = (mine && (mine.customName || mine.name)) || 'KERATH-VII';
+  let planetName = (G.planet && G.planet.name) || (mine && (mine.customName || mine.name)) || 'KERATH-VII';   // PROFIL_1310
   return {
     planet_name: String(planetName).slice(0, 40),
     level,
@@ -8955,6 +8955,10 @@ function mergeRealWorlds(sysKey, worlds) {
       reportRead: false,
     };
     const i = sys.planets.findIndex(p => p.coord === coord);
+    if (i >= 0 && sys.planets[i].customName) {   // PROFIL_1310 — un ancien surnom local cède au vrai nom
+      delete sys.planets[i].customName;
+      if (typeof savePlanetCustomName === 'function') savePlanetCustomName(coord, null);
+    }
     if (i >= 0) { if (!sys.planets[i].isReal) fresh.push(w.pseudo); sys.planets[i] = Object.assign({}, sys.planets[i], data); }
     else { sys.planets.push(data); fresh.push(w.pseudo); }
   }
@@ -10255,6 +10259,68 @@ function mpIngestNeighbors(rows) {
   if (typeof saveGame === 'function') saveGame();
   if (typeof _mpDiploRefresh === 'function') _mpDiploRefresh();
 }
+
+// PROFIL_1310 — Réglages : pseudo et nom de planète, une seule modification chacun
+var MP_RENAME_ERRORS = {
+  pseudo_locked: 'Ton pseudo a déjà été modifié une fois',
+  planet_locked: 'Le nom de ta planète a déjà été modifié une fois',
+  pseudo_taken: 'Ce pseudo est déjà pris',
+  pseudo_invalid: 'Pseudo : 3 à 20 caractères (lettres, chiffres, espace, . _ \' -)',
+  planet_invalid: 'Nom de planète : 2 à 40 caractères',
+  no_world: 'Ton monde n\'est pas encore au registre',
+};
+var _sbRenaming = false;
+async function sbRenameProfile(kind) {
+  if (_sbRenaming) return;
+  if (!(window.SBMP && window.SBMP.ready())) { toast('Registre hors ligne : réessaie dans un instant'); return; }
+  const w = window.SBMP.world || {};
+  if (kind === 'pseudo' ? w.pseudo_renamed : w.planet_renamed) { toast(MP_RENAME_ERRORS[kind + '_locked']); return; }
+  const isP = kind === 'pseudo';
+  const current = isP ? (w.pseudo || '') : ((G.planet && G.planet.name) || w.planet_name || '');
+  const raw = await sbPrompt({
+    title: isP ? 'Changer de pseudo' : 'Renommer ta planète',
+    body: `${isP ? 'Ton nom de commandant, vu par tous.' : 'Le nom de ta capitale, vu par les autres commandants.'}<br><br><strong style="color:#ff8a8a">Une seule modification possible : ce sera définitif.</strong>`,
+    placeholder: current, initialValue: current, confirmLabel: 'Continuer', maxLength: isP ? 20 : 40,
+  });
+  if (raw === null) return;
+  let next = String(raw).trim().replace(/[<>&"`\\]/g, '');
+  if (!isP) next = next.toUpperCase();
+  if (!next || next === current) return;
+  if (isP && !/^[A-Za-zÀ-ÿ0-9 _.'-]{3,20}$/.test(next)) { toast(MP_RENAME_ERRORS.pseudo_invalid); return; }
+  if (!isP && (next.length < 2 || next.length > 40)) { toast(MP_RENAME_ERRORS.planet_invalid); return; }
+  const ok = await sbConfirmWarning(isP ? 'Pseudo définitif' : 'Nom définitif', `<strong>${current || '—'}</strong> → <strong>${next}</strong><br><br>Tu ne pourras plus le changer.`, 'Confirmer');
+  if (!ok) return;
+  _sbRenaming = true;
+  try {
+    await window.SBMP.rename(isP ? next : null, isP ? null : next);
+    if (isP) { G.profile = G.profile || {}; G.profile.captainName = next; }
+    else { G.planet.name = next; }
+    toast(isP ? `Tu es désormais ${next}` : `Ta planète s'appelle désormais ${next}`);
+    if (typeof saveGame === 'function') saveGame();
+  } catch (e) {
+    const code = (String(e && e.message || e).match(/[a-z_]+/g) || []).find(c => MP_RENAME_ERRORS[c]);
+    toast(code ? MP_RENAME_ERRORS[code] : 'Le registre ne répond pas, réessaie');
+  } finally { _sbRenaming = false; }
+  if (window.SBCloud && window.SBCloud.renderDash) window.SBCloud.renderDash();
+  if (typeof refreshCurrentScreen === 'function') refreshCurrentScreen();
+}
+// Roue dentée des Réglages : une vraie roue dentée, bien visible ; pastille rouge tant qu'aucun email n'est lié
+var SB_GEAR_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>';
+(function () {
+  try {
+    const st = document.createElement('style');
+    st.textContent = `body .w-gear { width:38px !important; height:38px !important; padding:7px !important; color:#e6f0ff !important;
+        background:rgba(95,168,232,.14) !important; border:1px solid rgba(95,168,232,.45) !important; border-radius:50% !important; position:relative; }
+      body .w-gear svg { width:100%; height:100%; display:block; }
+      body.sb-unlinked .w-gear { border-color:rgba(255,80,64,.7) !important; }
+      body.sb-unlinked .w-gear::after { content:''; position:absolute; top:-1px; right:-1px; width:10px; height:10px; border-radius:50%;
+        background:#ff4f40; box-shadow:0 0 0 2px #05080c, 0 0 8px rgba(255,79,64,.8); }`;
+    document.head.appendChild(st);
+  } catch (e) {}
+  const swap = () => { const g = document.querySelector('.w-gear'); if (g && g.dataset.sbGear !== '1') { g.dataset.sbGear = '1'; g.innerHTML = SB_GEAR_SVG; } };
+  setInterval(swap, 2000);
+  setTimeout(swap, 300);
+})();
 
 function renderDefenseReportDetail(r) {
   const d = r.defense || {};
@@ -35244,7 +35310,11 @@ async function promptPlanetRename(coord) {
     return;
   }
   if (p.isMine) {
-    if (typeof toast === 'function') toast('Ta capitale se renomme depuis le dashboard');
+    if (typeof toast === 'function') toast('Ta capitale se renomme dans les Réglages (roue dentée)');
+    return;
+  }
+  if (p.isReal || p.isBot || p.playerName) {   // PROFIL_1310 — son nom appartient à son commandant
+    if (typeof toast === 'function') toast(`Monde de ${p.playerName || 'un commandant'} : son nom lui appartient`);
     return;
   }
   const current = p.customName || p.name || '';
@@ -35490,7 +35560,7 @@ function renderPlanetDetailScreen() {
   // Indicateur "renommée" en cyan discret + clic pour ouvrir prompt
   // Sur capitale on ne propose pas le renommage (déjà éditable via le dashboard)
   const nameEl = document.getElementById('pd-name');
-  if (nameEl && !p.isMine) {
+  if (nameEl && !p.isMine && !p.isReal && !p.isBot && !p.playerName) {   // PROFIL_1310
     nameEl.style.cursor = 'pointer';
     nameEl.style.textDecoration = 'underline';
     nameEl.style.textDecorationStyle = 'dotted';
@@ -36522,9 +36592,9 @@ function renderDefenseUnitDetail(key) {
 
 // ─── SHIP3D : fiche vaisseau en vue héros (3D plein écran derrière la fiche, comme le soldat lourd) ───
 const UNIT_SHIP3D_MODELS = {
-  cuirasse: { url: 'assets/3d/sb_kv01.glb?v=20261013-1100', code: 'KV-01 Kerath' },
-  fregate:  { url: 'assets/3d/sb_sr01.glb?v=20261013-1100', code: 'SR-01 Sentinelle', profile: 'sr01' },
-  tanker:   { url: 'assets/3d/sb_tk07.glb?v=20261013-1100', code: 'TK-07 Tanker', profile: 'tk07' },
+  cuirasse: { url: 'assets/3d/sb_kv01.glb?v=20261013-1300', code: 'KV-01 Kerath' },
+  fregate:  { url: 'assets/3d/sb_sr01.glb?v=20261013-1300', code: 'SR-01 Sentinelle', profile: 'sr01' },
+  tanker:   { url: 'assets/3d/sb_tk07.glb?v=20261013-1300', code: 'TK-07 Tanker', profile: 'tk07' },
 };
 let unitShip3D = null;   // { key, handle }
 function mountUnitShip3D(key, inService) {
@@ -36613,9 +36683,9 @@ function hasShipyardBuilt() {
   return !!(typeof G !== 'undefined' && G.planet && G.planet.parcels && G.planet.parcels.some(p => p && p.building === 'shipyard' && p.state === 'built'));
 }
 const DOCK_MODELS = {
-  tanker:   { url: 'assets/3d/sb_tk07_lod.glb?v=20261013-1100', engine: [1.0, 0.7, 0.4] },
-  fregate:  { url: 'assets/3d/sb_sr01_lod.glb?v=20261013-1100', engine: [0.5, 0.78, 1.0] },
-  cuirasse: { url: 'assets/3d/sb_kv01_lod.glb?v=20261013-1100', engine: [0.5, 0.78, 1.0] },
+  tanker:   { url: 'assets/3d/sb_tk07_lod.glb?v=20261013-1300', engine: [1.0, 0.7, 0.4] },
+  fregate:  { url: 'assets/3d/sb_sr01_lod.glb?v=20261013-1300', engine: [0.5, 0.78, 1.0] },
+  cuirasse: { url: 'assets/3d/sb_kv01_lod.glb?v=20261013-1300', engine: [0.5, 0.78, 1.0] },
 };
 function fleetStationedCount(k) {
   const c = (G.fleet && G.fleet.stationed && G.fleet.stationed[k]) || {};
@@ -36707,7 +36777,7 @@ function unmountFleetStation3D() {
 })();
 
 // ─── SHIP3D : fiche bâtiment en vue héros (chantier orbital OS-01) ───
-const BUILDING_SHIP3D = { shipyard: { url: 'assets/3d/sb_os01.glb?v=20261013-1100', code: 'OS-01 Chantier orbital', profile: 'os01' } };
+const BUILDING_SHIP3D = { shipyard: { url: 'assets/3d/sb_os01.glb?v=20261013-1300', code: 'OS-01 Chantier orbital', profile: 'os01' } };
 let bdShip3D = null;   // { key, handle }
 function mountBuildingShip3D(key, tier) {
   const scr = document.getElementById('scr-building-detail');
@@ -43647,19 +43717,19 @@ if (G.knownTargets && Array.isArray(G.tankerMissions)) {
 <!-- PLANET3D — carte 3D + boucle antenne (source : sb-build/src/planet3d.js) -->
 <script type="module" src="assets/planet3d.js?v=20261013-vein"></script>
 <!-- CLOUD — sauvegarde Supabase (source : sb-build/src/cloud.js) -->
-<script type="module" src="assets/cloud.js?v=20261013-1100"></script>
+<script type="module" src="assets/cloud.js?v=20261013-1300"></script>
 <!-- MATCH3 — Match-3 V2 (assets/match3.js, source src/match3.js + src/m3core.js) : remplace startM3 -->
-<script type="module" src="assets/match3.js?v=20261013-1130vein"></script>
+<script type="module" src="assets/match3.js?v=20261013-1300vein"></script>
 <!-- HOME V2 — « monde d'abord » : planète plein écran, ressources en ligne, Flotte / Défense / Prospection (assets/home.js) -->
-<script type="module" src="assets/home.js?v=20261013-1100"></script>
+<script type="module" src="assets/home.js?v=20261013-1300"></script>
 <!-- SPACE MAP v0 — carte du Centre de prospection (assets/spacemap.js, source src/spacemap.js) -->
-<script src="assets/spacemap.js?v=20261013-1100"></script>
+<script src="assets/spacemap.js?v=20261013-1300"></script>
 <!-- SPACE MAP niveau B — diorama 3D d'un système (assets/system3d.js, source src/system3d.js) -->
-<script type="module" src="assets/system3d.js?v=20261013-1100"></script>
+<script type="module" src="assets/system3d.js?v=20261013-1300"></script>
 <!-- SHIP3D — fiches 3D : cuirassé KV-01, frégate SR-01, tanker TK-07, chantier orbital OS-01 (assets/ship3d.js, sur le moteur partagé window.SB3D) -->
-<script src="assets/radio.js?v=20261013-1100"></script>
-<script type="module" src="assets/ship3d.js?v=20261013-1100"></script>
+<script src="assets/radio.js?v=20261013-1300"></script>
+<script type="module" src="assets/ship3d.js?v=20261013-1300"></script>
 <!-- FORMATION3D — flotte déployée en orbite, vue de haut en formation (remplace la vue orbite) -->
-<script src="assets/formation3d.js?v=20261013-1100"></script>
+<script src="assets/formation3d.js?v=20261013-1300"></script>
 </body>
 </html>
