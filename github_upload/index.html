@@ -28351,8 +28351,8 @@ function renderInfoCard(i) {
   // APRÈS L'ATTAQUE : secours depuis le centre de commandement
   if (p.state === 'capital' && window.SBAftermath && SBAftermath.dev >= 1) {
     info.insertAdjacentHTML('beforeend', `<div style="margin-top:10px;padding:10px 12px;border-radius:10px;border:1px solid rgba(255,80,60,.45);background:rgba(40,8,6,.6)">
-      <div style="font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:#ff8a70">Planète dévastée · ${Math.round(SBAftermath.dev)} %</div>
-      <div style="font-size:12px;color:var(--mut);margin:4px 0 8px;line-height:1.45">Production réduite de ${Math.round(SBAftermath.dev / 2)} %${SBAftermath.dev >= 50 ? ', améliorations bloquées' : ''}. Chaque veine profonde des secours répare 10 % et chaque partie réussie remet un bâtiment abîmé en état. Sans rien faire, la planète guérit de 1 % par heure.</div>
+      <div style="font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:#ff8a70">Planète dévastée · santé ${Math.round(100 - SBAftermath.dev)} %</div>
+      <div style="font-size:12px;color:var(--mut);margin:4px 0 8px;line-height:1.45">Production réduite de ${Math.round(SBAftermath.dev / 2)} %${SBAftermath.dev >= 50 ? ', améliorations bloquées' : ''}. Chaque veine profonde des secours rend 10 % de santé et chaque partie réussie remet un bâtiment abîmé en état. Sans rien faire, la planète regagne 1 % par heure.</div>
       <button class="btn-primary" onclick="SBAftermath.startRelief()">Lancer les secours</button></div>`);
   }
 }
@@ -43927,7 +43927,7 @@ if (G.knownTargets && Array.isArray(G.tankerMissions)) {
 <!-- CLOUD — sauvegarde Supabase (source : sb-build/src/cloud.js) -->
 <script type="module" src="assets/cloud.js?v=20261013-1630"></script>
 <!-- MATCH3 — Match-3 V2 (assets/match3.js, source src/match3.js + src/m3core.js) : remplace startM3 -->
-<script type="module" src="assets/match3.js?v=20261013-1630"></script>
+<script type="module" src="assets/match3.js?v=20261013-1810"></script>
 <!-- HOME V2 — « monde d'abord » : planète plein écran, ressources en ligne, Flotte / Défense / Prospection (assets/home.js) -->
 <script type="module" src="assets/home.js?v=20261013-1630"></script>
 <!-- SPACE MAP v0 — carte du Centre de prospection (assets/spacemap.js, source src/spacemap.js) -->
@@ -43935,7 +43935,7 @@ if (G.knownTargets && Array.isArray(G.tankerMissions)) {
 <!-- SPACE MAP niveau B — diorama 3D d'un système (assets/system3d.js, source src/system3d.js) -->
 <script type="module" src="assets/system3d.js?v=20261013-1630"></script>
 <!-- SHIP3D — fiches 3D : cuirassé KV-01, frégate SR-01, tanker TK-07, chantier orbital OS-01 (assets/ship3d.js, sur le moteur partagé window.SB3D) -->
-<script src="assets/aftermath.js?v=20261013-1630"></script>
+<script src="assets/aftermath.js?v=20261013-1810"></script>
 <script src="assets/fete_caserne.js?v=20261013-1630"></script>
 <script src="assets/radio.js?v=20261013-1630"></script>
 <script type="module" src="assets/ship3d.js?v=20261013-1630"></script>

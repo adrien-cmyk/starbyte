@@ -56,7 +56,7 @@
     if (!dev()) { if (!fixed) return; save(); refresh(); return; }
     s.dev = Math.max(0, dev() - r);
     if (s.dev <= 0) while (repairOne()) {}
-    say(s.dev > 0 ? `Secours : dévastation −${r} % · reste ${Math.round(s.dev)} %` : 'Secours : la planète est remise sur pied');
+    say(s.dev > 0 ? `Secours : santé de la planète +${r} % · ${Math.round(100 - s.dev)} %` : 'Secours : la planète est remise sur pied (100 %)');
     save(); refresh();
   }
 
@@ -82,7 +82,7 @@
     backdrop-filter:blur(6px); -webkit-backdrop-filter:blur(6px); font-size:12px; align-items:center; gap:10px; cursor:pointer; }
   #sb-devast b { color:#ff6a50; font-family:var(--font-mono, monospace); }
   #sb-devast .bar { flex:1; height:5px; border-radius:3px; background:rgba(255,255,255,.1); overflow:hidden; min-width:40px; }
-  #sb-devast .bar i { display:block; height:100%; background:linear-gradient(90deg,#ff3a20,#ff9a40); }
+  #sb-devast .bar i { display:block; height:100%; background:linear-gradient(90deg,#ff3a20,#ffb040 60%,#7ed080); background-size:200px 100%; transition:width .6s ease; }
   #sb-devast button { border:1px solid rgba(255,140,110,.6); background:rgba(120,20,10,.6); color:#ffe3dc; border-radius:8px; padding:6px 10px;
     font-size:10px; letter-spacing:.12em; text-transform:uppercase; cursor:pointer; }
   #sb-party { position:fixed; left:12px; right:12px; top:calc(var(--sat, env(safe-area-inset-top, 0px)) + 150px); z-index:30; display:none;
@@ -93,7 +93,7 @@
     color:inherit; font-size:15px; line-height:22px; text-align:center; cursor:pointer; padding:0; }`;
   document.head.appendChild(css);
   const ban = document.createElement('div'); ban.id = 'sb-devast';
-  ban.innerHTML = `<span>Planète dévastée · <b>0 %</b></span><span class="bar"><i></i></span><button>Secours</button>`;
+  ban.innerHTML = `<span>Santé de la planète · <b>100 %</b></span><span class="bar"><i></i></span><button>Secours</button>`;
   ban.addEventListener('click', startRelief);
   const party = document.createElement('div'); party.id = 'sb-party';
   // 13/10 (Adrien) : pas de minuteur, bandeau fermable (la fête continue sur la carte)
@@ -105,7 +105,7 @@
   function refresh() {
     const d = dev(), ph = partyPhase(), on = onPlanet();
     ban.style.display = on && d >= 1 ? 'flex' : 'none';
-    if (d >= 1) { ban.querySelector('b').textContent = Math.round(d) + ' %'; ban.querySelector('.bar i').style.width = d + '%'; }
+    if (d >= 1) { const hp = Math.max(0, 100 - d); ban.querySelector('b').textContent = Math.round(hp) + ' %'; ban.querySelector('.bar i').style.width = hp + '%'; }   // santé = 100 − dévastation : la jauge monte quand on soigne
     const s0 = st();
     party.style.display = on && ph && d < 1 && !(s0 && s0.partyHidden && s0.partyHidden === s0.partyAt) ? 'flex' : 'none';
     // rapport en attente : ouvert automatiquement dès que la carte est à l'écran
