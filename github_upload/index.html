@@ -8,6 +8,22 @@
 <meta name="theme-color" content="#040605">
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <title>Starbyte</title>
+<!-- Aperçu de partage (WhatsApp, iMessage, réseaux) -->
+<meta name="description" content="Rejoins l'histoire : mine ta planète en match-3, bâtis ta colonie et lance ta flotte à travers la galaxie.">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Starbyte">
+<meta property="og:title" content="Starbyte · Rejoins l'histoire">
+<meta property="og:description" content="Mine ta planète en match-3, bâtis ta colonie et lance ta flotte à travers la galaxie.">
+<meta property="og:url" content="https://adrien-cmyk.github.io/starbyte/github_upload/">
+<meta property="og:image" content="https://adrien-cmyk.github.io/starbyte/github_upload/assets/og-starbyte.jpg">
+<meta property="og:image:secure_url" content="https://adrien-cmyk.github.io/starbyte/github_upload/assets/og-starbyte.jpg">
+<meta property="og:image:type" content="image/jpeg">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="Logo Starbyte et une flotte en hyperespace · Rejoins l'histoire">
+<meta property="og:locale" content="fr_FR">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:image" content="https://adrien-cmyk.github.io/starbyte/github_upload/assets/og-starbyte.jpg">
 <style>
 :root {
   --bg-0:#040605;
@@ -4429,15 +4445,17 @@ svg.map {
      Demande nom de capitaine + nom de planète, stocké en local (save).
      UI sobre, ambiance spatiale, cohérente avec le reste du jeu. -->
 <div id="scr-welcome" class="screen hidden">
-  <div class="stars"></div>
-  <div class="glow"></div>
+  <!-- ACCUEIL (13/10) : flotte en hyperespace vue de l'arrière, voilée de noir à 50 % pour la lisibilité -->
+  <div id="welcome-hero" style="position:absolute;inset:0;z-index:0;pointer-events:none;overflow:hidden"></div>
+  <div style="position:absolute;inset:0;z-index:0;pointer-events:none;background:rgba(0,0,0,.5)"></div>
 
-  <div class="screen-scroll" style="display:flex;flex-direction:column;justify-content:center;min-height:100vh;padding:24px 20px">
+  <div class="screen-scroll" style="position:relative;z-index:1;display:flex;flex-direction:column;justify-content:center;min-height:100vh;padding:24px 20px">
 
     <div style="text-align:center;margin-bottom:36px">
       <div style="font-size:10px;letter-spacing:.32em;color:var(--mut);margin-bottom:10px;text-transform:uppercase">Bienvenue dans</div>
-      <div style="font-size:38px;font-weight:300;letter-spacing:.06em;color:#e6f0ff;margin-bottom:6px">STARBYTE</div>
-      <div style="font-size:11px;color:var(--mut);font-style:italic;line-height:1.6;max-width:280px;margin:0 auto">
+      <img src="assets/starbyte-logo.svg" alt="Starbyte" style="display:block;width:min(260px,72vw);height:auto;margin:6px auto 18px;filter:drop-shadow(0 0 18px rgba(150,120,255,.35))">
+      <div style="font-size:13px;letter-spacing:.34em;text-transform:uppercase;color:#d9ccff;margin-bottom:12px;text-shadow:0 0 14px rgba(150,110,255,.6)">Rejoins l'histoire</div>
+      <div style="font-size:11px;color:#b7c4d4;font-style:italic;line-height:1.6;max-width:280px;margin:0 auto">
         Une planète sans nom flotte dans le vide.<br>
         Tu es son premier capitaine.
       </div>
@@ -37849,6 +37867,7 @@ function confirmWelcome() {
   if (typeof renderDashboard === 'function') renderDashboard();
 
   // UIUX V2 — on arrive directement sur la planète
+  unmountWelcomeHero();
   goto('planet');
 
   if (typeof toast === 'function') {
@@ -37856,8 +37875,22 @@ function confirmWelcome() {
   }
 }
 
+// ACCUEIL (13/10) : flotte en mission vue de l'arrière, en fond (le moteur 3D se charge après le démarrage)
+let _welcomeHero = null;
+function mountWelcomeHero() {
+  const host = document.getElementById('welcome-hero');
+  if (!host || _welcomeHero) return;
+  if (!window.Formation3D || !window.SB3D) { setTimeout(mountWelcomeHero, 200); return; }
+  const fleet = { id: 'welcome', status: 'in_mission', composition: { cuirasse: { t1: 2, t2: 0, t3: 0 }, fregate: { t1: 6, t2: 0, t3: 0 }, tanker: { t1: 3, t2: 0, t3: 0 } } };
+  _welcomeHero = window.Formation3D.mount(host, { fleet, mode: 'mission', az: 0, el: 0.34, zoom: 0.72, spin: 0, shiftY: -0.2 });
+}
+function unmountWelcomeHero() {
+  if (_welcomeHero) { try { _welcomeHero.dispose(); } catch (e) {} _welcomeHero = null; }
+}
+
 // Setup au focus de l'écran : préfocus l'input capitaine
 function setupWelcomeScreen() {
+  mountWelcomeHero();
   const captainInput = document.getElementById('welcome-captain');
   if (captainInput && !captainInput.value) {
     setTimeout(() => captainInput.focus(), 100);
@@ -44117,6 +44150,6 @@ if (G.knownTargets && Array.isArray(G.tankerMissions)) {
 <script src="assets/radio.js?v=20261013-1630"></script>
 <script type="module" src="assets/ship3d.js?v=20261013-1630"></script>
 <!-- FORMATION3D — flotte déployée en orbite, vue de haut en formation (remplace la vue orbite) -->
-<script src="assets/formation3d.js?v=20261013-1630"></script>
+<script src="assets/formation3d.js?v=20261013-1910"></script>
 </body>
 </html>

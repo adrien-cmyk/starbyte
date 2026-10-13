@@ -369,7 +369,9 @@
     composer.addPass(new OutputPass());
 
     // caméra : arrière 3/4 de dessus ; orbite (azimut + inclinaison) et zoom lissés, rotation lente au repos
-    let az = mission ? 2.35 : 0.35, azT = az, el = mission ? 0.42 : 0.62, elT = el, zoom = 1, zoomT = 1, idle = true, idleTimer = null;
+    // opts.az / opts.el : cadrage initial (0 = vue arrière) ; opts.spin : rotation lente au repos (rad/s)
+    let az = opts.az ?? (mission ? 2.35 : 0.35), azT = az, el = opts.el ?? (mission ? 0.42 : 0.62), elT = el, zoom = opts.zoom ?? 1, zoomT = zoom, idle = true, idleTimer = null;
+    const SPIN = opts.spin ?? 0.025;
     const fit = () => ext / Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)) * (W() / H() < 0.8 ? 1.15 : 0.8);
     const ro = new ResizeObserver(() => { renderer.setSize(W(), H()); composer.setSize(W(), H()); applyView(); });
     ro.observe(container);
@@ -382,7 +384,7 @@
       const dt = Math.min(0.05, (now - last) / 1000); last = now;
       const t = (now - t0) / 1000;
       const intro = 1 - Math.pow(1 - Math.min(1, t / 2.6), 3);         // la caméra descend sur la formation
-      if (idle) azT += dt * 0.025;
+      if (idle) azT += dt * SPIN;
       const k = 1 - Math.exp(-dt * 7);
       az += (azT - az) * k; el += (elT - el) * k; zoom += (zoomT - zoom) * k;
       const d = fit() * zoom * (1 + 0.8 * (1 - intro));
