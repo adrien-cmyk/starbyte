@@ -174,8 +174,8 @@
     const applyView = () => { camera.aspect = W() / H(); if (shiftY) camera.setViewOffset(W(), H(), 0, H() * shiftY, W(), H()); camera.updateProjectionMatrix(); };
     applyView();
 
-    // étoiles
-    {
+    // étoiles (mission ; en orbite : champ d'étoiles colorées de l'environnement du chantier)
+    if (mission) {
       const N = 1600, pos = new Float32Array(N * 3);
       for (let i = 0; i < N; i++) {
         const u = Math.random() * 2 - 1, a = Math.random() * Math.PI * 2, r = 18000, q = Math.sqrt(1 - u * u);
@@ -185,21 +185,22 @@
       scene.add(new THREE.Points(g, new THREE.PointsMaterial({ size: 1.3, sizeAttenuation: false, color: 0xaebfd6 })));
     }
     // lumières : soleil rasant à l'avant, contre-jour froid
-    const SUN = new THREE.Vector3(-0.55, 0.28, -0.79).normalize();
+    const SUN = mission ? new THREE.Vector3(-0.55, 0.28, -0.79).normalize() : new THREE.Vector3(-0.34, -0.17, -0.93).normalize();
     const key = new THREE.DirectionalLight(0xfff2e0, 2.8); key.position.copy(SUN).multiplyScalar(3000); scene.add(key);
     const rim = new THREE.DirectionalLight(0x9db8e8, 1.0); rim.position.set(900, 400, 1500); scene.add(rim);
     scene.add(new THREE.HemisphereLight(0x2c3a58, 0x0a0c12, 0.7));
 
     // planète sous la flotte (textures de Kerath), elle défile lentement : la flotte avance
-    const planet = new THREE.Group(); if (!mission) scene.add(planet);
+    let envPlanet = null;
+    const planet = new THREE.Group();   // ancienne planète texturée (remplacée par l'environnement du chantier orbital)
     const PR = 9000; planet.position.set(0, -PR - 1300, -2000);
     const tl = new THREE.TextureLoader();
     const pMat = new THREE.MeshStandardMaterial({ color: 0x8a96a0, roughness: 0.95, metalness: 0 });
     planet.add(new THREE.Mesh(new THREE.SphereGeometry(PR, 128, 96), pMat));
     const cMat = new THREE.MeshStandardMaterial({ color: 0xb8c4d0, transparent: true, opacity: 0.0, depthWrite: false });
     const cMesh = new THREE.Mesh(new THREE.SphereGeometry(PR * 1.004, 128, 96), cMat); planet.add(cMesh);
-    if (!mission) tl.load('assets/3d/kerath_albedo.jpg', t => { if (THREE.SRGBColorSpace) t.colorSpace = THREE.SRGBColorSpace; pMat.map = t; pMat.color.set(0x4a5560); pMat.needsUpdate = true; });
-    if (!mission) tl.load('assets/3d/kerath_clouds.jpg', t => { cMat.alphaMap = t; cMat.opacity = 0.35; cMat.needsUpdate = true; });
+    if (false) tl.load('assets/3d/kerath_albedo.jpg', t => { if (THREE.SRGBColorSpace) t.colorSpace = THREE.SRGBColorSpace; pMat.map = t; pMat.color.set(0x4a5560); pMat.needsUpdate = true; });
+    if (false) tl.load('assets/3d/kerath_clouds.jpg', t => { cMat.alphaMap = t; cMat.opacity = 0.35; cMat.needsUpdate = true; });
     planet.add(new THREE.Mesh(new THREE.SphereGeometry(PR * 1.03, 96, 64), new THREE.ShaderMaterial({
       transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.BackSide,
       vertexShader: 'varying vec3 vN; varying vec3 vW; void main(){ vN = normalize(normalMatrix * normal); vec4 w = modelMatrix * vec4(position,1.0); vW = w.xyz; gl_Position = projectionMatrix * viewMatrix * w; }',
@@ -228,6 +229,102 @@
     const ships = [];
     let ext = 300;
     for (const s of list) ext = Math.max(ext, Math.abs(s.x) + 200, Math.abs(s.z) + 260);
+    // ORBITE (14/10) : environnement de la fiche du chantier orbital — ciel de nébuleuse, étoiles colorées,
+    // planète procédurale à contre-jour avec atmosphère, soleil droit devant (disque, halo, voile, reflet anamorphique),
+    // et de temps en temps une étoile filante
+    const shooting = [];
+    if (!mission) {
+      scene.add(new THREE.Mesh(new THREE.SphereGeometry(30000, 48, 32), new THREE.ShaderMaterial({
+        side: THREE.BackSide, depthWrite: false,
+        vertexShader: `varying vec3 vDir; void main(){ vDir = normalize(position); gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }`,
+        fragmentShader: `varying vec3 vDir;
+          float h(vec3 p){ p = fract(p*0.3183099+.1); p *= 17.0; return fract(p.x*p.y*p.z*(p.x+p.y+p.z)); }
+          float n(vec3 x){ vec3 i=floor(x), f=fract(x); f=f*f*(3.0-2.0*f);
+            return mix(mix(mix(h(i),h(i+vec3(1,0,0)),f.x),mix(h(i+vec3(0,1,0)),h(i+vec3(1,1,0)),f.x),f.y),
+                       mix(mix(h(i+vec3(0,0,1)),h(i+vec3(1,0,1)),f.x),mix(h(i+vec3(0,1,1)),h(i+vec3(1,1,1)),f.x),f.y),f.z); }
+          float fbm(vec3 p){ float a=.5, s=0.; for(int i=0;i<6;i++){ s+=a*n(p); p=p*2.03+vec3(1.7,9.2,3.1); a*=.5; } return s; }
+          void main(){
+            vec3 d = normalize(vDir);
+            vec3 axis = normalize(vec3(0.55, 0.75, 0.35));
+            float band = exp(-pow(dot(d, axis) * 1.8, 2.0));
+            float neb = band * smoothstep(.32, .82, fbm(d * 3.2));
+            float dust = fbm(d * 6.5 + 4.0);
+            vec3 col = vec3(.004,.007,.016);
+            float hue = fbm(d * 2.1 + 7.0);
+            col += mix(vec3(.08,.16,.62), vec3(.38,.10,.62), smoothstep(.35,.7,hue)) * neb * .55;
+            col += mix(vec3(.25,.45,1.0), vec3(.70,.30,1.0), smoothstep(.4,.7,hue)) * pow(neb, 2.4) * .55;
+            col *= 1.0 - .7 * smoothstep(.45, .75, dust) * band;
+            col += vec3(.40,.20,.08) * band * pow(smoothstep(.62,.9, fbm(d*9.0+11.0)), 2.0) * .18;
+            gl_FragColor = vec4(col, 1.0);
+          }`,
+      })));
+      const field = (count, radius, size) => {
+        const g = new THREE.BufferGeometry(), pos = new Float32Array(count * 3), col = new Float32Array(count * 3), c = new THREE.Color();
+        for (let i = 0; i < count; i++) {
+          const u = Math.random() * 2 - 1, t = Math.random() * Math.PI * 2, q = Math.sqrt(1 - u * u);
+          pos.set([radius * q * Math.cos(t), radius * u, radius * q * Math.sin(t)], i * 3);
+          const k = Math.random();
+          c.setRGB(...(k > .92 ? [1, .8, .6] : k > .7 ? [.78, .86, 1] : [1, 1, 1])).multiplyScalar(.25 + Math.random() * .6);
+          col.set([c.r, c.g, c.b], i * 3);
+        }
+        g.setAttribute('position', new THREE.BufferAttribute(pos, 3)); g.setAttribute('color', new THREE.BufferAttribute(col, 3));
+        return new THREE.Points(g, new THREE.PointsMaterial({ size, sizeAttenuation: false, vertexColors: true, depthWrite: false }));
+      };
+      scene.add(field(3000, 28000, 1.2), field(220, 28000, 2.2));
+      // planète : sous la flotte et devant, limbe à contre-jour (même shader que la fiche du chantier)
+      const PR = Math.max(6000, ext * 14), PPOS = new THREE.Vector3(ext * 1.6, -PR - ext * 1.1, -ext * 3.5);
+      const SD = SUN.clone();
+      const pl = new THREE.Mesh(new THREE.SphereGeometry(PR, 128, 96), new THREE.ShaderMaterial({
+        uniforms: { uSun: { value: SD } },
+        vertexShader: `varying vec3 vP; varying vec3 vW;
+          void main(){ vP = position; vec4 w = modelMatrix * vec4(position,1.0); vW = w.xyz; gl_Position = projectionMatrix * viewMatrix * w; }`,
+        fragmentShader: `uniform vec3 uSun; varying vec3 vP; varying vec3 vW;
+          float h(vec3 p){ p = fract(p*0.3183099+.1); p *= 17.0; return fract(p.x*p.y*p.z*(p.x+p.y+p.z)); }
+          float n(vec3 x){ vec3 i=floor(x), f=fract(x); f=f*f*(3.0-2.0*f);
+            return mix(mix(mix(h(i),h(i+vec3(1,0,0)),f.x),mix(h(i+vec3(0,1,0)),h(i+vec3(1,1,0)),f.x),f.y),
+                       mix(mix(h(i+vec3(0,0,1)),h(i+vec3(1,0,1)),f.x),mix(h(i+vec3(0,1,1)),h(i+vec3(1,1,1)),f.x),f.y),f.z); }
+          float fbm(vec3 p){ float s=0., a=.5; for(int i=0;i<5;i++){ s+=a*n(p); p=p*2.03+1.7; a*=.5; } return s; }
+          void main(){
+            vec3 d = normalize(vP), N = d;
+            float land = smoothstep(.52, .58, fbm(d * 3.2));
+            vec3 col = mix(mix(vec3(.01,.05,.13), vec3(.02,.11,.25), fbm(d * 9.0)), mix(vec3(.06,.12,.05), vec3(.16,.14,.08), fbm(d * 14.0)), land);
+            col = mix(col, vec3(.85,.88,.92), smoothstep(.5, .78, fbm(d * 5.5)) * .85);
+            float day = clamp(dot(N, normalize(uSun)) * 1.2 + .15, 0., 1.);
+            col *= .04 + 1.05 * day;
+            float rim = pow(1.0 - max(dot(N, normalize(cameraPosition - vW)), 0.0), 3.0);
+            col += vec3(.25,.5,1.0) * rim * (.25 + 1.2 * day);
+            gl_FragColor = vec4(col, 1.0);
+          }`,
+      }));
+      pl.position.copy(PPOS); scene.add(pl); envPlanet = pl;
+      const atmo = new THREE.Mesh(new THREE.SphereGeometry(PR * 1.025, 96, 64), new THREE.ShaderMaterial({
+        transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.BackSide,
+        vertexShader: `varying vec3 vN; varying vec3 vW; void main(){ vN = normalize(normalMatrix * normal); vec4 w = modelMatrix * vec4(position,1.0); vW = w.xyz; gl_Position = projectionMatrix * viewMatrix * w; }`,
+        fragmentShader: `varying vec3 vN; varying vec3 vW;
+          void main(){ vec3 V = normalize(cameraPosition - vW); float f = pow(1.0 - abs(dot(normalize(vN), V)), 2.2); gl_FragColor = vec4(vec3(.3,.6,1.0) * f * .9, f * .9); }`,
+      }));
+      atmo.position.copy(PPOS); scene.add(atmo);
+      // soleil droit devant : disque, halo, voile large, reflet anamorphique
+      const big = (stops) => { const c = document.createElement('canvas'); c.width = c.height = 256; const g = c.getContext('2d'), r = g.createRadialGradient(128, 128, 0, 128, 128, 128); stops.forEach(([o, col]) => r.addColorStop(o, col)); g.fillStyle = r; g.fillRect(0, 0, 256, 256); return new THREE.CanvasTexture(c); };
+      const SD_ = 20000, K = SD_ / 240;
+      for (const [size, stops, opacity, sy] of [
+        [16,  [[0, 'rgba(255,255,255,1)'], [.35, 'rgba(255,250,235,1)'], [.5, 'rgba(255,235,200,.6)'], [1, 'rgba(255,220,180,0)']], 1.0, 1],
+        [90,  [[0, 'rgba(255,240,215,.9)'], [.12, 'rgba(255,215,170,.45)'], [.4, 'rgba(200,170,255,.12)'], [1, 'rgba(120,120,255,0)']], .9, 1],
+        [260, [[0, 'rgba(255,230,200,.35)'], [.3, 'rgba(160,150,255,.08)'], [1, 'rgba(80,90,255,0)']], .8, 1],
+        [190, [[0, 'rgba(210,225,255,.8)'], [.25, 'rgba(150,170,255,.25)'], [1, 'rgba(100,120,255,0)']], .55, 0.03],
+      ]) {
+        const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: big(stops), blending: THREE.AdditiveBlending, depthWrite: false, transparent: true, opacity }));
+        sp.scale.set(size * K, size * K * sy, 1); sp.position.copy(SUN).multiplyScalar(SD_); scene.add(sp);
+      }
+      // étoiles filantes : une traînée lumineuse de temps en temps, loin dans le ciel
+      const shotTex = (() => { const c = document.createElement('canvas'); c.width = 256; c.height = 16; const g = c.getContext('2d');
+        const lg = g.createLinearGradient(0, 0, 256, 0); lg.addColorStop(0, 'rgba(255,255,255,0)'); lg.addColorStop(.85, 'rgba(200,220,255,.55)'); lg.addColorStop(1, 'rgba(255,255,255,1)');
+        g.fillStyle = lg; g.fillRect(0, 6, 256, 4); return new THREE.CanvasTexture(c); })();
+      for (let i = 0; i < 2; i++) {
+        const m = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshBasicMaterial({ map: shotTex, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide }));
+        m.frustumCulled = false; scene.add(m); shooting.push({ m, t0: -1, next: 2 + i * 5 + Math.random() * 4 });
+      }
+    }
     const loader = new GLTFLoader();
     const get = (url) => cache[url] || (cache[url] = new Promise((ok, ko) => loader.load(url, ok, undefined, ko)));
     let alive = true;
@@ -372,7 +469,7 @@
 
     // caméra : arrière 3/4 de dessus ; orbite (azimut + inclinaison) et zoom lissés, rotation lente au repos
     // opts.az / opts.el : cadrage initial (0 = vue arrière) ; opts.spin : rotation lente au repos (rad/s)
-    let az = opts.az ?? (mission ? 2.35 : 0.35), azT = az, el = opts.el ?? (mission ? 0.42 : 0.62), elT = el, zoom = opts.zoom ?? 1, zoomT = zoom, idle = true, idleTimer = null;
+    let az = opts.az ?? (mission ? 2.35 : 0.35), azT = az, el = opts.el ?? (mission ? 0.42 : 0.3), elT = el, zoom = opts.zoom ?? 1, zoomT = zoom, idle = true, idleTimer = null;
     const SPIN = opts.spin ?? 0.025;
     const fit = () => ext / Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)) * (W() / H() < 0.8 ? 1.15 : 0.8);
     const ro = new ResizeObserver(() => { renderer.setSize(W(), H()); composer.setSize(W(), H()); applyView(); });
@@ -395,8 +492,28 @@
       camera.lookAt(tgt);
       PT.value = t;
       HYPER.value = t;
-      planet.rotation.x += dt * 0.006;                                  // le sol défile sous la flotte
-      cMesh.rotation.y += dt * 0.002;
+      if (envPlanet) envPlanet.rotation.x -= dt * 0.004;                 // le sol défile sous la flotte
+      for (const sh of shooting) {
+        if (sh.t0 < 0 && t > sh.next) {                                 // nouvelle étoile filante, dans la moitié haute du ciel, côté caméra
+          const R = 16000, a = Math.random() * Math.PI * 2, el2 = .25 + Math.random() * .5;
+          const fwd = new THREE.Vector3(); camera.getWorldDirection(fwd);
+          const base = fwd.clone().multiplyScalar(R).add(new THREE.Vector3((Math.random() - .5) * R * .9, R * (.25 + Math.random() * .35), 0));
+          sh.p0 = base; sh.dir = new THREE.Vector3(Math.cos(a), -Math.abs(Math.sin(a)) * .6 - .2, (Math.random() - .5) * .3).normalize();
+          sh.len = 2200 + Math.random() * 2600; sh.dur = .7 + Math.random() * .5; sh.t0 = t;
+        }
+        if (sh.t0 >= 0) {
+          const u = (t - sh.t0) / sh.dur;
+          if (u >= 1) { sh.t0 = -1; sh.next = t + 4 + Math.random() * 7; sh.m.material.opacity = 0; continue; }
+          const head = sh.p0.clone().addScaledVector(sh.dir, sh.len * 2.2 * u);
+          sh.m.position.copy(head).addScaledVector(sh.dir, -sh.len / 2);
+          sh.m.scale.set(sh.len, sh.len * .012, 1);
+          sh.m.quaternion.copy(camera.quaternion);                      // face caméra, orientée dans le sens de la course à l'écran
+          const p0s = head.clone().project(camera), p1s = head.clone().addScaledVector(sh.dir, -sh.len).project(camera);
+          sh.m.rotateZ(Math.atan2((p0s.y - p1s.y) / camera.aspect, p0s.x - p1s.x) );
+          sh.m.material.opacity = Math.sin(u * Math.PI) * .9;
+        }
+      }
+
       for (const s of ships) {
         if (!s) continue;
         const p = s.userData.ph;
