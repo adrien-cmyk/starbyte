@@ -8546,6 +8546,7 @@ var EXTRA_SAVE_KEYS = [
   'botState',  // BOTS_1110 — stocks des commandants automates après pillage
   'mpGrowthMilestone',  // RUMORS_1110 — dernier palier de niveau annoncé au comptoir
   'mpDiplo',   // AMBASSADES_1210 — ambassades vues et dernière image des pactes
+  'mpNeighbors',   // VOISINS_1310 — voisins déjà signalés
 ];
 
 // Sauvegarde G complet dans localStorage. Appelé fréquemment, doit être rapide.
@@ -9349,6 +9350,7 @@ var MP_DIPLO_TYPES = {
   pact_signed:    { title: 'PACTE SIGNÉ',         list: 'Pacte signé',         sub: 'pacte de non-agression actif', color: '#7ed080' },
   pact_broken:    { title: 'PACTE ROMPU',         list: 'Pacte rompu',         sub: 'les raids redeviennent possibles', color: '#ff8a8a' },
   pact_declined:  { title: 'PACTE DÉCLINÉ',       list: 'Pacte décliné',       sub: 'proposition refusée', color: '#cececd' },
+  neighbor:       { title: 'SIGNAL CAPTÉ',        list: 'Commandant voisin',   sub: 'ajouté à ton carnet', color: '#5fffe8' },   // VOISINS_1310
 };
 function _mpDiploReport(type, d, key) {
   if (!G.reports) G.reports = [];
@@ -9686,6 +9688,10 @@ function renderDiploReportDetail(r) {
     else if (k) html += `<div style="margin:0 16px 14px;font-size:12px;color:var(--mut);font-style:italic;text-align:center">Ce pacte n'est plus en vigueur.</div>`;
   } else if (d.type === 'pact_broken') {
     html += box(`<strong>${d.pseudo}</strong> ${d.reason === 'recall' ? 'a rappelé son ambassade' : 'a dénoncé votre pacte'}. Les raids redeviennent possibles entre vous.${addr}`);
+  } else if (d.type === 'neighbor') {   // VOISINS_1310
+    html += box(`Une signature de commandant se détache du bruit de fond : <strong>${d.pseudo}</strong>${d.planet ? `, sur ${d.planet}` : ''}, niveau estimé ~${d.level || 1}. C'est l'un de tes plus proches voisins.${addr}`)
+      + `<div style="margin:0 16px 14px;font-size:12px;color:var(--mut);line-height:1.6">Depuis sa fiche (Carnet ou onglet Joueurs) : envoyer un tanker en ambassade, hisser un pavillon, proposer un pacte… ou préparer un raid.</div>`
+      + `<div style="margin:0 16px 14px;display:flex">${_mpDiploBtn('Voir sa planète', `openPlanetDetail('${d.address}')`)}</div>`;
   } else if (d.type === 'pact_declined') {
     html += box(`<strong>${d.pseudo}</strong> a décliné ton pacte de non-agression.${addr}`);
   } else if (d.type === 'cargo_accepted') {
@@ -10225,6 +10231,29 @@ async function mpSpyConvoy(reportId) {
     _mpRenderInterceptSheet();
   } catch (e) { toast(_mpPirErr(e)); }
   finally { _mpAmbushBusy.delete('spy:' + reportId); }
+}
+
+// VOISINS_1310 — signaux captés : les commandants les plus proches entrent au carnet (une fois chacun)
+function mpIngestNeighbors(rows) {
+  if (!Array.isArray(rows) || !rows.length) return;
+  if (!G.mpNeighbors || typeof G.mpNeighbors !== 'object') G.mpNeighbors = {};
+  const fresh = [];
+  for (const w of rows) {
+    if (!w || !w.address || w.address === (typeof mpMyAddressString === 'function' ? mpMyAddressString() : '')) continue;
+    const sysKey = String(w.address).split('-').slice(0, 3).join('-');
+    mergeRealWorlds(sysKey, [{ address: w.address, pseudo: w.pseudo, planet_name: w.planet_name, level_estimate: w.level_estimate }]);
+    if (!G.mpNeighbors[w.address]) {
+      G.mpNeighbors[w.address] = Date.now();
+      fresh.push(w);
+      _mpDiploReport('neighbor', { pseudo: w.pseudo, address: w.address, planet: w.planet_name || null, level: w.level_estimate || 1 }, 'nb-' + w.address);
+    }
+  }
+  if (!fresh.length) return;
+  const _ant = (window.SBAntenna && typeof SBAntenna.data === 'function') ? SBAntenna.data() : G.antenna;
+  const antenna = !!(_ant && _ant.built && !_ant.building);
+  toast(`📡 ${antenna ? 'Ton antenne capte' : 'Signal capté'} : ${fresh.map(w => w.pseudo).join(', ')} · ajouté${fresh.length > 1 ? 's' : ''} au carnet`);
+  if (typeof saveGame === 'function') saveGame();
+  if (typeof _mpDiploRefresh === 'function') _mpDiploRefresh();
 }
 
 function renderDefenseReportDetail(r) {
@@ -36493,9 +36522,9 @@ function renderDefenseUnitDetail(key) {
 
 // ─── SHIP3D : fiche vaisseau en vue héros (3D plein écran derrière la fiche, comme le soldat lourd) ───
 const UNIT_SHIP3D_MODELS = {
-  cuirasse: { url: 'assets/3d/sb_kv01.glb?v=20261012-2000', code: 'KV-01 Kerath' },
-  fregate:  { url: 'assets/3d/sb_sr01.glb?v=20261012-2000', code: 'SR-01 Sentinelle', profile: 'sr01' },
-  tanker:   { url: 'assets/3d/sb_tk07.glb?v=20261012-2000', code: 'TK-07 Tanker', profile: 'tk07' },
+  cuirasse: { url: 'assets/3d/sb_kv01.glb?v=20261013-1100', code: 'KV-01 Kerath' },
+  fregate:  { url: 'assets/3d/sb_sr01.glb?v=20261013-1100', code: 'SR-01 Sentinelle', profile: 'sr01' },
+  tanker:   { url: 'assets/3d/sb_tk07.glb?v=20261013-1100', code: 'TK-07 Tanker', profile: 'tk07' },
 };
 let unitShip3D = null;   // { key, handle }
 function mountUnitShip3D(key, inService) {
@@ -36584,9 +36613,9 @@ function hasShipyardBuilt() {
   return !!(typeof G !== 'undefined' && G.planet && G.planet.parcels && G.planet.parcels.some(p => p && p.building === 'shipyard' && p.state === 'built'));
 }
 const DOCK_MODELS = {
-  tanker:   { url: 'assets/3d/sb_tk07_lod.glb?v=20261012-2000', engine: [1.0, 0.7, 0.4] },
-  fregate:  { url: 'assets/3d/sb_sr01_lod.glb?v=20261012-2000', engine: [0.5, 0.78, 1.0] },
-  cuirasse: { url: 'assets/3d/sb_kv01_lod.glb?v=20261012-2000', engine: [0.5, 0.78, 1.0] },
+  tanker:   { url: 'assets/3d/sb_tk07_lod.glb?v=20261013-1100', engine: [1.0, 0.7, 0.4] },
+  fregate:  { url: 'assets/3d/sb_sr01_lod.glb?v=20261013-1100', engine: [0.5, 0.78, 1.0] },
+  cuirasse: { url: 'assets/3d/sb_kv01_lod.glb?v=20261013-1100', engine: [0.5, 0.78, 1.0] },
 };
 function fleetStationedCount(k) {
   const c = (G.fleet && G.fleet.stationed && G.fleet.stationed[k]) || {};
@@ -36678,7 +36707,7 @@ function unmountFleetStation3D() {
 })();
 
 // ─── SHIP3D : fiche bâtiment en vue héros (chantier orbital OS-01) ───
-const BUILDING_SHIP3D = { shipyard: { url: 'assets/3d/sb_os01.glb?v=20261012-2000', code: 'OS-01 Chantier orbital', profile: 'os01' } };
+const BUILDING_SHIP3D = { shipyard: { url: 'assets/3d/sb_os01.glb?v=20261013-1100', code: 'OS-01 Chantier orbital', profile: 'os01' } };
 let bdShip3D = null;   // { key, handle }
 function mountBuildingShip3D(key, tier) {
   const scr = document.getElementById('scr-building-detail');
@@ -43618,19 +43647,19 @@ if (G.knownTargets && Array.isArray(G.tankerMissions)) {
 <!-- PLANET3D — carte 3D + boucle antenne (source : sb-build/src/planet3d.js) -->
 <script type="module" src="assets/planet3d.js?v=20261012-lc01"></script>
 <!-- CLOUD — sauvegarde Supabase (source : sb-build/src/cloud.js) -->
-<script type="module" src="assets/cloud.js?v=20261012-2000"></script>
+<script type="module" src="assets/cloud.js?v=20261013-1100"></script>
 <!-- MATCH3 — Match-3 V2 (assets/match3.js, source src/match3.js + src/m3core.js) : remplace startM3 -->
-<script type="module" src="assets/match3.js?v=20261012-2000"></script>
+<script type="module" src="assets/match3.js?v=20261013-1100"></script>
 <!-- HOME V2 — « monde d'abord » : planète plein écran, ressources en ligne, Flotte / Défense / Prospection (assets/home.js) -->
-<script type="module" src="assets/home.js?v=20261012-2000"></script>
+<script type="module" src="assets/home.js?v=20261013-1100"></script>
 <!-- SPACE MAP v0 — carte du Centre de prospection (assets/spacemap.js, source src/spacemap.js) -->
-<script src="assets/spacemap.js?v=20261012-2000"></script>
+<script src="assets/spacemap.js?v=20261013-1100"></script>
 <!-- SPACE MAP niveau B — diorama 3D d'un système (assets/system3d.js, source src/system3d.js) -->
-<script type="module" src="assets/system3d.js?v=20261012-2000"></script>
+<script type="module" src="assets/system3d.js?v=20261013-1100"></script>
 <!-- SHIP3D — fiches 3D : cuirassé KV-01, frégate SR-01, tanker TK-07, chantier orbital OS-01 (assets/ship3d.js, sur le moteur partagé window.SB3D) -->
-<script src="assets/radio.js?v=20261012-2250"></script>
-<script type="module" src="assets/ship3d.js?v=20261012-2000"></script>
+<script src="assets/radio.js?v=20261013-1100"></script>
+<script type="module" src="assets/ship3d.js?v=20261013-1100"></script>
 <!-- FORMATION3D — flotte déployée en orbite, vue de haut en formation (remplace la vue orbite) -->
-<script src="assets/formation3d.js?v=20261012-2000"></script>
+<script src="assets/formation3d.js?v=20261013-1100"></script>
 </body>
 </html>
