@@ -295,23 +295,59 @@
       }
     })).catch(e => console.warn('[Formation3D]', e)).finally(() => { if (alive && opts.onReady) opts.onReady(); });
 
-    // mission : soleil droit devant, étoiles proches qui défilent (vitesse), poussière ionisée
-    let streaks = null, streakPos = null, streakV = null;
+    // mission : hyperespace — tunnel de traînées lumineuses floues (violet, magenta, cyan) qui convergent vers
+    // un cœur violet éblouissant droit devant ; tout est calculé sur le GPU (aucune mise à jour CPU)
+    const HYPER = { value: 0 };
     if (mission) {
-      const sunTex = radial([[0, 'rgba(255,255,255,1)'], [.3, 'rgba(255,246,228,1)'], [.5, 'rgba(255,230,190,.55)'], [1, 'rgba(255,210,170,0)']]);
-      const haloTex = radial([[0, 'rgba(255,236,210,.9)'], [.15, 'rgba(255,210,170,.4)'], [.45, 'rgba(190,160,255,.1)'], [1, 'rgba(120,120,255,0)']]);
-      [[sunTex, 600, 1, 1], [haloTex, 4200, .85, 1], [haloTex, 3600, .45, .035]].forEach(([tx, sz, op, sy]) => {
-        const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: tx, blending: THREE.AdditiveBlending, depthWrite: false, transparent: true, opacity: op }));
-        sp.scale.set(sz, sz * sy, 1); sp.position.copy(SUN).multiplyScalar(16000); scene.add(sp);
-      });
-      const N = 560; streakPos = new Float32Array(N * 6); streakV = new Float32Array(N);
+      const D = Math.min(30000, ext * 40);                               // profondeur du tunnel devant la flotte
+      const coreTex = radial([[0, 'rgba(255,255,255,1)'], [.12, 'rgba(235,220,255,1)'], [.3, 'rgba(160,110,255,.65)'], [.6, 'rgba(90,40,255,.18)'], [1, 'rgba(60,20,200,0)']]);
+      const hazeTex = radial([[0, 'rgba(120,70,255,.55)'], [.35, 'rgba(90,40,230,.22)'], [1, 'rgba(40,10,140,0)']]);
+      const flareTex = radial([[0, 'rgba(255,255,255,1)'], [.2, 'rgba(210,190,255,.6)'], [1, 'rgba(140,100,255,0)']]);
+      const at = new THREE.Vector3(0, 0, -D);
+      [[hazeTex, D * 1.1, 1, 1, .9], [coreTex, D * .16, 1, 1, 1], [flareTex, D * .5, .018, 1, .9], [flareTex, D * .5, .018, 1, .9, Math.PI / 2], [flareTex, D * .3, .012, 1, .6, Math.PI / 4], [flareTex, D * .3, .012, 1, .6, -Math.PI / 4]]
+        .forEach(([tx, sz, sy, _u, op, rot]) => {
+          const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: tx, blending: THREE.AdditiveBlending, depthWrite: false, transparent: true, opacity: op, rotation: rot || 0, fog: false }));
+          sp.scale.set(sz, sz * sy, 1); sp.position.copy(at); scene.add(sp);
+        });
+      const N = 1400, span = ext * 16;
+      const base = new THREE.PlaneGeometry(1, 1); base.translate(.5, 0, 0);   // x ∈ [0,1] le long de la traînée, y ∈ [−.5,.5] en travers
+      const g = new THREE.InstancedBufferGeometry(); g.index = base.index; g.attributes.position = base.attributes.position;
+      const aP = new Float32Array(N * 4), aC = new Float32Array(N * 3);
+      const PAL = [[.55, .35, 1.0], [.86, .38, 1.0], [.38, .82, 1.0], [.92, .86, 1.0], [.7, .45, 1.0]];
       for (let i = 0; i < N; i++) {
-        const x = (Math.random() - .5) * ext * 7, y = (Math.random() - .5) * ext * 4, z = (Math.random() - .5) * ext * 9;
-        streakPos.set([x, y, z, x, y, z], i * 6); streakV[i] = .6 + Math.random() * .8;
+        const r = ext * (.45 + Math.pow(Math.random(), .7) * 3.6);
+        aP.set([Math.random() * Math.PI * 2, r, Math.random(), .55 + Math.random() * .9], i * 4);
+        aC.set(PAL[Math.floor(Math.random() * PAL.length)], i * 3);
       }
-      const sg = new THREE.BufferGeometry(); sg.setAttribute('position', new THREE.BufferAttribute(streakPos, 3));
-      streaks = new THREE.LineSegments(sg, new THREE.LineBasicMaterial({ color: 0x9fb8ff, transparent: true, opacity: .3, blending: THREE.AdditiveBlending, depthWrite: false }));
-      streaks.frustumCulled = false; scene.add(streaks);
+      g.setAttribute('aP', new THREE.InstancedBufferAttribute(aP, 4)); g.setAttribute('aC', new THREE.InstancedBufferAttribute(aC, 3));
+      g.instanceCount = N;
+      const m = new THREE.ShaderMaterial({
+        transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
+        uniforms: { uT: HYPER, uSpan: { value: span }, uNear: { value: ext * 3.5 }, uV: { value: ext * 7 }, uLen: { value: ext * 2.2 }, uW: { value: ext * .02 }, uExt: { value: ext } },
+        vertexShader: `attribute vec4 aP; attribute vec3 aC; uniform float uT, uSpan, uNear, uV, uLen, uW, uExt;
+          varying vec2 vC; varying vec3 vCol; varying float vF;
+          void main(){
+            float zz = fract(aP.z + uT * uV * aP.w / uSpan);              // 0 : au loin, 1 : dépasse la caméra
+            float z = uNear - uSpan * (1.0 - zz);
+            vec3 head = vec3(cos(aP.x) * aP.y, sin(aP.x) * aP.y * .8, z);
+            float len = uLen * aP.w * (.5 + 1.3 * zz * zz);              // s'étire en approchant (vitesse apparente)
+            vec4 h = viewMatrix * vec4(head, 1.0), tl = viewMatrix * vec4(head - vec3(0.0, 0.0, len), 1.0);
+            vec3 side = normalize(cross(tl.xyz - h.xyz, -h.xyz));
+            float w = uW * (.6 + .7 * aP.w) * (.5 + zz);
+            vec3 p = mix(h.xyz, tl.xyz, position.x) + side * w * position.y * 2.0;
+            vC = vec2(position.x, position.y * 2.0); vCol = aC;
+            vF = smoothstep(0.0, .3, zz) * (1.0 - smoothstep(.9, 1.0, zz)) * smoothstep(uExt * .9, uExt * 2.4, -h.z);   // rien ne frôle l'objectif
+            gl_Position = projectionMatrix * vec4(p, 1.0);
+          }`,
+        fragmentShader: `varying vec2 vC; varying vec3 vCol; varying float vF;
+          void main(){
+            float across = exp(-vC.y * vC.y * 3.2);                      // profil gaussien : flou, sans arête
+            float along = pow(1.0 - vC.x, 1.6) * smoothstep(0.0, .06, vC.x + .02);
+            float a = across * along * vF;
+            gl_FragColor = vec4(mix(vCol, vec3(1.0), across * along * .2) * .85 * a, a * .7);
+          }`,
+      });
+      const tun = new THREE.Mesh(g, m); tun.frustumCulled = false; tun.renderOrder = 1; scene.add(tun);
     }
 
     const composer = new EffectComposer(renderer);
@@ -341,15 +377,7 @@
       camera.position.set(tgt.x + Math.sin(az) * Math.cos(el) * d, tgt.y + Math.sin(el) * d, tgt.z + Math.cos(az) * Math.cos(el) * d);
       camera.lookAt(tgt);
       PT.value = t;
-      if (streaks) {                                                    // étoiles proches : défilent vers l'arrière (+Z)
-        const span = ext * 9, V = ext * 2.4;
-        for (let i = 0; i < streakV.length; i++) {
-          const o = i * 6; let z = streakPos[o + 2] + V * streakV[i] * dt;
-          if (z > span / 2) z -= span;
-          streakPos[o + 2] = z; streakPos[o + 5] = z - V * streakV[i] * 0.18;
-        }
-        streaks.geometry.attributes.position.needsUpdate = true;
-      }
+      HYPER.value = t;
       planet.rotation.x += dt * 0.006;                                  // le sol défile sous la flotte
       cMesh.rotation.y += dt * 0.002;
       for (const s of ships) {
