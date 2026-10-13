@@ -187,6 +187,20 @@
       if (/^[A-Z]-[A-Z]-\d{4}/.test(tc) && !/^SIG-/.test(tc)) add(tc.split('-').slice(0, 3).join('-'), { scanning: true });
     }
 
+    // Balises posées : leur système apparaît (même jamais balayé), avec sa balise
+    for (const b of (G.probesPool || [])) {
+      if (b.tier !== 'beacon' || b.state !== 'deployed' || !b.deployedSystem) continue;
+      const m = String(b.deployedSystem).toUpperCase().match(/^([A-Z])-([A-Z])-(\d{4})/);
+      if (!m) continue;
+      const sb = add(`${m[1]}-${m[2]}-${m[3]}`, {});
+      (sb.beacons = sb.beacons || []).push(b);
+    }
+    // 13/10 — mémoire de la carte : un système vu reste sur la carte même si ses rapports sont supprimés
+    if (!G.mapSeen) G.mapSeen = {};
+    for (const k of Object.keys(G.mapSeen)) if (/^[A-Z]-[A-Z]-\d{4}$/.test(k)) add(k, { known: true });
+    for (const k of Object.keys(G.systemTags || {})) if (/^[A-Z]-[A-Z]-\d{4}$/.test(k)) add(k, { known: true });
+    for (const sx of Object.values(systems)) if (sx.known && !G.mapSeen[sx.key]) G.mapSeen[sx.key] = Date.now();
+
     // ── Plateau : une case par objet ──
     const home = mySystemKey();
     add(home, { known: true, isMine: true });
@@ -253,7 +267,7 @@
     const o = [];
     for (const [i, v] of st.occ) if (v.kind !== 'home') o.push(i + v.kind[0] + v.key);
     for (const s of Object.values(st.systems)) {
-      o.push((s.known ? 'K' : '') + (s.scanning ? 'S' : '') + s.key);
+      o.push((s.known ? 'K' : '') + (s.scanning ? 'S' : '') + s.key + ':' + ((G.systemTags || {})[s.key] || '') + ':' + ((s.beacons || []).length));
       for (const t of s.targets) o.push(t.key + ':' + (t.kt.status || ''));
       for (const g of s.sigs) o.push(g.id + ':' + (g.resolved ? 1 : 0));
       for (const pl of s.planets) o.push('P' + pl.coord + (pl.playerName ? '@' + pl.playerName : ''));
@@ -314,7 +328,7 @@
       if (st.ok) act = _sigBtn(COL.radar, 'Balayer', `SBMap.sweep('${esc(s.sysKey)}')`, `Radar · ${esc(s.sysKey)} · ${PROBE_TIER_CONFIG.radar.duration}`);
       else if (st.build) act = _sigBtn(COL.radar, 'Construire une Radar', `openProbeDetail('radar')`, `${PROBE_TIER_CONFIG.radar.cost.metal} Métal · puis reviens balayer`, true);
       else act = _sigOff(st.why);
-      return `<div class="sm-panel"><div class="sm-ptitle">Secteur ${esc(s.sector)} · zone inexplorée</div><div class="sm-psub">Rien de connu ici.</div>${act}</div>`;
+      return `<div class="sm-panel"><div class="sm-ptitle">Secteur ${esc(s.sector)} · zone inexplorée</div><div class="sm-psub">Rien de connu ici.</div>${act}${beaconAction(s.sysKey, null)}</div>`;
     }
     if (s.kind === 'orbit') {
       // anneau autour de ma planète : c'est mon propre système
@@ -343,7 +357,7 @@
       if (sys && sys.scanning) {
         // la sonde y va vraiment : on le dit, avec l'heure d'arrivée
         const m = (G.probeMissions || []).find(x => x.status === 'in_transit' && String(x.targetCoords || '').startsWith(s.key));
-        bits.push(m ? `Radar en route · arrivée dans ${formatTankerDuration(Math.max(0, (m.arrivalAt || 0) - Date.now()))}` : 'balayage en cours');
+        bits.push(m ? `${esc((PROBE_TIER_CONFIG[m.tier] || { label: 'Sonde' }).label)} en route · arrivée dans ${formatTankerDuration(Math.max(0, (m.arrivalAt || 0) - Date.now()))}` : 'balayage en cours');
       }
       const st = (typeof _probeTierStatus === 'function') ? _probeTierStatus('radar') : { ok: false };
       let act = '';
@@ -353,7 +367,9 @@
         else act = _sigOff(st.why);
       }
       const insp = (window.SBSystem && sys && (sys.known || sys.scanning)) ? _sigBtn(COL.cyan, 'Inspecter le système', `SBSystem.open('${esc(s.key)}')`, '', true) : '';
-      return `<div class="sm-panel"><div class="sm-ptitle">Système ${esc(s.key)}</div><div class="sm-psub">${bits.join(' · ') || 'Balayé, rien de relevé.'}</div>${insp}${act}</div>`;
+      const tag = (G.systemTags || {})[s.key];
+      const tagTxt = tag === 'star' ? ' · <span style="color:#ffc864">intéressant</span>' : tag === 'skip' ? ' · <span style="color:#8a96a0">sans intérêt</span>' : '';
+      return `<div class="sm-panel"><div class="sm-ptitle">Système ${esc(s.key)}</div><div class="sm-psub">${bits.join(' · ') || 'Balayé, rien de relevé.'}${tagTxt}</div>${tagChips(s.key)}${insp}${act}${beaconAction(s.key, sys)}</div>`;
     }
     if (s.kind === 'sig') {
       const sig = G.signatures && G.signatures[s.key];
@@ -390,8 +406,17 @@
     }
     if (s.kind === 'planet') {
       const pl = (typeof findPlanetByCoord === 'function') ? findPlanetByCoord(s.key) : null;
+      if (pl && pl.playerName) {
+        // monde d'un autre commandant : sa fiche, le re-sonder (choix de la sonde), poser une balise sur son système
+        const sysKey = String(s.key).split('-').slice(0, 3).join('-');
+        const lvl = pl.playerLevel ? ' · niv. ' + esc(pl.playerLevel) : '';
+        return `<div class="sm-panel"><div class="sm-ptitle" style="color:#ff9a8a">${esc(pl.playerName)}</div><div class="sm-psub"><span class="mono">${esc(s.key)}</span> · ${esc(pl.customName || pl.name || '')}${lvl}</div>`
+          + _sigBtn('#ff9a8a', 'Voir sa fiche', `openPlanetDetail('${esc(s.key)}')`, '', true)
+          + _sigBtn(COL.radar, 'Sonder ce monde', `resondPlanet('${esc(s.key)}')`, 'Radar sur son système ou Furtive sur sa planète', true)
+          + beaconAction(sysKey, null) + `</div>`;
+      }
       const act = _sigBtn(COL.cyan, 'Voir corps céleste', `openPlanetDetail('${esc(s.key)}')`, '', true);
-      return `<div class="sm-panel"><div class="sm-ptitle">${esc((pl && pl.name) || 'Planète')}</div><div class="sm-psub mono">${esc(s.key)}${pl && pl.type ? ' · ' + esc(pl.type) : ''}</div>${act}</div>`;
+      return `<div class="sm-panel"><div class="sm-ptitle">${esc((pl && (pl.customName || pl.name)) || 'Planète')}</div><div class="sm-psub mono">${esc(s.key)}${pl && pl.type ? ' · ' + esc((typeof PLANET_TYPES !== 'undefined' && PLANET_TYPES[pl.type] && PLANET_TYPES[pl.type].label) || pl.type) : ''}</div>${act}</div>`;
     }
     if (s.kind === 'flight') {
       const f = state.flights.find(x => x.id === s.key);
@@ -584,7 +609,11 @@
         target: fade(new T.MeshBasicMaterial({ color: 0xffc864, opacity: 1 })),
         planet: fade(new T.MeshBasicMaterial({ color: 0xb4a8ff, opacity: 1 })),
         player: fade(new T.MeshBasicMaterial({ color: 0xff7a6a, opacity: 1 })),
+        star: fade(new T.LineBasicMaterial({ color: 0xffc864, opacity: 0.7 })),
       };
+      // balises posées : un mât violet, lisible à toutes les distances
+      this.beaconMat = fade(new T.MeshBasicMaterial({ color: 0xb48cff, opacity: 1 }));
+      this.G.mast = new T.CylinderGeometry(0.16, 0.16, 7, 6); this.G.mast.translate(0, 3.5, 0);
       // Étoiles : un matériau par couleur, luminosité réglée par le zoom (à peine visibles de loin)
       this.starMat = STAR_COLS.map((c) => { const m = new T.MeshBasicMaterial({ color: c }); m.userData.base = new T.Color(c); return m; });
       this.starHalo = STAR_COLS.map((c) => fade(new T.SpriteMaterial({ map: this.halo, color: c, opacity: 0.3, blending: T.AdditiveBlending })));
@@ -823,7 +852,8 @@
         if (!isHome) {
           const ci2 = Math.floor(_mulberry32(_hashSeed('SM3:star:' + s.key))() * STAR_COLS.length);
           const known = s.known;
-          const star = mark(new T.Mesh(Gm.sphere, known ? this.starMat[ci2] : this.dimStar));
+          const tag = (G.systemTags || {})[s.key];
+          const star = mark(new T.Mesh(Gm.sphere, known && tag !== 'skip' ? this.starMat[ci2] : this.dimStar));
           star.scale.setScalar(known ? 2.1 : 1.3); star.position.y = 5; star.userData.star = true; star.userData.base = known ? 2.1 : 1.3; g.add(star);
           this.starMeshes.push({ mesh: star, cell: ci, halo: null });
           const halo = new T.Sprite(this.starHalo[ci2]); halo.position.y = 5; halo.scale.setScalar(known ? 11 : 6); g.add(halo);
@@ -842,11 +872,21 @@
           // repère d'intérêt (mi-distance) : la couleur la plus importante de ce que contient le système
           const has = (k) => list.some((it) => it.kind === k && !(k === 'sig' && it.obj.resolved));
           const hasPlayer = list.some((it) => it.kind === 'planet' && it.obj.playerName);
-          const tk = hasPlayer ? 'player' : has('sig') ? 'sig' : has('target') ? 'target' : list.some((it) => it.kind === 'planet') ? 'planet' : null;
+          const tk = tag === 'skip' ? null : hasPlayer ? 'player' : has('sig') ? 'sig' : has('target') ? 'target' : list.some((it) => it.kind === 'planet') ? 'planet' : null;
+          if (tag === 'star') {
+            // marqué « intéressant » : un fin cercle doré autour de l'étoile
+            const ring = mark(new T.Line(this._circleG || (this._circleG = Gm.circle(1)), this.TICK.star)); ring.scale.setScalar(7.5); ring.position.y = 0.5; g.add(ring);
+          }
           if (tk) {
             const tick = mark(new T.Mesh(Gm.sphereLo, this.TICK[tk])); tick.scale.setScalar(1.1); tick.position.set(4.2, 5, -2.4); g.add(tick);
             this.ticks.push(tick);
           }
+        }
+
+        // balise posée ici : un mât violet à côté de l'étoile
+        if (s.beacons && s.beacons.length) {
+          const mast = mark(new T.Mesh(this.G.mast, this.beaconMat)); mast.position.set(isHome ? -9 : -4.6, 0, isHome ? 9 : 2.8); g.add(mast);
+          const top = mark(new T.Mesh(Gm.sphereLo, this.beaconMat)); top.scale.setScalar(0.65); top.position.set(mast.position.x, 7.3, mast.position.z); g.add(top);
         }
 
         // ── Détail « près » : orbites et corps, à l'intérieur de la case ──
@@ -954,7 +994,8 @@
       this.starMat.forEach((m) => m.color.copy(m.userData.base).multiplyScalar(k));
       this.starHalo.forEach((m) => { m.opacity = (0.04 + 0.22 * far) * (1 - 0.85 * near); });
       this.dimStar.color.setRGB(0.42 * k, 0.48 * k, 0.5 * k);
-      for (const m of Object.values(this.TICK)) m.opacity = far * (1 - near);
+      for (const m of Object.values(this.TICK)) m.opacity = (m.userData.base || 1) * far * (1 - near);
+      this.beaconMat.opacity = 0.35 + 0.65 * far;
       for (const m of Object.values(this.NEAR)) m.opacity = (m.userData.base == null ? 1 : m.userData.base) * near;
       for (const m of Object.values(this.fillMat)) m.opacity = m.userData.base * (0.5 + 0.5 * far) * (1 - near);
       this.nearGroups.forEach((g) => { g.visible = near > 0.01; });
@@ -1141,13 +1182,93 @@
     if (i >= 0) E.moveTo(CELLS[i].x, CELLS[i].z, ['system', 'home', 'sig', 'target', 'planet'].includes(sel.kind) ? NEAR_DIST : Math.min(560, E.dist()), 900);
   }
 
-  function sweep(sysKey) {
+  async function sweep(sysKey) {
+    // 13/10 : un système marqué « sans intérêt » demande confirmation avant d'y renvoyer une Radar
+    if ((G.systemTags || {})[sysKey] === 'skip' && typeof sbConfirmWarning === 'function') {
+      const seen = G.mapSeen && G.mapSeen[sysKey] ? new Date(G.mapSeen[sysKey]).toLocaleDateString('fr-CH', { day: 'numeric', month: 'short' }) : null;
+      const ok = await sbConfirmWarning('Système sans intérêt', `Tu as marqué ${esc(sysKey)} « sans intérêt »${seen ? ' (vu le ' + seen + ')' : ''}. Y renvoyer une Radar quand même ?`, 'Balayer quand même');
+      if (!ok) return;
+    }
     const m = launchProbe('radar', sysKey, 'local', false);
     if (!m) return;
     if (typeof saveGame === 'function') saveGame();
     _sel = { kind: 'system', key: sysKey };
     render();
     if (typeof renderProbesPane === 'function' && document.getElementById('probes-cards-list')) { try { renderProbesPane(); } catch (e) {} }
+  }
+
+  /* ─── Marques de systèmes (13/10) : intéressant / sans intérêt — gardées même sans rapport ─── */
+  function tagChips(key) {
+    const t = (G.systemTags || {})[key];
+    const chip = (v, l, c) => `<button class="sm-tag${t === v ? ' on' : ''}" style="--c:${c}" onclick="event.stopPropagation();SBMap.tag('${esc(key)}','${v}')">${l}</button>`;
+    return `<div class="sm-tags">${chip('star', 'Intéressant', '#ffc864')}${chip('skip', 'Sans intérêt', '#9aa6ae')}</div>`;
+  }
+  function tag(key, v) {
+    if (!G.systemTags) G.systemTags = {};
+    const was = G.systemTags[key];
+    if (was === v) delete G.systemTags[key]; else G.systemTags[key] = v;
+    if (!G.mapSeen) G.mapSeen = {};
+    if (!G.mapSeen[key]) G.mapSeen[key] = Date.now();
+    if (typeof saveGame === 'function') saveGame();
+    if (G.systemTags[key] === 'skip' && typeof toast === 'function') toast('Système sans intérêt : ses rapports sont rangés aux archives');
+    refresh(true);
+    if (typeof renderProspectRapports === 'function' && document.getElementById('prospect-rapports-list')) { try { renderProspectRapports(); } catch (e) {} }
+  }
+
+  /* ─── Balises depuis la carte (13/10) ─── */
+  const BEACON_COL = '#a370ff';
+  function beaconAction(sysKey, sys) {
+    if (!sysKey || typeof PROBE_TIER_CONFIG === 'undefined' || !PROBE_TIER_CONFIG.beacon) return '';
+    const here = (G.probesPool || []).find(b => b.tier === 'beacon' && b.state === 'deployed' && String(b.deployedSystem || '').toUpperCase().startsWith(sysKey));
+    if (here) {
+      const n = here.detectionCount || 0;
+      return _sigBtn(BEACON_COL, 'Rappeler la balise', `SBMap.recallBeacon('${esc(here.id)}')`, `Balise en surveillance · ${n} détection${n > 1 ? 's' : ''}`, true);
+    }
+    const going = (G.probeMissions || []).find(m => m.tier === 'beacon' && m.status === 'in_transit' && String(m.targetCoords || '').startsWith(sysKey));
+    if (going) return _sigOff(`Balise en route · arrivée dans ${formatTankerDuration(Math.max(0, (going.arrivalAt || 0) - Date.now()))}`);
+    const deployed = (G.probesPool || []).filter(b => b.tier === 'beacon' && b.state === 'deployed').length;
+    const quota = PROBE_TIER_CONFIG.beacon.quotaMax || 3;
+    if (deployed >= quota) return _sigOff(`${quota} balises déjà posées`, 'Rappelle-en une pour la poser ici');
+    const st = (typeof _probeTierStatus === 'function') ? _probeTierStatus('beacon') : { ok: false, build: true, why: 'Aucune balise prête' };
+    if (st.ok) return _sigBtn(BEACON_COL, 'Poser une balise', `SBMap.beacon('${esc(sysKey)}')`, 'Surveillance permanente des convois · 8 min de trajet', true);
+    if (st.build) return _sigBtn(BEACON_COL, 'Construire une balise', `openProbeDetail('beacon')`, `${PROBE_TIER_CONFIG.beacon.cost.metal || 300} Métal · ${PROBE_TIER_CONFIG.beacon.cost.cristal || 100} Cristal`, true);
+    return _sigOff(st.why);
+  }
+  function beacon(sysKey) {
+    const m = launchProbe('beacon', sysKey, 'local', false);
+    if (!m) return;
+    if (typeof saveGame === 'function') saveGame();
+    if (typeof toast === 'function') toast('Balise en route vers ' + sysKey);
+    refresh(true);
+  }
+  function recallBeaconFromMap(id) {
+    if (typeof recallBeacon === 'function') recallBeacon(id);
+    if (typeof saveGame === 'function') saveGame();
+    refresh(true);
+  }
+
+  /* ─── « En vol » dans la feuille Sondes : chaque sonde mène à sa cible sur la carte ─── */
+  function flightsHtml() {
+    const now = Date.now();
+    const list = (G.probeMissions || []).filter(m => m.status === 'in_transit').sort((a, b) => a.arrivalAt - b.arrivalAt);
+    if (!list.length) return '';
+    const rows = list.map(m => {
+      const cfg = PROBE_TIER_CONFIG[m.tier] || { label: m.tier, accent: '#9fb3bf' };
+      const tgt = String(m.targetCoords || '—');
+      return `<button class="smw-fl" onclick="SBMap.showFlight('${esc(m.id)}')">
+        <span class="t" style="color:${cfg.accent || '#9fb3bf'}">${esc(cfg.label)}</span>
+        <span class="g">${esc(tgt)}</span>
+        <span class="e">${esc(formatTankerDuration(Math.max(0, (m.arrivalAt || 0) - now)))}</span></button>`;
+    }).join('');
+    return `<div class="smw-fl-h">En vol · ${list.length}</div>${rows}`;
+  }
+  function showFlight(id) {
+    const m = (G.probeMissions || []).find(x => x.id === id);
+    if (!m) return;
+    W.closeSheet();
+    const sel = (typeof mapSelectionFor === 'function') ? mapSelectionFor(m.targetCoords) : null;
+    if (sel) { if (E.ready) focusSel(sel); else { _sel = sel; render(); } }
+    else { _sel = { kind: 'flight', key: id }; refresh(true); }
   }
 
   /* ═══════════════════ Écran plein : « monde d'abord », comme la planète ═══════════════════
@@ -1274,6 +1395,10 @@
       if (!this.sheet) return;
       this.tab = tab;
       this.sheet.querySelector('.smw-sh-t').textContent = SHEETS[tab] || '';
+      // feuille Sondes : les sondes en vol d'abord, chacune mène à sa cible sur la carte
+      let fl = this.sheet.querySelector('.smw-flights');
+      if (!fl) { fl = document.createElement('div'); fl.className = 'smw-flights'; this.sheet.querySelector('.smw-sh-body').prepend(fl); }
+      fl.innerHTML = tab === 'sondes' ? flightsHtml() : '';
       this.nav.querySelectorAll('button').forEach((b) => b.classList.toggle('on', b.dataset.t === tab));
       this.sheet.classList.add('on');
     },
@@ -1377,6 +1502,15 @@
       .sm-psub{font-size:10px;color:var(--mut);margin-top:3px;letter-spacing:.04em;line-height:1.5}
       .sm-psub.mono,.sm-psub .mono{font-family:var(--font-mono)}
       .sm-panel .sig-next{margin-top:8px}
+      .sm-tags{display:flex;gap:6px;margin-top:9px}
+      .sm-tag{flex:1;padding:7px 0;border-radius:6px;border:1px solid rgba(150,170,185,.22);background:transparent;color:rgba(200,212,220,.7);font:500 10px/1 'Space Grotesk',system-ui,sans-serif;letter-spacing:.12em;text-transform:uppercase;cursor:pointer}
+      .sm-tag.on{border-color:var(--c);color:var(--c);background:color-mix(in srgb, var(--c) 10%, transparent)}
+      .smw-fl-h{margin:4px 2px 6px;font:500 9px/1 'JetBrains Mono',monospace;letter-spacing:.16em;text-transform:uppercase;color:rgba(190,205,215,.55)}
+      .smw-fl{display:flex;align-items:center;gap:10px;width:100%;padding:10px 12px;margin-bottom:6px;border:1px solid rgba(120,160,190,.18);border-radius:8px;background:rgba(255,255,255,.02);color:#dfe8ee;font-family:inherit;cursor:pointer;text-align:left}
+      .smw-fl .t{font-size:11px;letter-spacing:.08em;text-transform:uppercase;min-width:64px}
+      .smw-fl .g{flex:1;font:500 11px/1.2 'JetBrains Mono',monospace;color:#cfdbe4}
+      .smw-fl .e{font:500 10px/1 'JetBrains Mono',monospace;color:rgba(190,205,215,.6)}
+      .smw-flights{margin-bottom:8px}
     `;
     document.head.appendChild(st);
   }
@@ -1384,7 +1518,7 @@
   injectCss();
   function panelFor(sel) { const keep = _sel; _sel = sel; let h = ''; try { h = panelMarkup(collect()); } finally { _sel = keep; } return h; }
   const API = {
-    render, sweep, panelFor,
+    render, sweep, panelFor, tag, beacon, recallBeacon: recallBeaconFromMap, showFlight,
     select(kind, key) {
       if (_fallback) return;
       const sel = { kind, key };

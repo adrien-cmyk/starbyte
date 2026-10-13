@@ -8549,7 +8549,8 @@ var EXTRA_SAVE_KEYS = [
   'tutorialArtefactSeen', 'tutorialBombSeen', 'tutorialHyperSeen', 'tutorialMegaSeen',
   'mpDeals',   // MP_DOCKS_V0 — marchés entre commandants (séquestre et règlement)
   'botState',  // BOTS_1110 — stocks des commandants automates après pillage
-  'mpGrowthMilestone',  // RUMORS_1110 — dernier palier de niveau annoncé au comptoir
+  'mpGrowthMilestone',
+  'systemTags', 'mapSeen',   // PATCH_1310_CARTE — marques de systèmes + systèmes déjà vus (survivent aux rapports supprimés)  // RUMORS_1110 — dernier palier de niveau annoncé au comptoir
   'mpDiplo',   // AMBASSADES_1210 — ambassades vues et dernière image des pactes
   'mpNeighbors',   // VOISINS_1310 — voisins déjà signalés
 ];
@@ -23132,6 +23133,7 @@ function handleProbeReturn(missionId) {
   } else {
     report = generateProbeReport(mission.probeName, mission.sector, mission.tier, mission.mode, mission.targetCoords);
   }
+  if (mission.tier === 'stealth' && report) _spyEnrichReport(report, mission.targetCoords);
 
   // Storage
   if (!Array.isArray(G.probeReports)) G.probeReports = [];
@@ -32794,8 +32796,12 @@ function renderProspectRapports() {
   // ─── PASSE 4-sondes-v1.1-c : Auto-archivage ───
   // Top 10 récents toujours visibles + repli "Archives"
   const RECENT_COUNT = 10;
-  const recents = allReports.slice(0, RECENT_COUNT);
-  const archives = allReports.slice(RECENT_COUNT);
+  // 13/10 — systèmes marqués « sans intérêt » sur la carte : leurs rapports filent d'office aux archives
+  const _tags = G.systemTags || {};
+  const _isSkip = (x) => x.kind === 'probe' && _tags[String((x.report && x.report.targetCoords) || '').toUpperCase().split('-').slice(0, 3).join('-')] === 'skip';
+  const _kept = allReports.filter(x => !_isSkip(x)), _skipped = allReports.filter(_isSkip);
+  const recents = _kept.slice(0, RECENT_COUNT);
+  const archives = _kept.slice(RECENT_COUNT).concat(_skipped);
 
   const recentsHtml = recents.map(r => renderReportRow(r)).join('');
 
@@ -32916,6 +32922,18 @@ function mapSelectionFor(coords) {
   }
   return null;
 }
+// 13/10 — carnet, fiche planète, rapports de balise : tout mène à la carte (le système s'ouvre, l'objet est entouré)
+function openPlanetOnMap(coord) {
+  const p = (typeof findPlanetByCoord === 'function') ? findPlanetByCoord(coord) : null;
+  if (p && p.isMine) return openOnMap('home', `${MY_ADDRESS.cluster}-${MY_ADDRESS.sector}-${MY_ADDRESS.system}`);
+  openOnMap('planet', (p && p.coord) || coord);
+}
+function openSystemOnMap(sys) {
+  const m = String(sys || '').toUpperCase().match(/^([A-Z])-([A-Z])-(\d{4})/);
+  if (!m) return;
+  const key = `${m[1]}-${m[2]}-${m[3]}`, mine = `${MY_ADDRESS.cluster}-${MY_ADDRESS.sector}-${MY_ADDRESS.system}`;
+  openOnMap(key === mine ? 'home' : 'system', key);
+}
 function openOnMap(kind, key) {
   G.prospectTab = 'univers';
   if (typeof getCurrentScreen === 'function' && getCurrentScreen() !== 'prospect') goto('prospect');
@@ -32964,6 +32982,54 @@ function renderReportRow(entry) {
 // Le badge "MOUVANT" a été retiré : c'est de la mécanique interne, le joueur
 // n'a pas besoin de savoir si une cible vient de "l'univers mouvant" ou non.
 // Le badge "PLANÈTE" reste : c'est une info diégétique utile.
+// 13/10 — Furtive sur un monde habité : niveau, défense, bouclier, activité ; ce qu'il manque dit quoi développer
+function _spyPrecision() {
+  const lt = (typeof getLaboTier === 'function') ? getLaboTier() : 0;
+  return lt >= 3 ? 3 : lt >= 2 ? 2 : 1;
+}
+async function _spyEnrichReport(report, address) {
+  const addr = String(address || '').toUpperCase();
+  const prec = _spyPrecision();
+  report.spy = { address: addr, precision: prec, pending: true };
+  try {
+    const w = (window.SBMP && typeof SBMP.worldCard === 'function') ? await SBMP.worldCard(addr) : null;
+    if (w) {
+      const fuzz = (v, pct) => Math.max(0, Math.round(v * (1 + (Math.random() * 2 - 1) * pct)));
+      report.spy = {
+        address: addr, precision: prec, found: true, pseudo: w.pseudo, planet: w.planet_name,
+        level: prec >= 2 ? w.level_estimate : fuzz(w.level_estimate, 0.25),
+        defense: prec >= 3 ? w.defense_estimate : fuzz(w.defense_estimate, prec >= 2 ? 0.15 : 0.35),
+        shielded: !!w.shielded, lastSeen: prec >= 2 ? w.last_seen_days : null,
+      };
+    } else report.spy = { address: addr, precision: prec, found: false };
+  } catch (e) { report.spy = { address: addr, precision: prec, found: false, error: true }; }
+  if (typeof saveGame === 'function') saveGame();
+  if (typeof renderProspectRapports === 'function' && document.getElementById('prospect-rapports-list')) { try { renderProspectRapports(); } catch (e) {} }
+}
+function _spyBlockHtml(r) {
+  const s = r && r.spy;
+  if (!s) return '';
+  const row = (k, v) => `<div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid var(--border);font-size:11px"><span style="color:var(--mut)">${k}</span><span style="color:var(--text);font-family:'SF Mono',monospace">${v}</span></div>`;
+  const precTxt = ['', '±35 %', '±15 %', 'exacte'][s.precision] || '';
+  let body;
+  if (s.pending) body = `<div style="font-size:11px;color:var(--mut)">Décodage du relevé…</div>`;
+  else if (!s.found) body = `<div style="font-size:11px;color:var(--mut)">${s.error ? 'Liaison perdue avec la Furtive : relevé illisible.' : 'Aucun monde habité à cette adresse.'}</div>`;
+  else body = row('Commandant', _escapeHtml(s.pseudo || '—')) + row('Monde', _escapeHtml(s.planet || '—'))
+    + row('Niveau', '≈ ' + s.level) + row('Défense', '≈ ' + s.defense + ' <span style="color:var(--mut)">(' + precTxt + ')</span>')
+    + row('Bouclier débutant', s.shielded ? 'actif' : 'non')
+    + row('Dernière activité', s.lastSeen == null ? '<span style="color:var(--mut)">illisible</span>' : (s.lastSeen === 0 ? "aujourd'hui" : 'il y a ' + s.lastSeen + ' j'));
+  // ce qu'il manque → ce qu'il faut développer pour mieux espionner
+  const next = [];
+  if (s.precision < 2) next.push('Laboratoire niv. 2 : défense à ±15 %, niveau exact, dernière activité');
+  if (s.precision < 3) next.push('Laboratoire niv. 3 : défense exacte');
+  next.push('Stocks et flotte en orbite : illisibles avec la Furtive actuelle (à venir)');
+  return `<div style="margin:12px 0 4px;padding:10px 12px;border:1px solid rgba(255,138,138,.28);border-radius:8px;background:rgba(50,15,15,.12)">
+    <div style="font-size:9px;letter-spacing:.14em;text-transform:uppercase;color:#ff8a8a;margin-bottom:6px">Relevé d'espionnage${precTxt ? ' · précision ' + precTxt : ''}</div>
+    ${body}
+    <div style="margin-top:8px;font-size:10px;color:var(--mut);line-height:1.6">${next.map(t => '▸ ' + t).join('<br>')}</div>
+  </div>`;
+}
+
 function renderProbeReportRow(r, isUnread) {
   const tsText = r.createdAt ? formatReportTimestamp(r.createdAt) : '';
   const cfg = PROBE_TIER_CONFIG[r.tier];
@@ -33057,12 +33123,13 @@ function renderProbeReportRow(r, isUnread) {
   const coordsAttr = mapSel
     ? `onclick="event.stopPropagation();openOnMap('${mapSel.kind}','${mapSel.key}')" style="cursor:pointer;${coordsStyle}"`
     : `style="${coordsStyle}"`;
+  const _spyHtml = _spyBlockHtml(r);
   const coordsHtml = r.targetCoords
     ? `<div ${coordsAttr}>
         <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:4px"><div style="font-size:9px;color:var(--mut);letter-spacing:.12em;text-transform:uppercase">Coordonnées</div>${mapSel ? `<div style="font-size:9px;color:var(--cyan);letter-spacing:.12em;text-transform:uppercase">Voir sur la carte →</div>` : ''}</div>
         <div style="font-family:'SF Mono',monospace;font-size:16px;color:${accent};letter-spacing:.06em;text-align:center">${r.targetCoords}</div>
-      </div>`
-    : '';
+      </div>${_spyHtml}`
+    : _spyHtml;
 
   // Corps détaillé
   let fullBodyHtml = '';
@@ -33702,7 +33769,7 @@ function renderBeaconReportRow(r, isUnread) {
   // Preview détail (style "Système · contact · cargo")
   const previewHtml = `
     <div style="font-size:11px;color:var(--mut);margin-top:4px">
-      <span style="color:${accent};font-family:'SF Mono',monospace">${r.systemCoord || '—'}</span>
+      <span onclick="event.stopPropagation();openSystemOnMap('${r.systemCoord || ''}')" title="Voir sur la carte" style="color:${accent};font-family:'SF Mono',monospace;cursor:pointer;text-decoration:underline dotted;text-underline-offset:3px">${r.systemCoord || '—'}</span>
       <span style="opacity:.5;margin:0 4px">·</span>
       <span style="color:var(--text)">${t.name}</span>
       <span style="opacity:.5;margin:0 4px">·</span>
@@ -34997,7 +35064,7 @@ function renderKnownPlayersView() {
         </div>
         <div style="flex:1;min-width:0">
           <div style="font-size:14px;color:#ff8a8a;font-weight:500;line-height:1.2">${_escapeHtml(p.playerName)}</div>
-          <div style="font-size:10px;color:var(--mut);margin-top:3px;font-family:'SF Mono',monospace">${p.coord} · ${_escapeHtml(planetName)} · ${lvl}</div>
+          <div style="font-size:10px;color:var(--mut);margin-top:3px;font-family:'SF Mono',monospace"><span onclick="event.stopPropagation();openPlanetOnMap('${p.coord}')" title="Voir sur la carte" style="color:var(--cyan);cursor:pointer;text-decoration:underline dotted;text-underline-offset:3px">${p.coord}</span> · ${_escapeHtml(planetName)} · ${lvl}</div>
         </div>
         <div style="flex-shrink:0;color:var(--mut)">${icon('chevronRight', {size:14})}</div>
       </div>
@@ -35055,7 +35122,7 @@ function renderCarnetView() {
             <span style="font-size:9px;color:var(--mut);font-family:'SF Mono',monospace">Niv. ${lvl}</span>
           </div>
           <div style="font-size:11px;color:var(--text);margin-bottom:2px">${_escapeHtml(p.name || p.coord)}</div>
-          <div style="font-size:10px;color:var(--mut);font-family:'SF Mono',monospace">${p.coord} · ${ptypeLabel}</div>
+          <div style="font-size:10px;color:var(--mut);font-family:'SF Mono',monospace"><span onclick="event.stopPropagation();openPlanetOnMap('${p.coord}')" title="Voir sur la carte" style="color:var(--cyan);cursor:pointer;text-decoration:underline dotted;text-underline-offset:3px">${p.coord}</span> · ${ptypeLabel}</div>
         </div>
       `;
     }).join('');
@@ -35762,6 +35829,7 @@ function renderPlanetDetailScreen() {
   }
 
   document.getElementById('pd-coord').textContent = p.coord;
+  { const _c = document.getElementById('pd-coord'); if (_c) { _c.style.cursor = 'pointer'; _c.title = 'Voir sur la carte'; _c.onclick = () => openPlanetOnMap(p.coord); } }
   // Chunk 15/05 — Nom custom : prend p.customName s'il existe, sinon le nom par défaut
   const displayName = p.isMine ? G.planet.name : (p.customName || p.name);
   document.getElementById('pd-name').textContent = displayName;
@@ -35794,6 +35862,7 @@ function renderPlanetDetailScreen() {
 
   // Illustration de la planète selon son type
   const illuEl = document.getElementById('pd-illu');
+  if (illuEl) { illuEl.style.cursor = 'pointer'; illuEl.title = 'Voir sur la carte'; illuEl.onclick = () => openPlanetOnMap(p.coord); }
   if (illuEl) {
     let illuKey = null;
     if (p.isMine)              illuKey = 'planete_libre'; // sa propre planète habitable
@@ -36069,26 +36138,25 @@ function sendPlayerMessage(planetCoord, flagId) {
 }
 
 
-function resondPlanet(coord) {
-  if (G.probe.state !== 'ready') {
-    toast('Sonde en mission');
+async function resondPlanet(coord) {
+  // 13/10 (Adrien) : choisir la sonde. Radar = son système ; Furtive = espionnage du monde lui-même.
+  const p = (typeof findPlanetByCoord === 'function') ? findPlanetByCoord(coord) : null;
+  const who = (p && (p.playerName || p.customName || p.name)) || coord;
+  const sys = String(coord).split('-').slice(0, 3).join('-');
+  const items = [
+    { tier: 'radar', target: sys, label: 'Radar — balayer son système', sub: 'Mondes et échos du système · 5–10 min' },
+    { tier: 'stealth', target: coord, label: 'Furtive — espionner ' + who, sub: 'Niveau, défense, bouclier · précision selon ton Laboratoire · 4–8 h' },
+  ];
+  const it = await _mpChoose('Sonder ' + who, items);
+  if (!it) return;
+  const st = (typeof _probeTierStatus === 'function') ? _probeTierStatus(it.tier) : { ok: true };
+  if (!st.ok) {
+    if (st.build && await sbConfirm({ title: 'Aucune sonde prête', body: st.why + '. Construire une sonde maintenant ?', confirmLabel: 'Ouvrir le hangar' })) openProbeDetail(it.tier);
+    else if (!st.build) toast(st.why);
     return;
   }
-  // Pré-remplir l'écran prospection avec cette adresse
-  goto('prospect');
-  setTimeout(() => {
-    const parts = coord.split('-');
-    if (parts.length >= 2) {
-      const sectorIn = document.getElementById('addr-sector');
-      const systemIn = document.getElementById('addr-system');
-      if (sectorIn && systemIn) {
-        sectorIn.value = parts[0];
-        systemIn.value = parts[1];
-        setProbeMode('manual');
-        onAddressChange();
-      }
-    }
-  }, 100);
+  const m = launchProbe(it.tier, it.target, 'local', false);
+  if (m) { if (typeof saveGame === 'function') saveGame(); toast((it.tier === 'stealth' ? 'Furtive' : 'Radar') + ' en route vers ' + who); }
 }
 
 /* ═══════════ DEFENSE SCREEN (hub militaire) ═══════════ */
@@ -43931,7 +43999,7 @@ if (G.knownTargets && Array.isArray(G.tankerMissions)) {
 <!-- HOME V2 — « monde d'abord » : planète plein écran, ressources en ligne, Flotte / Défense / Prospection (assets/home.js) -->
 <script type="module" src="assets/home.js?v=20261013-1630"></script>
 <!-- SPACE MAP v0 — carte du Centre de prospection (assets/spacemap.js, source src/spacemap.js) -->
-<script src="assets/spacemap.js?v=20261013-1715"></script>
+<script src="assets/spacemap.js?v=20261013-1900"></script>
 <!-- SPACE MAP niveau B — diorama 3D d'un système (assets/system3d.js, source src/system3d.js) -->
 <script type="module" src="assets/system3d.js?v=20261013-1630"></script>
 <!-- SHIP3D — fiches 3D : cuirassé KV-01, frégate SR-01, tanker TK-07, chantier orbital OS-01 (assets/ship3d.js, sur le moteur partagé window.SB3D) -->
