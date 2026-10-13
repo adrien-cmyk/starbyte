@@ -4,6 +4,8 @@
            h.begin() / h.orbit(dx, dy) / h.dolly(k) / h.end()   — gestes relayés par la page (comme Ship3D)
            h.pick(clientX, clientY) → { type, tier, index } | null ; h.select(index | null) ; h.dispose()
    Moteur 3D partagé : window.SB3D (planet3d.js). Modèles : versions légères (LOD carte) des vaisseaux.
+   opts.mode = 'mission' : la flotte file en espace profond — bulle de choc plasma, filaments arrachés à la coque
+   et panaches moteurs pour chaque vaisseau (même langage que les fiches d'unité Ship3D), étoiles qui défilent.
 */
 (function () {
   const MODELS = {
@@ -45,9 +47,116 @@
     return list;
   }
 
+  /* ── plasma de croisière (mode mission) ─────────────────────────────────────────────── */
+  const NOISE = `float hh(vec2 p){ return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }
+    float vn(vec2 p){ vec2 i=floor(p), f=fract(p); f=f*f*(3.0-2.0*f);
+      return mix(mix(hh(i),hh(i+vec2(1,0)),f.x),mix(hh(i+vec2(0,1)),hh(i+vec2(1,1)),f.x),f.y); }
+    float fbm(vec2 p){ float s=0., a=.5; for(int i=0;i<4;i++){ s+=a*vn(p); p=p*2.1+3.7; a*=.5; } return s; }`;
+  // bulle de choc : paraboloïde partant devant l'étrave, épousant la coque, ouvert en sillage (repère local du vaisseau, proue vers +Z)
+  function bubbleGeo(THREE, bow, cy, L, R0, scale) {
+    const segU = 56, segA = 36, len = 2.1 * L, pos = [], uv = [], idx = [];
+    for (let i = 0; i <= segU; i++) {
+      const u = i / segU, d = Math.pow(u, 1.6) * len, r = R0 * Math.pow(Math.max(d / L, 1e-4), 0.47) * scale;
+      for (let j = 0; j <= segA; j++) { const a = j / segA * Math.PI * 2; pos.push(Math.cos(a) * r, cy + Math.sin(a) * r * 0.78, bow - d); uv.push(j / segA, u); }
+    }
+    for (let i = 0; i < segU; i++) for (let j = 0; j < segA; j++) { const a = i * (segA + 1) + j, b = a + segA + 1; idx.push(a, b, a + 1, b, b + 1, a + 1); }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+    g.setIndex(idx); g.computeVertexNormals(); return g;
+  }
+  const shockMat = (THREE, T, gain, fres, speed) => new THREE.ShaderMaterial({
+    transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
+    uniforms: { uTime: T, uGain: { value: gain }, uFres: { value: fres }, uSpeed: { value: speed } },
+    vertexShader: `varying vec2 vUv; varying vec3 vN; varying vec3 vV;
+      void main(){ vUv = uv; vec4 mv = modelViewMatrix * vec4(position,1.0); vN = normalize(normalMatrix * normal); vV = normalize(-mv.xyz); gl_Position = projectionMatrix * mv; }`,
+    fragmentShader: `uniform float uTime, uGain, uFres, uSpeed; varying vec2 vUv; varying vec3 vN; varying vec3 vV; ${NOISE}
+      void main(){
+        float u = vUv.y;
+        float fres = pow(1.0 - abs(dot(normalize(vN), normalize(vV))), uFres);
+        vec2 q = vec2(vUv.x * 46.0, u * 9.0 - uTime * uSpeed);
+        float streaks = smoothstep(.38, .9, fbm(vec2(q.x, q.y * .35)));
+        float churn = fbm(vec2(vUv.x * 12.0 + uTime * .2, u * 20.0 - uTime * uSpeed * 2.0));
+        float nose = exp(-u * 22.0);
+        float body = smoothstep(1.0, .55, u) * (1.0 - nose);
+        float tail = smoothstep(.45, 1.0, u) * smoothstep(1.0, .7, u);
+        float inten = nose * 4.5 + body * (.35 + .9 * streaks) + tail * churn * .9;
+        vec3 col = mix(mix(vec3(.80,.92,1.0), vec3(.22,.45,1.0), smoothstep(0.0, .12, u)), vec3(.58,.22,1.0), smoothstep(.25, .9, u) * (.5 + .5 * churn));
+        float a = uGain * inten * (fres * .85 + nose * .5) * (.85 + .15 * sin(uTime * 3.0 + u * 30.0));
+        gl_FragColor = vec4(col * a, a);
+      }`,
+  });
+  // filaments de plasma calculés sur le GPU : nés surtout à l'étrave, collés à la coque puis arrachés en queue de comète
+  function filaments(THREE, T, n, bow, cy, hw, hh, L) {
+    const corner = new Float32Array(n * 8), par = new Float32Array(n * 16), pos = new Float32Array(n * 12), idx = [];
+    for (let i = 0; i < n; i++) {
+      corner.set([0, -1, 0, 1, 1, -1, 1, 1], i * 8);
+      const a = Math.random() * Math.PI * 2, seed = Math.random(), s0 = Math.random() < .8 ? Math.random() * .12 : Math.random() * .75, rate = 1 / (2.2 + Math.random() * 1.8);
+      for (let k = 0; k < 4; k++) par.set([a, seed, s0, rate], (i * 4 + k) * 4);
+      const v = i * 4; idx.push(v, v + 2, v + 1, v + 1, v + 2, v + 3);
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.BufferAttribute(pos, 3)); g.setAttribute('aCorner', new THREE.BufferAttribute(corner, 2)); g.setAttribute('aP', new THREE.BufferAttribute(par, 4));
+    g.setIndex(idx);
+    const m = new THREE.ShaderMaterial({
+      transparent: true, depthWrite: false, blending: THREE.NormalBlending, side: THREE.DoubleSide,
+      uniforms: { uTime: T, uBow: { value: bow }, uCy: { value: cy }, uHw: { value: hw }, uHh: { value: hh }, uL: { value: L }, uA: { value: .02 * Math.sqrt(1400 / n) } },
+      vertexShader: `attribute vec2 aCorner; attribute vec4 aP; uniform float uTime, uBow, uCy, uHw, uHh, uL;
+        varying vec2 vC; varying float vAge; varying float vSeed;
+        void main(){
+          float age = fract(uTime * aP.w + aP.y); vC = aCorner; vSeed = aP.y; vAge = age;
+          float sn = aP.z + (.65 + 2.25 * age) * age;                       // station le long du vaisseau, en longueurs de coque
+          float prof = max(.15, smoothstep(0.0, .3, sn));                   // étrave effilée
+          float grow = 1.04 + age * age * .35 + max(sn - 1.0, 0.0) * .45;    // colle à la coque puis s'arrache
+          vec2 e = vec2(cos(aP.x), sin(aP.x)); e = sign(e) * sqrt(abs(e));
+          vec3 head = vec3(e.x * (uHw * prof * grow + uL * .004), uCy + e.y * (uHh * prof * grow + uL * .004), uBow - sn * uL);
+          float k = uL / 12.5;
+          float len = (1.6 + 6.0 * age + 1.8 * fract(aP.y * 7.3)) * k, wid = (.06 + .16 * age + .04 * fract(aP.y * 3.1)) * k;
+          vec4 h = modelViewMatrix * vec4(head, 1.0);
+          vec4 tl = modelViewMatrix * vec4(head - vec3(0.0, 0.0, len), 1.0);
+          vec3 side = normalize(cross(tl.xyz - h.xyz, -h.xyz));
+          vec3 p = mix(h.xyz, tl.xyz, aCorner.x) + side * wid * mix(1.0, 1.6, aCorner.x) * aCorner.y;
+          gl_Position = projectionMatrix * vec4(p, 1.0);
+        }`,
+      fragmentShader: `varying vec2 vC; varying float vAge; varying float vSeed; uniform float uTime, uA;
+        float h1(float x){ return fract(sin(x * 127.1) * 43758.5453); }
+        float v1(float x){ float i = floor(x), f = fract(x); f = f*f*(3.0-2.0*f); return mix(h1(i), h1(i + 1.0), f); }
+        void main(){
+          float across = pow(max(1.0 - vC.y * vC.y, 0.0), 2.2);
+          float along = smoothstep(0.0, .25, vC.x) * smoothstep(1.0, .35, vC.x);
+          float fib = .85 + .15 * v1(vC.x * 3.0 + vSeed * 40.0 - uTime * 1.5);
+          float life = smoothstep(0.0, .06, vAge) * smoothstep(1.0, .3, vAge);
+          vec3 col = mix(vec3(.62,.78,1.0), vec3(.46,.22,1.0), clamp(vC.x * .7 + vAge * .6, 0.0, 1.0));
+          gl_FragColor = vec4(col * 1.15, across * along * fib * life * uA);
+        }`,
+    });
+    const mesh = new THREE.Mesh(g, m); mesh.frustumCulled = false; mesh.renderOrder = 3; return mesh;
+  }
+  // panaches de propulsion (repère du modèle : tuyères vers −Z)
+  const plumeMat = (THREE, T, color, alpha, flick, layer) => new THREE.ShaderMaterial({
+    transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
+    uniforms: { uTime: T, uColor: { value: new THREE.Color(color) }, uAlpha: { value: alpha }, uFlick: { value: flick }, uLayer: { value: layer } },
+    vertexShader: `varying vec2 vUv; varying vec3 vN; varying vec3 vV;
+      void main(){ vUv = uv; vec4 mv = modelViewMatrix * vec4(position,1.0); vN = normalize(normalMatrix * normal); vV = normalize(-mv.xyz); gl_Position = projectionMatrix * mv; }`,
+    fragmentShader: `uniform float uTime, uAlpha, uFlick, uLayer; uniform vec3 uColor; varying vec2 vUv; varying vec3 vN; varying vec3 vV; ${NOISE}
+      void main(){
+        float t = vUv.y;
+        float along = pow(t, 1.25 + uLayer * .9) * smoothstep(0.0, .12, t);
+        float core = pow(abs(dot(normalize(vN), normalize(vV))), 1.2 + uLayer);
+        vec2 q = vec2(vUv.x * 6.0, vUv.y * 9.0 - uTime * 7.0);
+        float turb = .72 + .28 * vn(q) * uFlick + .12 * vn(q * 2.7 + 5.0);
+        float diamonds = .78 + .22 * pow(.5 + .5 * sin(t * 46.0 - uTime * 3.0), 3.0) * (1.0 - uLayer * .6) * smoothstep(.35, .9, t);
+        float a = uAlpha * along * core * turb * diamonds;
+        gl_FragColor = vec4(mix(uColor * vec3(.75, .8, 1.15), uColor, t) * a, a);
+      }`,
+  });
+  const PLUMES = { blue: [0x2a5cff, 0x3f86ff, 0x86c0ff, 0xe6f3ff], amber: [0xff5a1a, 0xff8a2a, 0xffc070, 0xfff2d8] };
+  const FIL_N = { cuirasse: 420, fregate: 160, tanker: 110 };
+
   function mount(container, opts = {}) {
     const { THREE, GLTFLoader, RoomEnvironment, EffectComposer, RenderPass, UnrealBloomPass, OutputPass } = window.SB3D;
     const list = place(roster(opts.fleet));
+    const mission = opts.mode === 'mission';
+    const PT = { value: 0 };   // horloge des shaders de plasma
     const W = () => Math.max(1, container.clientWidth), H = () => Math.max(1, container.clientHeight);
     const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
     renderer.setPixelRatio(Math.min(devicePixelRatio || 1, 2)); renderer.setSize(W(), H());
@@ -80,15 +189,15 @@
     scene.add(new THREE.HemisphereLight(0x2c3a58, 0x0a0c12, 0.7));
 
     // planète sous la flotte (textures de Kerath), elle défile lentement : la flotte avance
-    const planet = new THREE.Group(); scene.add(planet);
+    const planet = new THREE.Group(); if (!mission) scene.add(planet);
     const PR = 9000; planet.position.set(0, -PR - 1300, -2000);
     const tl = new THREE.TextureLoader();
     const pMat = new THREE.MeshStandardMaterial({ color: 0x8a96a0, roughness: 0.95, metalness: 0 });
     planet.add(new THREE.Mesh(new THREE.SphereGeometry(PR, 128, 96), pMat));
     const cMat = new THREE.MeshStandardMaterial({ color: 0xb8c4d0, transparent: true, opacity: 0.0, depthWrite: false });
     const cMesh = new THREE.Mesh(new THREE.SphereGeometry(PR * 1.004, 128, 96), cMat); planet.add(cMesh);
-    tl.load('assets/3d/kerath_albedo.jpg', t => { if (THREE.SRGBColorSpace) t.colorSpace = THREE.SRGBColorSpace; pMat.map = t; pMat.color.set(0x4a5560); pMat.needsUpdate = true; });
-    tl.load('assets/3d/kerath_clouds.jpg', t => { cMat.alphaMap = t; cMat.opacity = 0.35; cMat.needsUpdate = true; });
+    if (!mission) tl.load('assets/3d/kerath_albedo.jpg', t => { if (THREE.SRGBColorSpace) t.colorSpace = THREE.SRGBColorSpace; pMat.map = t; pMat.color.set(0x4a5560); pMat.needsUpdate = true; });
+    if (!mission) tl.load('assets/3d/kerath_clouds.jpg', t => { cMat.alphaMap = t; cMat.opacity = 0.35; cMat.needsUpdate = true; });
     planet.add(new THREE.Mesh(new THREE.SphereGeometry(PR * 1.03, 96, 64), new THREE.ShaderMaterial({
       transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.BackSide,
       vertexShader: 'varying vec3 vN; varying vec3 vW; void main(){ vN = normalize(normalMatrix * normal); vec4 w = modelMatrix * vec4(position,1.0); vW = w.xyz; gl_Position = projectionMatrix * viewMatrix * w; }',
@@ -141,6 +250,30 @@
         sp.position.set(x, y, z); sp.scale.setScalar(M.glowSize / M.scale); g.add(sp);
       }
       const holder = new THREE.Group(); holder.add(g);
+      if (mission) {
+        // repère local du porteur : proue vers +Z (le porteur est retourné pour filer vers −Z)
+        const bb = new THREE.Box3().setFromObject(g), sz = bb.getSize(new THREE.Vector3()), c = bb.getCenter(new THREE.Vector3());
+        const L = sz.z, bow = bb.max.z + L * 0.1, hw = sz.x / 2, hhh = sz.y / 2;
+        const R0 = Math.max(0.31 * L, 1.35 * Math.max(hw, hhh / 0.78));
+        const shock = new THREE.Group();
+        [[1.0, .55, 2.2, 1.6], [1.12, .28, 3.2, 1.1], [0.9, .22, 1.6, 2.4]].forEach(([sc, gain, fr, sp]) => {
+          const m = new THREE.Mesh(bubbleGeo(THREE, bow, c.y, L, R0, sc), shockMat(THREE, PT, gain * (hp > 0 ? 1 : .5), fr, sp));
+          m.renderOrder = 2; m.frustumCulled = false; shock.add(m);
+        });
+        holder.add(shock);
+        holder.add(filaments(THREE, PT, FIL_N[s.type], bb.max.z, c.y, hw, hhh, L));
+        // panaches : 4 couches par tuyère (cœur blanc, corps, gaine, halo)
+        const pal = M.color === 0xffb070 ? PLUMES.amber : PLUMES.blue, thrust = 0.45 + 0.55 * hp / 100;
+        for (const [x, y, z] of M.glow) {
+          const pg = new THREE.Group(); pg.position.set(x, y, z);
+          const R = M.glowSize * 0.32 / M.scale;
+          for (const [len, rIn, rOut, col, alpha, flick, layer] of [[R * 40, R * .86, R * .2, pal[0], .16, 1, 1], [R * 28, R * .74, R * .1, pal[1], .3, 1, .7], [R * 16, R * .58, R * .05, pal[2], .42, .8, .4], [R * 7, R * .4, R * .03, pal[3], .55, .4, 0]]) {
+            const geo = new THREE.CylinderGeometry(rIn, rOut, len * thrust, 28, 1, true); geo.rotateX(Math.PI / 2); geo.translate(0, 0, -len * thrust / 2);
+            const pm = new THREE.Mesh(geo, plumeMat(THREE, PT, col, alpha, flick, layer)); pm.frustumCulled = false; pm.renderOrder = 4; pg.add(pm);
+          }
+          g.add(pg);
+        }
+      }
       holder.position.set(s.x, 0, s.z); holder.rotation.y = Math.PI;      // cap vers −Z
       holder.userData = { ph: i * 1.7, x: s.x, z: s.z, idx: i };
       fleetG.add(holder); ships[i] = holder;
@@ -162,13 +295,32 @@
       }
     })).catch(e => console.warn('[Formation3D]', e)).finally(() => { if (alive && opts.onReady) opts.onReady(); });
 
+    // mission : soleil droit devant, étoiles proches qui défilent (vitesse), poussière ionisée
+    let streaks = null, streakPos = null, streakV = null;
+    if (mission) {
+      const sunTex = radial([[0, 'rgba(255,255,255,1)'], [.3, 'rgba(255,246,228,1)'], [.5, 'rgba(255,230,190,.55)'], [1, 'rgba(255,210,170,0)']]);
+      const haloTex = radial([[0, 'rgba(255,236,210,.9)'], [.15, 'rgba(255,210,170,.4)'], [.45, 'rgba(190,160,255,.1)'], [1, 'rgba(120,120,255,0)']]);
+      [[sunTex, 600, 1, 1], [haloTex, 4200, .85, 1], [haloTex, 3600, .45, .035]].forEach(([tx, sz, op, sy]) => {
+        const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: tx, blending: THREE.AdditiveBlending, depthWrite: false, transparent: true, opacity: op }));
+        sp.scale.set(sz, sz * sy, 1); sp.position.copy(SUN).multiplyScalar(16000); scene.add(sp);
+      });
+      const N = 560; streakPos = new Float32Array(N * 6); streakV = new Float32Array(N);
+      for (let i = 0; i < N; i++) {
+        const x = (Math.random() - .5) * ext * 7, y = (Math.random() - .5) * ext * 4, z = (Math.random() - .5) * ext * 9;
+        streakPos.set([x, y, z, x, y, z], i * 6); streakV[i] = .6 + Math.random() * .8;
+      }
+      const sg = new THREE.BufferGeometry(); sg.setAttribute('position', new THREE.BufferAttribute(streakPos, 3));
+      streaks = new THREE.LineSegments(sg, new THREE.LineBasicMaterial({ color: 0x9fb8ff, transparent: true, opacity: .3, blending: THREE.AdditiveBlending, depthWrite: false }));
+      streaks.frustumCulled = false; scene.add(streaks);
+    }
+
     const composer = new EffectComposer(renderer);
     composer.addPass(new RenderPass(scene, camera));
     const bloom = new UnrealBloomPass(new THREE.Vector2(W() / 2, H() / 2), 0.35, 0.4, 1.0); composer.addPass(bloom);
     composer.addPass(new OutputPass());
 
     // caméra : arrière 3/4 de dessus ; orbite (azimut + inclinaison) et zoom lissés, rotation lente au repos
-    let az = 0.35, azT = 0.35, el = 0.62, elT = 0.62, zoom = 1, zoomT = 1, idle = true, idleTimer = null;
+    let az = mission ? 2.35 : 0.35, azT = az, el = mission ? 0.42 : 0.62, elT = el, zoom = 1, zoomT = 1, idle = true, idleTimer = null;
     const fit = () => ext / Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)) * (W() / H() < 0.8 ? 1.15 : 0.8);
     const ro = new ResizeObserver(() => { renderer.setSize(W(), H()); composer.setSize(W(), H()); applyView(); });
     ro.observe(container);
@@ -188,6 +340,16 @@
       const tgt = new THREE.Vector3(0, 0, -ext * 0.12);
       camera.position.set(tgt.x + Math.sin(az) * Math.cos(el) * d, tgt.y + Math.sin(el) * d, tgt.z + Math.cos(az) * Math.cos(el) * d);
       camera.lookAt(tgt);
+      PT.value = t;
+      if (streaks) {                                                    // étoiles proches : défilent vers l'arrière (+Z)
+        const span = ext * 9, V = ext * 2.4;
+        for (let i = 0; i < streakV.length; i++) {
+          const o = i * 6; let z = streakPos[o + 2] + V * streakV[i] * dt;
+          if (z > span / 2) z -= span;
+          streakPos[o + 2] = z; streakPos[o + 5] = z - V * streakV[i] * 0.18;
+        }
+        streaks.geometry.attributes.position.needsUpdate = true;
+      }
       planet.rotation.x += dt * 0.006;                                  // le sol défile sous la flotte
       cMesh.rotation.y += dt * 0.002;
       for (const s of ships) {

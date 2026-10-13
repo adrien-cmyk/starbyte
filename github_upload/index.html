@@ -13630,12 +13630,12 @@ function renderFleetDetail() {
   integEl.innerHTML = renderFleetIntegrityCard(fleet);
   if (fleet.repair && primaryEl) primaryEl.innerHTML = `<div style="padding:12px 14px;border-radius:10px;border:1px solid rgba(255,192,96,.35);background:rgba(40,28,8,.55);color:var(--amber);font-size:11px;letter-spacing:.14em;text-transform:uppercase;text-align:center">Réparation au chantier en cours</div>`;
   // FORMATION3D — flotte en orbite : vue arrière 3/4 de la formation en plein écran, la fiche défile par-dessus
-  setTimeout(() => { if (isDeployed) mountFleetFormation3D(fleet); else unmountFleetFormation3D(); }, 0);
+  setTimeout(() => { if (isDeployed || isInMission) mountFleetFormation3D(fleet, isInMission ? 'mission' : 'orbit'); else unmountFleetFormation3D(); }, 0);
 }
 
 // ─── FORMATION3D : fiche d'une flotte en orbite en vue héros ───
 let fleetFormation3D = null;   // { id, sig, handle }
-function mountFleetFormation3D(fleet) {
+function mountFleetFormation3D(fleet, mode = 'orbit') {
   const scr = document.getElementById('scr-fleet-detail');
   const scroll = scr && scr.querySelector('.screen-scroll');
   if (!scr || !scroll || !window.WebGLRenderingContext) return false;
@@ -13645,18 +13645,19 @@ function mountFleetFormation3D(fleet) {
   if (!space) { space = document.createElement('div'); space.id = 'fd-form-space'; space.className = 'ud-hero-space'; const h = scroll.querySelector('.head'); scroll.insertBefore(space, h ? h.nextSibling : scroll.firstChild); }
   scr.classList.add('ud-hero', 'ud-ship');
   hero.style.display = ''; space.style.display = '';
-  if (!hero.querySelector('.u3d-hint')) hero.insertAdjacentHTML('beforeend', `<div class="fd-sel" id="fd-sel"></div><div class="u3d-hint">En orbite · touche un vaisseau</div>`);
+  if (!hero.querySelector('.u3d-hint')) hero.insertAdjacentHTML('beforeend', `<div class="fd-sel" id="fd-sel"></div><div class="u3d-hint"></div>`);
+  hero.querySelector('.u3d-hint').textContent = mode === 'mission' ? 'En mission · touche un vaisseau' : 'En orbite · touche un vaisseau';
   requestAnimationFrame(() => {
     const hb = hero.getBoundingClientRect(), sb = space.getBoundingClientRect();
     if (hb.height) hero.style.setProperty('--u3d-band', Math.max(0, hb.bottom - sb.bottom) + 'px');
   });
   shipHeroGestures('scr-fleet-detail', () => fleetFormation3D && fleetFormation3D.handle, (hit) => showFormationSelection(hit));
   syncFleetIntegrity(fleet);
-  const sig = JSON.stringify([fleet.composition, fleet.integrity]);
+  const sig = JSON.stringify([fleet.composition, fleet.integrity, mode]);
   if (fleetFormation3D && fleetFormation3D.id === fleet.id && fleetFormation3D.sig === sig) return true;
   unmountFleetFormation3D(true);
   hero.classList.add('u3d-loading');
-  fleetFormation3D = { id: fleet.id, sig, handle: window.Formation3D.mount(hero, { fleet, shiftY: 0.2, onReady: () => hero.classList.remove('u3d-loading') }) };
+  fleetFormation3D = { id: fleet.id, sig, handle: window.Formation3D.mount(hero, { fleet, mode, shiftY: 0.2, onReady: () => hero.classList.remove('u3d-loading') }) };
   return true;
 }
 function showFormationSelection(hit) {
@@ -43858,6 +43859,6 @@ if (G.knownTargets && Array.isArray(G.tankerMissions)) {
 <script src="assets/radio.js?v=20261013-1400"></script>
 <script type="module" src="assets/ship3d.js?v=20261013-1400"></script>
 <!-- FORMATION3D — flotte déployée en orbite, vue de haut en formation (remplace la vue orbite) -->
-<script src="assets/formation3d.js?v=20261013-1400"></script>
+<script src="assets/formation3d.js?v=20261013-1600"></script>
 </body>
 </html>
