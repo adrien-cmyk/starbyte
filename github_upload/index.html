@@ -2222,6 +2222,10 @@ svg.map {
   opacity: 1;
   transform: translateX(-50%) translateY(0);
 }
+/* PATCH_1310_TOASTS — bulle touchable : elle ouvre la fenêtre concernée */
+#toast.shown.tap { pointer-events: auto; cursor: pointer; padding-right: 30px; }
+#toast.tap::after { content: '›'; position: absolute; right: 12px; top: 50%; transform: translateY(-52%); font-size: 18px; line-height: 1; color: rgba(95,255,232,.75); }
+#toast.tap:active { filter: brightness(1.25); }
 
 #result-ovr {
   position: fixed;
@@ -8901,6 +8905,7 @@ function mpRenderIncoming(list) {
     el.onclick = () => {
       const r = _mpIncoming[0];
       if (r) toast(`${r.attacker_pseudo}${r.fleet_name ? ' · ' + r.fleet_name : ''} arrive à ${new Date(Date.parse(r.arrives_at)).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}. Renforce ta défense ou déploie une flotte en orbite.`);
+      goto('fleet');   // PATCH_1310_TOASTS — l'alerte mène à la flotte
     };
     document.body.appendChild(el);
   }
@@ -38043,15 +38048,101 @@ function fmt(n) {
 }
 
 let toastTimer = null;
-function toast(msg) {
+// PATCH_1310_TOASTS — une bulle peut porter une action : toast(msg, () => …).
+// Sans action explicite, _toastRoute devine la fenêtre d'après le message (rapport, carte, ambassade…).
+var _toastTap = null, _toastWired = false;
+function toast(msg, onTap) {
   const el = document.getElementById('toast');
   // Chunk polish 15/05 : utiliser innerHTML au lieu de textContent pour
   // que les icônes SVG inline (via icon('xxx')) soient rendues correctement.
   // Pas de risque XSS : on contrôle tous les appelants (pas de user input).
   el.innerHTML = msg;
+  if (!_toastWired) {
+    _toastWired = true;
+    el.addEventListener('click', () => {
+      const f = _toastTap; _toastTap = null;
+      el.classList.remove('shown', 'tap'); clearTimeout(toastTimer);
+      if (f) { try { f(); } catch (e) { console.warn('[bulle]', e); } }
+    });
+  }
+  let tap = null;
+  try { tap = typeof onTap === 'function' ? onTap : _toastRoute(String(msg == null ? '' : msg)); } catch (e) { tap = null; }
+  _toastTap = tap;
+  el.classList.toggle('tap', !!tap);
   el.classList.add('shown');
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => el.classList.remove('shown'), 3000);
+  toastTimer = setTimeout(() => el.classList.remove('shown'), tap ? 4500 : 3000);
+}
+function _toastOpenProspectReport(kind, id) {
+  if (typeof openProspectRapports === 'function') openProspectRapports(); else goto('prospect');
+  setTimeout(() => {
+    if (kind === 'tanker' && id && G._expandedTankerReport !== id && typeof toggleTankerReport === 'function') toggleTankerReport(id);
+    if (kind === 'probe' && id && G._expandedProbeReport !== id && typeof toggleProbeReport === 'function') toggleProbeReport(id);
+    if (kind === 'beacon' && id && typeof markBeaconReportRead === 'function') markBeaconReportRead(id);
+  }, 160);
+}
+function _toastLatestReport(pred) {
+  const r = (G.reports || []).find(x => !pred || pred(x));
+  if (r && typeof openReportDetail === 'function') return openReportDetail(r.id);
+  if (typeof openReportsList === 'function') openReportsList();
+}
+function _toastRoute(msg) {
+  const t = msg.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+  if (!t) return null;
+  // refus, erreurs, consignes : rien à ouvrir
+  if (/^(Aucun|Aucune|Impossible|Erreur|Pas de |Rien|Il faut|Donne |Maximum|Rappelle d'abord|Touche |Cale vide|Ce n’est pas|Ce n'est pas|Tu as déjà|Registre|Inscription|Choisis|Sélectionne|Ressources insuffisantes|Énergie insuffisante)/i.test(t)) return null;
+  if (/introuvable|indisponible|insuffisant|réessaie|hors ligne|déjà engagée|doit être en orbite/i.test(t)) return null;
+  const sys = (t.match(/\b([A-Z]-[A-Z]-\d{4})(?!-\d)/) || [])[1] || null;
+  const planet = (t.match(/\b([A-Z]-[A-Z]-\d{4}-\d{1,2})\b/) || [])[1] || null;
+  // messages d'ambassade (chat)
+  if (/^💬/.test(t)) {
+    const u = Object.values(typeof _mpChatUnread !== 'undefined' ? _mpChatUnread : {}).find(r => r && r.pseudo && t.includes(r.pseudo));
+    if (u && typeof openEmbassy === 'function') { const a = Object.keys(_mpChatUnread).find(k => _mpChatUnread[k] === u); return () => openEmbassy(a); }
+    return null;
+  }
+  // flotte hostile en approche → la flotte (déployer en orbite)
+  if (/Flotte hostile|arrive à \d|impact à \d/.test(t)) return () => goto('fleet');
+  // marché proposé au dock
+  if (/marché au dock|accepté ton marché|Marché (conclu|avec)/.test(t)) return () => goto('commerce');
+  // pavillon reçu
+  if (/hisse un pavillon/.test(t)) return () => _toastLatestReport(r => r.kind === 'flag');
+  // piraterie entre commandants
+  if (/^⚔|^⚠ .*intercepté|a échappé à|Convoi \(/.test(t)) return () => _toastLatestReport(r => r.kind === 'piracy');
+  // convoi détecté par une balise → fiche d'interception
+  if (/^📡/.test(t) && sys) {
+    const r = (G.beaconReports || []).slice().reverse().find(x => x.mp && x.systemCoord === sys);
+    if (r) return () => markBeaconReportRead(r.id);
+  }
+  // détection locale d'une balise → rapports de balise
+  if (/Détection sur/.test(t)) {
+    const r = (G.beaconReports || []).slice().reverse().find(x => x.systemCoord === sys);
+    return () => _toastOpenProspectReport('beacon', r && r.id);
+  }
+  // ambassades (tanker en orbite, cale, poste de route)
+  if (/en orbite chez|ambassade ouverte|tanker .* en orbite|la cale de|canal d'ambassade|tient un poste/.test(t)) {
+    const who = (G._mpPosts || []).find(o => t.includes(o.pseudo));
+    if (who && typeof openEmbassy === 'function') return () => openEmbassy(who.address);
+    const m = (G.tankerMissions || []).find(x => x.mpTarget && (t.includes(x.tankerName) || t.includes(x.mpTarget.pseudo)));
+    if (m && typeof openEmbassy === 'function') return () => openEmbassy(m.mpTarget.address);
+    const w = Object.values(G.knownSystems || {}).flatMap(k => k.planets || []).find(pl => pl.playerName && t.includes(pl.playerName) && pl.coord);
+    if (w && typeof openEmbassy === 'function') return () => openEmbassy(w.coord);
+  }
+  // retour de tanker → son rapport
+  if (/Σ-\d+.*(revenu|rentré|ne reviendra pas|déposé|cargo perdu)/.test(t)) {
+    const r = (G.tankerReports || [])[0];
+    return () => _toastOpenProspectReport('tanker', r && r.id);
+  }
+  // flottes : retour, combat, rapport
+  if (/rapport disponible|revient|est rentrée|Mission terminée| sur .+$/.test(t) && (G.fleet && (G.fleet.prepared || []).some(f => t.includes(f.name)))) {
+    return () => _toastLatestReport(r => r.kind !== 'flag');
+  }
+  if (/rapport/i.test(t)) return () => _toastLatestReport();
+  // un système ou un monde nommé → la carte
+  if (planet && typeof openPlanetOnMap === 'function') return () => openPlanetOnMap(planet);
+  if (sys && typeof openSystemOnMap === 'function') return () => openSystemOnMap(sys);
+  // une flotte nommée → la flotte
+  if (G.fleet && (G.fleet.prepared || []).some(f => f.name && t.includes(f.name))) return () => goto('fleet');
+  return null;
 }
 
 /* ═══════════ MODAL STARBYTE (chunk polish 15/05) ═══════════
