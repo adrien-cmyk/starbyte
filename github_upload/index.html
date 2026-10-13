@@ -8550,7 +8550,7 @@ var EXTRA_SAVE_KEYS = [
   'mpDeals',   // MP_DOCKS_V0 — marchés entre commandants (séquestre et règlement)
   'botState',  // BOTS_1110 — stocks des commandants automates après pillage
   'mpGrowthMilestone',
-  'systemTags', 'mapSeen', 'beaconRoutes',   // + routes entre balises (13/10)   // PATCH_1310_CARTE — marques de systèmes + systèmes déjà vus (survivent aux rapports supprimés)  // RUMORS_1110 — dernier palier de niveau annoncé au comptoir
+  'systemTags', 'mapSeen', 'beaconRoutes', 'spottedLegs',   // PATCH_1310_ROUTES2 — tronçons relevés par mes balises   // + routes entre balises (13/10)   // PATCH_1310_CARTE — marques de systèmes + systèmes déjà vus (survivent aux rapports supprimés)  // RUMORS_1110 — dernier palier de niveau annoncé au comptoir
   'mpDiplo',   // AMBASSADES_1210 — ambassades vues et dernière image des pactes
   'mpNeighbors',   // VOISINS_1310 — voisins déjà signalés
 ];
@@ -9998,7 +9998,7 @@ async function mpConvoyRegister(m, leg) {
   try {
     const id = await window.SBMP.convoyStart(c);
     if (!m.mpConvoy || m.mpConvoy[leg] !== 'pending') window.SBMP.convoyEnd(m.id, leg);   // demi-tour pendant l'inscription
-    else m.mpConvoy[leg] = id;
+    else { m.mpConvoy[leg] = id; if (Array.isArray(m.via)) _mpConvoyRoute(m, leg); }   // PATCH_1310_ROUTES2
     if (typeof saveGame === 'function') saveGame();
   } catch (e) {
     const msg = String(e && e.message || e);
@@ -10006,6 +10006,26 @@ async function mpConvoyRegister(m, leg) {
     else console.warn('[convoi] inscription :', msg);
   }
   finally { _mpConvoyBusy.delete(key); }
+}
+// PATCH_1310_ROUTES2 — appel direct au registre (le module cloud ne connaît pas encore cette fonction)
+async function _mpRpc(fn, args) {
+  let tok = null;
+  try { const a = JSON.parse(localStorage.getItem('starbyte_auth') || 'null'); tok = a && (a.access_token || (a.currentSession && a.currentSession.access_token)); } catch (e) {}
+  if (!tok) throw new Error('no_session');
+  const KEY = 'sb_publishable_tXGrQIROzH2DwBrny1GcHQ_iKJKoBOQ';
+  const res = await fetch('https://elupnpdcblztpfywnhjl.supabase.co/rest/v1/rpc/' + fn, {
+    method: 'POST', headers: { 'Content-Type': 'application/json', apikey: KEY, Authorization: 'Bearer ' + tok }, body: JSON.stringify(args || {}) });
+  const txt = await res.text();
+  if (!res.ok) throw new Error(txt.slice(0, 200));
+  try { return JSON.parse(txt); } catch (e) { return txt; }
+}
+async function _mpConvoyRoute(m, leg) {
+  if (!m || !Array.isArray(m.via) || (m.mpRouteSent || {})[leg]) return;
+  const via = leg === 'back' ? m.via.slice().reverse() : m.via;
+  try {
+    await _mpRpc('mp_convoy_route', { p_mission: m.id, p_leg: leg, p_via: via, p_own: !!m.ownRouteId });
+    m.mpRouteSent = Object.assign({}, m.mpRouteSent, { [leg]: true });
+  } catch (e) { console.warn('[convoi] tracé :', String(e && e.message || e)); }
 }
 function mpConvoyEnd(m, leg) {
   if (!m || !m.mpConvoy || !m.mpConvoy[leg] || m.mpConvoy[leg] === 'failed') return;
@@ -10150,7 +10170,18 @@ async function mpIngestPiracy(d, meId) {
         mp: { convoyId: s.convoy_id, system: s.system, pseudo: s.pseudo || null, leg: s.leg, dock: s.dock_name, routeType: s.route_type, spied: !!s.spied } };
       G.beaconReports.push(r);
       dirty = true;
-      toast(`📡 ${s.system} : ${s.pseudo ? 'convoi de ' + s.pseudo : 'convoi sous pavillon impérial'} · fenêtre ${Math.max(1, Math.ceil((end - Date.now()) / 60000))} min`);
+      // PATCH_1310_ROUTES2 — balise sur le tracé : le cap du convoi (système suivant) est relevé, et entre sur la carte
+      const nx = /^[A-Z]-[A-Z]-\d{4}$/.test(String(s.next_system || '')) ? s.next_system : null;
+      if (nx) {
+        r.mp.next = nx; r.mp.onRoute = !!s.on_route;
+        if (!Array.isArray(G.spottedLegs)) G.spottedLegs = [];
+        if (!G.spottedLegs.some(l => l.convoyId === s.convoy_id && l.from === s.system)) {
+          G.spottedLegs.unshift({ id: 'sp-' + s.convoy_id + '-' + s.system, convoyId: s.convoy_id, from: s.system, to: nx, pseudo: s.pseudo || null, at: Date.now(), onRoute: !!s.on_route });
+          G.spottedLegs = G.spottedLegs.slice(0, 40);
+        }
+        if (typeof SBMap !== 'undefined' && SBMap.render) { try { SBMap.render(); } catch (e) {} }
+      }
+      toast(`📡 ${s.system} : ${s.pseudo ? 'convoi de ' + s.pseudo : 'convoi sous pavillon impérial'}${r.mp.next ? ' · cap sur ' + r.mp.next : ''} · fenêtre ${Math.max(1, Math.ceil((end - Date.now()) / 60000))} min`);
     } else if (r.mp) { r.expiresAt = end; r.mp.spied = !!s.spied; }
   }
   // b. mes flottes en embuscade : pertes et cale de butin tenues par le registre
@@ -10385,6 +10416,7 @@ function _mpRenderInterceptSheet() {
       ${line('Tanker', 'T' + t.tankerTier)}
       ${line('Cale estimée', t.cargoEstimate)}
       ${line('Trajet', _mpLegLabel({ leg: d.leg, dock: d.dock, kind: d.leg === 'out' && !d.dock ? 'embassy' : 'route' }))}
+      ${d.next ? line('Cap relevé', `<span onclick="closeMpInterceptSheet();openSystemOnMap('${d.next}')" style="cursor:pointer;text-decoration:underline dotted;text-underline-offset:3px;font-family:var(--font-mono)">${d.next}</span>${d.onRoute ? ' · route privée' : ''}`, '#ff9a6a') : ''}
       ${line('Fenêtre', left > 0 ? formatMissionTimer(left) : 'fermée', left > 0 ? '#a370ff' : 'var(--mut)')}
     </div>
     ${actions}
@@ -23839,6 +23871,17 @@ const ROUTE_TYPES = {
     canEncounter: false,
     accentColor: 'var(--blue)',
   },
+  // PATCH_1310_ROUTES2 — ma route entre deux balises : pas de taxe, pas d'incident ; la longueur du tracé fait la durée
+  own: {
+    key: 'own',
+    label: 'Ma route',
+    description: 'Tracé privé entre deux balises',
+    durationFactor: 0.65,
+    taxFactor: 1.0,
+    incidentChance: 0,
+    canEncounter: false,
+    accentColor: '#c39bff',
+  },
   direct: {
     key: 'direct',
     label: 'Voie directe',
@@ -25348,8 +25391,10 @@ function renderTankerComposeRoute() {
     `;
   };
 
+  const ownCards = _ownRoutesCardsHtml(c, baseDurationMs);   // PATCH_1310_ROUTES2
   list.innerHTML = `
     <div style="padding:0 16px">
+      ${ownCards}
       ${card(
         'beacon',
         'Voie balisée',
@@ -25374,11 +25419,55 @@ function renderTankerComposeRoute() {
   `;
 }
 
-function setComposeRoute(routeKey) {
+function setComposeRoute(routeKey, ownRouteId) {
   if (!G.tankerComposing) return;
   if (!ROUTE_TYPES[routeKey]) return;
   G.tankerComposing.routeType = routeKey;
+  G.tankerComposing.ownRouteId = routeKey === 'own' ? ownRouteId : null;
   renderTankerCompose();
+}
+// PATCH_1310_ROUTES2 — trajets possibles vers la destination du tanker (calculés sur la carte)
+function _composePlan(c) {
+  const sys = String((c && c.destination) || '').split('/')[0].split('-').slice(0, 3).join('-');
+  if (!/^[A-Z]-[A-Z]-\d{4}$/.test(sys) || !window.SBMap || typeof SBMap.planFor !== 'function') return null;
+  return SBMap.planFor(sys);
+}
+function _composeOwnRoute(c, plan) {
+  if (!c || c.routeType !== 'own') return null;
+  return ((plan || _composePlan(c) || {}).routes || []).find(r => r.id === c.ownRouteId) || null;
+}
+function _ownRouteRatio(plan, r) {
+  return Math.max(1, Math.min(3, r.len / Math.max(1, plan.direct.len)));
+}
+function _ownRoutesCardsHtml(c, baseDurationMs) {
+  const plan = _composePlan(c);
+  if (!plan || !plan.routes.length) return '';
+  if (G._composeRoutePref) {   // venu de la carte : « Envoyer un tanker » sur une route
+    if (plan.routes.some(r => r.id === G._composeRoutePref)) { c.routeType = 'own'; c.ownRouteId = G._composeRoutePref; }
+    G._composeRoutePref = null;
+  }
+  return plan.routes.slice(0, 3).map(r => {
+    const sel = c.routeType === 'own' && c.ownRouteId === r.id;
+    const ms = baseDurationMs * ROUTE_TYPES.own.durationFactor * _ownRouteRatio(plan, r);
+    const open = r.openLen > 0 ? `${r.openLen} case${r.openLen > 1 ? 's' : ''} à découvert jusqu'à la balise ${r.startKey}` : 'départ depuis ta balise de système';
+    return `
+      <div onclick="setComposeRoute('own','${r.id}')" style="margin-bottom:8px;padding:10px 12px;background:${sel ? 'rgba(195,155,255,.10)' : 'rgba(40,40,40,.3)'};border:1px solid ${sel ? r.color : 'var(--border)'};border-radius:6px;cursor:pointer">
+        <div style="display:flex;align-items:center;gap:10px">
+          <div style="width:4px;align-self:stretch;border-radius:2px;background:${r.color}"></div>
+          <div style="flex:1">
+            <div style="font-size:12px;color:${sel ? r.color : 'var(--text)'};font-weight:${sel ? '600' : '400'}">${_escapeHtml(r.name)}</div>
+            <div style="font-size:10px;color:var(--mut);margin-top:2px">Ta route privée : ni taxe ni incident. Seules les balises posées sur le tracé la voient passer.</div>
+            <div style="font-size:10px;color:var(--mut);margin-top:4px;font-family:var(--font-mono)">
+              <span style="color:${sel ? r.color : 'var(--mut)'}">⏱ ${formatTankerDuration(ms)}</span>
+              <span style="margin:0 6px;opacity:.4">·</span><span>pas de taxe</span>
+              <span style="margin:0 6px;opacity:.4">·</span><span>aucun incident</span>
+            </div>
+            <div style="font-size:10px;color:var(--mut);margin-top:3px">${r.len} cases · ${open}</div>
+          </div>
+          ${sel ? `<div style="color:${r.color}">${icon('check', {size:14})}</div>` : ''}
+        </div>
+      </div>`;
+  }).join('');
 }
 
 // ─── Récap mission ───
@@ -25415,11 +25504,14 @@ function renderTankerComposeRecap() {
   // Pour le proto on met 5 min fixe
   const baseDurationMs = 5 * 60 * 1000;
   const routeCfg = ROUTE_TYPES[c.routeType || 'beacon'];
-  const estimatedDurationMs = baseDurationMs * routeCfg.durationFactor;
+  let estimatedDurationMs = baseDurationMs * routeCfg.durationFactor;
+  const _plan = c.routeType === 'own' ? _composePlan(c) : null, _own = _composeOwnRoute(c, _plan);   // PATCH_1310_ROUTES2
+  if (_own) estimatedDurationMs *= _ownRouteRatio(_plan, _own);
   const intentLabel = c.postArrival === 'orbit_relay'
     ? '<span style="color:#ffc864">Reste en orbite (balise)</span>'
     : '<span style="color:var(--mut)">Dépose et rentre</span>';
-  const routeLabel = c.routeType === 'direct'
+  const routeLabel = _own ? `<span style="color:${_own.color}">${_escapeHtml(_own.name)}</span>`
+    : c.routeType === 'direct'
     ? '<span style="color:#c4762a">Voie directe</span>'
     : '<span style="color:var(--blue)">Voie balisée</span>';
 
@@ -25509,7 +25601,18 @@ function confirmTankerComposition() {
   };
 
   // ─── Routes Duales : ajuster durée et tirer rencontre éventuelle ───
+  // PATCH_1310_ROUTES2 — ma route : si elle a disparu entre-temps, voie directe
+  const _plan = _composePlan(c), _own = _composeOwnRoute(c, _plan);
+  if (c.routeType === 'own' && !_own) c.routeType = 'direct';
   applyRouteToMission(mission, c.routeType || 'beacon');
+  if (_own) {
+    mission.arrivalAt = mission.departedAt + (mission.arrivalAt - mission.departedAt) * _ownRouteRatio(_plan, _own);
+    mission.ownRouteId = _own.id;
+    mission.ownRouteName = _own.name;
+    mission.via = _own.via.slice(0, 24);
+  } else if (_plan) {
+    mission.via = _plan.direct.via.slice(0, 24);   // ligne droite : les systèmes connus traversés
+  }
 
   if (!Array.isArray(G.tankerMissions)) G.tankerMissions = [];
   G.tankerMissions.push(mission);
@@ -26028,6 +26131,11 @@ function _buildRouteTrajetPrefix(mission, crew) {
     && !mission.cargoOriginal?.resources?.cristal && !mission.cargoOriginal?.soldiers?.garde
     && !mission.cargoOriginal?.soldiers?.lourd;
 
+  if (mission.routeType === 'own') {   // PATCH_1310_ROUTES2
+    bilanParts.push(`${mission.ownRouteName || 'Ta route'} · trajet ${durationLabel}`);
+    bilanParts.push('ni taxe ni incident');
+    return `**Trajet par ta route.**\n\n*${bilanParts.join(' · ')}.*\n\nLe tanker a suivi le tracé entre tes balises, système après système. Personne ne l'a arrêté.\n\n---\n\n`;
+  }
   if (mission.routeType === 'beacon') {
     bilanParts.push(`Voie balisée · trajet ${durationLabel}`);
     if (!isEmptyTanker) bilanParts.push(`taxe impériale 12% appliquée`);
@@ -44000,7 +44108,7 @@ if (G.knownTargets && Array.isArray(G.tankerMissions)) {
 <!-- HOME V2 — « monde d'abord » : planète plein écran, ressources en ligne, Flotte / Défense / Prospection (assets/home.js) -->
 <script type="module" src="assets/home.js?v=20261013-1630"></script>
 <!-- SPACE MAP v0 — carte du Centre de prospection (assets/spacemap.js, source src/spacemap.js) -->
-<script src="assets/spacemap.js?v=20261013-2200"></script>
+<script src="assets/spacemap.js?v=20261013-2330"></script>
 <!-- SPACE MAP niveau B — diorama 3D d'un système (assets/system3d.js, source src/system3d.js) -->
 <script type="module" src="assets/system3d.js?v=20261013-1630"></script>
 <!-- SHIP3D — fiches 3D : cuirassé KV-01, frégate SR-01, tanker TK-07, chantier orbital OS-01 (assets/ship3d.js, sur le moteur partagé window.SB3D) -->

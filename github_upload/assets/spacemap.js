@@ -226,6 +226,10 @@
     for (const k of Object.keys(G.systemTags || {})) if (/^[A-Z]-[A-Z]-\d{4}$/.test(k)) add(k, { known: true });
     for (const sx of Object.values(systems)) if (sx.known && !G.mapSeen[sx.key]) G.mapSeen[sx.key] = Date.now();
 
+    // 13/10 — tronçons repérés par mes balises (un convoi passé, et son cap) : les deux systèmes entrent sur la carte
+    const spotted = (G.spottedLegs || []).filter(l => l && /^[A-Z]-[A-Z]-\d{4}$/.test(l.from) && /^[A-Z]-[A-Z]-\d{4}$/.test(l.to) && (now - (l.at || 0)) < 3 * 86400000);
+    for (const l of spotted) { add(l.from, { known: true }); add(l.to, { known: true }); }
+
     // ── Plateau : une case par objet ──
     const home = mySystemKey();
     add(home, { known: true, isMine: true });
@@ -281,6 +285,14 @@
       routes.push({ r, broken: !path, path: path || [], a: A, b: B });
     }
 
+    const spottedPaths = [];
+    for (const l of spotted) {
+      const fa = cell['sys:' + l.from], fb = cell['sys:' + l.to];
+      if (fa === undefined || fb === undefined) continue;
+      spottedPaths.push({ l, path: hexPath(fa, fb, null) || [fa, fb] });
+    }
+    const partial = { cell, occ, routes, home };
+
     // Missions en vol
     const flights = [];
     for (const m of (G.probeMissions || [])) {
@@ -294,15 +306,41 @@
     for (const m of (G.tankerMissions || [])) {
       if (!(m.status === 'in_transit' || m.status === 'returning' || m.status === 'exploring')) continue;
       const tc = String(m.targetCoords || '');
-      const sysKey = tc.split('/')[0];
+      const sysKey = tc.split('/')[0].split('-').slice(0, 3).join('-');   // cible, épave ou planète (A-N-2000-04)
       if (!/^[A-Z]-[A-Z]-\d{4}$/.test(sysKey)) continue;
       const at = cell['tgt:' + tc] !== undefined ? cell['tgt:' + tc] : cell['sys:' + sysKey];
       if (at === undefined) continue;
       const back = m.status === 'returning';
-      flights.push({ kind: 'tanker', id: m.id, label: m.tankerName || 'Tanker', from: back ? at : 0, to: back ? 0 : at,
+      const toCk = cell['pl:' + tc] !== undefined ? 'pl:' + tc : (cell['tgt:' + tc] !== undefined ? 'tgt:' + tc : null);
+      // 13/10 — un tanker sur ma route suit son tracé (le trajet maison → balise de départ reste à découvert)
+      let path = null;
+      if (m.ownRouteId) { const pl = planFrom(partial, sysKey); const r = pl && pl.routes.find(x => x.id === m.ownRouteId); if (r) path = back ? r.cells.slice().reverse() : r.cells; }
+      flights.push({ kind: 'tanker', id: m.id, label: m.tankerName || 'Tanker', from: back ? at : 0, to: back ? 0 : at, toCk: back ? null : toCk, path,
         departedAt: back ? (m.returnDepartedAt || m.arrivalAt || m.departedAt) : m.departedAt, arrivalAt: back ? (m.returnArrivalAt || m.arrivalAt) : m.arrivalAt, target: tc, back });
     }
-    return { systems, flights, occ, cell, items, routes, lit: litRing() };
+    return { systems, flights, occ, cell, items, routes, spotted: spottedPaths, home, lit: litRing() };
+  }
+
+  // 13/10 — trajets possibles vers un système : voie directe (ligne droite) et mes routes qui y aboutissent.
+  // via = systèmes connus traversés, dans l'ordre (c'est ce que voient les balises des autres commandants).
+  function planFrom(st, destKey) {
+    const dc = st.cell['sys:' + destKey];
+    if (dc === undefined) return null;
+    const viaOf = (cells) => cells.slice(1, -1).map(i => st.occ.get(i)).filter(o => o && o.kind === 'system').map(o => o.key);
+    const dPath = dc === 0 ? [0] : (hexPath(0, dc, null) || [0, dc]);
+    const out = { dest: destKey, direct: { cells: dPath, via: viaOf(dPath), len: dPath.length - 1 }, routes: [] };
+    for (const rt of st.routes || []) {
+      if (rt.broken || !rt.a || !rt.b || rt.path.length < 2) continue;
+      let p;
+      if (rt.b.ci === dc) p = rt.path; else if (rt.a.ci === dc) p = rt.path.slice().reverse(); else continue;
+      const start = p[0];
+      const pre = start === 0 ? [0] : (hexPath(0, start, null) || [0, start]);
+      const cells = pre.concat(p.slice(1));
+      const so = st.occ.get(start);
+      out.routes.push({ id: rt.r.id, name: rt.r.name, color: rt.r.color, cells, via: viaOf(cells), len: cells.length - 1,
+        openLen: pre.length - 1, startKey: so ? so.key : st.home });
+    }
+    return out;
   }
 
   // Empreinte : ce qui change le plateau (pas le temps qui passe)
@@ -316,6 +354,8 @@
       for (const pl of s.planets) o.push('P' + pl.coord + (pl.playerName ? '@' + pl.playerName : ''));
     }
     for (const f of st.flights) o.push('F' + f.id + f.from + '>' + f.to);
+    for (const sp of st.spotted || []) o.push('S' + sp.l.from + '>' + sp.l.to);
+    for (const f of st.flights) if (f.path) o.push('P' + f.id + f.path.length);
     for (const rt of st.routes || []) o.push('R' + rt.r.id + rt.r.color + (rt.r.avoid || []).join('/') + (rt.broken ? 'x' : '') + rt.path.join('.'));
     return st.lit + '|' + o.sort().join(',');
   }
@@ -413,7 +453,7 @@
       const insp = (window.SBSystem && sys && (sys.known || sys.scanning)) ? _sigBtn(COL.cyan, 'Inspecter le système', `SBSystem.open('${esc(s.key)}')`, '', true) : '';
       const tag = (G.systemTags || {})[s.key];
       const tagTxt = tag === 'star' ? ' · <span style="color:#ffc864">intéressant</span>' : tag === 'skip' ? ' · <span style="color:#8a96a0">sans intérêt</span>' : '';
-      return `<div class="sm-panel"><div class="sm-ptitle">Système ${esc(s.key)}</div><div class="sm-psub">${bits.join(' · ') || 'Balayé, rien de relevé.'}${tagTxt}</div>${tagChips(s.key)}${insp}${act}${beaconAction(s.key, sys)}</div>`;
+      return `<div class="sm-panel"><div class="sm-ptitle">Système ${esc(s.key)}</div><div class="sm-psub">${bits.join(' · ') || 'Balayé, rien de relevé.'}${tagTxt}</div>${tagChips(s.key)}${spottedHtml(s.key)}${insp}${act}${beaconAction(s.key, sys)}</div>`;
     }
     if (s.kind === 'sig') {
       const sig = G.signatures && G.signatures[s.key];
@@ -844,8 +884,23 @@
     },
     _tickFlights() {
       const now = Date.now(), T = this.T, tmp = new T.Vector3();
+      const along = (f, d, out) => {   // point à la distance d le long du tracé
+        const c = f.cum; d = Math.max(0, Math.min(c[c.length - 1], d));
+        let i = 1; while (i < c.length - 1 && c[i] < d) i++;
+        const seg = c[i] - c[i - 1] || 1;
+        out.lerpVectors(f.pts[i - 1], f.pts[i], (d - c[i - 1]) / seg); return i;
+      };
       for (const f of this.flights) {
         let k = f.t1 > f.t0 ? (now - f.t0) / (f.t1 - f.t0) : 1; k = Math.max(0, Math.min(1, k));
+        if (f.pts) {
+          const total = f.cum[f.cum.length - 1], d = k * total, i = along(f, d, tmp);
+          f.ship.position.copy(tmp); f.ship.lookAt(f.pts[i].x, f.pts[i].y, f.pts[i].z);
+          const back = new T.Vector3(); along(f, d - 60, back);
+          const p = f.trail.geometry.attributes.position;
+          p.setXYZ(0, back.x, back.y, back.z); p.setXYZ(1, tmp.x, tmp.y, tmp.z); p.needsUpdate = true;
+          f.trail.geometry.computeBoundingSphere();
+          continue;
+        }
         tmp.lerpVectors(f.a, f.b, k);
         f.ship.position.copy(tmp);
         f.ship.lookAt(f.b.x, f.b.y, f.b.z);
@@ -971,8 +1026,14 @@
         };
         const a = pos(f.from, null), b = pos(f.to, f.toCk);
         const out = (p, q) => { const d = q.clone().sub(p); d.y = 0; const L = d.length(); return L > 20 ? p.clone().addScaledVector(d.normalize(), 9) : p; };
-        if (f.from === 0) a.copy(out(a, b)); if (f.to === 0) b.copy(out(b, a));
-        const route = new T.Line(new T.BufferGeometry().setFromPoints([a, b]), new T.LineDashedMaterial({ color: c, dashSize: 3, gapSize: 4, transparent: true, opacity: 0.22 }));
+        // 13/10 — sur une route : le vaisseau suit les cases du tracé
+        let pts = null;
+        if (f.path && f.path.length > 2) {
+          pts = f.path.map(i => pos(i, null));
+          pts[0] = a; pts[pts.length - 1] = b;
+          if (f.from === 0) a.copy(out(a, pts[1])); if (f.to === 0) b.copy(out(b, pts[pts.length - 2]));
+        } else { if (f.from === 0) a.copy(out(a, b)); if (f.to === 0) b.copy(out(b, a)); }
+        const route = new T.Line(new T.BufferGeometry().setFromPoints(pts || [a, b]), new T.LineDashedMaterial({ color: c, dashSize: 3, gapSize: 4, transparent: true, opacity: pts ? 0.4 : 0.22 }));
         route.computeLineDistances(); this.content.add(route);
         const trail = new T.Line(new T.BufferGeometry().setFromPoints([a.clone(), a.clone()]), new T.LineBasicMaterial({ color: c, transparent: true, opacity: 0.6 }));
         this.content.add(trail);
@@ -986,7 +1047,9 @@
         const hit = new T.Mesh(new T.SphereGeometry(9, 8, 6), new T.MeshBasicMaterial({ visible: false })); ship.add(hit);
         ship.userData.flight = f.id;
         this.content.add(ship);
-        this.flights.push({ ship, trail, a, b, t0: f.departedAt || 0, t1: f.arrivalAt || 0 });
+        const fl = { ship, trail, a, b, t0: f.departedAt || 0, t1: f.arrivalAt || 0 };
+        if (pts) { fl.pts = pts; fl.cum = [0]; for (let i = 1; i < pts.length; i++) fl.cum.push(fl.cum[i - 1] + pts[i].distanceTo(pts[i - 1])); }
+        this.flights.push(fl);
       }
       this._tickFlights();
       this._routes(st);
@@ -1016,6 +1079,19 @@
         const dots = new T.Points(new T.BufferGeometry().setFromPoints(rt.path.slice(1, -1).map(i => new T.Vector3(CELLS[i].x, 1.0, CELLS[i].z))),
           new T.PointsMaterial({ color: rt.r.color, size: 3, sizeAttenuation: false, transparent: true, opacity: 0.8, depthWrite: false }));
         this.routeGroup.add(dots);
+      }
+      // 13/10 — tronçons repérés par mes balises : un convoi est passé par là, cap sur le système suivant
+      for (const sp of st.spotted || []) {
+        if (sp.path.length < 2) continue;
+        const l = new T.Line(new T.BufferGeometry().setFromPoints(sp.path.map(i => new T.Vector3(CELLS[i].x, 0.8, CELLS[i].z))),
+          new T.LineDashedMaterial({ color: 0xff8a5a, dashSize: 5, gapSize: 5, transparent: true, opacity: 0.55, depthWrite: false }));
+        l.computeLineDistances(); this.routeGroup.add(l);
+        const tip = CELLS[sp.path[sp.path.length - 1]], prev = CELLS[sp.path[sp.path.length - 2]];
+        const ang = Math.atan2(tip.x - prev.x, tip.z - prev.z);
+        const arrow = new T.Mesh(new T.ConeGeometry(2.6, 7, 3), new T.MeshBasicMaterial({ color: 0xff8a5a, transparent: true, opacity: 0.7, depthWrite: false }));
+        arrow.rotation.set(Math.PI / 2, ang, 0, 'YXZ');   // cône couché, pointe vers le système suivant
+        const mx = tip.x - (tip.x - prev.x) * 0.45, mz = tip.z - (tip.z - prev.z) * 0.45;
+        arrow.position.set(mx, 0.9, mz); this.routeGroup.add(arrow);
       }
     },
     _ribbon(pts, w) {
@@ -1462,8 +1538,36 @@
       + (av ? `<div class="sm-avs"><span>Évite</span>${av}</div>` : '')
       + `<div class="sm-tags">${tool('Éviter un système', 'routeAvoid')}${tool('Couleur', 'routeColor')}</div>`
       + `<div class="sm-tags">${tool('Renommer', 'routeRename')}${tool('Supprimer', 'routeDelete')}</div>`
-      + _sigOff('Emprunter la route : prochaine étape', 'Flottes et tankers, détection par les balises sur le tracé')
+      + routeTravelHtml(rt, state)
       + `</div>`;
+  }
+  // 13/10 — emprunter la route : un tanker part vers un monde connu au bout de la route
+  function routeTravelHtml(rt, state) {
+    if (rt.broken) return _sigOff('Route rompue', 'Repose la balise pour la rouvrir aux tankers');
+    const ends = [rt.a.key, rt.b.key];
+    const worlds = [];
+    for (const k of ends) for (const it of (state.items[k] || [])) if (it.kind === 'planet') worlds.push(it.obj);
+    const busy = (G.tankerMissions || []).filter(m => m.ownRouteId === rt.r.id && (m.status === 'in_transit' || m.status === 'returning')).length;
+    const note = busy ? `${busy} tanker${busy > 1 ? 's' : ''} sur la route` : 'Sans incident de voie directe · seules les balises du tracé voient passer';
+    if (!worlds.length) return _sigOff('Aucun monde connu au bout de la route', 'Balaye un des deux systèmes pour y trouver une destination');
+    return worlds.slice(0, 2).map(p => _sigBtn(rt.r.color, 'Envoyer un tanker · ' + esc(p.playerName || p.customName || p.name || p.coord),
+      `SBMap.sendOnRoute('${esc(rt.r.id)}','${esc(p.coord)}')`, note, true)).join('');
+  }
+  function sendOnRoute(rid, coord) {
+    if (typeof openTankerCompose !== 'function') return;
+    G._composeRoutePref = rid;          // la fiche du tanker présélectionne cette route
+    openTankerCompose(coord);
+  }
+  // Tronçons repérés depuis / vers ce système
+  function spottedHtml(sysKey) {
+    const st = _state || collect();
+    const legs = (st.spotted || []).filter(sp => sp.l.from === sysKey || sp.l.to === sysKey);
+    if (!legs.length) return '';
+    const ago = (t) => { const m = Math.max(1, Math.round((Date.now() - t) / 60000)); return m < 60 ? `il y a ${m} min` : m < 1440 ? `il y a ${Math.round(m / 60)} h` : `il y a ${Math.round(m / 1440)} j`; };
+    return `<div class="sm-spot">` + legs.slice(0, 3).map(sp => {
+      const out = sp.l.from === sysKey, other = out ? sp.l.to : sp.l.from;
+      return `<button onclick="event.stopPropagation();SBMap.select('system','${esc(other)}')"><span class="k">${out ? 'Cap relevé' : 'Venu de'}</span><span class="mono">${esc(other)}</span><span class="w">${esc(sp.l.pseudo || 'pavillon masqué')} · ${ago(sp.l.at)}</span></button>`;
+    }).join('') + `</div>`;
   }
   function routesSheetHtml() {
     const st = _state || collect();
@@ -1745,6 +1849,11 @@
       .sm-rt i{width:14px;height:3px;border-radius:2px;flex:none}
       .sm-rt b{font-weight:600;letter-spacing:.04em}
       .sm-rt span{margin-left:auto;font:500 10px/1 'JetBrains Mono',monospace;color:rgba(190,205,215,.6)}
+      .sm-spot{display:flex;flex-direction:column;gap:4px;margin-top:8px}
+      .sm-spot button{display:grid;grid-template-columns:auto 1fr;gap:2px 8px;text-align:left;padding:7px 9px;border-radius:7px;border:1px dashed rgba(255,138,90,.45);background:rgba(255,138,90,.05);color:#e6f0ff;cursor:pointer;font:inherit}
+      .sm-spot .k{font-size:9px;letter-spacing:.12em;text-transform:uppercase;color:#ff9a6a;align-self:center}
+      .sm-spot .mono{font:500 11px/1.2 'JetBrains Mono',monospace;color:#ffd2b8}
+      .sm-spot .w{grid-column:1/-1;font-size:10px;color:var(--mut)}
       .sm-avs{display:flex;flex-wrap:wrap;align-items:center;gap:5px;margin-top:8px;font-size:10px;color:var(--mut)}
       .sm-av{padding:4px 7px;border-radius:5px;border:1px solid rgba(255,138,138,.35);background:transparent;color:#ff9a8a;font:500 10px/1 'JetBrains Mono',monospace;cursor:pointer}
     `;
@@ -1755,7 +1864,8 @@
   function panelFor(sel) { const keep = _sel; _sel = sel; let h = ''; try { h = panelMarkup(collect()); } finally { _sel = keep; } return h; }
   const API = {
     render, sweep, panelFor, tag, beacon, recallBeacon: recallBeaconFromMap, showFlight,
-    openRoute, selectRoute, showRoute, routeAvoid, routeUnavoid, routeColor, routeRename, routeDelete,
+    openRoute, selectRoute, showRoute, routeAvoid, routeUnavoid, routeColor, routeRename, routeDelete, sendOnRoute,
+    planFor(destKey) { try { return planFrom(_state || collect(), destKey); } catch (e) { return null; } },
     select(kind, key) {
       if (_fallback) return;
       const sel = { kind, key };
