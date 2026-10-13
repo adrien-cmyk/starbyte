@@ -44,11 +44,18 @@
     save(); refresh();
   }
 
+  // bâtiments abîmés par un raid (production à moitié) : réparés par les secours, jamais par un match-3 du bâtiment
+  const damagedIdx = () => (G.planet && G.planet.parcels || []).map((p, i) => p && p.damaged ? i : -1).filter(i => i >= 0)
+    .sort((a, b) => (G.planet.parcels[a].damagedAt || 0) - (G.planet.parcels[b].damagedAt || 0));
+  function repairOne() { const i = damagedIdx()[0]; if (i != null && typeof mpRepairParcel === 'function') { mpRepairParcel(i, { free: true }); return true; } return false; }
   function onRelief(tier) {
     const s = st(); if (!s) return;
     const r = RELIEF[Math.min(3, tier || 0)] || 0;
-    if (!r || !dev()) return;
+    if (!r) return;
+    const fixed = repairOne();
+    if (!dev()) { if (!fixed) return; save(); refresh(); return; }
     s.dev = Math.max(0, dev() - r);
+    if (s.dev <= 0) while (repairOne()) {}
     say(s.dev > 0 ? `Secours : dévastation −${r} % · reste ${Math.round(s.dev)} %` : 'Secours : la planète est remise sur pied');
     save(); refresh();
   }
@@ -101,73 +108,415 @@
       const id = s.pendingReport; s.pendingReport = null; save();
       setTimeout(() => { try { openReportDetail(id); } catch (e) { console.warn('[aftermath] rapport', e); } }, 900);
     }
+    // planète guérie d'elle-même : les bâtiments encore abîmés sont remis en état
+    if (d < 1 && !refresh._fixing && damagedIdx().length) { refresh._fixing = true; try { while (repairOne()) {} } finally { refresh._fixing = false; } }
     const b = Math.round(d / 10);
     if (b !== refresh._b) { refresh._b = b; if (window.Planet3D && Planet3D.ready && Planet3D.sync) try { Planet3D.sync(); } catch (e) {} }
     if (window.SBAftermathFX) window.SBAftermathFX.update(d, ph);
   }
   setInterval(refresh, 1000);
 
-  // ── effets 3D sur la carte (feux d'artifice, banderoles, incendies, fumée, gyrophares) ─────────────
-  const FX = { group: null, built: '', t0: performance.now(), parts: [] };
+  // ── effets 3D sur la carte ─────────────────────────────────────────────────
+  // Dévastation (DA « catastrophe », 13/10/2026) : arbres en feu + flammèches, bâtiments éventrés en flammes
+  // avec panache de fumée noire, débris au sol, cratères fumants, lumières en panne, forêt et ciel orangés.
+  // Tout est en shaders instanciés (un seul draw par famille) pour tenir sur iPhone.
+  const FX = { group: null, built: '', parts: [], fw: null, amb: null, forest: null, broken: [] };
+  const U = { uT: { value: 0 }, uWind: { value: null }, uPR: { value: 2 } };
   function three() { return window.SB3D && window.SB3D.THREE; }
   function radial(T, stops) {
     const c = document.createElement('canvas'); c.width = c.height = 64; const g = c.getContext('2d');
     const r = g.createRadialGradient(32, 32, 0, 32, 32, 32); stops.forEach(([o, col]) => r.addColorStop(o, col));
     g.fillStyle = r; g.fillRect(0, 0, 64, 64); return new T.CanvasTexture(c);
   }
+  function scorchTex(T) {
+    const c = document.createElement('canvas'); c.width = c.height = 128; const g = c.getContext('2d');
+    const r = g.createRadialGradient(64, 64, 0, 64, 64, 64);
+    r.addColorStop(0, 'rgba(6,4,3,1)'); r.addColorStop(.45, 'rgba(14,9,6,.92)'); r.addColorStop(.75, 'rgba(26,16,10,.55)'); r.addColorStop(1, 'rgba(30,20,12,0)');
+    g.fillStyle = r; g.fillRect(0, 0, 128, 128);
+    for (let i = 0; i < 260; i++) { // projections noires irrégulières
+      const a = Math.random() * 6.283, d = 30 + Math.random() * 34, s = 1 + Math.random() * 4;
+      g.fillStyle = `rgba(8,5,4,${.25 + Math.random() * .5})`; g.beginPath(); g.arc(64 + Math.cos(a) * d, 64 + Math.sin(a) * d, s, 0, 6.283); g.fill();
+    }
+    return new T.CanvasTexture(c);
+  }
+  const hash = (n) => { const x = Math.sin(n * 127.1 + 311.7) * 43758.5453; return x - Math.floor(x); };
+
+  const NOISE = `
+    float sbH(vec2 p){ return fract(sin(dot(p, vec2(127.1,311.7)))*43758.5453); }
+    float sbN(vec2 p){ vec2 i=floor(p), f=fract(p); vec2 u=f*f*(3.-2.*f);
+      return mix(mix(sbH(i),sbH(i+vec2(1.,0.)),u.x), mix(sbH(i+vec2(0.,1.)),sbH(i+vec2(1.,1.)),u.x), u.y); }
+    float sbF(vec2 p){ float a=.5, s=0.; for(int i=0;i<4;i++){ s+=a*sbN(p); p*=2.03; a*=.5; } return s; }`;
+
+  // flammes : quads verticaux tournés vers la caméra, langues de feu en bruit fractal qui montent
+  function flameMesh(T, list) {
+    if (!list.length) return null;
+    const base = new T.PlaneGeometry(1, 1, 1, 1); base.translate(0, .5, 0);
+    const g = new T.InstancedBufferGeometry(); g.index = base.index; g.attributes.position = base.attributes.position; g.attributes.uv = base.attributes.uv;
+    const pos = new Float32Array(list.length * 3), par = new Float32Array(list.length * 3);
+    list.forEach((f, i) => { pos.set([f.x, f.y, f.z], i * 3); par.set([f.w, f.h, f.seed], i * 3); });
+    g.setAttribute('aPos', new T.InstancedBufferAttribute(pos, 3)); g.setAttribute('aP', new T.InstancedBufferAttribute(par, 3));
+    g.instanceCount = list.length;
+    const m = new T.ShaderMaterial({
+      uniforms: { uT: U.uT },
+      vertexShader: `uniform float uT; attribute vec3 aPos; attribute vec3 aP; varying vec2 vUv; varying float vSeed;
+        void main(){ vUv = uv; vSeed = aP.z;
+          vec3 right = normalize(vec3(viewMatrix[0][0], viewMatrix[1][0], viewMatrix[2][0]));
+          float sway = sin(uT*1.7 + aP.z*20.0)*0.10*position.y*position.y;
+          vec3 wp = aPos + right*((position.x + sway)*aP.x) + vec3(0.0, position.y*aP.y, 0.0);
+          gl_Position = projectionMatrix * viewMatrix * vec4(wp, 1.0); }`,
+      fragmentShader: `uniform float uT; varying vec2 vUv; varying float vSeed; ${NOISE}
+        void main(){
+          vec2 p = vec2((vUv.x-0.5)*2.0, vUv.y);
+          float n1 = sbF(vec2(p.x*1.3 + vSeed*13.0, p.y*1.5 - uT*1.7));
+          float n2 = sbF(vec2(p.x*3.1 - vSeed*7.0, p.y*3.3 - uT*3.2));
+          p.x += (n1-0.5)*1.0*p.y;
+          float w = 0.85*pow(max(1.0-p.y, 0.0), 0.7) + 0.03;
+          float body = 1.0 - abs(p.x)/w;
+          float f = body*0.9 - p.y*0.75 + (n2-0.5)*1.25*(0.2+p.y) + 0.18;
+          float a = smoothstep(0.02, 0.22, f) * smoothstep(0.0, 0.07, vUv.y);
+          if (a < 0.01) discard;
+          vec3 c = mix(vec3(0.55,0.04,0.0), vec3(1.0,0.32,0.03), smoothstep(0.05,0.35,f));
+          c = mix(c, vec3(1.0,0.68,0.22), smoothstep(0.42,0.85,f));
+          float fl = 0.85 + 0.15*sin(uT*17.0 + vSeed*40.0);
+          gl_FragColor = vec4(c*(0.55 + 1.05*smoothstep(0.3,0.95,f))*fl, a*0.95);
+        }`,
+      transparent: true, depthWrite: false, blending: T.AdditiveBlending,
+    });
+    const mesh = new T.Mesh(g, m); mesh.frustumCulled = false; mesh.renderOrder = 6; return mesh;
+  }
+
+  // fumée : bouffées en billboard, bruit fractal, montent et dérivent avec le vent ; noire au-dessus des bâtiments,
+  // gris-brun au-dessus des arbres, éclairée en orange par le feu à sa base
+  function smokeMesh(T, list) {
+    if (!list.length) return null;
+    const base = new T.PlaneGeometry(1, 1);
+    const g = new T.InstancedBufferGeometry(); g.index = base.index; g.attributes.position = base.attributes.position; g.attributes.uv = base.attributes.uv;
+    const pos = new Float32Array(list.length * 3), par = new Float32Array(list.length * 4), q = new Float32Array(list.length * 2);
+    list.forEach((s, i) => { pos.set([s.x, s.y, s.z], i * 3); par.set([s.H, s.S, s.rate, s.seed], i * 4); q.set([s.tint, s.glow], i * 2); });
+    g.setAttribute('aPos', new T.InstancedBufferAttribute(pos, 3)); g.setAttribute('aP', new T.InstancedBufferAttribute(par, 4)); g.setAttribute('aQ', new T.InstancedBufferAttribute(q, 2));
+    g.instanceCount = list.length;
+    const m = new T.ShaderMaterial({
+      uniforms: { uT: U.uT, uWind: U.uWind },
+      vertexShader: `uniform float uT; uniform vec2 uWind; attribute vec3 aPos; attribute vec4 aP; attribute vec2 aQ;
+        varying vec2 vUv; varying float vU; varying float vSeed; varying vec2 vQ;
+        void main(){
+          float u = fract(uT*aP.z + aP.w); vU = u; vSeed = aP.w; vQ = aQ; vUv = uv;
+          float H = aP.x;
+          vec3 c = aPos + vec3(uWind.x*u*u*H, u*H, uWind.y*u*u*H);
+          c.x += sin(uT*0.5 + aP.w*30.0)*u*H*0.05; c.z += cos(uT*0.4 + aP.w*21.0)*u*H*0.04;
+          float s = aP.y*(0.4 + 1.7*u);
+          vec3 right = vec3(viewMatrix[0][0], viewMatrix[1][0], viewMatrix[2][0]);
+          vec3 up = vec3(viewMatrix[0][1], viewMatrix[1][1], viewMatrix[2][1]);
+          float ang = aP.w*6.283 + uT*0.15*(fract(aP.w*7.0)-0.5);
+          vec2 q = vec2(cos(ang)*position.x - sin(ang)*position.y, sin(ang)*position.x + cos(ang)*position.y);
+          gl_Position = projectionMatrix * viewMatrix * vec4(c + (right*q.x + up*q.y)*s, 1.0); }`,
+      fragmentShader: `uniform float uT; varying vec2 vUv; varying float vU; varying float vSeed; varying vec2 vQ; ${NOISE}
+        void main(){
+          vec2 p = vUv - 0.5; float r = length(p)*2.0;
+          float n = sbF(vUv*2.4 + vSeed*17.0 + vec2(0.0, -uT*0.06));
+          float m = 1.0 - smoothstep(0.3, 1.0, r + (n-0.5)*1.0);
+          float life = smoothstep(0.0, 0.08, vU) * (1.0 - smoothstep(0.5, 1.0, vU));
+          float a = m*life*mix(1.0, 0.55, vQ.x);
+          if (a < 0.01) discard;
+          vec3 col = mix(vec3(0.012,0.01,0.009), vec3(0.2,0.17,0.15), vQ.x) * (0.6 + 0.8*n);
+          col += vec3(1.0,0.3,0.06) * vQ.y * pow(1.0-vU, 9.0) * (1.2 - vUv.y) * 1.3;
+          gl_FragColor = vec4(col, a);
+        }`,
+      transparent: true, depthWrite: false,
+    });
+    const mesh = new T.Mesh(g, m); mesh.frustumCulled = false; mesh.renderOrder = 7; return mesh;
+  }
+
+  // flammèches : points incandescents qui montent en tourbillonnant et clignotent
+  function emberPoints(T, list) {
+    if (!list.length) return null;
+    const g = new T.BufferGeometry();
+    const pos = new Float32Array(list.length * 3), par = new Float32Array(list.length * 4);
+    list.forEach((e, i) => { pos.set([e.x, e.y, e.z], i * 3); par.set([e.rate, e.seed, e.spread, e.h], i * 4); });
+    g.setAttribute('position', new T.BufferAttribute(pos, 3)); g.setAttribute('aP', new T.BufferAttribute(par, 4));
+    const m = new T.ShaderMaterial({
+      uniforms: { uT: U.uT, uWind: U.uWind, uPR: U.uPR },
+      vertexShader: `uniform float uT; uniform vec2 uWind; uniform float uPR; attribute vec4 aP; varying float vA; varying float vS;
+        void main(){
+          float u = fract(uT*aP.x + aP.y); float h = aP.w;
+          vec3 c = position + vec3(sin(uT*1.3 + aP.y*40.0)*aP.z*u + uWind.x*u*h*0.6, u*h, cos(uT*1.1 + aP.y*23.0)*aP.z*u + uWind.y*u*h*0.6);
+          vec4 mv = viewMatrix * vec4(c, 1.0); gl_Position = projectionMatrix * mv;
+          float fl = step(0.3, fract(sin(floor(uT*12.0 + aP.y*90.0))*43758.5453));
+          vA = (1.0-u)*smoothstep(0.0, 0.04, u)*(0.35 + 0.65*fl); vS = aP.y;
+          gl_PointSize = min(uPR*7.0, uPR*(1.2 + 1.6*fract(aP.y*9.1))*(340.0 / -mv.z)); }`,
+      fragmentShader: `varying float vA; varying float vS;
+        void main(){ float d = length(gl_PointCoord - 0.5)*2.0; float a = (1.0 - smoothstep(0.15, 1.0, d))*vA; if (a < 0.01) discard;
+          gl_FragColor = vec4(mix(vec3(1.0,0.32,0.04), vec3(1.0,0.78,0.38), fract(vS*13.0))*3.2, a); }`,
+      transparent: true, depthWrite: false, blending: T.AdditiveBlending,
+    });
+    const pts = new T.Points(g, m); pts.frustumCulled = false; pts.renderOrder = 8; return pts;
+  }
+
+  // bâtiment éventré : découpe déchiquetée inclinée (discard), bord calciné rougeoyant, suie, intérieur noir
+  function breakBuilding(T, obj, e, seed, glow) {
+    const bb = new T.Box3().setFromObject(obj); if (bb.isEmpty()) return null;
+    const h = bb.max.y - bb.min.y, c = bb.getCenter(new T.Vector3());
+    const cut = bb.min.y + h * (0.8 - 0.36 * e), amp = h * 0.15;
+    const ta = hash(seed) * 6.283, tilt = new T.Vector2(Math.cos(ta), Math.sin(ta)).multiplyScalar(0.22);
+    const uni = { uSbCut: { value: cut }, uSbAmp: { value: amp }, uSbCtr: { value: new T.Vector2(c.x, c.z) }, uSbTilt: { value: tilt }, uSbGlow: { value: glow }, uSbSoot: { value: 0.62 }, uT: U.uT };
+    const clones = new Map(), mats = [];
+    obj.traverse(o => {
+      if (!o.isMesh || !o.material || o.userData.sbBrokenMesh) return;
+      const one = (mm) => {
+        if (!mm || !mm.isMeshStandardMaterial) return mm;
+        if (clones.has(mm)) return clones.get(mm);
+        const k = mm.clone(); k.side = T.DoubleSide;
+        k.userData.sbBase = mm.emissiveIntensity || 0;
+        k.onBeforeCompile = (sh) => {
+          Object.assign(sh.uniforms, uni);
+          sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nvarying vec3 vSbW;')
+            .replace('#include <project_vertex>', '#include <project_vertex>\nvSbW = (modelMatrix * vec4(transformed, 1.0)).xyz;');
+          sh.fragmentShader = sh.fragmentShader.replace('#include <common>', `#include <common>
+            varying vec3 vSbW; uniform float uSbCut, uSbAmp, uSbGlow, uSbSoot, uT; uniform vec2 uSbCtr, uSbTilt; ${NOISE}`)
+            .replace('#include <clipping_planes_fragment>', `#include <clipping_planes_fragment>
+              float sbCut = uSbCut + dot(vSbW.xz - uSbCtr, uSbTilt) + (sbF(vSbW.xz*0.21 + vSbW.y*0.04) - 0.5)*uSbAmp*2.0;
+              if (vSbW.y > sbCut) discard;
+              float sbD = sbCut - vSbW.y;
+              float sbEdge = 1.0 - smoothstep(0.0, 1.4, sbD);
+              float sbChar = (1.0 - smoothstep(0.0, 9.0, sbD)) * (0.6 + 0.4*sbN(vSbW.xz*0.5 + vSbW.y*0.3));`)
+            .replace('#include <color_fragment>', `#include <color_fragment>
+              diffuseColor.rgb *= uSbSoot * mix(1.0, 0.05, sbChar);
+              if (!gl_FrontFacing) diffuseColor.rgb *= 0.08;`)
+            .replace('#include <roughnessmap_fragment>', `#include <roughnessmap_fragment>
+              roughnessFactor = mix(roughnessFactor, 0.95, sbChar);`)
+            .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
+              totalEmissiveRadiance += vec3(1.0,0.3,0.04) * sbEdge * uSbGlow * (0.75 + 0.25*sin(uT*6.0 + vSbW.x*0.7 + vSbW.z*0.5));`);
+        };
+        k.customProgramCacheKey = () => 'sbBroken1';
+        clones.set(mm, k); mats.push(k); return k;
+      };
+      o.material = Array.isArray(o.material) ? o.material.map(one) : one(o.material);
+      o.userData.sbBrokenMesh = true;
+    });
+    return { bb, cut, h, c, mats };
+  }
+
+  function clearFX() {
+    if (FX.group && FX.group.parent) FX.group.parent.remove(FX.group);
+    if (FX.group) FX.group.traverse(o => { if (o.geometry) o.geometry.dispose(); if (o.material && o.material.dispose) o.material.dispose(); });
+    FX.parts.forEach(p => { if (p.kind === 'lamp' && p.o) p.o.intensity = p.base; });
+    FX.group = null; FX.parts = []; FX.built = '';
+    setAmbience(0); setForest(null, 0);
+  }
+
+  // ambiance : ciel, brouillard et lumières tirés vers l'orange de catastrophe
+  function setAmbience(k) {
+    const T = three(), P = window.Planet3D; if (!T || !P || !P.scene) return;
+    const sc = P.scene;
+    if (!FX.amb) {
+      const hemi = sc.children.find(o => o.isHemisphereLight), sun = sc.children.find(o => o.isDirectionalLight);
+      FX.amb = { hemi, sun, h: hemi && [hemi.color.clone(), hemi.groundColor.clone(), hemi.intensity], s: sun && [sun.color.clone(), sun.intensity],
+        fog: sc.fog && sc.fog.color.clone(), bg: sc.background && sc.background.isColor ? sc.background.clone() : null, env: sc.environmentIntensity };
+    }
+    const A = FX.amb, L = (a, hex) => a.clone().lerp(new T.Color(hex), k);
+    if (A.hemi) { A.hemi.color.copy(L(A.h[0], 0xb0541c)); A.hemi.groundColor.copy(L(A.h[1], 0x2a0d04)); A.hemi.intensity = A.h[2] * (1 - .1 * k); }
+    if (A.sun) { A.sun.color.copy(L(A.s[0], 0xff8a3a)); A.sun.intensity = A.s[1] * (1 - .25 * k); }
+    if (A.fog && sc.fog) sc.fog.color.copy(L(A.fog, 0x4a1c0a));
+    if (A.bg && sc.background && sc.background.isColor) sc.background.copy(L(A.bg, 0x241006));
+    if (A.env != null) sc.environmentIntensity = A.env * (1 - .45 * k);
+  }
+
+  // forêt : feuillage roussi (teinte par instance), arbres en feu et voisins calcinés
+  function forestMeshes() {
+    const P = window.Planet3D; if (!P || !P.kit || !P.kit.veg) return [];
+    const out = [];
+    P.kit.veg.forEach((v, type) => {
+      if (!v || type > 3) return;
+      const geos = []; v.traverse(m => { if (m.isMesh) geos.push(m.geometry); });
+      const bb = new (three().Box3)().setFromObject(v), H = bb.max.y - bb.min.y;
+      P.scene.children.forEach(o => {
+        if (!o.isInstancedMesh || !geos.includes(o.geometry)) return;
+        const c = o.material.color; const foliage = c.g > c.r * 1.05;
+        out.push({ mesh: o, type, H, foliage });
+      });
+    });
+    return out;
+  }
+  function setForest(info, k) {
+    const T = three(); if (!T) return;
+    if (!FX.forest) FX.forest = forestMeshes();
+    const TGT = [0x3e2a1c, 0x56341c, 0x352418, 0x463020];
+    FX.forest.forEach(f => {
+      const m = f.mesh, mat = m.material;
+      if (!mat.userData.sbOrig) mat.userData.sbOrig = mat.color.clone();
+      mat.color.copy(mat.userData.sbOrig).lerp(new T.Color(f.foliage ? TGT[f.type] : 0x1a120d), f.foliage ? Math.min(1, k * 1.1) : k * 0.7);
+      if (!m.instanceColor) { m.instanceColor = new T.InstancedBufferAttribute(new Float32Array(m.count * 3).fill(1), 3); mat.needsUpdate = true; }
+      const arr = m.instanceColor.array;
+      if (!info || !k) { arr.fill(1); m.instanceColor.needsUpdate = true; return; }
+      const tag = info.tag[f.type];
+      for (let i = 0; i < m.count; i++) {
+        const t = tag ? tag[i] : 0, r = hash(i * 3.7 + f.type * 11);
+        let R = 1, G2 = 1, B = 1;
+        if (t === 2) { R = G2 = B = 0.07; }                        // en feu : silhouette noire derrière les flammes
+        else if (t === 1) { R = .16; G2 = .12; B = .1; }            // calciné
+        else if (f.foliage) { if (r < .22) { R = .32; G2 = .26; B = .22; } else { R = .62 + .45 * r; G2 = .5 + .4 * r * r; B = .45 + .25 * r; } } // roux, ocre, brun, charbon
+        arr[i * 3] = R; arr[i * 3 + 1] = G2; arr[i * 3 + 2] = B;
+      }
+      m.instanceColor.needsUpdate = true;
+    });
+  }
+
   function buildingSpots() {
     const P = window.Planet3D; const out = [];
     if (!P || !P.buildGroup) return out;
-    P.buildGroup.children.forEach(o => { if (o.userData && o.userData.parcel != null) out.push({ p: o.position.clone(), idx: o.userData.parcel, obj: o }); });
+    const seen = new Set();
+    P.buildGroup.children.forEach(o => {
+      if (!o.userData || o.userData.parcel == null || seen.has(o.userData.parcel)) return;
+      seen.add(o.userData.parcel); out.push({ p: o.position.clone(), idx: o.userData.parcel, obj: o });
+    });
     return out;
   }
-  function clearFX() { if (FX.group && FX.group.parent) FX.group.parent.remove(FX.group); FX.group = null; FX.parts = []; FX.built = ''; }
-  function buildFX(d, ph) {
+  function damageOf(idx) {
+    const p = (G.planet && G.planet.parcels || [])[idx] || {};
+    return Math.max(p.damaged ? .55 : 0, window.SBAftermath ? SBAftermath.visualDamage(idx) : 0);
+  }
+
+  function buildDevastation(T, P, g, d, spots, ctr) {
+    let rnd = 7; const R = () => (rnd = (rnd * 16807) % 2147483647) / 2147483647;
+    const flames = [], smoke = [], embers = [], k = Math.min(1, .45 + d / 100 * .75);
+    U.uWind.value = new T.Vector2(.5, -.28);
+    U.uPR.value = P.renderer ? P.renderer.getPixelRatio() : 2;
+    setAmbience(k);
+    const glowTex = radial(T, [[0, 'rgba(255,150,60,1)'], [.35, 'rgba(255,80,20,.55)'], [1, 'rgba(255,40,0,0)']]);
+    const scorch = scorchTex(T);
+    const decal = (x, y, z, r, tex, add, op) => {
+      const m = new T.Mesh(new T.PlaneGeometry(r * 2, r * 2), new T.MeshBasicMaterial({ map: tex, transparent: true, depthWrite: false, opacity: op,
+        blending: add ? T.AdditiveBlending : T.NormalBlending, polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4, fog: false }));
+      m.rotation.x = -Math.PI / 2; m.rotation.z = R() * 6.283; m.position.set(x, y, z); m.renderOrder = 2; g.add(m); return m;
+    };
+    let lights = 0;
+    const fireLight = (x, y, z, pow) => {
+      if (lights >= 4) return; lights++;
+      const l = new T.PointLight(0xff6a1e, pow, 110, 1.5); l.position.set(x, y, z); g.add(l);
+      FX.parts.push({ kind: 'flick', o: l, base: pow, ph: R() * 10 });
+    };
+
+    // 1) arbres en feu : foyers groupés autour de la colonie
+    const forest = FX.forest || (FX.forest = forestMeshes());
+    const trees = [];
+    const tag = {};
+    const M4 = new T.Matrix4(), v = new T.Vector3(), q = new T.Quaternion(), s = new T.Vector3();
+    forest.filter(f => f.foliage).forEach(f => {
+      tag[f.type] = new Uint8Array(f.mesh.count);
+      for (let i = 0; i < f.mesh.count; i++) {
+        f.mesh.getMatrixAt(i, M4); M4.decompose(v, q, s);
+        const dx = v.x - ctr.x, dz = v.z - ctr.z, r = Math.hypot(dx, dz);
+        if (r > 60 && r < 290 && f.type !== 2) trees.push({ type: f.type, i, x: v.x, y: v.y, z: v.z, h: f.H * s.y, r });
+      }
+    });
+    const nPatch = Math.round(5 + d / 100 * 9), patches = [];
+    // les deux tiers des foyers dans le cadre de la vue par défaut, le reste tout autour
+    const cam = P.camera, pv = new T.Vector3();
+    const inView = (t) => { if (!cam) return true; pv.set(t.x, t.y + 6, t.z).project(cam); return Math.abs(pv.x) < .85 && pv.y > -.75 && pv.y < .55 && pv.z < 1; };
+    for (let n = 0, tries = 0; n < nPatch && tries < 800 && trees.length; tries++) {
+      const t = trees[Math.floor(R() * trees.length)];
+      if (t.r > 250 || patches.some(p => Math.hypot(p.x - t.x, p.z - t.z) < 40)) continue;
+      if (n < nPatch * .66 && tries < 600 && !inView(t)) continue;
+      patches.push({ x: t.x, y: t.y, z: t.z, rad: 13 + R() * 12, n: 0 }); n++;
+    }
+    patches.sort((a, b) => Math.hypot(a.x - ctr.x, a.z - ctr.z) - Math.hypot(b.x - ctr.x, b.z - ctr.z));
+    trees.forEach(t => {
+      for (const p of patches) {
+        const dd = Math.hypot(t.x - p.x, t.z - p.z);
+        if (dd < p.rad && p.n < 16) {
+          tag[t.type][t.i] = 2; p.n++;
+          const fh = t.h * (1.05 + R() * .5);
+          flames.push({ x: t.x, y: t.y + t.h * .1, z: t.z, w: fh * .56, h: fh, seed: R() });
+          if (R() < .5) flames.push({ x: t.x + (R() - .5) * 3, y: t.y, z: t.z + (R() - .5) * 3, w: fh * .45, h: fh * .55, seed: R() });
+          break;
+        } else if (dd < p.rad * 1.9 && tag[t.type][t.i] !== 2) tag[t.type][t.i] = 1;
+      }
+    });
+    patches.forEach((p, i) => {
+      decal(p.x, p.y + .4, p.z, p.rad * 1.6, glowTex, true, .55);
+      FX.parts.push({ kind: 'glow', o: g.children[g.children.length - 1], base: .55, ph: R() * 10 });
+      if (i < 3) fireLight(p.x, p.y + 14, p.z, 1100);
+      for (let k2 = 0; k2 < 12; k2++) smoke.push({ x: p.x, y: p.y + 14, z: p.z, H: 120 + R() * 40, S: 15 + R() * 6, rate: .05 + R() * .015, seed: k2 / 12 + R() * .05, tint: .35, glow: .8 });
+      for (let k2 = 0; k2 < 70; k2++) embers.push({ x: p.x + (R() - .5) * p.rad * 1.4, y: p.y + 4 + R() * 8, z: p.z + (R() - .5) * p.rad * 1.4, rate: .12 + R() * .18, seed: R(), spread: 4 + R() * 8, h: 35 + R() * 45 });
+    });
+    setForest({ tag }, k);
+
+    // 2) bâtiments éventrés en flammes, panache noir, débris au sol, lumières en panne
+    const chunkGeo = new T.DodecahedronGeometry(1, 0), plateGeo = new T.BoxGeometry(1, 1, 1);
+    const chunkMat = new T.MeshStandardMaterial({ color: 0x3b3735, roughness: .78, metalness: .35 });
+    const plateBase = P.M && P.M.MAT_ARMOR_LIGHT;
+    const plateMat = new T.MeshStandardMaterial({ color: plateBase ? plateBase.color.clone().multiplyScalar(.6) : 0x8a8a88, roughness: .38, metalness: .55, envMapIntensity: 1.2 });
+    const debris = [];
+    const occupied = new Set(spots.map(sp => sp.idx));
+    spots.forEach(sp => {
+      const e = damageOf(sp.idx);
+      sp.obj.traverse(o => { if (o.isLight) { if (o.userData.sbBase == null) o.userData.sbBase = o.intensity; FX.parts.push({ kind: 'lamp', o, base: o.userData.sbBase, seed: R(), hard: e > 0 || R() < .45 }); } });
+      if (!(e > .05)) return;
+      const br = breakBuilding(T, sp.obj, e, sp.idx + 1, 1.1);
+      if (!br) return;
+      br.mats.forEach(m => { if (m.userData.sbBase > .3) FX.parts.push({ kind: 'neon', o: m, base: Math.max(m.userData.sbBase, 1.2), seed: R() }); });
+      const sz = br.bb.getSize(new T.Vector3()), rb = Math.max(sz.x, sz.z) / 2;
+      const nf = 2 + Math.round(e * 2);
+      for (let f = 0; f < nf; f++) {
+        const fx = br.c.x + (R() - .5) * sz.x * .5, fz = br.c.z + (R() - .5) * sz.z * .5, fy = br.cut - br.h * .12;
+        const fh = 9 + e * 10 + R() * 5;
+        flames.push({ x: fx, y: fy, z: fz, w: fh * .55, h: fh, seed: R() });
+        flames.push({ x: fx + (R() - .5) * 4, y: fy, z: fz + (R() - .5) * 4, w: fh * .4, h: fh * .7, seed: R() });
+        const nPuff = f === 0 ? 32 : 14, H = f === 0 ? 170 : 110;
+        for (let k2 = 0; k2 < nPuff; k2++) smoke.push({ x: fx, y: fy + fh * .6, z: fz, H, S: (f === 0 ? 24 : 17) + R() * 6, rate: .035 + R() * .01, seed: k2 / nPuff + R() * .03, tint: 0, glow: 1 });
+        for (let k2 = 0; k2 < 45; k2++) embers.push({ x: fx + (R() - .5) * 8, y: fy + 4, z: fz + (R() - .5) * 8, rate: .15 + R() * .2, seed: R(), spread: 5 + R() * 9, h: 45 + R() * 55 });
+      }
+      fireLight(br.c.x, br.cut + 8, br.c.z, 1500);
+      const nd = Math.round(18 + e * 26);
+      for (let j = 0; j < nd; j++) {
+        const a = R() * 6.283, rr = rb * (.55 + R() * .85), plate = R() < .35;
+        const sx = plate ? 2 + R() * 4 : .8 + R() * 2.4, sy = plate ? .25 + R() * .3 : .5 + R() * 1.4, sz2 = plate ? 1.5 + R() * 3.5 : .8 + R() * 2.2;
+        debris.push({ plate, x: br.c.x + Math.cos(a) * rr, y: (P.plateY || .36) + sy * .3, z: br.c.z + Math.sin(a) * rr, sx, sy, sz: sz2,
+          rx: plate ? (R() - .5) * .9 : R() * 6, ry: R() * 6.283, rz: plate ? (R() - .5) * .9 : R() * 6, c: .35 + R() * .65 });
+      }
+      decal(br.c.x, (P.plateY || .36) + .06, br.c.z, rb * 1.35, scorch, false, .85);
+    });
+    ['chunk', 'plate'].forEach(kind => {
+      const list = debris.filter(x => (kind === 'plate') === x.plate); if (!list.length) return;
+      const im = new T.InstancedMesh(kind === 'plate' ? plateGeo : chunkGeo, kind === 'plate' ? plateMat : chunkMat, list.length);
+      const o = new T.Object3D(), col = new T.Color();
+      list.forEach((x, i) => { o.position.set(x.x, x.y, x.z); o.rotation.set(x.rx, x.ry, x.rz); o.scale.set(x.sx, x.sy, x.sz); o.updateMatrix(); im.setMatrixAt(i, o.matrix); im.setColorAt(i, col.setScalar(x.c)); });
+      im.castShadow = im.receiveShadow = true; g.add(im);
+    });
+
+    // 3) cratères fumants : brûlure au sol, bourrelet de terre, braises au fond, filet de fumée
+    const free = [];
+    (P.parcelGroup ? P.parcelGroup.children : []).forEach(o => { if (o.userData && o.userData.parcel != null && !occupied.has(o.userData.parcel)) free.push(o.position); });
+    const nCr = Math.round(3 + d / 100 * 8);
+    const rimMat = new T.MeshStandardMaterial({ color: 0x2a1f18, roughness: .95, metalness: 0 });
+    for (let c2 = 0; c2 < nCr && free.length; c2++) {
+      const base = free.splice(Math.floor(R() * free.length), 1)[0];
+      const x = base.x + (R() - .5) * 18, z = base.z + (R() - .5) * 18, y = (P.plateY || .36), Rr = 4 + R() * 4.5;
+      decal(x, y + .05, z, Rr * 2.3, scorch, false, .95);
+      const rim = new T.TorusGeometry(Rr, Rr * .3, 6, 22); rim.rotateX(Math.PI / 2);
+      const pa = rim.attributes.position; for (let i = 0; i < pa.count; i++) { const j = 1 + (hash(i + c2 * 31) - .5) * .35; pa.setXYZ(i, pa.getX(i) * j, Math.max(0, pa.getY(i)) * (.5 + hash(i * 7 + c2) * .6), pa.getZ(i) * j); }
+      rim.computeVertexNormals();
+      const rm = new T.Mesh(rim, rimMat); rm.position.set(x, y, z); rm.receiveShadow = true; g.add(rm);
+      const pit = decal(x, y + .12, z, Rr * .85, glowTex, true, .7);
+      FX.parts.push({ kind: 'glow', o: pit, base: .7, ph: R() * 10 });
+      for (let k2 = 0; k2 < 6; k2++) smoke.push({ x, y: y + 1, z, H: 55 + R() * 20, S: 5 + R() * 3, rate: .07 + R() * .02, seed: k2 / 6 + R() * .05, tint: .3, glow: .6 });
+      for (let k2 = 0; k2 < 10; k2++) embers.push({ x: x + (R() - .5) * Rr, y: y + .5, z: z + (R() - .5) * Rr, rate: .2 + R() * .2, seed: R(), spread: 2 + R() * 3, h: 12 + R() * 14 });
+    }
+
+    [flameMesh(T, flames), smokeMesh(T, smoke), emberPoints(T, embers)].forEach(m => m && g.add(m));
+  }
+
+  function buildFX(d, ph, key) {
     const T = three(), P = window.Planet3D;
     if (!T || !P || !P.scene) return;
     clearFX();
     const g = new T.Group(); g.name = 'SB_AFTERMATH'; P.scene.add(g); FX.group = g;
-    const spots = buildingSpots(); if (!spots.length) return;
-    const ctr = spots.reduce((a, s) => a.add(s.p), new T.Vector3()).multiplyScalar(1 / spots.length);
-    const y0 = spots[0].p.y;
+    const spots = buildingSpots();
+    const ctr = spots.length ? spots.reduce((a, s) => a.add(s.p), new T.Vector3()).multiplyScalar(1 / spots.length) : new T.Vector3();
+    const y0 = spots.length ? spots[0].p.y : .36;
     let rnd = 1; const R = () => (rnd = (rnd * 16807) % 2147483647) / 2147483647;
-    if (d >= 1) {
-      // incendies dans la forêt (couronne autour de la colonie) + colonnes de fumée
-      const fireTex = radial(T, [[0, 'rgba(255,230,160,1)'], [.3, 'rgba(255,120,30,.8)'], [1, 'rgba(255,40,0,0)']]);
-      const smokeTex = radial(T, [[0, 'rgba(60,55,52,.75)'], [.6, 'rgba(40,38,36,.35)'], [1, 'rgba(30,30,30,0)']]);
-      const nFire = Math.round(6 + d / 100 * 30);
-      for (let i = 0; i < nFire; i++) {
-        const a = R() * Math.PI * 2, r = 85 + R() * 95;
-        const pos = new T.Vector3(ctr.x + Math.cos(a) * r, y0 + 2, ctr.z + Math.sin(a) * r * 0.8);
-        const f = new T.Sprite(new T.SpriteMaterial({ map: fireTex, blending: T.AdditiveBlending, depthWrite: false, transparent: true }));
-        f.position.copy(pos); f.scale.setScalar(10 + R() * 8); g.add(f);
-        FX.parts.push({ kind: 'fire', o: f, ph: R() * 10, base: f.scale.x, y: pos.y });
-        const light = i % 4 === 0 ? new T.PointLight(0xff6a20, 600, 80, 1.6) : null;
-        if (light) { light.position.copy(pos).add(new T.Vector3(0, 6, 0)); g.add(light); FX.parts.push({ kind: 'flick', o: light, ph: R() * 10 }); }
-        for (let k = 0; k < 2; k++) {
-          const s = new T.Sprite(new T.SpriteMaterial({ map: smokeTex, depthWrite: false, transparent: true, opacity: 0 }));
-          g.add(s); FX.parts.push({ kind: 'smoke', o: s, x: pos.x, y: pos.y + 4, z: pos.z, ph: R(), rate: 0.05 + R() * 0.04, size: 22 + R() * 16 });
-        }
-      }
-      // fumée sur les bâtiments
-      spots.forEach((s, i) => {
-        if (R() > 0.35 + d / 150) return;
-        for (let k = 0; k < 2; k++) {
-          const sm = new T.Sprite(new T.SpriteMaterial({ map: smokeTex, depthWrite: false, transparent: true, opacity: 0 }));
-          g.add(sm); FX.parts.push({ kind: 'smoke', o: sm, x: s.p.x + (R() - .5) * 10, y: s.p.y + 12, z: s.p.z + (R() - .5) * 10, ph: R(), rate: 0.06 + R() * 0.05, size: 18 + R() * 14 });
-        }
-      });
-      // gyrophares d'urgence sanitaire autour du centre de commandement
-      const ci = capitalIdx(); const cap = spots.find(s => s.idx === ci) || spots[0];
-      const beaconTex = radial(T, [[0, 'rgba(255,255,255,1)'], [.25, 'rgba(255,255,255,.6)'], [1, 'rgba(255,255,255,0)']]);
-      for (let k = 0; k < 4; k++) {
-        const a = Math.PI / 4 + k * Math.PI / 2;
-        const b = new T.Sprite(new T.SpriteMaterial({ map: beaconTex, color: k % 2 ? 0xff2a20 : 0x2a7aff, blending: T.AdditiveBlending, depthWrite: false, transparent: true }));
-        b.position.set(cap.p.x + Math.cos(a) * 30, y0 + 3, cap.p.z + Math.sin(a) * 30); b.scale.setScalar(9); g.add(b);
-        FX.parts.push({ kind: 'beacon', o: b, ph: k * 0.5 });
-      }
-    }
-    if (d < 1 && ph) {
+    if (d >= 1) buildDevastation(T, P, g, d, spots, ctr);
+    if (d < 1 && ph && spots.length) {
       // banderoles : fanions colorés en guirlandes entre les bâtiments + mâts au centre de commandement
       const cols = [0xff4a6a, 0xffc040, 0x40d0ff, 0x7aff8a, 0xc070ff];
       const flagGeo = new T.BufferGeometry();
@@ -189,11 +538,11 @@
           g.add(f); FX.parts.push({ kind: 'flag', o: f, ph: R() * 6, ry: f.rotation.y });
         }
       });
-      // feux d'artifice : 6 lanceurs, gerbes de particules additives
+      // feux d'artifice : gerbes de particules additives
       FX.fwTex = radial(T, [[0, 'rgba(255,255,255,1)'], [.4, 'rgba(255,255,255,.5)'], [1, 'rgba(255,255,255,0)']]);
       FX.fw = []; FX.fwCtr = ctr; FX.fwY = y0; FX.fwNext = 0; FX.cols = cols;
     }
-    FX.built = (d >= 1 ? 'd' + Math.round(d / 10) : '') + (ph && d < 1 ? 'p' : '') + ':' + spots.length;
+    FX.built = key;
   }
   function spawnFirework(T, now) {
     const c = FX.fwCtr, n = 60, col = new T.Color(FX.cols[Math.floor(Math.random() * FX.cols.length)]);
@@ -209,15 +558,23 @@
     const light = new T.PointLight(col, 1500, 160, 1.4); light.position.copy(at); FX.group.add(light);
     FX.fw.push({ pts, vel, t0: now, light });
   }
+  // panne : néon qui hoquette — longues coupures, rafales de clignotements, rares retours francs
+  function failing(t, seed, hard) {
+    const slow = (t * (hard ? .22 : .09) + seed * 7) % 1;
+    if (slow < (hard ? .35 : .12)) return hard ? .02 : .25;
+    const k = Math.floor(t * (hard ? 14 : 9) + seed * 100);
+    return hash(k + seed * 13) > (hard ? .45 : .25) ? 1 : (hard ? .05 : .4);
+  }
   function anim() {
     requestAnimationFrame(anim);
     if (!FX.group || !onPlanet()) return;
     const T = three(); const now = performance.now(), t = now / 1000, dt = Math.min(0.05, (now - (FX.last || now)) / 1000); FX.last = now;
+    U.uT.value = t % 1000;
     for (const p of FX.parts) {
-      if (p.kind === 'fire') { const k = 0.8 + 0.25 * Math.sin(t * 9 + p.ph) + 0.1 * Math.sin(t * 23 + p.ph * 3); p.o.scale.set(p.base * k, p.base * k * 1.3, 1); p.o.position.y = p.y + p.base * 0.3 * k; }
-      else if (p.kind === 'flick') p.o.intensity = 450 + 250 * Math.sin(t * 11 + p.ph) * Math.sin(t * 4.3 + p.ph);
-      else if (p.kind === 'smoke') { const u = (t * p.rate + p.ph) % 1; p.o.position.set(p.x + u * 14, p.y + u * 60, p.z - u * 8); p.o.scale.setScalar(p.size * (0.5 + u * 1.6)); p.o.material.opacity = Math.sin(u * Math.PI) * 0.6; }
-      else if (p.kind === 'beacon') p.o.material.opacity = Math.max(0, Math.sin(t * 6 + p.ph * Math.PI)) ;
+      if (p.kind === 'flick') p.o.intensity = p.base * (.7 + .3 * Math.sin(t * 11 + p.ph) * Math.sin(t * 4.3 + p.ph) + .12 * Math.sin(t * 27 + p.ph));
+      else if (p.kind === 'glow') p.o.material.opacity = p.base * (.75 + .25 * Math.sin(t * 7 + p.ph) * Math.sin(t * 2.9 + p.ph * 2));
+      else if (p.kind === 'lamp') p.o.intensity = p.base * failing(t, p.seed, p.hard);
+      else if (p.kind === 'neon') p.o.emissiveIntensity = p.base * failing(t, p.seed, true);
       else if (p.kind === 'flag') p.o.rotation.z = Math.sin(t * 3 + p.ph) * 0.25;
     }
     const ph = partyPhase();
@@ -239,10 +596,11 @@
     update(d, ph) {
       const P = window.Planet3D;
       if (!P || !P.ready || !three()) return;
-      const spots = P.buildGroup ? P.buildGroup.children.filter(o => o.userData && o.userData.parcel != null).length : 0;
-      const want = (d >= 1 ? 'd' + Math.round(d / 10) : '') + (ph && d < 1 ? 'p' : '') + ':' + spots;
+      const ids = P.buildGroup ? P.buildGroup.children.filter(o => o.userData && o.userData.parcel != null).map(o => o.id).join(',') : '';
+      const dmg = (G.planet && G.planet.parcels || []).map(p => p && p.damaged ? 1 : 0).join('');
+      const want = (d >= 1 ? 'd' + Math.round(d / 10) : '') + (ph && d < 1 ? 'p' : '') + ':' + ids + ':' + dmg;
       if (!(d >= 1) && !ph) { if (FX.group) clearFX(); return; }
-      if (want !== FX.built || !FX.group || !FX.group.parent) buildFX(d, ph);
+      if (want !== FX.built || !FX.group || !FX.group.parent) buildFX(d, ph, want);
     },
   };
 
