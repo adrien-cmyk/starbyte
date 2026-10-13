@@ -9271,6 +9271,11 @@ function mpApplyRaidAgainstMe(raid) {
       groundHeld: !!(combat && combat.phases && combat.phases.phase2 && !combat.phases.phase2.won),
     },
   });
+  // APRÈS L'ATTAQUE (13/10) : fête si la défense tient, dévastation sinon ; rapport ouvert automatiquement
+  if (window.SBAftermath) {
+    const _ph = combat && combat.phases && combat.phases.phase2;
+    try { SBAftermath.onRaid({ defended: !won, landed: !!(_ph && _ph.won), groundHeld: !!(_ph && !_ph.won), reportId: G.reports[0] && G.reports[0].id }); } catch (e) { console.warn('[aftermath]', e); }
+  }
   const lootTxt = ['metal', 'energie', 'cristal'].filter(k => loot[k] > 0).map(k => `${fmt(loot[k])} ${tileInfo(k).label.toLowerCase()}`).join(' · ');
   toast(won
     ? `⚠ Raid de ${raid.attacker_pseudo} : ${lootTxt || 'rien'} pillé${damagedName ? ' · ' + damagedName + ' abîmé' : ''}`
@@ -28262,6 +28267,13 @@ function renderInfoCard(i) {
     ${teachHtml}
     ${cta}
   `;
+  // APRÈS L'ATTAQUE : secours depuis le centre de commandement
+  if (p.state === 'capital' && window.SBAftermath && SBAftermath.dev >= 1) {
+    info.insertAdjacentHTML('beforeend', `<div style="margin-top:10px;padding:10px 12px;border-radius:10px;border:1px solid rgba(255,80,60,.45);background:rgba(40,8,6,.6)">
+      <div style="font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:#ff8a70">Planète dévastée · ${Math.round(SBAftermath.dev)} %</div>
+      <div style="font-size:12px;color:var(--mut);margin:4px 0 8px;line-height:1.45">Production réduite de ${Math.round(SBAftermath.dev / 2)} %${SBAftermath.dev >= 50 ? ', améliorations bloquées' : ''}. Chaque veine profonde des secours répare 10 %. Sans rien faire, la planète guérit de 1 % par heure.</div>
+      <button class="btn-primary" onclick="SBAftermath.startRelief()">Lancer les secours</button></div>`);
+  }
 }
 
 function onHexClick(idx) {
@@ -30499,6 +30511,10 @@ function startBuildingUpgrade(parcelIdx) {
     toast('Bâtiment abîmé : répare-le d\'abord');
     return false;
   }
+  if (window.SBAftermath && SBAftermath.upgradeBlocked()) {
+    toast('Planète dévastée : lance les secours avant d\'améliorer');
+    return false;
+  }
   const currentTier = parcel.lvl || 1;
   if (currentTier >= TIER_MAX) {
     toast('Niveau maximum atteint');
@@ -30921,8 +30937,10 @@ function simulateTo(now) {
 function _simSegment(ms, at, out) {
   // 1. Ressources — taux HORAIRES (décision d'Adrien 10/10 : « +40/h » veut dire 40 par heure)
   const hours = Math.max(0, ms) / 3600000;
+  // dévastation (après un raid perdu) : production réduite, guérison naturelle −1 %/h
+  const devMult = (window.SBAftermath && typeof SBAftermath.simSegment === 'function') ? SBAftermath.simSegment(hours) : 1;
   for (const r of Object.values(G.res || {})) {
-    if (r.rate > 0 && r.v < r.max) r.v = Math.min(r.max, r.v + r.rate * hours);
+    if (r.rate > 0 && r.v < r.max) r.v = Math.min(r.max, r.v + r.rate * hours * devMult);
   }
 
   // 2. Crédits (Comptoirs) et carburant (Raffineries) — taux horaires aussi
@@ -43824,11 +43842,11 @@ if (G.knownTargets && Array.isArray(G.tankerMissions)) {
 
 </script>
 <!-- PLANET3D — carte 3D + boucle antenne (source : sb-build/src/planet3d.js) -->
-<script type="module" src="assets/planet3d.js?v=20261013-half"></script>
+<script type="module" src="assets/planet3d.js?v=20261013-1400"></script>
 <!-- CLOUD — sauvegarde Supabase (source : sb-build/src/cloud.js) -->
 <script type="module" src="assets/cloud.js?v=20261013-1400"></script>
 <!-- MATCH3 — Match-3 V2 (assets/match3.js, source src/match3.js + src/m3core.js) : remplace startM3 -->
-<script type="module" src="assets/match3.js?v=20261013-1400vein"></script>
+<script type="module" src="assets/match3.js?v=20261013-1400"></script>
 <!-- HOME V2 — « monde d'abord » : planète plein écran, ressources en ligne, Flotte / Défense / Prospection (assets/home.js) -->
 <script type="module" src="assets/home.js?v=20261013-1400"></script>
 <!-- SPACE MAP v0 — carte du Centre de prospection (assets/spacemap.js, source src/spacemap.js) -->
@@ -43836,6 +43854,7 @@ if (G.knownTargets && Array.isArray(G.tankerMissions)) {
 <!-- SPACE MAP niveau B — diorama 3D d'un système (assets/system3d.js, source src/system3d.js) -->
 <script type="module" src="assets/system3d.js?v=20261013-1400"></script>
 <!-- SHIP3D — fiches 3D : cuirassé KV-01, frégate SR-01, tanker TK-07, chantier orbital OS-01 (assets/ship3d.js, sur le moteur partagé window.SB3D) -->
+<script src="assets/aftermath.js?v=20261013-1430"></script>
 <script src="assets/radio.js?v=20261013-1400"></script>
 <script type="module" src="assets/ship3d.js?v=20261013-1400"></script>
 <!-- FORMATION3D — flotte déployée en orbite, vue de haut en formation (remplace la vue orbite) -->
