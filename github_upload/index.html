@@ -4446,12 +4446,11 @@ svg.map {
      UI sobre, ambiance spatiale, cohérente avec le reste du jeu. -->
 <div id="scr-welcome" class="screen hidden">
   <!-- ACCUEIL (13/10) : flotte en hyperespace vue de l'arrière, voilée de noir à 50 % pour la lisibilité -->
-  <style>#scr-welcome input::placeholder{color:rgba(200,214,232,.55)} #scr-welcome input:focus{border-color:rgba(160,200,255,.9)!important;box-shadow:0 0 0 3px rgba(120,160,255,.18)}</style>
+  <style>@media (max-height:760px){#scr-welcome svg[aria-label="Starbyte"]{width:min(210px,60vw)!important;margin:2px auto 10px!important}#scr-welcome .wl-intro{display:none}#scr-welcome input{padding:11px 14px!important}#welcome-scroll .wl-help{display:none}} #scr-welcome input::placeholder{color:rgba(200,214,232,.55)} #scr-welcome input:focus{border-color:rgba(160,200,255,.9)!important;box-shadow:0 0 0 3px rgba(120,160,255,.18)}</style>
   <div id="welcome-hero" style="position:absolute;inset:0;z-index:0;pointer-events:none;overflow:hidden"></div>
-  <div style="position:absolute;left:0;right:0;bottom:calc(env(safe-area-inset-bottom, 0px) + 10px);z-index:2;text-align:center;font-size:9px;letter-spacing:.08em;color:rgba(220,228,240,.55);pointer-events:none">© Adrien Thétaz - 2026</div>
   <div style="position:absolute;inset:0;z-index:0;pointer-events:none;background:rgba(0,0,0,.5)"></div>
 
-  <div class="screen-scroll" style="position:relative;z-index:1;display:flex;flex-direction:column;justify-content:flex-start;min-height:100vh;padding:calc(env(safe-area-inset-top, 0px) + 28px) 20px calc(env(safe-area-inset-bottom, 0px) + 34px)">
+  <div class="screen-scroll" id="welcome-scroll" style="position:relative;z-index:1;display:flex;flex-direction:column;justify-content:flex-start;padding:calc(env(safe-area-inset-top, 0px) + 18px) 20px calc(env(safe-area-inset-bottom, 0px) + 12px)">
 
     <div style="text-align:center;margin-bottom:0">
       <div style="font-size:10px;letter-spacing:.32em;color:#b9c6d8;margin-bottom:10px;text-transform:uppercase;text-shadow:0 1px 6px rgba(0,0,0,.8)">Bienvenue dans</div>
@@ -4468,13 +4467,13 @@ svg.map {
   <polygon points="176.6 34 190 31.4 180.5 28.5 175.4 27.8 173.3 28.9 175 27.4 177.9 25.7 183.3 15.3 172 22.9 163.4 0 165.3 22.7 166.7 23.4 167.6 27.3 171 29.5 170.8 33.7 173.8 35.8 174.4 41.2 186.3 53.3 176.6 34"/>
 </svg>
       <div style="font-size:13px;letter-spacing:.34em;text-transform:uppercase;color:#d9ccff;margin-bottom:12px;text-shadow:0 0 14px rgba(150,110,255,.6)">Rejoins l'histoire</div>
-      <div style="font-size:11px;color:#b7c4d4;font-style:italic;line-height:1.6;max-width:280px;margin:0 auto">
+      <div class="wl-intro" style="font-size:11px;color:#b7c4d4;font-style:italic;line-height:1.6;max-width:280px;margin:0 auto">
         Une planète sans nom flotte dans le vide.<br>
         Tu es son premier capitaine.
       </div>
     </div>
 
-    <div id="welcome-fleet-gap" style="flex:1 1 auto;min-height:150px" aria-hidden="true"></div>
+    <div id="welcome-fleet-gap" style="flex:1 1 0;min-height:16px" aria-hidden="true"></div>
 
     <div style="max-width:340px;margin:0 auto;width:100%;padding:20px 18px 18px;border-radius:14px;background:rgba(4,6,14,.5);border:1px solid rgba(150,170,255,.18)">
 
@@ -4486,7 +4485,7 @@ svg.map {
           maxlength="20"
           placeholder="ex: Adrien, Bersek89, Korr_Lord..."
           style="width:100%;padding:13px 14px;background:rgba(8,12,24,.85);border:1px solid rgba(120,180,240,.55);border-radius:8px;color:#f2f7ff;font-family:'SF Mono',monospace;font-size:14px;outline:none">
-        <div style="font-size:10.5px;color:#aebdd0;margin-top:7px;letter-spacing:.03em;text-shadow:0 1px 4px rgba(0,0,0,.8)">Comment t'appellent les autres dans l'univers</div>
+        <div class="wl-help" style="font-size:10.5px;color:#aebdd0;margin-top:7px;letter-spacing:.03em;text-shadow:0 1px 4px rgba(0,0,0,.8)">Comment t'appellent les autres dans l'univers</div>
       </div>
 
       <div style="margin-bottom:30px">
@@ -4498,7 +4497,7 @@ svg.map {
           placeholder="ex: KERATH-VII, NOUVELLE-TERRE..."
           value="KERATH-VII"
           style="width:100%;padding:13px 14px;background:rgba(8,12,24,.85);border:1px solid rgba(120,180,240,.55);border-radius:8px;color:#f2f7ff;font-family:'SF Mono',monospace;font-size:14px;outline:none;text-transform:uppercase">
-        <div style="font-size:10.5px;color:#aebdd0;margin-top:7px;letter-spacing:.03em;text-shadow:0 1px 4px rgba(0,0,0,.8)">Apparaîtra dans les rapports et sur la carte galactique</div>
+        <div class="wl-help" style="font-size:10.5px;color:#aebdd0;margin-top:7px;letter-spacing:.03em;text-shadow:0 1px 4px rgba(0,0,0,.8)">Apparaîtra dans les rapports et sur la carte galactique</div>
       </div>
 
       <button
@@ -4521,6 +4520,7 @@ svg.map {
 
     </div>
 
+    <div style="flex:0 0 auto;text-align:center;font-size:9px;letter-spacing:.08em;color:rgba(220,228,240,.55);margin-top:12px">© Adrien Thétaz - 2026</div>
   </div>
 </div>
 
