@@ -316,6 +316,14 @@
         a: { ci: cells[0], key: chain[0] }, b: { ci: cells[cells.length - 1], key: r.portSys } });
     }
 
+    // 14/10 (E4) — routes ouvertes par une Moyenne éclaireur (ou offertes par un allié)
+    if (window.SBLines) for (const o of SBLines.openedRoutes()) {
+      const cells = o.chain.map(k => cell['sys:' + k]).filter(i => i !== undefined);
+      if (cells.length < 2) continue;
+      routes.push({ r: { id: o.id, name: o.name, color: o.color || '#9fe08a', avoid: [] }, opened: true, routeId: o.id, broken: false, path: cells,
+        a: { ci: cells[0], key: o.chain[0] }, b: { ci: cells[cells.length - 1], key: o.to } });
+    }
+
     // Missions en vol
     const flights = [];
     for (const m of (G.probeMissions || [])) {
@@ -484,7 +492,7 @@
       const li = sys && sys.li;
       const title = li && li.port ? `${esc(li.port.name)}` : `Système ${esc(s.key)}`;
       const sub = li && li.port ? `<span class="mono">${esc(s.key)}</span> · ${esc(li.port.typeLabel || 'lieu caché')}` : (bits.join(' · ') || (li && (li.lane || li.echo || li.obs.length) ? 'Couloir de passage' : 'Balayé, rien de relevé.'));
-      return `<div class="sm-panel"><div class="sm-ptitle"${li && li.port ? ' style="color:#ffc864"' : ''}>${title}</div><div class="sm-psub">${sub}${tagTxt}</div>${laneHtml(s.key, li)}${postsHtml(s.key)}${spottedHtml(s.key)}${insp}${act}${beaconAction(s.key, sys)}</div>`;
+      return `<div class="sm-panel"><div class="sm-ptitle"${li && li.port ? ' style="color:#ffc864"' : ''}>${title}</div><div class="sm-psub">${sub}${tagTxt}</div>${laneHtml(s.key, li)}${postsHtml(s.key)}${spottedHtml(s.key)}${insp}${act}${scoutHtml(s.key, sys)}${beaconAction(s.key, sys)}</div>`;
     }
     if (s.kind === 'sig') {
       const sig = G.signatures && G.signatures[s.key];
@@ -1666,6 +1674,7 @@
     const rt = (state.routes || []).find(x => x.r.id === id);
     if (!rt) return null;
     if (rt.line) return lineRouteCard(rt);
+    if (rt.opened) return openedRouteCard(rt);
     const r = rt.r, n = Math.max(0, rt.path.length - 1);
     const sub = rt.broken
       ? `<span style="color:#ff8a8a">${(!rt.a || !rt.b) ? 'Rompue : une balise a été rappelée' : 'Tracé impossible : trop de systèmes évités'}</span>`
@@ -1678,6 +1687,62 @@
       + `<div class="sm-tags">${tool('Renommer', 'routeRename')}${tool('Supprimer', 'routeDelete')}</div>`
       + routeTravelHtml(rt, state)
       + `</div>`;
+  }
+  // 14/10 (E4) — ouvrir une route vers ce système : une Moyenne éclaireur trace le premier passage
+  function scoutHtml(sysKey, sys) {
+    if (!window.SBLines || sysKey === mySystemKey() || !(sys && sys.known)) return '';
+    const o = SBLines.openedTo(sysKey);
+    if (o) return _sigBtn(o.color || '#9fe08a', 'Voir la route ouverte', `SBMap.selectRoute('${esc(o.id)}')`, esc(o.name), true);
+    const fl = SBLines.scoutInFlight(sysKey);
+    if (fl) return _sigOff(`Moyenne en éclaireur · arrivée dans ${formatTankerDuration(Math.max(0, fl.arrivalAt - Date.now()))}`);
+    const st = (typeof _probeTierStatus === 'function') ? _probeTierStatus('medium') : { ok: false };
+    const label = (sys.planets && sys.planets.find(p => p.playerName)) ? sys.planets.find(p => p.playerName).playerName : '';
+    if (st.ok) return _sigBtn('#9fe08a', 'Ouvrir une route jusqu\'ici', `SBMap.scout('${esc(sysKey)}','${esc(label)}')`, 'Une Moyenne part en éclaireur et trace le passage · 2 à 4 h · elle peut se perdre', true);
+    if (st.build) return _sigBtn('#9fe08a', 'Construire une Moyenne', `openProbeDetail('medium')`, 'Pour ouvrir une route jusqu\'ici', true);
+    return _sigOff(st.why || 'Moyenne indisponible', 'Pour ouvrir une route jusqu\'ici');
+  }
+  function scout(sysKey, label) { if (window.SBLines) { SBLines.scoutLaunch(sysKey, label || null); refresh(true); } }
+  function openedRouteCard(rt) {
+    const o = SBLines.openedRoutes().find(x => x.id === rt.routeId);
+    if (!o) return '';
+    const n = Math.max(0, o.chain.length - 2);
+    const bal = SBLines.balisageChain(o.chain.slice(1, -1));
+    const dots = bal.chain.map(k => `<i class="${bal.beaconed.includes(k) ? 'on' : ''}" title="${esc(k)}"></i>`).join('');
+    const pct = Math.round(bal.ratio * 100);
+    const st = _state || collect();
+    const toSys = st.systems[o.to];
+    const pl = toSys && toSys.planets && toSys.planets[0];
+    return `<div class="sm-panel"><div class="sm-ptitle" style="color:${o.color}">${esc(o.name)}</div>`
+      + `<div class="sm-psub">${o.by ? `Offerte par ${esc(o.by)} · ` : 'Ouverte par ta Moyenne · '}${n} système${n > 1 ? 's' : ''} de passage · <span class="mono">${esc(o.chain[0])} → ${esc(o.to)}</span></div>`
+      + `<div class="sm-bal"><div class="h"><b>Balisage</b><span>${bal.beaconed.length}/${bal.chain.length} jalons</span></div><div class="d">${dots}</div><div class="t">${pct ? `Plus rapide et plus sûre à mesure que tu la balises · ${pct} %` : 'Non balisée'}</div></div>`
+      + (bal.next ? _sigBtn('#b48cff', 'Baliser le jalon suivant', `SBMap.beacon('${esc(bal.next)}')`, esc(bal.next), true) : '')
+      + (pl ? _sigBtn(o.color, 'Envoyer un tanker', `SBMap.sendOnOpened('${esc(o.id)}','${esc(pl.coord)}')`, `Vers ${esc(pl.playerName || pl.name || pl.coord)} par cette route`, true) : '')
+      + (o.by ? '' : _sigBtn('#ffb3e0', 'Donner à un allié', `SBMap.giveOpened('${esc(o.id)}')`, 'Seuls ceux à qui tu la donnes sauront y aller', true))
+      + `<div class="sm-tags"><button class="sm-tag" onclick="event.stopPropagation();SBMap.forgetOpened('${esc(o.id)}')">Oublier la route</button></div>`
+      + `</div>`;
+  }
+  function sendOnOpened(id, coord) {
+    if (typeof openTankerCompose !== 'function') return;
+    G._composeRoutePref = id;
+    openTankerCompose(coord);
+  }
+  async function giveOpened(id) {
+    const seen = new Set(), items = [];
+    for (const sys of Object.values(G.knownSystems || {})) for (const p of sys.planets || []) {
+      const addr = p.mpAddress || p.coord;
+      if (!p.isReal || !p.playerName || seen.has(addr)) continue;
+      seen.add(addr); items.push({ addr, label: esc(p.playerName), sub: esc(addr) });
+    }
+    if (!items.length) { toast('Aucun commandant dans ton carnet'); return; }
+    const it = await _mpChoose('Donner la route à…', items);
+    if (!it) return;
+    try { await SBLines.giveRoute(id, it.addr); toast(`Route offerte à ${it.label} : elle la recevra à sa prochaine connexion`); }
+    catch (e) { toast(/gift_rate/.test(String(e.message)) ? 'Trop de dons aujourd\'hui' : 'Le registre ne répond pas, réessaie'); }
+  }
+  async function forgetOpened(id) {
+    const ok = typeof sbConfirm === 'function' ? await sbConfirm({ title: 'Oublier la route ?', body: 'Elle disparaît de ta carte. Ceux à qui tu l\'as donnée la gardent.', confirmLabel: 'Oublier', cancelLabel: 'Garder' }) : true;
+    if (!ok) return;
+    SBLines.forgetOpened(id); _sel = null; refresh(true);
   }
   // 14/10 (E2) — route d'une ligne remontée jusqu'à un lieu caché
   function lineRouteCard(rt) {
@@ -2075,7 +2140,7 @@
   function panelFor(sel) { const keep = _sel; _sel = sel; let h = ''; try { h = panelMarkup(collect()); } finally { _sel = keep; } return h; }
   const API = {
     render, sweep, panelFor, tag, beacon, recallBeacon: recallBeaconFromMap, showFlight,
-    openRoute, selectRoute, showRoute, routeAvoid, routeUnavoid, routeColor, routeRename, routeDelete, sendOnRoute, postOnRoute, postHere,
+    openRoute, selectRoute, showRoute, routeAvoid, routeUnavoid, routeColor, routeRename, routeDelete, sendOnRoute, postOnRoute, postHere, scout, sendOnOpened, giveOpened, forgetOpened,
     planFor(destKey) { try { return planFrom(_state || collect(), destKey); } catch (e) { return null; } },
     select(kind, key) {
       if (_fallback) return;

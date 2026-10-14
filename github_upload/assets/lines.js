@@ -266,8 +266,8 @@
   /* ── E3 · balisage : mes balises posées sur les jalons connus d'une route de ligne ── */
   // ratio = jalons balisés / jalons connus ; trajet −35 % et risque −60 % à pleine couverture ;
   // à partir de la moitié, le convoi passe en « voie balisée » au registre (pavillon masqué, un passage sur deux échappe aux balises).
-  function balisage(portSys) {
-    const chain = knownChain(portSys).slice(0, -1);
+  function balisage(portSys) { return balisageChain(knownChain(portSys).slice(0, -1)); }
+  function balisageChain(chain) {
     const mine = new Set((G.probesPool || []).filter(p => p.tier === 'beacon' && p.state === 'deployed').map(p => sysOf(p.deployedSystem)));
     const going = new Set((G.probeMissions || []).filter(m => m.tier === 'beacon' && m.status === 'in_transit').map(m => sysOf(m.targetCoords)));
     const beaconed = chain.filter(k => mine.has(k));
@@ -277,7 +277,8 @@
   }
   // routes de ligne qu'une balise posée sur ce système balise
   function routesBalisedBy(sys) {
-    return (G.routes || []).filter(r => r.portSys && knownChain(r.portSys).slice(0, -1).includes(sys));
+    return (G.routes || []).filter(r => r.portSys && knownChain(r.portSys).slice(0, -1).includes(sys))
+      .concat(openedRoutes().filter(o => o.chain.slice(1, -1).includes(sys)));
   }
   // un convoi de joueur vu par une de mes balises sur une ligne : il emprunte peut-être « ma » route
   function noteUser(sys, pseudo, at) {
@@ -292,6 +293,106 @@
       G.lineUsers[line.port] = list.slice(0, 30);
     }
   }
+
+  /* ── E4 · ouvrir une route par un premier voyage : une Moyenne éclaireur ── */
+  // Vers un lieu connu sans chemin (planète alliée, point de ralliement…). La sonde part dans l'inconnu, se consume
+  // en traçant le passage ; son trajet devient une route (chaîne de systèmes) qu'on peut baliser et donner.
+  const OPEN_COLOR = '#9fe08a';
+  function openedRoutes() { if (!Array.isArray(G.openedRoutes)) G.openedRoutes = []; return G.openedRoutes; }
+  function openedTo(sys) { return openedRoutes().find(o => o.to === sys) || null; }
+  function scoutInFlight(sys) { return (G.probeMissions || []).find(m => m.mode === 'scout' && m.status === 'in_transit' && m.targetCoords === sys) || null; }
+  function sectorGap(a, b) { return Math.abs(String(a || 'A').charCodeAt(0) - String(b || 'A').charCodeAt(0)); }
+  function scoutLaunch(sys, label) {
+    state();
+    if (!SYS.test(sys || '')) return null;
+    const home = myHome();
+    if (sys === home) return null;
+    if (openedTo(sys)) { toast('Tu as déjà une route jusqu\'ici'); return null; }
+    if (scoutInFlight(sys)) { toast('Une Moyenne trace déjà ce passage'); return null; }
+    const probe = (G.probesPool || []).find(p => p.tier === 'medium' && p.state === 'ready');
+    if (!probe) { toast('Aucune Moyenne prête'); return null; }
+    const d = (typeof PROBE_DURATIONS_BY_TIER !== 'undefined' && PROBE_DURATIONS_BY_TIER.medium) || { min: 2 * 3600e3, max: 4 * 3600e3 };
+    const now = Date.now(), dur = d.min + Math.random() * (d.max - d.min);
+    const m = { id: 'pm-' + now + '-' + Math.random().toString(36).slice(2, 6), probeId: probe.id,
+      probeName: (typeof generateProbeName === 'function') ? generateProbeName() : 'Éclaireur', tier: 'medium', mode: 'scout',
+      targetCoords: sys, scoutLabel: label || null, sector: sys.split('-')[1], departedAt: now, arrivalAt: now + dur, status: 'in_transit' };
+    probe.state = 'mission';
+    (G.probeMissions = G.probeMissions || []).push(m);
+    if (typeof saveGame === 'function') saveGame();
+    if (typeof toast === 'function') toast(`Moyenne ${m.probeName} en éclaireur vers ${label || sys} · ${typeof formatTankerDuration === 'function' ? formatTankerDuration(dur) : ''}`);
+    if (window.SBMap && SBMap.render) { try { SBMap.render(); } catch (e) {} }
+    return m;
+  }
+  // appelé à l'arrivée (handleProbeReturn) : la sonde se consume, le passage devient une route — ou elle se perd
+  function scoutArrived(m) {
+    state();
+    const i = (G.probeMissions || []).findIndex(x => x.id === m.id);
+    if (i >= 0) G.probeMissions.splice(i, 1);
+    const pi = (G.probesPool || []).findIndex(p => p.id === m.probeId);
+    if (pi >= 0) G.probesPool.splice(pi, 1);
+    const home = myHome() || 'A-A-1000';
+    const to = m.targetCoords, gap = sectorGap(home.split('-')[1], to.split('-')[1]);
+    if (Math.random() < 0.08 + 0.12 * Math.min(gap, 3)) {
+      if (typeof toast === 'function') toast(`✗ La Moyenne ${m.probeName} s'est perdue en route vers ${m.scoutLabel || to} · aucun passage tracé`);
+      if (typeof saveGame === 'function') saveGame();
+      return null;
+    }
+    // le passage : 3 à 6 systèmes intermédiaires, du secteur de départ vers celui d'arrivée
+    const r = rngOf('scout:' + home + '>' + to + ':' + m.id);
+    const n = 3 + Math.min(3, gap) + Math.floor(r() * 2);
+    const [cl] = to.split('-'), s0 = home.split('-')[1].charCodeAt(0), s1 = to.split('-')[1].charCodeAt(0);
+    const wps = [];
+    for (let k = 1; k <= n; k++) {
+      const sec = String.fromCharCode(Math.round(s0 + (s1 - s0) * k / (n + 1)));
+      let key, g = 0;
+      do { key = `${cl}-${sec}-${1000 + Math.floor(r() * 9000)}`; } while ((wps.includes(key) || key === to || key === home) && g++ < 50);
+      wps.push(key);
+    }
+    const o = { id: 'or-' + m.id.slice(3), name: 'Route vers ' + (m.scoutLabel || to), color: OPEN_COLOR, chain: [home].concat(wps, [to]),
+      to, toLabel: m.scoutLabel || null, openedAt: Date.now(), by: null };
+    openedRoutes().push(o);
+    if (!G.mapSeen) G.mapSeen = {};
+    for (const k of o.chain) if (!G.mapSeen[k]) G.mapSeen[k] = Date.now();
+    if (typeof saveGame === 'function') saveGame();
+    if (typeof toast === 'function') toast(`🛰 Route ouverte vers ${m.scoutLabel || to} · ${n} systèmes de passage tracés`, () => { if (window.SBMap && SBMap.showRoute) { if (typeof openOnMap === 'function') openOnMap('system', to); setTimeout(() => SBMap.selectRoute(o.id), 600); } });
+    if (window.SBMap && SBMap.render) { try { SBMap.render(); } catch (e) {} }
+    return o;
+  }
+  function forgetOpened(id) {
+    G.openedRoutes = openedRoutes().filter(o => o.id !== id);
+    if (typeof saveGame === 'function') saveGame();
+  }
+  // donner une route à un autre commandant (registre) ; il la reçoit au prochain passage du jeu
+  async function giveRoute(id, toAddress) {
+    const o = openedRoutes().find(x => x.id === id);
+    if (!o || typeof _mpRpc !== 'function') return false;
+    await _mpRpc('mp_route_give', { p_to_address: toAddress, p_route: { name: o.name, chain: o.chain, to: o.to, toLabel: o.toLabel } });
+    return true;
+  }
+  let _giftsAt = 0;
+  async function pollGifts() {
+    if (typeof G === 'undefined' || !G || typeof _mpRpc !== 'function' || !(window.SBMP && SBMP.ready && SBMP.ready())) return;
+    if (Date.now() - _giftsAt < 55000) return;
+    _giftsAt = Date.now();
+    let rows;
+    try { rows = await _mpRpc('mp_route_inbox', {}); } catch (e) { return; }
+    for (const g of Array.isArray(rows) ? rows : []) {
+      const rt = g.route || {};
+      const chain = (Array.isArray(rt.chain) ? rt.chain : []).filter(k => SYS.test(k)).slice(0, 12);
+      if (chain.length >= 2 && !openedRoutes().some(o => o.id === 'gift-' + g.id)) {
+        const o = { id: 'gift-' + g.id, name: String(rt.name || 'Route offerte').slice(0, 60), color: '#ffb3e0', chain, to: chain[chain.length - 1],
+          toLabel: rt.toLabel ? String(rt.toLabel).slice(0, 40) : null, openedAt: Date.now(), by: String(g.from_pseudo || '?').slice(0, 20) };
+        openedRoutes().push(o);
+        if (!G.mapSeen) G.mapSeen = {};
+        for (const k of chain) if (!G.mapSeen[k]) G.mapSeen[k] = Date.now();
+        if (typeof toast === 'function') toast(`⚑ ${o.by} t'offre une route : ${o.name}`, () => { if (typeof openOnMap === 'function') openOnMap('system', o.to); setTimeout(() => SBMap.selectRoute(o.id), 600); });
+      }
+      try { await _mpRpc('mp_route_gift_seen', { p_gift: g.id }); } catch (e) {}
+    }
+    if (typeof saveGame === 'function') saveGame();
+    if (window.SBMap && SBMap.render) { try { SBMap.render(); } catch (e) {} }
+  }
+  setInterval(() => { if (document.visibilityState !== 'hidden') pollGifts(); }, 20000);
 
   /* ── E2 · une carte de route devient une piste : elle place sur une ligne, plus ou moins près du lieu ── */
   function activateCard(card) {
@@ -407,7 +508,8 @@
 
   window.SBLines = {
     network, passages, capOf, convoyOf, tickBeacons, tickEcho, infoFor, knownSystems, discoverPort,
-    activateCard, ensureRoute, knownChain, balisage, routesBalisedBy, noteUser,
+    activateCard, ensureRoute, knownChain, balisage, balisageChain, routesBalisedBy, noteUser,
+    openedRoutes, openedTo, scoutInFlight, scoutLaunch, scoutArrived, forgetOpened, giveRoute, pollGifts,
     WINDOW_MS, EPOCH,
     _reset() { _net = null; },
   };

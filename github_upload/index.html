@@ -8589,7 +8589,8 @@ var EXTRA_SAVE_KEYS = [
   'mpGrowthMilestone',
   'systemTags', 'mapSeen', 'beaconRoutes', 'spottedLegs',
   'lineObs', 'trafficEchoes', 'hiddenPorts', '_linesNet', '_linesRoutes',   // PATCH_1410_PISTES
-  'lineUsers',   // PATCH_1410_BALISAGE — convois de joueurs vus sur mes lignes   // PATCH_1410_LIGNES — lignes observées, échos de l'antenne, lieux cachés découverts   // PATCH_1310_ROUTES2 — tronçons relevés par mes balises   // + routes entre balises (13/10)   // PATCH_1310_CARTE — marques de systèmes + systèmes déjà vus (survivent aux rapports supprimés)  // RUMORS_1110 — dernier palier de niveau annoncé au comptoir
+  'lineUsers',   // PATCH_1410_BALISAGE — convois de joueurs vus sur mes lignes
+  'openedRoutes',   // PATCH_1410_ECLAIREUR — routes ouvertes par une Moyenne ou offertes par un allié   // PATCH_1410_LIGNES — lignes observées, échos de l'antenne, lieux cachés découverts   // PATCH_1310_ROUTES2 — tronçons relevés par mes balises   // + routes entre balises (13/10)   // PATCH_1310_CARTE — marques de systèmes + systèmes déjà vus (survivent aux rapports supprimés)  // RUMORS_1110 — dernier palier de niveau annoncé au comptoir
   'mpDiplo',   // AMBASSADES_1210 — ambassades vues et dernière image des pactes
   'mpNeighbors',   // VOISINS_1310 — voisins déjà signalés
   'tuto',          // TUTO_1410 — premiers pas (étape, vu, terminé)
@@ -23482,6 +23483,13 @@ function handleProbeReturn(missionId) {
   const mission = G.probeMissions[idx];
   if (mission.status !== 'in_transit') return;
 
+  // PATCH_1410_ECLAIREUR — Moyenne en éclaireur : elle se consume en traçant le passage, qui devient une route
+  if (mission.mode === 'scout' && window.SBLines) {
+    SBLines.scoutArrived(mission);
+    if (typeof refreshCurrentScreen === 'function') refreshCurrentScreen();
+    return null;
+  }
+
   // ⚡ Phase 4 P1 — Balise persistante : ne génère pas de rapport, ne brûle pas, ne revient pas.
   // La sonde arrive à destination et passe en état 'deployed' indéfiniment.
   // Elle générera des détections passives via tickActiveBeacons.
@@ -25888,7 +25896,7 @@ function _ownRoutesCardsHtml(c, baseDurationMs) {
   return plan.routes.slice(0, 3).map(r => {
     const sel = c.routeType === 'own' && c.ownRouteId === r.id;
     const ms = baseDurationMs * ROUTE_TYPES.own.durationFactor * _ownRouteRatio(plan, r);
-    const open = r.openLen > 0 ? `${r.openLen} case${r.openLen > 1 ? 's' : ''} à découvert jusqu'à la balise ${r.startKey}` : 'départ depuis ta balise de système';
+    const open = r.openLen > 0 ? `${r.openLen} case${r.openLen > 1 ? 's' : ''} à découvert jusqu'au départ de la route (${r.startKey})` : 'départ de ton système';
     return `
       <div onclick="setComposeRoute('own','${r.id}')" style="margin-bottom:8px;padding:10px 12px;background:${sel ? 'rgba(195,155,255,.10)' : 'rgba(40,40,40,.3)'};border:1px solid ${sel ? r.color : 'var(--border)'};border-radius:6px;cursor:pointer">
         <div style="display:flex;align-items:center;gap:10px">
@@ -45186,7 +45194,7 @@ if (G.knownTargets && Array.isArray(G.tankerMissions)) {
 <!-- PERF_1310 — mesure des performances chez les joueurs + qualité 3D automatique (assets/perf.js) -->
 <script src="assets/perf.js?v=20261014-1540"></script>
 <!-- PATCH_1410_LIGNES — lignes PNJ à horaire sur les routes cachées (assets/lines.js) -->
-<script src="assets/lines.js?v=20261014-2340"></script>
+<script src="assets/lines.js?v=20261015-0000"></script>
 <!-- CLOUD — sauvegarde Supabase (source : sb-build/src/cloud.js) -->
 <script type="module" src="assets/cloud.js?v=20261014-1440"></script>
 <!-- MATCH3 — Match-3 V2 (assets/match3.js, source src/match3.js + src/m3core.js) : remplace startM3 -->
@@ -45194,7 +45202,7 @@ if (G.knownTargets && Array.isArray(G.tankerMissions)) {
 <!-- HOME V2 — « monde d'abord » : planète plein écran, ressources en ligne, Flotte / Défense / Prospection (assets/home.js) -->
 <script type="module" src="assets/home.js?v=20261014-1440"></script>
 <!-- SPACE MAP v0 — carte du Centre de prospection (assets/spacemap.js, source src/spacemap.js) -->
-<script src="assets/spacemap.js?v=20261014-2340"></script>
+<script src="assets/spacemap.js?v=20261015-0000"></script>
 <!-- SPACE MAP niveau B — diorama 3D d'un système (assets/system3d.js, source src/system3d.js) -->
 <script type="module" src="assets/system3d.js?v=20261014-1440"></script>
 <!-- SHIP3D — fiches 3D : cuirassé KV-01, frégate SR-01, tanker TK-07, chantier orbital OS-01 (assets/ship3d.js, sur le moteur partagé window.SB3D) -->
