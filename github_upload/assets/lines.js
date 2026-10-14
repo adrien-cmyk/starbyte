@@ -28,6 +28,11 @@
     pilgrim_stop:      { key: 'pelerins',   label: 'Pèlerins',             cargo: ['léger'],          tiers: [1],    escort: 'sans escorte' },
   };
 
+  // 15/10 (Adrien) : The Drifting Crown, la station pirate, prend la place du lieu du secteur M (l'ancien Relais d'Erebus) ;
+  // ses deux lignes : des marchands et des contrebandiers
+  const CROWN_DOCK_ID = 'dock-37oe89';
+  const CROWN_KINDS = ['hidden_freeport', 'asteroid_bar'];
+
   /* ── hachage déterministe (mêmes résultats sur tous les appareils) ── */
   function h32(s) { let h = 2166136261; s = String(s); for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619) >>> 0; } return h >>> 0; }
   function rngOf(seed) { let a = h32(seed) || 1; return () => { a |= 0; a = (a + 0x6D2B79F5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
@@ -69,7 +74,7 @@
           const k = `${cl}-${sec}-${1000 + Math.floor(r() * 9000)}`;
           if (k !== port && !chain.includes(k) && !ports[k]) chain.push(k);
         }
-        const kind = KINDS[dock.type] || KINDS.hidden_freeport;
+        const kind = dock.id === CROWN_DOCK_ID ? KINDS[CROWN_KINDS[j]] : (KINDS[dock.type] || KINDS.hidden_freeport);
         const line = {
           id: dock.id + '-' + j, dockId: dock.id, port, chain, kind,
           period: (80 + Math.floor(r() * 70)) * 60000,      // un départ toutes les 80 à 150 min
@@ -138,6 +143,7 @@
       G.spottedLegs = G.spottedLegs.filter(l => !l.npc || n.byId[l.lineId]);
       G._linesNet = 3;
     }
+    migrateCrown();
     if (!G._linesRoutes) { G._linesRoutes = 1; for (const k of Object.keys(G.hiddenPorts)) { try { ensureRoute(k); } catch (e) {} } }
   }
   // tronçons relevés : ceux des lignes PNJ sont la connaissance des routes (jamais évincés, bornés par le réseau),
@@ -234,6 +240,26 @@
   const MOOD_BY_KIND = { marchand: 'grasse', contrebande: 'noire', recup: 'nerveuse', arme: 'imperiale', pelerins: 'morte' };
   const NOUN_BY_MOOD = { nerveuse: 'la Veine', grasse: 'la Saigne', morte: 'le Linceul', noire: 'la Voie Noire', imperiale: 'la Vieille Voie' };
   const cap1 = (x) => x.charAt(0).toUpperCase() + x.slice(1);
+  function routeNameFor(dock, moodKey) {
+    return dock.id === CROWN_DOCK_ID ? 'La Saigne de la Couronne' : cap1(`${NOUN_BY_MOOD[moodKey] || 'la Route'} de ${dock.name}`);
+  }
+  // ce qui a été appris du lieu avant qu'il devienne la Couronne prend son nom (une fois)
+  function migrateCrown() {
+    if (G._linesCrown === 1) return;
+    G._linesCrown = 1;
+    let d = null;
+    try { d = generateDockForRoute({ destinationHint: (Object.values(network().ports).find(x => x.dockId === CROWN_DOCK_ID) || {}).hint }); } catch (e) {}
+    if (!d || d.id !== CROWN_DOCK_ID || !d.crown) return;
+    const pick = ({ name, type, typeLabel, sub, accent, ambience, detail, crown }) => ({ name, type, typeLabel, sub, accent, ambience, detail, crown });
+    const F = pick(d);
+    if (G.universeDocks && G.universeDocks[CROWN_DOCK_ID]) Object.assign(G.universeDocks[CROWN_DOCK_ID], F);
+    for (const m of G.tankerMissions || []) if (m.dock && m.dock.id === CROWN_DOCK_ID) Object.assign(m.dock, F);
+    for (const r of G.routes || []) {
+      if (r.dock && r.dock.id === CROWN_DOCK_ID) Object.assign(r.dock, F);
+      if (r.id === 'rt-ln-' + CROWN_DOCK_ID) { r.moodKey = 'grasse'; r.name = routeNameFor(d, 'grasse'); if (r.sourceCard) r.sourceCard.name = d.name; }
+    }
+    for (const [k, h] of Object.entries(G.hiddenPorts || {})) if (h.dockId === CROWN_DOCK_ID) Object.assign(h, { name: d.name, type: d.type, typeLabel: d.typeLabel });
+  }
   function ensureRoute(portSys) {
     const p = network().ports[portSys];
     if (!p) return null;
@@ -251,7 +277,7 @@
     const mood = (typeof ROUTE_MOODS !== 'undefined' && ROUTE_MOODS[moodKey]) || { stabilityRange: [60, 80], label: '' };
     const [a0, a1] = mood.stabilityRange || [60, 80];
     r = {
-      id: 'rt-ln-' + p.dockId, name: cap1(`${NOUN_BY_MOOD[moodKey] || 'la Route'} de ${dock.name}`), moodKey,
+      id: 'rt-ln-' + p.dockId, name: routeNameFor(dock, moodKey), moodKey,
       originHint: 'Ligne remontée balise après balise', destinationHint: p.hint,
       quality: 85, stability: Math.round((a0 + a1) / 2), knowledgeLevel: 0, passages: 0, lost: 0, delayed: 0,
       discoveredAt: Date.now(), lastUsedAt: null, status: 'active', dockId: dock.id, dock,
@@ -1169,7 +1195,7 @@
     dockMarketHtml, sellHere, withdrawOffer, buyOffer, learnRoute, noteRobbery, tickMarket, fetchOffers, sellableRoutes,
     ORDER_MODES, ordersOf, ordersLabel, chooseOrders, setOrders, pushOrders, pushNpc, holdCap, holdUsed, holdAll, fleetAtk, odds, oddsLabel,
     robNpc, tailNpc, tickAmbushes, capLegs, salesOn, soldChain, npcReportCan, npcReportAction, ambushTravel, ambushAt, pollSpied, autoPlayers,
-    WINDOW_MS, EPOCH,
+    WINDOW_MS, EPOCH, CROWN_DOCK_ID,
     _reset() { _net = null; },
   };
 })();

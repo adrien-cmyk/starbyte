@@ -8596,6 +8596,7 @@ var EXTRA_SAVE_KEYS = [
   'mpDiplo',   // AMBASSADES_1210 — ambassades vues et dernière image des pactes
   'mpNeighbors',   // VOISINS_1310 — voisins déjà signalés
   'tuto',          // TUTO_1410 — premiers pas (étape, vu, terminé)
+  '_linesCrown', 'crownSeen',   // PATCH_1510_CROWN — lieu du secteur M devenu la Couronne, première arrivée vue
 ];
 
 // Sauvegarde G complet dans localStorage. Appelé fréquemment, doit être rapide.
@@ -11691,6 +11692,7 @@ function prospectLocked() {
 }
 
 function goto(scr, opts) {
+  if (scr !== 'dock' && typeof crownUnmount === 'function') crownUnmount();   // PATCH_1510_CROWN
   setTimeout(() => { const el = document.getElementById('scr-' + scr); const sc = el && el.querySelector('.screen-scroll'); if (sc) updateHeroScrim(sc); }, 60);
   opts = opts || {};
   // ORBITE = ARMER (10/10/2026) : la construction navale n'existe qu'avec le chantier orbital.
@@ -39996,7 +39998,7 @@ function generateDockForRoute(route) {
   const prefix = prefixes[type.key][Math.floor(rng() * prefixes[type.key].length)];
   const suffix = suffixes[Math.floor(rng() * suffixes.length)];
 
-  return {
+  return _crownDock({   // PATCH_1510_CROWN
     // ID stable = hash de la destination. Sert de clé dans G.universeDocks et pour migration multijoueur.
     id: 'dock-' + seed.toString(36),
     type: type.key,
@@ -40009,8 +40011,17 @@ function generateDockForRoute(route) {
     // Le dock connaît la destination canonique qui l'a fait naître
     destinationHint: destHint,
     arrivedAt: null,
-  };
+  });
 }
+// PATCH_1510_CROWN — The Drifting Crown, la station pirate : le lieu caché du secteur M
+var CROWN_DOCK_ID = 'dock-37oe89';
+var CROWN_DOCK = {
+  name: 'The Drifting Crown', type: 'hidden_freeport', typeLabel: 'Port franc pirate', sub: 'station-bar à la dérive · 2,4 km',
+  accent: '#f0b54a', crown: true,
+  ambience: 'Elle dérive depuis plus longtemps que les cartes ne s\'en souviennent. Une couronne de laiton et de coques rapiécées, dix bras tendus vers le vide, des milliers de hublots ambrés. On y entre sans pavillon ; on en ressort avec des dettes, une route ou un ennemi.',
+  detail: 'Au bord de l\'anneau, sous l\'enseigne dorée, le bar de la Couronne. Ici tout se vend : cargaisons, adresses, routes. Les bots du comptoir ont la mémoire longue, et la langue plus longue encore.',
+};
+function _crownDock(d) { return (d && d.id === CROWN_DOCK_ID) ? Object.assign(d, CROWN_DOCK) : d; }
 
 // ─── Registre des docks de l'univers (canon 18/05) ───
 // Une destination = un dock. On stocke ici les docks déjà rencontrés.
@@ -43316,6 +43327,131 @@ function onLeaveDockBack() {
   goto('commerce', { replace: true });
 }
 
+// ═══ PATCH_1510_CROWN — The Drifting Crown en 3D sur l'écran du dock ═══
+// En tête : la station en orbite lente (ou la façade du bar). Toucher → plein écran, on tourne et on zoome.
+// Première arrivée de la partie : l'approche s'ouvre d'elle-même en plein écran (le « woah »).
+var _crown = null;   // { el, handle, home, fs }
+var CROWN_URL = 'assets/3d/sb_dc01.glb?v=20261015-1000';
+function _crownCss() {
+  if (document.getElementById('crown-css')) return;
+  const st = document.createElement('style'); st.id = 'crown-css';
+  st.textContent = `
+    #crown-hero{position:relative;height:44vh;min-height:250px;max-height:460px;margin:0 0 16px;border-radius:0 0 14px 14px;overflow:hidden;background:#010207;cursor:pointer;-webkit-tap-highlight-color:transparent}
+    #crown-hero.fs{position:fixed;inset:0;height:100%;max-height:none;margin:0;border-radius:0;z-index:9000;cursor:grab}
+    #crown-hero canvas{touch-action:pan-y}
+    #crown-hero>div:not(.cr-load){z-index:2}
+    #crown-hero .cr-load{z-index:2}
+    #crown-hero.fs canvas{touch-action:none}
+    #crown-hero .cr-ttl{position:absolute;left:0;right:0;top:0;padding:calc(14px + env(safe-area-inset-top,0px)) 16px 34px;background:linear-gradient(180deg,rgba(1,2,7,.85),rgba(1,2,7,0));pointer-events:none}
+    #crown-hero:not(.fs) .cr-ttl{padding-top:14px}
+    #crown-hero .cr-ttl b{display:block;font-size:19px;letter-spacing:.14em;color:#ffd27a;font-weight:700;text-shadow:0 0 18px rgba(255,170,60,.45)}
+    #crown-hero .cr-ttl span{display:block;margin-top:3px;font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:rgba(230,240,255,.65)}
+    #crown-hero .cr-bot{position:absolute;left:0;right:0;bottom:0;display:flex;align-items:center;gap:8px;padding:30px 12px calc(12px + env(safe-area-inset-bottom,0px));background:linear-gradient(0deg,rgba(1,2,7,.8),rgba(1,2,7,0))}
+    #crown-hero:not(.fs) .cr-bot{padding-bottom:12px}
+    #crown-hero .cr-chip{padding:7px 12px;border-radius:999px;border:1px solid rgba(240,181,74,.45);background:rgba(10,8,4,.55);color:#ffd27a;font:inherit;font-size:11px;letter-spacing:.08em;cursor:pointer}
+    #crown-hero .cr-chip.on{background:rgba(240,181,74,.22);border-color:#f0b54a;color:#fff3d6}
+    #crown-hero .cr-sp{flex:1}
+    #crown-hero .cr-hint{font-size:10px;color:rgba(230,240,255,.6);letter-spacing:.06em}
+    #crown-hero .cr-x{position:absolute;right:12px;top:calc(12px + env(safe-area-inset-top,0px));width:36px;height:36px;border-radius:50%;border:1px solid rgba(255,255,255,.25);background:rgba(1,2,7,.55);color:#e6f0ff;font-size:18px;line-height:34px;text-align:center;cursor:pointer;display:none}
+    #crown-hero.fs .cr-x{display:block}
+    #crown-hero .cr-load{position:absolute;left:16px;right:16px;top:50%;height:2px;background:rgba(255,255,255,.08);border-radius:2px;overflow:hidden}
+    #crown-hero .cr-load i{display:block;height:100%;width:0;background:#f0b54a;transition:width .2s}
+    #crown-hero.ready .cr-load{display:none}
+    #crown-hero .cr-intro{position:absolute;left:0;right:0;bottom:calc(84px + env(safe-area-inset-bottom,0px));text-align:center;pointer-events:none;opacity:0;transition:opacity 1.6s}
+    #crown-hero .cr-intro.on{opacity:1}
+    #crown-hero .cr-intro b{display:block;font-size:26px;letter-spacing:.2em;color:#ffd27a;text-shadow:0 0 24px rgba(255,170,60,.6)}
+    #crown-hero .cr-intro span{display:block;margin-top:8px;font-size:12px;color:rgba(230,240,255,.8);font-style:italic;font-family:'Charter','Iowan Old Style',Georgia,serif;padding:0 28px}
+    #crown-hero .cr-enter{display:none;padding:10px 18px;border-radius:999px;border:1px solid #f0b54a;background:rgba(240,181,74,.2);color:#fff3d6;font:inherit;font-size:12px;letter-spacing:.12em;cursor:pointer}
+    #crown-hero.fs.first .cr-enter{display:inline-block}
+    #crown-hero.fs.first .cr-chip,#crown-hero.fs.first .cr-hint{display:none}
+    #crown-hero.fs.first .cr-ttl{opacity:0}
+    #crown-hero .cr-enter{white-space:nowrap}
+    .crown-bar{margin:0 0 12px;padding:14px 14px 12px;border:1px solid rgba(240,181,74,.4);border-radius:10px;background:linear-gradient(180deg,rgba(240,181,74,.10),rgba(0,0,0,.15));cursor:pointer}
+    .crown-bar b{display:block;font-size:13px;color:#ffd27a;letter-spacing:.06em}
+    .crown-bar span{display:block;margin-top:4px;font-size:11px;color:var(--mut);line-height:1.5}
+    .crown-bar i{display:inline-block;margin-top:8px;font-style:normal;font-size:10px;letter-spacing:.12em;color:#f0b54a}`;
+  document.head.appendChild(st);
+}
+function crownDockHero(dock) {
+  const scr = document.getElementById('scr-dock');
+  const scroll = scr && scr.querySelector('.screen-scroll');
+  const banner = document.getElementById('dock-banner');
+  if (!dock || !dock.crown || !scroll || !window.WebGLRenderingContext) { crownUnmount(); if (banner) banner.style.display = ''; return; }
+  if (_crown && _crown.el.isConnected) return;
+  _crownCss();
+  if (banner) banner.style.display = 'none';
+  const first = !G.crownSeen;
+  const el = document.createElement('div');
+  el.id = 'crown-hero';
+  el.innerHTML = `<div class="cr-ttl"><b>THE DRIFTING CROWN</b><span>Port franc pirate · ${typeof mpDockSystem === 'function' && mpDockSystem(dock) ? '⌖ ' + mpDockSystem(dock) : 'station-bar à la dérive'}</span></div>
+    <div class="cr-load"><i></i></div>
+    <div class="cr-intro"><b>THE DRIFTING CROWN</b><span>Une couronne de laiton à la dérive. Dix bras tendus vers le vide, des milliers de hublots ambrés : ton tanker vient d'entrer au port franc.</span></div>
+    <div class="cr-bot"><button class="cr-chip on" data-v="port">La station</button><button class="cr-chip" data-v="bar">Le bar</button><span class="cr-sp"></span><span class="cr-hint">Toucher pour explorer</span><button class="cr-enter">ENTRER AU PORT</button></div>
+    <div class="cr-x" title="Fermer">✕</div>`;
+  const head = scroll.querySelector('.head');
+  scroll.insertBefore(el, head ? head.nextSibling : scroll.firstChild);
+  _crown = { el, handle: null, home: scroll, fs: false };
+  const bar = el.querySelector('.cr-load i');
+  const start = () => {
+    if (!_crown || _crown.el !== el) return;
+    _crown.handle = window.Station3D.mount(el, {
+      url: CROWN_URL, view: 'port', intro: first, interactive: false,
+      onProgress: (k) => { bar.style.width = Math.round(k * 100) + '%'; },
+      onReady: () => { el.classList.add('ready'); if (first) setTimeout(() => el.querySelector('.cr-intro').classList.add('on'), 3800); },
+      onError: () => { crownUnmount(); if (banner) banner.style.display = ''; },
+    });
+  };
+  if (window.Station3D) start(); else window.addEventListener('station3d-ready', start, { once: true });
+  el.addEventListener('click', (e) => {
+    const chip = e.target.closest('.cr-chip');
+    if (chip) { e.stopPropagation(); crownSetView(chip.dataset.v); return; }
+    if (e.target.closest('.cr-x')) { e.stopPropagation(); crownFullscreen(false); return; }
+    if (e.target.closest('.cr-enter')) { e.stopPropagation(); crownFullscreen(false); return; }
+    if (!_crown.fs) crownFullscreen(true);
+  });
+  if (first) { G.crownSeen = Date.now(); if (typeof saveGame === 'function') saveGame(); el.classList.add('first'); crownFullscreen(true); }
+}
+function crownSetView(v) {
+  if (!_crown) return;
+  if (_crown.handle) _crown.handle.setView(v);
+  _crown.el.querySelectorAll('.cr-chip').forEach(b => b.classList.toggle('on', b.dataset.v === v));
+}
+// plein écran : la vue passe au-dessus de tout (on la sort de l'écran, dont les transitions la décaleraient)
+function crownFullscreen(on) {
+  if (!_crown) return;
+  const el = _crown.el;
+  if (on && !_crown.fs) {
+    _crown.fs = true; _crown.placeholder = document.createElement('div'); _crown.placeholder.style.height = el.offsetHeight + 'px'; _crown.placeholder.style.marginBottom = '16px';
+    el.parentNode.insertBefore(_crown.placeholder, el); document.body.appendChild(el); el.classList.add('fs');
+    el.querySelector('.cr-hint').textContent = 'Glisser pour tourner · pincer pour zoomer';
+    if (_crown.handle) _crown.handle.setInteractive(true);
+  } else if (!on && _crown.fs) {
+    _crown.fs = false; el.classList.remove('fs', 'first');
+    if (_crown.placeholder && _crown.placeholder.parentNode) { _crown.placeholder.parentNode.insertBefore(el, _crown.placeholder); _crown.placeholder.remove(); }
+    el.querySelector('.cr-intro').classList.remove('on');
+    el.querySelector('.cr-hint').textContent = 'Toucher pour explorer';
+    if (_crown.handle) _crown.handle.setInteractive(false);
+  }
+}
+function crownUnmount() {
+  if (!_crown) return;
+  try { if (_crown.handle) _crown.handle.dispose(); } catch (e) {}
+  if (_crown.placeholder) _crown.placeholder.remove();
+  _crown.el.remove();
+  _crown = null;
+  const banner = document.getElementById('dock-banner'); if (banner) banner.style.display = '';
+}
+// le bar : l'en-tête de la section des commandants à quai ; il envoie la caméra sur la façade
+function crownBarHeader() {
+  return `<div class="crown-bar" onclick="crownShowBar()"><b>🍸 Le bar de la Couronne</b><span>Sous l'enseigne dorée, au bord de l'anneau. Ceux qui sont à quai, les marchés, les rumeurs, les cartes au comptoir.</span><i>VOIR LE BAR ↑</i></div>`;
+}
+function crownShowBar() {
+  if (!_crown) return;
+  crownSetView('bar');
+  const sc = document.querySelector('#scr-dock .screen-scroll');
+  if (sc) sc.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
 function renderDockScreen() {
   if (!_activeDockMissionId) return;
   const mission = (G.tankerMissions || []).find(m => m.id === _activeDockMissionId);
@@ -43345,6 +43481,7 @@ function renderDockScreen() {
   const cargoLine = cargoParts.length > 0 ? cargoParts.join(' · ') : 'cale vide';
 
   document.getElementById('dock-name').textContent = dock.name || 'Dock';
+  if (typeof crownDockHero === 'function') crownDockHero(dock);   // PATCH_1510_CROWN
   document.getElementById('dock-subtitle').innerHTML = `<span style="color:${dock.accent || '#ffc864'}">${dock.typeLabel || 'Dock'}</span> · ${dock.sub || ''}${mpDockSystem(dock) ? ` · <span style="font-family:'SF Mono',monospace;color:var(--mut)">⌖ ${mpDockSystem(dock)}</span>` : ''}`;   // PIRATERIE_1210 : le système du dock, là où guettent les balises
   document.getElementById('dock-body').innerHTML = `
     <!-- Bannière ambiance -->
@@ -43382,6 +43519,7 @@ function renderDockScreen() {
     ${_renderDockStaySection(mission, dock)}
 
     <!-- MP : commandants à quai, marchés, rumeurs du comptoir -->
+    ${dock.crown ? crownBarHeader() : ''}
     ${_renderDockPlayersSection(mission, dock)}
 
     <!-- D3 : Autres convois amarrés -->
@@ -45256,7 +45394,7 @@ if (G.knownTargets && Array.isArray(G.tankerMissions)) {
 <!-- PERF_1310 — mesure des performances chez les joueurs + qualité 3D automatique (assets/perf.js) -->
 <script src="assets/perf.js?v=20261014-1540"></script>
 <!-- PATCH_1410_LIGNES — lignes PNJ à horaire sur les routes cachées (assets/lines.js) -->
-<script src="assets/lines.js?v=20261015-0900"></script>
+<script src="assets/lines.js?v=20261015-1000"></script>
 <!-- CLOUD — sauvegarde Supabase (source : sb-build/src/cloud.js) -->
 <script type="module" src="assets/cloud.js?v=20261014-1440"></script>
 <!-- MATCH3 — Match-3 V2 (assets/match3.js, source src/match3.js + src/m3core.js) : remplace startM3 -->
@@ -45272,6 +45410,8 @@ if (G.knownTargets && Array.isArray(G.tankerMissions)) {
 <script src="assets/fete_caserne.js?v=20261014-1440"></script>
 <script src="assets/radio.js?v=20261014-1440"></script>
 <script type="module" src="assets/ship3d.js?v=20261014-1440"></script>
+<!-- PATCH_1510_CROWN — The Drifting Crown en 3D (assets/station3d.js, sur le moteur partagé window.SB3D) -->
+<script type="module" src="assets/station3d.js?v=20261015-1000"></script>
 <!-- FORMATION3D — flotte déployée en orbite, vue de haut en formation (remplace la vue orbite) -->
 <script src="assets/formation3d.js?v=20261014-1440"></script>
 </body>
