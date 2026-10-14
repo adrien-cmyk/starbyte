@@ -263,6 +263,36 @@
     return best.length ? best : [portSys];
   }
 
+  /* ── E3 · balisage : mes balises posées sur les jalons connus d'une route de ligne ── */
+  // ratio = jalons balisés / jalons connus ; trajet −35 % et risque −60 % à pleine couverture ;
+  // à partir de la moitié, le convoi passe en « voie balisée » au registre (pavillon masqué, un passage sur deux échappe aux balises).
+  function balisage(portSys) {
+    const chain = knownChain(portSys).slice(0, -1);
+    const mine = new Set((G.probesPool || []).filter(p => p.tier === 'beacon' && p.state === 'deployed').map(p => sysOf(p.deployedSystem)));
+    const going = new Set((G.probeMissions || []).filter(m => m.tier === 'beacon' && m.status === 'in_transit').map(m => sysOf(m.targetCoords)));
+    const beaconed = chain.filter(k => mine.has(k));
+    const ratio = chain.length ? beaconed.length / chain.length : 0;
+    return { chain, beaconed, ratio, next: chain.find(k => !mine.has(k) && !going.has(k)) || null, pending: chain.filter(k => going.has(k)).length,
+      factor: 1 - 0.35 * ratio, riskMult: 1 - 0.6 * ratio, cover: ratio >= 0.5 };
+  }
+  // routes de ligne qu'une balise posée sur ce système balise
+  function routesBalisedBy(sys) {
+    return (G.routes || []).filter(r => r.portSys && knownChain(r.portSys).slice(0, -1).includes(sys));
+  }
+  // un convoi de joueur vu par une de mes balises sur une ligne : il emprunte peut-être « ma » route
+  function noteUser(sys, pseudo, at) {
+    if (!SYS.test(sys || '')) return;
+    const on = (network().bySys[sys] || []).filter(o => !o.isPort);
+    if (!on.length) return;
+    if (!G.lineUsers || typeof G.lineUsers !== 'object') G.lineUsers = {};
+    for (const { line } of on) {
+      const list = G.lineUsers[line.port] = (G.lineUsers[line.port] || []);
+      if (list.some(u => u.sys === sys && Math.abs(u.at - at) < 15 * 60000 && u.pseudo === (pseudo || null))) continue;
+      list.unshift({ pseudo: pseudo || null, at, sys });
+      G.lineUsers[line.port] = list.slice(0, 30);
+    }
+  }
+
   /* ── E2 · une carte de route devient une piste : elle place sur une ligne, plus ou moins près du lieu ── */
   function activateCard(card) {
     state();
@@ -377,7 +407,7 @@
 
   window.SBLines = {
     network, passages, capOf, convoyOf, tickBeacons, tickEcho, infoFor, knownSystems, discoverPort,
-    activateCard, ensureRoute, knownChain,
+    activateCard, ensureRoute, knownChain, balisage, routesBalisedBy, noteUser,
     WINDOW_MS, EPOCH,
     _reset() { _net = null; },
   };

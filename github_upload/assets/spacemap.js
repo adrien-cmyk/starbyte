@@ -1533,6 +1533,16 @@
     refresh(true);
   }
   async function recallBeaconFromMap(id) {
+    // 14/10 (E3) — une balise qui balise une route de ligne : la rappeler la rend plus lente et plus exposée
+    const bcn = myBeacons().find(b => b.id === id);
+    const lr = (bcn && window.SBLines) ? SBLines.routesBalisedBy(beaconSys(bcn)) : [];
+    if (lr.length && typeof sbConfirmWarning === 'function') {
+      const ok = await sbConfirmWarning('Retirer le balisage', `Cette balise balise ${lr.map(r => '<strong>' + esc(r.name) + '</strong>').join(', ')}. La rappeler rend la route plus lente et plus exposée, pour toi comme pour ceux qui l'empruntent. La route reste connue.`, 'Rappeler quand même');
+      if (!ok) return;
+      if (typeof recallBeacon === 'function') recallBeacon(id);
+      if (typeof saveGame === 'function') saveGame();
+      return refresh(true);
+    }
     // une balise qui porte des routes : rappeler la balise rompt ces routes (étape 3 : flottes orphelines, réputation)
     const used = (G.beaconRoutes || []).filter(r => r.a === id || r.b === id);
     if (used.length && typeof sbConfirmWarning === 'function') {
@@ -1675,8 +1685,23 @@
     if (!r) return '';
     const busy = (G.tankerMissions || []).filter(m => m.routeId === r.id && ['in_transit', 'docked', 'returning'].includes(m.status)).length;
     const n = Math.max(0, rt.path.length - 1);
+    // 14/10 (E3) — balisage : mes balises sur les jalons connus
+    const bal = window.SBLines ? SBLines.balisage(r.portSys) : null;
+    let balHtml = '';
+    if (bal && bal.chain.length) {
+      const pct = Math.round(bal.ratio * 100);
+      const dots = bal.chain.map(k => `<i class="${bal.beaconed.includes(k) ? 'on' : ''}" title="${esc(k)}"></i>`).join('');
+      balHtml = `<div class="sm-bal"><div class="h"><b>Balisage</b><span>${bal.beaconed.length}/${bal.chain.length} jalons</span></div><div class="d">${dots}</div>`
+        + `<div class="t">${pct ? `Trajet −${Math.round(35 * bal.ratio)} % · risque −${Math.round(60 * bal.ratio)} %${bal.cover ? ' · voie balisée : pavillon masqué aux balises des autres' : ''}` : 'Non balisée : trajet nominal, exposée'}</div></div>`;
+      if (bal.next) balHtml += _sigBtn('#b48cff', 'Baliser le jalon suivant', `SBMap.beacon('${esc(bal.next)}')`, `${esc(bal.next)} · plus rapide, plus sûre, et tu vois qui l'emprunte`, true);
+      else if (bal.pending) balHtml += _sigOff(`${bal.pending} balise${bal.pending > 1 ? 's' : ''} en route`);
+    }
+    const users = ((G.lineUsers || {})[r.portSys] || []).slice(0, 4);
+    const ago = (t) => { const m = Math.max(1, Math.round((Date.now() - t) / 60000)); return m < 60 ? `il y a ${m} min` : m < 1440 ? `il y a ${Math.round(m / 60)} h` : `il y a ${Math.round(m / 1440)} j`; };
+    const usersHtml = users.length ? `<div class="sm-users"><b>Vus sur la ligne</b>${users.map(u => `<span>${esc(u.pseudo || 'pavillon masqué')} · ${esc(u.sys)} · ${ago(u.at)}</span>`).join('')}</div>` : '';
     return `<div class="sm-panel"><div class="sm-ptitle" style="color:#ffc864">${esc(r.name)}</div>`
       + `<div class="sm-psub">Vers ${esc((r.dock && r.dock.name) || 'un lieu caché')} · ${n} tronçon${n > 1 ? 's' : ''} connu${n > 1 ? 's' : ''}</div>`
+      + balHtml + usersHtml
       + _sigBtn('#ffc864', 'Envoyer un tanker', `openTankerComposeForRoute('${esc(r.id)}')`, busy ? `${busy} tanker${busy > 1 ? 's' : ''} sur cette route` : 'Il suit la ligne · les balises posées dessus le voient passer', true)
       + _sigBtn(COL.cyan, 'Voir le lieu', `SBMap.select('system','${esc(r.portSys)}')`, '', true)
       + `</div>`;
@@ -2013,6 +2038,16 @@
       .sm-rt i{width:14px;height:3px;border-radius:2px;flex:none}
       .sm-rt b{font-weight:600;letter-spacing:.04em}
       .sm-rt span{margin-left:auto;font:500 10px/1 'JetBrains Mono',monospace;color:rgba(190,205,215,.6)}
+      .sm-bal{margin-top:9px;padding:8px 10px;border-radius:8px;border:1px solid rgba(180,140,255,.28);background:rgba(180,140,255,.05)}
+      .sm-bal .h{display:flex;justify-content:space-between;align-items:baseline}
+      .sm-bal .h b{font:600 10px/1.2 'Space Grotesk',system-ui,sans-serif;letter-spacing:.12em;text-transform:uppercase;color:#cdb4ff}
+      .sm-bal .h span{font:500 11px/1 'JetBrains Mono',monospace;color:rgba(220,228,235,.8)}
+      .sm-bal .d{display:flex;gap:5px;margin:7px 0 6px}
+      .sm-bal .d i{flex:1;height:4px;border-radius:2px;background:rgba(180,140,255,.18)}
+      .sm-bal .d i.on{background:#b48cff;box-shadow:0 0 6px rgba(180,140,255,.6)}
+      .sm-bal .t{font-size:10.5px;line-height:1.4;color:rgba(220,228,235,.75)}
+      .sm-users{display:flex;flex-direction:column;gap:3px;margin-top:8px;font-size:11px;color:rgba(220,228,235,.8)}
+      .sm-users b{font:600 10px/1.2 'Space Grotesk',system-ui,sans-serif;letter-spacing:.12em;text-transform:uppercase;color:#ff9a6a;margin-bottom:2px}
       .sm-lanes{display:flex;flex-direction:column;gap:5px;margin-top:8px}
       .sm-lane{display:flex;flex-direction:column;gap:2px;padding:7px 9px;border-radius:7px;border:1px solid rgba(255,200,100,.22);background:rgba(255,200,100,.04)}
       .sm-lane b{font:600 10px/1.2 'Space Grotesk',system-ui,sans-serif;letter-spacing:.12em;text-transform:uppercase;color:#ffd08a}

@@ -8588,7 +8588,8 @@ var EXTRA_SAVE_KEYS = [
   'botState',  // BOTS_1110 — stocks des commandants automates après pillage
   'mpGrowthMilestone',
   'systemTags', 'mapSeen', 'beaconRoutes', 'spottedLegs',
-  'lineObs', 'trafficEchoes', 'hiddenPorts', '_linesNet', '_linesRoutes',   // PATCH_1410_PISTES   // PATCH_1410_LIGNES — lignes observées, échos de l'antenne, lieux cachés découverts   // PATCH_1310_ROUTES2 — tronçons relevés par mes balises   // + routes entre balises (13/10)   // PATCH_1310_CARTE — marques de systèmes + systèmes déjà vus (survivent aux rapports supprimés)  // RUMORS_1110 — dernier palier de niveau annoncé au comptoir
+  'lineObs', 'trafficEchoes', 'hiddenPorts', '_linesNet', '_linesRoutes',   // PATCH_1410_PISTES
+  'lineUsers',   // PATCH_1410_BALISAGE — convois de joueurs vus sur mes lignes   // PATCH_1410_LIGNES — lignes observées, échos de l'antenne, lieux cachés découverts   // PATCH_1310_ROUTES2 — tronçons relevés par mes balises   // + routes entre balises (13/10)   // PATCH_1310_CARTE — marques de systèmes + systèmes déjà vus (survivent aux rapports supprimés)  // RUMORS_1110 — dernier palier de niveau annoncé au comptoir
   'mpDiplo',   // AMBASSADES_1210 — ambassades vues et dernière image des pactes
   'mpNeighbors',   // VOISINS_1310 — voisins déjà signalés
   'tuto',          // TUTO_1410 — premiers pas (étape, vu, terminé)
@@ -10294,7 +10295,7 @@ function _mpConvoyLeg(m, leg) {
     const arriveAt = leg === 'out' ? m.arrivalAt : m.returnArrivalAt;
     const startAt = leg === 'out' ? m.departedAt : (m.returnDepartedAt || m.cancelledAt || Date.now());
     return { missionId: m.id, leg, kind: 'route', to: mpDockSystem(m.dock), dock: m.dock && m.dock.name, elapsedMs: Date.now() - startAt,
-      routeType: route && route.moodKey === 'imperiale' ? 'beacon' : 'direct', knowledge: route ? (route.knowledgeLevel || 0) : 0,
+      routeType: (route && route.moodKey === 'imperiale') || m.baliseCover ? 'beacon' : 'direct', knowledge: route ? (route.knowledgeLevel || 0) : 0,   // PATCH_1410_BALISAGE
       protection: leg === 'back' && m.protection ? (m.protection.reduction || 0) : 0, tier: m.tier || 1, tanker: m.tankerName,
       cargo: res3(m.cargo), durationMs: arriveAt - Date.now(), arriveAt };
   }
@@ -10573,6 +10574,7 @@ async function mpIngestPiracy(d, meId) {
         mp: { convoyId: s.convoy_id, system: s.system, pseudo: s.pseudo || null, leg: s.leg, dock: s.dock_name, routeType: s.route_type, spied: !!s.spied } };
       G.beaconReports.push(r);
       dirty = true;
+      if (window.SBLines && SBLines.noteUser) SBLines.noteUser(s.system, s.pseudo || null, Date.now());   // PATCH_1410_BALISAGE
       // PATCH_1310_ROUTES2 — balise sur le tracé : le cap du convoi (système suivant) est relevé, et entre sur la carte
       const nx = /^[A-Z]-[A-Z]-\d{4}$/.test(String(s.next_system || '')) ? s.next_system : null;
       if (nx) {
@@ -40094,6 +40096,11 @@ function launchTankerOnRoute(routeId, tierKey, cargo) {
     const ch = SBLines.knownChain(route.portSys);
     mission.portSys = route.portSys;
     mission.via = ch.slice(0, -1).slice(0, 24);
+    // PATCH_1410_BALISAGE — route balisée : plus rapide, plus sûre, et masquée au registre dès la moitié
+    const bal = SBLines.balisage(route.portSys);
+    mission.balisage = bal.ratio;
+    mission.baliseCover = bal.cover;
+    mission.arrivalAt = mission.departedAt + (mission.arrivalAt - mission.departedAt) * bal.factor;
   }
   G.tankerMissions.push(mission);
 
@@ -42645,6 +42652,7 @@ function _completeRouteRunReturn(missionId) {
     riskPct = Math.max(0, riskPct * (1 - mission.protection.reduction));
     protectionApplied = { ...mission.protection, riskBefore: before, riskAfter: riskPct };
   }
+  if (mission.balisage) riskPct = Math.max(0, riskPct * (1 - 0.6 * mission.balisage));   // PATCH_1410_BALISAGE
   const isLost = Math.random() * 100 < riskPct;
 
   // ─── Tanker vide → route vexée (option A canon) ───
@@ -45178,7 +45186,7 @@ if (G.knownTargets && Array.isArray(G.tankerMissions)) {
 <!-- PERF_1310 — mesure des performances chez les joueurs + qualité 3D automatique (assets/perf.js) -->
 <script src="assets/perf.js?v=20261014-1540"></script>
 <!-- PATCH_1410_LIGNES — lignes PNJ à horaire sur les routes cachées (assets/lines.js) -->
-<script src="assets/lines.js?v=20261014-2300"></script>
+<script src="assets/lines.js?v=20261014-2340"></script>
 <!-- CLOUD — sauvegarde Supabase (source : sb-build/src/cloud.js) -->
 <script type="module" src="assets/cloud.js?v=20261014-1440"></script>
 <!-- MATCH3 — Match-3 V2 (assets/match3.js, source src/match3.js + src/m3core.js) : remplace startM3 -->
@@ -45186,7 +45194,7 @@ if (G.knownTargets && Array.isArray(G.tankerMissions)) {
 <!-- HOME V2 — « monde d'abord » : planète plein écran, ressources en ligne, Flotte / Défense / Prospection (assets/home.js) -->
 <script type="module" src="assets/home.js?v=20261014-1440"></script>
 <!-- SPACE MAP v0 — carte du Centre de prospection (assets/spacemap.js, source src/spacemap.js) -->
-<script src="assets/spacemap.js?v=20261014-2300"></script>
+<script src="assets/spacemap.js?v=20261014-2340"></script>
 <!-- SPACE MAP niveau B — diorama 3D d'un système (assets/system3d.js, source src/system3d.js) -->
 <script type="module" src="assets/system3d.js?v=20261014-1440"></script>
 <!-- SHIP3D — fiches 3D : cuirassé KV-01, frégate SR-01, tanker TK-07, chantier orbital OS-01 (assets/ship3d.js, sur le moteur partagé window.SB3D) -->
