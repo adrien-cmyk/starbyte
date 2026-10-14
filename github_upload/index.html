@@ -8588,7 +8588,7 @@ var EXTRA_SAVE_KEYS = [
   'botState',  // BOTS_1110 — stocks des commandants automates après pillage
   'mpGrowthMilestone',
   'systemTags', 'mapSeen', 'beaconRoutes', 'spottedLegs',
-  'lineObs', 'trafficEchoes', 'hiddenPorts', '_linesNet',   // PATCH_1410_LIGNES — lignes observées, échos de l'antenne, lieux cachés découverts   // PATCH_1310_ROUTES2 — tronçons relevés par mes balises   // + routes entre balises (13/10)   // PATCH_1310_CARTE — marques de systèmes + systèmes déjà vus (survivent aux rapports supprimés)  // RUMORS_1110 — dernier palier de niveau annoncé au comptoir
+  'lineObs', 'trafficEchoes', 'hiddenPorts', '_linesNet', '_linesRoutes',   // PATCH_1410_PISTES   // PATCH_1410_LIGNES — lignes observées, échos de l'antenne, lieux cachés découverts   // PATCH_1310_ROUTES2 — tronçons relevés par mes balises   // + routes entre balises (13/10)   // PATCH_1310_CARTE — marques de systèmes + systèmes déjà vus (survivent aux rapports supprimés)  // RUMORS_1110 — dernier palier de niveau annoncé au comptoir
   'mpDiplo',   // AMBASSADES_1210 — ambassades vues et dernière image des pactes
   'mpNeighbors',   // VOISINS_1310 — voisins déjà signalés
   'tuto',          // TUTO_1410 — premiers pas (étape, vu, terminé)
@@ -39036,6 +39036,25 @@ function activateRouteCard(cardId) {
   if (idx === -1) return null;
   const card = G.routeCards[idx];
 
+  // PATCH_1410_PISTES — une carte ne crée plus une route d'un coup : elle met sur une piste (une ligne PNJ),
+  // plus ou moins près du lieu caché selon sa qualité. Il reste à remonter le reste avec des balises.
+  if (window.SBLines && typeof SBLines.activateCard === 'function') {
+    const res = SBLines.activateCard(card);
+    if (res) {
+      G.routeCards.splice(idx, 1);
+      if (res.fake) {
+        toast(`✗ « ${card.name} » : des coordonnées qui mènent nulle part. Carte perdue.`);
+      } else {
+        const where = { clean: 'à un tronçon du lieu', holed: 'sur la ligne, mais il manque des morceaux', dead: 'au tout début d\'une ligne', singing: 'droit sur le lieu' }[res.kind] || 'sur une ligne';
+        toast(`🗺 « ${card.name} » : une piste ${where} · ${res.sys} · pose une balise pour la suivre`, () => openSystemOnMap(res.sys));
+        setTimeout(() => { try { openSystemOnMap(res.sys); } catch (e) {} }, 450);
+      }
+      if (typeof saveGame === 'function') saveGame();
+      if (typeof refreshCurrentScreen === 'function') refreshCurrentScreen();
+      return null;
+    }
+  }
+
   // Les cartes "fake" (qualité quasi-nulle) ont 70% de chance d'être réellement bidon :
   // dans ce cas, on consomme la carte mais on ne crée PAS de route.
   // (Le joueur découvre que Torek lui a vendu du vent.)
@@ -40070,6 +40089,12 @@ function launchTankerOnRoute(routeId, tierKey, cargo) {
     targetCoords: route.destinationHint,
     targetLabel: dock.name,
   };
+  // PATCH_1410_PISTES — route d'une ligne remontée : le tanker suit les jalons connus (vus par les balises posées dessus)
+  if (route.portSys && window.SBLines) {
+    const ch = SBLines.knownChain(route.portSys);
+    mission.portSys = route.portSys;
+    mission.via = ch.slice(0, -1).slice(0, 24);
+  }
   G.tankerMissions.push(mission);
 
   // Marquer la route comme en cours d'utilisation
@@ -45153,7 +45178,7 @@ if (G.knownTargets && Array.isArray(G.tankerMissions)) {
 <!-- PERF_1310 — mesure des performances chez les joueurs + qualité 3D automatique (assets/perf.js) -->
 <script src="assets/perf.js?v=20261014-1540"></script>
 <!-- PATCH_1410_LIGNES — lignes PNJ à horaire sur les routes cachées (assets/lines.js) -->
-<script src="assets/lines.js?v=20261014-2230"></script>
+<script src="assets/lines.js?v=20261014-2300"></script>
 <!-- CLOUD — sauvegarde Supabase (source : sb-build/src/cloud.js) -->
 <script type="module" src="assets/cloud.js?v=20261014-1440"></script>
 <!-- MATCH3 — Match-3 V2 (assets/match3.js, source src/match3.js + src/m3core.js) : remplace startM3 -->
@@ -45161,7 +45186,7 @@ if (G.knownTargets && Array.isArray(G.tankerMissions)) {
 <!-- HOME V2 — « monde d'abord » : planète plein écran, ressources en ligne, Flotte / Défense / Prospection (assets/home.js) -->
 <script type="module" src="assets/home.js?v=20261014-1440"></script>
 <!-- SPACE MAP v0 — carte du Centre de prospection (assets/spacemap.js, source src/spacemap.js) -->
-<script src="assets/spacemap.js?v=20261014-1540"></script>
+<script src="assets/spacemap.js?v=20261014-2300"></script>
 <!-- SPACE MAP niveau B — diorama 3D d'un système (assets/system3d.js, source src/system3d.js) -->
 <script type="module" src="assets/system3d.js?v=20261014-1440"></script>
 <!-- SHIP3D — fiches 3D : cuirassé KV-01, frégate SR-01, tanker TK-07, chantier orbital OS-01 (assets/ship3d.js, sur le moteur partagé window.SB3D) -->

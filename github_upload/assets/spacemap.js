@@ -306,6 +306,16 @@
     // ce que les lignes PNJ disent de chaque système (couloir, écho, lieu caché, convois observés)
     if (window.SBLines) for (const sx of Object.values(systems)) { try { sx.li = SBLines.infoFor(sx.key); } catch (e) { sx.li = null; } }
 
+    // 14/10 (E2) — routes des lignes remontées : du plus loin connu jusqu'au lieu caché, tracées comme une route
+    if (window.SBLines) for (const r of (G.routes || [])) {
+      if (!r.portSys) continue;
+      const chain = SBLines.knownChain(r.portSys);
+      const cells = chain.map(k => cell['sys:' + k]).filter(i => i !== undefined);
+      if (cells.length < 2) continue;
+      routes.push({ r: { id: r.id, name: r.name, color: '#ffc864', avoid: [] }, line: true, routeId: r.id, portSys: r.portSys, broken: false, path: cells,
+        a: { ci: cells[0], key: chain[0] }, b: { ci: cells[cells.length - 1], key: r.portSys } });
+    }
+
     // Missions en vol
     const flights = [];
     for (const m of (G.probeMissions || [])) {
@@ -318,7 +328,7 @@
     }
     for (const m of (G.tankerMissions || [])) {
       if (!(m.status === 'in_transit' || m.status === 'returning' || m.status === 'exploring')) continue;
-      const tc = String(m.targetCoords || '');
+      const tc = String(m.portSys || m.targetCoords || '');   // 14/10 (E2) : un tanker vers le dock d'une ligne vise le système du lieu
       const sysKey = tc.split('/')[0].split('-').slice(0, 3).join('-');   // cible, épave ou planète (A-N-2000-04)
       if (!/^[A-Z]-[A-Z]-\d{4}$/.test(sysKey)) continue;
       const at = cell['tgt:' + tc] !== undefined ? cell['tgt:' + tc] : cell['sys:' + sysKey];
@@ -328,6 +338,10 @@
       // 13/10 — un tanker sur ma route suit son tracé (le trajet maison → balise de départ reste à découvert)
       let path = null;
       if (m.ownRouteId) { const pl = planFrom(partial, sysKey); const r = pl && pl.routes.find(x => x.id === m.ownRouteId); if (r) path = back ? r.cells.slice().reverse() : r.cells; }
+      if (m.portSys && window.SBLines) {   // le tanker gagne le début connu de la ligne, puis la suit jusqu'au lieu
+        const cells = [0].concat(SBLines.knownChain(m.portSys).map(k => cell['sys:' + k]).filter(i => i !== undefined));
+        if (cells.length > 2) path = back ? cells.slice().reverse() : cells;
+      }
       flights.push({ kind: 'tanker', id: m.id, label: m.tankerName || 'Tanker', from: back ? at : 0, to: back ? 0 : at, toCk: back ? null : toCk, path,
         departedAt: back ? (m.returnDepartedAt || m.arrivalAt || m.departedAt) : m.departedAt, arrivalAt: back ? (m.returnArrivalAt || m.arrivalAt) : m.arrivalAt, target: tc, back });
     }
@@ -1553,13 +1567,18 @@
     const ago = (t) => { const m = Math.max(1, Math.round((Date.now() - t) / 60000)); return m < 60 ? `il y a ${m} min` : m < 1440 ? `il y a ${Math.round(m / 60)} h` : `il y a ${Math.round(m / 1440)} j`; };
     const hasBeacon = myBeacons().some(b => beaconSys(b) === sysKey);
     const rows = [];
-    if (li.port) rows.push(`<div class="sm-lane port"><b>Lieu caché</b><span>Une ligne y mène. Bientôt : y envoyer un tanker par la route découverte.</span></div>`);
+    if (li.port) {
+      const r = li.route;
+      rows.push(`<div class="sm-lane port"><b>Lieu caché</b><span>${r ? `Route connue : ${esc(r.name)}. Tes tankers peuvent s'y amarrer : dock, bar, marchés.` : 'Une ligne y mène.'}</span></div>`);
+      if (r) rows.push(_sigBtn('#ffc864', 'Envoyer un tanker', `openTankerComposeForRoute('${esc(r.id)}')`, 'Il suit la ligne jusqu\'au dock', true) + _sigBtn('#ffc864', 'Voir la route', `SBMap.selectRoute('${esc(r.id)}')`, '', true));
+    }
+    if (li.fromCard && !li.obs.length && !li.port) rows.push(`<div class="sm-lane"><b>Piste de « ${esc(li.fromCard)} »</b><span>La carte mène ici. Pose une balise pour voir passer les convois et relever leur cap.</span></div>`);
     for (const o of li.obs) {
       rows.push(`<div class="sm-lane"><b>${esc(o.label)}</b><span>vu ${o.n} fois${o.periodMin ? ` · repasse toutes les ~${o.periodMin} min` : ''} · dernier ${ago(o.last)}</span></div>`);
     }
     if (!li.obs.length && !li.port) {
       if (hasBeacon) rows.push(`<div class="sm-lane"><b>Couloir sous surveillance</b><span>Ta balise attend le prochain passage.</span></div>`);
-      else if (li.echo) rows.push(`<div class="sm-lane"><b>Trafic capté par ton antenne</b><span>Pose une balise ici pour voir qui passe, et vers où.</span></div>`);
+      else if (li.echo && !li.fromCard) rows.push(`<div class="sm-lane"><b>Trafic capté par ton antenne</b><span>Pose une balise ici pour voir qui passe, et vers où.</span></div>`);
       else if (li.lane) rows.push(`<div class="sm-lane"><b>Couloir de passage</b><span>Du trafic régulier traverse ce système. Une balise ici verrait qui passe.</span></div>`);
     }
     return rows.length ? `<div class="sm-lanes">${rows.join('')}</div>` : '';
@@ -1636,6 +1655,7 @@
   function routeCard(state, id) {
     const rt = (state.routes || []).find(x => x.r.id === id);
     if (!rt) return null;
+    if (rt.line) return lineRouteCard(rt);
     const r = rt.r, n = Math.max(0, rt.path.length - 1);
     const sub = rt.broken
       ? `<span style="color:#ff8a8a">${(!rt.a || !rt.b) ? 'Rompue : une balise a été rappelée' : 'Tracé impossible : trop de systèmes évités'}</span>`
@@ -1647,6 +1667,18 @@
       + `<div class="sm-tags">${tool('Éviter un système', 'routeAvoid')}${tool('Couleur', 'routeColor')}</div>`
       + `<div class="sm-tags">${tool('Renommer', 'routeRename')}${tool('Supprimer', 'routeDelete')}</div>`
       + routeTravelHtml(rt, state)
+      + `</div>`;
+  }
+  // 14/10 (E2) — route d'une ligne remontée jusqu'à un lieu caché
+  function lineRouteCard(rt) {
+    const r = (G.routes || []).find(x => x.id === rt.routeId);
+    if (!r) return '';
+    const busy = (G.tankerMissions || []).filter(m => m.routeId === r.id && ['in_transit', 'docked', 'returning'].includes(m.status)).length;
+    const n = Math.max(0, rt.path.length - 1);
+    return `<div class="sm-panel"><div class="sm-ptitle" style="color:#ffc864">${esc(r.name)}</div>`
+      + `<div class="sm-psub">Vers ${esc((r.dock && r.dock.name) || 'un lieu caché')} · ${n} tronçon${n > 1 ? 's' : ''} connu${n > 1 ? 's' : ''}</div>`
+      + _sigBtn('#ffc864', 'Envoyer un tanker', `openTankerComposeForRoute('${esc(r.id)}')`, busy ? `${busy} tanker${busy > 1 ? 's' : ''} sur cette route` : 'Il suit la ligne · les balises posées dessus le voient passer', true)
+      + _sigBtn(COL.cyan, 'Voir le lieu', `SBMap.select('system','${esc(r.portSys)}')`, '', true)
       + `</div>`;
   }
   // 13/10 — emprunter la route : un tanker part vers un monde connu au bout de la route

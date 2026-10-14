@@ -136,6 +136,7 @@
       G.spottedLegs = G.spottedLegs.filter(l => !l.npc || n.byId[l.lineId]);
       G._linesNet = 3;
     }
+    if (!G._linesRoutes) { G._linesRoutes = 1; for (const k of Object.keys(G.hiddenPorts)) { try { ensureRoute(k); } catch (e) {} } }
   }
   function myHome() { try { return `${MY_ADDRESS.cluster}-${MY_ADDRESS.sector}-${MY_ADDRESS.system}`; } catch (e) { return null; } }
 
@@ -208,7 +209,92 @@
     G.hiddenPorts[portSys] = { dockId: p.dockId, name: p.name, type: p.type, typeLabel: p.typeLabel, at: now };
     if (!G.mapSeen) G.mapSeen = {};
     G.mapSeen[portSys] = now;
-    if (typeof toast === 'function') toast(`⚓ Lieu caché découvert : ${p.name} (${portSys}) · la ligne y mène`, () => { if (typeof openSystemOnMap === 'function') openSystemOnMap(portSys); });
+    ensureRoute(portSys);
+    if (typeof toast === 'function') toast(`⚓ Lieu caché découvert : ${p.name} (${portSys}) · tes tankers peuvent désormais s'y rendre`, () => { if (typeof openSystemOnMap === 'function') openSystemOnMap(portSys); });
+  }
+
+  /* ── E2 · un lieu découvert = une route connue : elle entre au Commerce, les tankers suivent la ligne ── */
+  const MOOD_BY_KIND = { marchand: 'grasse', contrebande: 'noire', recup: 'nerveuse', arme: 'imperiale', pelerins: 'morte' };
+  const NOUN_BY_MOOD = { nerveuse: 'la Veine', grasse: 'la Saigne', morte: 'le Linceul', noire: 'la Voie Noire', imperiale: 'la Vieille Voie' };
+  const cap1 = (x) => x.charAt(0).toUpperCase() + x.slice(1);
+  function ensureRoute(portSys) {
+    const p = network().ports[portSys];
+    if (!p) return null;
+    if (!Array.isArray(G.routes)) G.routes = [];
+    let r = G.routes.find(x => x.portSys === portSys);
+    if (r) return r;
+    let dock = null;
+    try { dock = generateDockForRoute({ destinationHint: p.hint }); } catch (e) {}
+    if (!dock) return null;
+    if (!G.universeDocks) G.universeDocks = {};
+    if (!G.universeDocks[dock.id]) G.universeDocks[dock.id] = dock;
+    dock = G.universeDocks[dock.id];
+    const line = network().byId[p.lines[0]];
+    const moodKey = MOOD_BY_KIND[line && line.kind.key] || 'grasse';
+    const mood = (typeof ROUTE_MOODS !== 'undefined' && ROUTE_MOODS[moodKey]) || { stabilityRange: [60, 80], label: '' };
+    const [a0, a1] = mood.stabilityRange || [60, 80];
+    r = {
+      id: 'rt-ln-' + p.dockId, name: cap1(`${NOUN_BY_MOOD[moodKey] || 'la Route'} de ${dock.name}`), moodKey,
+      originHint: 'Ligne remontée balise après balise', destinationHint: p.hint,
+      quality: 85, stability: Math.round((a0 + a1) / 2), knowledgeLevel: 0, passages: 0, lost: 0, delayed: 0,
+      discoveredAt: Date.now(), lastUsedAt: null, status: 'active', dockId: dock.id, dock,
+      sourceCard: { kind: 'line', source: 'Ligne PNJ remontée', name: p.name },
+      portSys, lineDiscovered: true,
+    };
+    G.routes.push(r);
+    return r;
+  }
+  // tronçons connus d'une route de ligne, du plus loin connu jusqu'au lieu (pour la carte et pour le registre)
+  function knownChain(portSys) {
+    state();
+    const p = network().ports[portSys];
+    if (!p) return [];
+    const known = new Set();
+    for (const l of G.spottedLegs) if (l.npc) { known.add(l.from); known.add(l.to); }
+    for (const k of Object.keys(G.trafficEchoes)) known.add(k);
+    let best = [];
+    for (const id of p.lines) {
+      const line = network().byId[id];
+      let start = line.chain.length;
+      for (let i = line.chain.length - 1; i >= 0; i--) { if (known.has(line.chain[i])) start = i; else break; }
+      const chain = line.chain.slice(start).concat([portSys]);
+      if (chain.length > best.length) best = chain;
+    }
+    return best.length ? best : [portSys];
+  }
+
+  /* ── E2 · une carte de route devient une piste : elle place sur une ligne, plus ou moins près du lieu ── */
+  function activateCard(card) {
+    state();
+    const home = myHome() || '';
+    const sec = home.split('-')[1];
+    const lines = network().lines;
+    const pool = lines.filter(l => l.sector === sec);
+    const list = pool.length ? pool : lines;
+    if (!list.length || !card) return null;
+    const line = list[h32('carte:' + card.id) % list.length];
+    const n = line.chain.length, now = Date.now();
+    const kind = card.kind || 'clean';
+    if (kind === 'fake' && h32('fake:' + card.id) % 10 < 7) return { fake: true };
+    // propre : à 1 tronçon du lieu · trouée : à 3 tronçons, un trou au milieu · morte : au tout début · chantante : le lieu lui-même
+    let at, legs = [];
+    if (kind === 'singing') { at = n - 1; legs = [[n - 1, -1]]; }
+    else if (kind === 'clean') { at = n - 1; legs = [[n - 2, n - 1]]; }
+    else if (kind === 'holed') { at = Math.max(0, n - 3); legs = [[Math.max(0, n - 4), Math.max(0, n - 3)]]; }
+    else { at = 0; legs = []; }
+    const sys = line.chain[at];
+    for (const [i, j] of legs) {
+      const from = line.chain[i], to = j < 0 ? line.port : line.chain[j];
+      if (!G.spottedLegs.some(l => l.npc && l.from === from && l.to === to))
+        G.spottedLegs.unshift({ id: `cd-${card.id}-${from}`, lineId: line.id, from, to, pseudo: 'Carte : ' + (card.name || 'carte de route'), at: now, npc: true, cargo: 'lourd' });
+    }
+    G.trafficEchoes[sys] = { lineId: line.id, at: now, fromCard: card.name || null };
+    if (!G.mapSeen) G.mapSeen = {};
+    G.mapSeen[sys] = now;
+    if (kind === 'singing') discoverPort(line.port, now);
+    if (typeof saveGame === 'function') saveGame();
+    if (window.SBMap && SBMap.render) { try { SBMap.render(); } catch (e) {} }
+    return { sys, lineId: line.id, kind };
   }
 
   /* ── l'antenne capte un écho de trafic (un jalon où poser une balise) ── */
@@ -278,7 +364,8 @@
         caps: legsOut.filter(l => l.lineId === line.id).map(l => l.to) });
     }
     if (!knowsLane && !echo && !port && !obs.length) return null;
-    return { lane: knowsLane, echo: !!echo, port, obs, legsIn: legsIn.length, legsOut: legsOut.length };
+    const route = port ? (G.routes || []).find(r => r.portSys === sys) || null : null;
+    return { lane: knowsLane, echo: !!echo, fromCard: echo && echo.fromCard, port, route, obs, legsIn: legsIn.length, legsOut: legsOut.length };
   }
   function knownSystems() {
     if (typeof G === 'undefined' || !G) return [];
@@ -290,6 +377,7 @@
 
   window.SBLines = {
     network, passages, capOf, convoyOf, tickBeacons, tickEcho, infoFor, knownSystems, discoverPort,
+    activateCard, ensureRoute, knownChain,
     WINDOW_MS, EPOCH,
     _reset() { _net = null; },
   };
