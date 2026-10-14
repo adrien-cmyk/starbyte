@@ -37408,9 +37408,9 @@ function renderDefenseUnitDetail(key) {
 
 // ─── SHIP3D : fiche vaisseau en vue héros (3D plein écran derrière la fiche, comme le soldat lourd) ───
 const UNIT_SHIP3D_MODELS = {
-  cuirasse: { url: 'assets/3d/sb_kv01.glb?v=20261014-1300', code: 'KV-01 Kerath' },
-  fregate:  { url: 'assets/3d/sb_sr01.glb?v=20261014-1300', code: 'SR-01 Sentinelle', profile: 'sr01' },
-  tanker:   { url: 'assets/3d/sb_tk07.glb?v=20261014-1300', code: 'TK-07 Tanker', profile: 'tk07' },
+  cuirasse: { url: 'assets/3d/sb_kv01.glb?v=20261014-1430', code: 'KV-01 Kerath' },
+  fregate:  { url: 'assets/3d/sb_sr01.glb?v=20261014-1430', code: 'SR-01 Sentinelle', profile: 'sr01' },
+  tanker:   { url: 'assets/3d/sb_tk07.glb?v=20261014-1430', code: 'TK-07 Tanker', profile: 'tk07' },
 };
 let unitShip3D = null;   // { key, handle }
 function mountUnitShip3D(key, inService) {
@@ -37499,9 +37499,9 @@ function hasShipyardBuilt() {
   return !!(typeof G !== 'undefined' && G.planet && G.planet.parcels && G.planet.parcels.some(p => p && p.building === 'shipyard' && p.state === 'built'));
 }
 const DOCK_MODELS = {
-  tanker:   { url: 'assets/3d/sb_tk07_lod.glb?v=20261014-1300', engine: [1.0, 0.7, 0.4] },
-  fregate:  { url: 'assets/3d/sb_sr01_lod.glb?v=20261014-1300', engine: [0.5, 0.78, 1.0] },
-  cuirasse: { url: 'assets/3d/sb_kv01_lod.glb?v=20261014-1300', engine: [0.5, 0.78, 1.0] },
+  tanker:   { url: 'assets/3d/sb_tk07_lod.glb?v=20261014-1430', engine: [1.0, 0.7, 0.4] },
+  fregate:  { url: 'assets/3d/sb_sr01_lod.glb?v=20261014-1430', engine: [0.5, 0.78, 1.0] },
+  cuirasse: { url: 'assets/3d/sb_kv01_lod.glb?v=20261014-1430', engine: [0.5, 0.78, 1.0] },
 };
 function fleetStationedCount(k) {
   const c = (G.fleet && G.fleet.stationed && G.fleet.stationed[k]) || {};
@@ -37593,7 +37593,7 @@ function unmountFleetStation3D() {
 })();
 
 // ─── SHIP3D : fiche bâtiment en vue héros (chantier orbital OS-01) ───
-const BUILDING_SHIP3D = { shipyard: { url: 'assets/3d/sb_os01.glb?v=20261014-1300', code: 'OS-01 Chantier orbital', profile: 'os01' } };
+const BUILDING_SHIP3D = { shipyard: { url: 'assets/3d/sb_os01.glb?v=20261014-1430', code: 'OS-01 Chantier orbital', profile: 'os01' } };
 let bdShip3D = null;   // { key, handle }
 function mountBuildingShip3D(key, tier) {
   const scr = document.getElementById('scr-building-detail');
@@ -44758,9 +44758,9 @@ var BUILDING_GUIDE = {
     how: 'Elle ajoute +200 de défense et ouvre l\'écran <b>Défense</b>, où tu recrutes l\'infanterie. Les soldats repoussent les débarquements ennemis.',
     unlocks: ['L\'écran Défense planétaire et les gardes', 'Au tier 2 (Centre tactique) : les soldats lourds', 'Des soldats à embarquer pour tes raids'],
     tip: 'Les autres commandants peuvent te raider : une garnison au sol limite le pillage et protège tes bâtiments.' },
-  shipyard: { lead: 'Ta porte vers l\'espace : on y assemble sondes, tankers et vaisseaux de guerre.',
-    how: 'Il ouvre l\'orbite : la station OS-01 et ta flotte à quai. Tu y construis tes vaisseaux et tes sondes, puis tu composes des flottes.',
-    unlocks: ['Sondes d\'exploration (trouver des systèmes, des veines, des commandants)', 'Tankers : commerce, docks, ambassades chez les autres joueurs', 'Frégates et cuirassés : raids, embuscades, défense orbitale'],
+  shipyard: { lead: 'Ta porte vers l\'espace : on y assemble tankers et vaisseaux de guerre.',
+    how: 'Il ouvre l\'orbite : la station OS-01 et ta flotte à quai. Tu y construis tes vaisseaux, puis tu composes des flottes. (Tes sondes, elles, se construisent au centre de prospection.)',
+    unlocks: ['Tankers : exploiter les veines lointaines, rejoindre les docks francs, ouvrir des ambassades', 'Frégates et cuirassés : raids, embuscades, défense orbitale', 'Aller chercher ce que tes sondes ont trouvé'],
     tip: 'Une centrale d\'abord : le chantier coûte de l\'énergie, et ses vaisseaux aussi.' },
   turret: { lead: 'La forteresse : le bunker est la pierre angulaire de ta défense.',
     how: 'Il ajoute +1500 de défense et débloque les tourelles et les soldats lourds dans l\'écran Défense.',
@@ -44811,7 +44811,11 @@ function openBuildingSheet(key, idx) {
     ${g.tip ? `<div class="sec tip">💡 ${g.tip}</div>` : ''}
     <div class="acts"><button class="sec2" data-a="back">Retour</button><button class="pri" data-a="build" ${miss.length ? 'disabled' : ''}>${miss.length ? 'Il manque des ressources' : 'Construire'}</button></div>`);
   el.querySelector('[data-a="back"]').onclick = closeSbSheet;
-  el.querySelector('[data-a="build"]').onclick = () => { if (miss.length) return; closeSbSheet(); doBuild(key, idx); };
+  if (idx == null) { const bt = el.querySelector('[data-a="build"]'); bt.disabled = false; bt.textContent = 'Où le construire ?'; }
+  el.querySelector('[data-a="build"]').onclick = () => {
+    if (idx == null) { closeSbSheet(); toast('Sur ta planète : touche un gisement, puis Construire'); return; }
+    if (miss.length) return; closeSbSheet(); doBuild(key, idx);
+  };
 }
 function openCapitalSheet() {
   const lvl = (() => { try { return mpWorldSnapshot().level; } catch (e) { return null; } })();
@@ -44832,6 +44836,161 @@ function openCapitalSheet() {
   el.querySelector('[data-a="open"]').onclick = () => { closeSbSheet(); goto('capital'); };
   el.querySelector('[data-a="tuto"]').onclick = () => SBTuto.restart();
 }
+
+/* PROSPECT_GUIDE_1410 — GUIDE DU CENTRE DE PROSPECTION (14/10/2026, demande d'Adrien)
+   Cinq pages : ce que cache l'univers · les sondes · verrouiller une signature · lire la carte · et ensuite.
+   S'ouvre à la première visite du centre (une fois par partie), puis à la demande (bouton « ? » sur la carte).
+   Même sans chantier orbital, il donne l'envie : secrets, histoires, gens, bars, routes. */
+var SBProspectGuide = (function () {
+  const css = document.createElement('style');
+  css.textContent = `
+  #sb-pguide { position:fixed; inset:0; z-index:9550; display:flex; align-items:flex-end; background:rgba(0,0,0,.66); }
+  #sb-pguide .pg { width:100%; max-height:90vh; overflow-y:auto; padding:18px 18px calc(env(safe-area-inset-bottom,0px) + 16px); border-radius:16px 16px 0 0;
+    background:radial-gradient(120% 60% at 50% 0%, rgba(95,255,232,.07), transparent 60%), linear-gradient(#0c151b,#060d11); border-top:1px solid rgba(95,255,232,.32); color:#dfeaf0; font-size:13.5px; line-height:1.55; -webkit-overflow-scrolling:touch; }
+  #sb-pguide .k { display:flex; align-items:center; gap:8px; font-size:9px; letter-spacing:.16em; text-transform:uppercase; color:#5fffe8; margin-bottom:6px; }
+  #sb-pguide .k i { width:7px; height:7px; border-radius:50%; background:#5fffe8; box-shadow:0 0 8px #5fffe8; }
+  #sb-pguide .k .x { margin-left:auto; background:none; border:0; color:rgba(220,230,240,.6); font-size:18px; cursor:pointer; padding:0 2px; }
+  #sb-pguide h3 { margin:0 0 8px; font-size:19px; font-weight:600; color:#f2f8fb; letter-spacing:.01em; }
+  #sb-pguide p { margin:0 0 10px; }
+  #sb-pguide b { color:#ffd27a; font-weight:600; }
+  #sb-pguide .secrets { display:grid; grid-template-columns:1fr 1fr; gap:8px; margin:10px 0 4px; }
+  #sb-pguide .secrets div { padding:10px; border-radius:10px; background:rgba(255,255,255,.035); border:1px solid rgba(255,255,255,.07); font-size:12px; line-height:1.4; color:#c9d6de; }
+  #sb-pguide .secrets div b { display:block; color:#f2f8fb; font-size:13px; margin-bottom:2px; }
+  #sb-pguide .probe { display:flex; gap:12px; align-items:flex-start; padding:10px 0; border-bottom:1px solid rgba(255,255,255,.06); }
+  #sb-pguide .probe:last-child { border-bottom:0; }
+  #sb-pguide .probe .ic { flex-shrink:0; width:34px; height:34px; border-radius:9px; display:grid; place-items:center; font-size:17px; border:1px solid currentColor; }
+  #sb-pguide .probe .nm { color:#f2f8fb; font-weight:600; }
+  #sb-pguide .probe .nm span { font-weight:400; font-size:11px; color:var(--mut); margin-left:6px; }
+  #sb-pguide .probe .ds { font-size:12.5px; color:#b8c6cf; }
+  #sb-pguide .probe .ct { margin-left:auto; flex-shrink:0; font-size:11px; color:var(--mut); text-align:right; white-space:nowrap; padding-top:2px; }
+  #sb-pguide .chain { margin:8px 0 6px; }
+  #sb-pguide .st { display:flex; gap:12px; position:relative; padding-bottom:14px; }
+  #sb-pguide .st:not(:last-child)::before { content:''; position:absolute; left:16px; top:34px; bottom:0; width:1px; background:linear-gradient(rgba(95,255,232,.45), rgba(95,255,232,.08)); }
+  #sb-pguide .st .n { flex-shrink:0; width:33px; height:33px; border-radius:50%; display:grid; place-items:center; font-size:13px; font-weight:600; border:1px solid currentColor; background:rgba(0,0,0,.3); }
+  #sb-pguide .st .ti { color:#f2f8fb; font-weight:600; margin-top:5px; }
+  #sb-pguide .st .ds { font-size:12.5px; color:#b8c6cf; }
+  #sb-pguide .chip { display:inline-block; margin-top:5px; padding:3px 8px; border-radius:6px; font-family:'SF Mono',ui-monospace,monospace; font-size:11px; letter-spacing:.04em; border:1px solid currentColor; background:rgba(0,0,0,.25); }
+  #sb-pguide .gest { display:flex; gap:10px; align-items:flex-start; padding:8px 0; }
+  #sb-pguide .gest .g { flex-shrink:0; width:30px; text-align:center; font-size:18px; }
+  #sb-pguide .note { font-size:12px; color:#ffe1a6; background:rgba(255,190,90,.07); border:1px solid rgba(255,190,90,.25); border-radius:10px; padding:10px 12px; margin:10px 0 0; }
+  #sb-pguide .nav { display:flex; align-items:center; gap:10px; margin-top:16px; }
+  #sb-pguide .dots { display:flex; gap:6px; flex:1; justify-content:center; }
+  #sb-pguide .dots i { width:6px; height:6px; border-radius:50%; background:rgba(255,255,255,.18); }
+  #sb-pguide .dots i.on { background:#5fffe8; box-shadow:0 0 6px #5fffe8; }
+  #sb-pguide .nav button { padding:12px 14px; border-radius:10px; font:inherit; font-size:11px; letter-spacing:.12em; text-transform:uppercase; cursor:pointer; white-space:nowrap; }
+  #sb-pguide .nav .prev { border:1px solid rgba(255,255,255,.16); background:transparent; color:#cdd6dc; }
+  #sb-pguide .nav .next { border:1px solid rgba(95,255,232,.6); background:rgba(95,255,232,.14); color:#5fffe8; min-width:116px; }
+  #sb-pguide .nav .prev[disabled] { visibility:hidden; }
+  #sb-pguide .cta { width:100%; margin-top:10px; padding:12px; border-radius:10px; border:1px solid rgba(58,160,255,.55); background:rgba(58,160,255,.1); color:#8ec8ff; font:inherit; font-size:11px; letter-spacing:.12em; text-transform:uppercase; cursor:pointer; }
+  #sb-pguide-btn { position:absolute; right:16px; z-index:30; width:38px; height:38px; border-radius:50%; border:1px solid rgba(95,255,232,.5); background:rgba(6,14,18,.75);
+    color:#5fffe8; font:600 17px/1 inherit; cursor:pointer; display:none; backdrop-filter:blur(6px); -webkit-backdrop-filter:blur(6px); }
+  #scr-prospect.hidden #sb-pguide-btn { display:none !important; }`;
+  document.head.appendChild(css);
+
+  const ready = (k) => ((G.probesPool || []).filter(q => q && (q.tier === k || q.type === k) && q.state === 'ready').length);
+  const hasShip = () => (typeof hasShipyardBuilt === 'function' && hasShipyardBuilt());
+  const PAGES = [
+    () => `<h3>Au-delà de ta planète</h3>
+      <p>L'univers ne se donne pas : <b>tout se découvre</b>. Ce centre est ton instrument pour regarder plus loin que ta colonie.</p>
+      <div class="secrets">
+        <div><b>Des secrets</b>veines lointaines, épaves qui dérivent, lieux cachés</div>
+        <div><b>Des histoires</b>archives, signaux anciens, civilisations éteintes</div>
+        <div><b>Des gens</b>d'autres commandants, des marchands, des pirates</div>
+        <div><b>Des rencontres</b>au comptoir des docks francs, le bar galactique</div>
+        <div><b>Des routes</b>que personne n'a encore tracées</div>
+        <div><b>Des cibles</b>à piller… ou des alliés à trouver</div>
+      </div>
+      <p style="margin-top:10px">Tout commence par une sonde.</p>`,
+    () => {
+      const row = (ic, col, nm, sub, ds, ct) => `<div class="probe"><div class="ic" style="color:${col}">${ic}</div><div><div class="nm">${nm}<span>${sub}</span></div><div class="ds">${ds}</div></div><div class="ct">${ct}</div></div>`;
+      const n = (k) => { const c = ready(k); return c ? `${c} prête${c > 1 ? 's' : ''}` : 'à construire'; };
+      return `<h3>Tes sondes</h3>
+      <p>Chacune a un seul métier. On les enchaîne.</p>
+      ${row('◯', '#e6f0ff', 'Radar', 'jetable', 'Balaie un <b>système entier</b> et relève des <b>signatures</b> opaques (SIG-…). Elle brûle à l\'arrivée.', n('radar'))}
+      ${row('◇', '#5fcc8a', 'Légère', 'résolution', '<b>Identifie</b> une signature : une veine ou une épave à exploiter, ou un corps orbital.', n('light'))}
+      ${row('◈', '#9a8aff', 'Moyenne', 'verrouillage', '<b>Verrouille</b> un corps orbital : il devient une adresse fixe dans ton carnet.', n('medium'))}
+      ${row('⌖', '#a370ff', 'Balise', 'surveillance', 'Reste dans un système et voit <b>passer les convois</b> : qui, d\'où, vers où. Les routes se dessinent.', n('beacon'))}
+      ${row('⊙', '#ff8c64', 'Furtive', 'espionnage', 'Observe les stocks et défenses d\'un commandant <b>sans être vue</b>.', n('stealth'))}`;
+    },
+    () => `<h3>Verrouiller une signature</h3>
+      <p>Une signature, c'est un écho : quelque chose est là, mais quoi, et où exactement ? Trois sondes pour le savoir.</p>
+      <div class="chain">
+        <div class="st"><div class="n" style="color:#e6f0ff">1</div><div><div class="ti">Radar sur un système</div><div class="ds">Le balayage revient avec des échos opaques.</div><span class="chip" style="color:#e6f0ff">SIG-7F2 · écho métallique</span></div></div>
+        <div class="st"><div class="n" style="color:#5fcc8a">2</div><div><div class="ti">Légère sur la signature</div><div class="ds">Elle dit ce que c'est : une <b>veine</b> ou une <b>épave</b> (un tanker peut aller l'exploiter), ou un <b>corps orbital</b>.</div><span class="chip" style="color:#5fcc8a">SIG-7F2 → corps orbital</span></div></div>
+        <div class="st"><div class="n" style="color:#9a8aff">3</div><div><div class="ti">Moyenne : verrouillage</div><div class="ds">Le corps orbital devient une <b>adresse fixe</b>, pour toujours, dans ton carnet. Tes tankers et tes flottes peuvent alors s'y rendre.</div><span class="chip" style="color:#9a8aff">A-N-3709-24 · au carnet</span></div></div>
+      </div>
+      <div class="note">💡 La Moyenne demande la <b>cartographie sismique</b> : laboratoire amélioré au niveau 2.</div>`,
+    () => `<h3>Lire la carte</h3>
+      <div class="gest"><div class="g">👆</div><div><b>Touche un système</b> pour l'ouvrir, puis envoie une <b>Radar</b>. Commence par tes voisins : c'est rapide et ça coûte peu.</div></div>
+      <div class="gest"><div class="g">📄</div><div><b>Rapports</b> : chaque sonde revient avec un rapport. Touche une signature pour y envoyer une Légère.</div></div>
+      <div class="gest"><div class="g">📒</div><div><b>Carnet</b> : tout ce que tu connais (systèmes, signatures suivies, commandants).</div></div>
+      <div class="gest"><div class="g">⌖</div><div>Le viseur recentre la carte sur ta planète.</div></div>
+      <div class="gest"><div class="g">📡</div><div>Ton <b>antenne</b> capte aussi du trafic : quand une bulle apparaît en haut, quelqu'un passe dans le coin.</div></div>`,
+    () => hasShip()
+      ? `<h3>Et ensuite</h3>
+      <p>Ton <b>chantier orbital</b> est prêt : ce que tes sondes trouvent, tes vaisseaux peuvent aller le chercher.</p>
+      <div class="gest"><div class="g">⛽</div><div>Un <b>tanker</b> exploite une veine lointaine, rejoint un <b>dock franc</b> (et son bar), ou ouvre une <b>ambassade</b> chez un commandant.</div></div>
+      <div class="gest"><div class="g">⚔</div><div>Une <b>flotte</b> raide une adresse verrouillée, ou se poste en embuscade sur une balise.</div></div>
+      <p style="margin-top:8px">Les autres commandants ne s'affichent pas : <b>il faut les trouver</b>.</p>`
+      : `<h3>Et ensuite</h3>
+      <p>Tes sondes regardent. Pour <b>aller chercher</b> ce qu'elles trouvent, il te faudra un <b>chantier orbital</b> :</p>
+      <div class="gest"><div class="g">⛽</div><div>des <b>tankers</b> pour exploiter les veines lointaines, rejoindre les docks francs et leur bar, ouvrir des ambassades ;</div></div>
+      <div class="gest"><div class="g">⚔</div><div>des <b>vaisseaux de guerre</b> pour piller, défendre, tendre des embuscades.</div></div>
+      <p style="margin-top:8px">Les autres commandants ne s'affichent pas : <b>il faut les trouver</b>. En attendant, tes sondes préparent le terrain.</p>
+      <button class="cta" data-ship="1">Voir la fiche du chantier orbital</button>`,
+  ];
+  let page = 0;
+  function close() { const e = document.getElementById('sb-pguide'); if (e) e.remove(); }
+  function draw() {
+    const el = document.getElementById('sb-pguide'); if (!el) return;
+    const last = page === PAGES.length - 1;
+    el.querySelector('.pg').innerHTML = `
+      <div class="k"><i></i>Officier de bord · centre de prospection<button class="x" aria-label="Fermer">×</button></div>
+      ${PAGES[page]()}
+      <div class="nav"><button class="prev" ${page ? '' : 'disabled'}>Retour</button>
+        <div class="dots">${PAGES.map((_, i) => `<i class="${i === page ? 'on' : ''}"></i>`).join('')}</div>
+        <button class="next">${last ? 'Explorer' : 'Suivant'}</button></div>`;
+    el.querySelector('.x').onclick = close;
+    el.querySelector('.prev').onclick = () => { if (page) { page--; draw(); } };
+    el.querySelector('.next').onclick = () => { if (last) close(); else { page++; draw(); el.querySelector('.pg').scrollTop = 0; } };
+    const sh = el.querySelector('[data-ship]'); if (sh) sh.onclick = () => { close(); if (typeof openBuildingSheet === 'function') openBuildingSheet('shipyard', null); };
+  }
+  function open(at) {
+    close();
+    const el = document.createElement('div'); el.id = 'sb-pguide';
+    el.innerHTML = '<div class="pg"></div>';
+    el.addEventListener('click', (e) => { if (e.target === el) close(); });
+    document.body.appendChild(el);
+    page = Math.max(0, Math.min(PAGES.length - 1, at || 0)); draw();
+    if (G.tuto || (G.tuto = { done: true, legacy: true })) { G.tuto.seen = G.tuto.seen || {}; if (!G.tuto.seen.prospect) { G.tuto.seen.prospect = Date.now(); if (typeof saveGame === 'function') saveGame(); } }
+  }
+  // bouton « ? » sur la carte du centre, sous les boutons existants ; première visite : ouverture automatique
+  let shownAt = 0;
+  setInterval(() => {
+    try {
+      const scr = document.getElementById('scr-prospect');
+      const vis = !!scr && !scr.classList.contains('hidden');
+      let btn = document.getElementById('sb-pguide-btn');
+      if (scr && !btn) {
+        btn = document.createElement('button'); btn.id = 'sb-pguide-btn'; btn.setAttribute('aria-label', 'Guide du centre de prospection'); btn.textContent = '?';
+        btn.onclick = () => open(0); scr.appendChild(btn);
+      }
+      if (btn) {
+        btn.style.display = vis ? 'block' : 'none';
+        if (vis) {   // aligné sous la colonne de boutons ronds en haut à droite
+          const rs = [...scr.querySelectorAll('button')].filter(b => b !== btn && b.offsetParent && b.getBoundingClientRect().right > innerWidth - 70 && b.getBoundingClientRect().top < innerHeight * 0.35);
+          const bottom = rs.reduce((m, b) => Math.max(m, b.getBoundingClientRect().bottom), 0);
+          const top = Math.round((bottom || 150) + 10) + 'px'; if (btn.style.top !== top) btn.style.top = top;
+        }
+      }
+      if (!vis) { shownAt = 0; return; }
+      if (!shownAt) shownAt = Date.now();
+      const seen = G.tuto && G.tuto.seen && G.tuto.seen.prospect;
+      if (!seen && Date.now() - shownAt > 900 && !document.getElementById('sb-pguide') && !document.getElementById('sb-sheet')) open(0);
+    } catch (e) { console.warn('[guide prospection]', e); }
+  }, 500);
+  return { open, close };
+})();
 
 /* ═══════════ INIT ═══════════ */
 
@@ -44970,27 +45129,27 @@ if (G.knownTargets && Array.isArray(G.tankerMissions)) {
 
 </script>
 <!-- PLANET3D — carte 3D + boucle antenne (source : sb-build/src/planet3d.js) -->
-<script type="module" src="assets/planet3d.js?v=20261014-1300"></script>
+<script type="module" src="assets/planet3d.js?v=20261014-1430"></script>
 <!-- PERF_1310 — mesure des performances chez les joueurs + qualité 3D automatique (assets/perf.js) -->
-<script src="assets/perf.js?v=20261014-1300"></script>
+<script src="assets/perf.js?v=20261014-1430"></script>
 <!-- PATCH_1410_LIGNES — lignes PNJ à horaire sur les routes cachées (assets/lines.js) -->
-<script src="assets/lines.js?v=20261014-1300"></script>
+<script src="assets/lines.js?v=20261014-1430"></script>
 <!-- CLOUD — sauvegarde Supabase (source : sb-build/src/cloud.js) -->
-<script type="module" src="assets/cloud.js?v=20261014-1300"></script>
+<script type="module" src="assets/cloud.js?v=20261014-1430"></script>
 <!-- MATCH3 — Match-3 V2 (assets/match3.js, source src/match3.js + src/m3core.js) : remplace startM3 -->
-<script type="module" src="assets/match3.js?v=20261014-1300"></script>
+<script type="module" src="assets/match3.js?v=20261014-1430"></script>
 <!-- HOME V2 — « monde d'abord » : planète plein écran, ressources en ligne, Flotte / Défense / Prospection (assets/home.js) -->
-<script type="module" src="assets/home.js?v=20261014-1300"></script>
+<script type="module" src="assets/home.js?v=20261014-1430"></script>
 <!-- SPACE MAP v0 — carte du Centre de prospection (assets/spacemap.js, source src/spacemap.js) -->
-<script src="assets/spacemap.js?v=20261014-1300"></script>
+<script src="assets/spacemap.js?v=20261014-1430"></script>
 <!-- SPACE MAP niveau B — diorama 3D d'un système (assets/system3d.js, source src/system3d.js) -->
-<script type="module" src="assets/system3d.js?v=20261014-1300"></script>
+<script type="module" src="assets/system3d.js?v=20261014-1430"></script>
 <!-- SHIP3D — fiches 3D : cuirassé KV-01, frégate SR-01, tanker TK-07, chantier orbital OS-01 (assets/ship3d.js, sur le moteur partagé window.SB3D) -->
-<script src="assets/aftermath.js?v=20261014-1300"></script>
-<script src="assets/fete_caserne.js?v=20261014-1300"></script>
-<script src="assets/radio.js?v=20261014-1300"></script>
-<script type="module" src="assets/ship3d.js?v=20261014-1300"></script>
+<script src="assets/aftermath.js?v=20261014-1430"></script>
+<script src="assets/fete_caserne.js?v=20261014-1430"></script>
+<script src="assets/radio.js?v=20261014-1430"></script>
+<script type="module" src="assets/ship3d.js?v=20261014-1430"></script>
 <!-- FORMATION3D — flotte déployée en orbite, vue de haut en formation (remplace la vue orbite) -->
-<script src="assets/formation3d.js?v=20261014-1300"></script>
+<script src="assets/formation3d.js?v=20261014-1430"></script>
 </body>
 </html>
