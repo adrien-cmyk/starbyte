@@ -16,6 +16,7 @@
   'use strict';
   if (window.SBLines) return;
 
+  const PLACE_SECTORS = ['M', 'N', 'O'];        // un lieu caché par secteur de la saison de test
   const EPOCH = Date.UTC(2026, 9, 1);           // origine commune des horaires
   const WINDOW_MS = 12 * 60 * 1000;             // fenêtre d'interception d'un passage (comme les balises)
   const ECHO_EVERY_MS = 3 * 3600 * 1000;        // un écho de trafic toutes les 3 h au plus
@@ -38,7 +39,9 @@
     const lines = [], bySys = {}, ports = {};
     const hintsP = (typeof HINT_PREFIXES !== 'undefined') ? HINT_PREFIXES : [];
     const hintsB = (typeof HINT_BODIES !== 'undefined') ? HINT_BODIES : [];
-    const seen = new Set();
+    // 14/10 (Adrien) : 3 lieux cachés au début, pas 40 — un par secteur de la saison (M, N, O),
+    // choisis parmi les destinations des cartes de route, toujours les mêmes pour tout le monde.
+    const seen = new Set(), all = [];
     for (const p of hintsP) for (const b of hintsB) {
       const hint = `${p} ${b}`;
       let dock;
@@ -46,10 +49,17 @@
       if (!dock || seen.has(dock.id)) continue;
       seen.add(dock.id);
       const port = (typeof mpDockSystem === 'function') ? mpDockSystem(dock) : null;
-      if (!port) continue;
+      if (port) all.push({ dock, hint, port });
+    }
+    const picked = [];
+    for (const sec of PLACE_SECTORS) {
+      const c = all.filter(x => x.port.split('-')[1] === sec).sort((x, y) => h32('lieu:' + x.dock.id) - h32('lieu:' + y.dock.id))[0];
+      if (c) picked.push(c);
+    }
+    for (const { dock, hint, port } of picked) {
       const [cl, sec, num] = port.split('-');
       ports[port] = { sys: port, dockId: dock.id, name: dock.name, type: dock.type, typeLabel: dock.typeLabel || dock.sub || '', hint, lines: [] };
-      const nLines = 1 + (h32('nl:' + dock.id) % 2);
+      const nLines = 2;                                     // deux lignes mènent à chaque lieu
       for (let j = 0; j < nLines; j++) {
         const r = rngOf('line:' + dock.id + ':' + j);
         const n = 6 + Math.floor(r() * 3);                  // 6 à 8 jalons avant le port
@@ -117,6 +127,15 @@
     if (!G.trafficEchoes || typeof G.trafficEchoes !== 'object') G.trafficEchoes = {};   // sys → { lineId, at }
     if (!G.hiddenPorts || typeof G.hiddenPorts !== 'object') G.hiddenPorts = {};         // port sys → { dockId, name, type, at }
     if (!Array.isArray(G.spottedLegs)) G.spottedLegs = [];
+    // 14/10 : passage de 40 lieux à 3 — on oublie ce qui appartenait aux lignes qui n'existent plus
+    if (G._linesNet !== 3) {
+      const n = network();
+      for (const k of Object.keys(G.hiddenPorts)) if (!n.ports[k]) delete G.hiddenPorts[k];
+      for (const [k, e] of Object.entries(G.trafficEchoes)) if (!n.byId[e.lineId]) delete G.trafficEchoes[k];
+      for (const k of Object.keys(G.lineObs)) if (!n.byId[k]) delete G.lineObs[k];
+      G.spottedLegs = G.spottedLegs.filter(l => !l.npc || n.byId[l.lineId]);
+      G._linesNet = 3;
+    }
   }
   function myHome() { try { return `${MY_ADDRESS.cluster}-${MY_ADDRESS.sector}-${MY_ADDRESS.system}`; } catch (e) { return null; } }
 
