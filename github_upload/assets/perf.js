@@ -9,6 +9,15 @@
       pendant 30 s), la qualité remonte d'un cran. La connexion n'y change rien : elle ne ralentit
       que les échanges avec les autres commandants (signalés à part).
    4. Réglages : qualité Auto / Haute / Économe, et compteur d'images (diagnostic).
+
+   14/10/2026 — appareils faibles (Android à 15 images/s sur la planète, gels à l'ouverture de la carte) :
+   - niveau Économe : ombres coupées en plus du halo ; nouveau niveau Minimale (densité 0,75) ;
+   - à partir d'Économe, les nouveaux moteurs 3D sont créés sans anticrénelage (MSAA), et au
+     rechargement suivant tous le sont : c'est le plus gros gain sur les GPU de téléphone ;
+   - la qualité auto ne se règle plus que sur les secondes où une scène 3D a vraiment été dessinée
+     (les écrans 2D, fluides, la faisaient remonter puis rechuter sur la planète : yoyo + recompilations) ;
+   - pas de vérification synchrone des shaders hors développement (gel à la première ouverture) ;
+   - perte du contexte WebGL (mémoire saturée) : comptée dans les mesures et qualité au plus bas.
    ═══════════════════════════════════════════════════════════════════════════ */
 (function () {
   'use strict';
@@ -22,12 +31,16 @@
     flushMs: 3 * 60e3,
     hitchMs: 100,
   };
-  const CAPS = [Infinity, 1.25, 1.0];   // plafond de densité de pixels par niveau
-  const NAMES = ['Haute', 'Moyenne', 'Économe'];
+  const CAPS = [Infinity, 1.25, 1.0, 0.75];   // plafond de densité de pixels par niveau
+  const NAMES = ['Haute', 'Moyenne', 'Économe', 'Minimale'];
+  const MAXL = 3;
+  const DEV = /^(localhost|127\.|192\.168\.|10\.)/.test(location.hostname);
 
   const st = {
     mode: LS('sb_quality_mode') || 'auto',          // 'auto' | 'high' | 'eco'
-    level: Math.max(0, Math.min(2, parseInt(LS('sb_quality_level') || '0', 10) || 0)),
+    level: Math.max(0, Math.min(MAXL, parseInt(LS('sb_quality_level') || '0', 10) || 0)),
+    drew3d: false,                                   // une scène 3D a été dessinée pendant la seconde en cours
+    ctxLost: 0,
     holdUntil: 0, lastUpAt: 0,
     secs: [],                                        // images/s des dernières secondes (écran visible)
     buckets: {},                                     // écran → { frames:[…fps par seconde], hitches, secs }
@@ -36,7 +49,7 @@
     session: Math.random().toString(36).slice(2, 10),
     fpsOn: LS('sb_fps_counter') === '1',
   };
-  const effLevel = () => st.mode === 'high' ? 0 : st.mode === 'eco' ? 2 : st.level;
+  const effLevel = () => st.mode === 'high' ? 0 : st.mode === 'eco' ? MAXL : st.level;
 
   /* ── 1. images par seconde ── */
   let last = 0, count = 0, secStart = 0, resumeAt = 0;
@@ -55,13 +68,17 @@
       secStart = now; count = 0;
       b.frames.push(fps); b.secs++;
       if (b.frames.length > 900) b.frames.splice(0, 300);
-      st.secs.push(fps); if (st.secs.length > 60) st.secs.shift();
-      autoQuality(now);
+      // la qualité ne dépend que des secondes où la 3D a tourné (un écran 2D fluide ne doit pas la faire remonter)
+      if (st.drew3d) { st.secs.push(fps); if (st.secs.length > 60) st.secs.shift(); autoQuality(now); }
+      st.drew3d = false;
       drawCounter(fps);
     }
   }
+  let _scrK = null, _scrAt = 0;   // écran courant relu au plus 4 fois par seconde (pas un querySelectorAll par image)
   function bucket() {
-    const k = curScreen();
+    const n = performance.now();
+    if (n - _scrAt > 250) { _scrK = curScreen(); _scrAt = n; }
+    const k = _scrK;
     return st.buckets[k] || (st.buckets[k] = { frames: [], hitches: 0, secs: 0 });
   }
   const median = (a) => { if (!a.length) return null; const s = a.slice().sort((x, y) => x - y); return s[Math.floor(s.length / 2)]; };
@@ -72,7 +89,7 @@
     if (st.mode !== 'auto') return;
     const lastN = (n) => st.secs.slice(-n);
     const low = lastN(cfg.lowSecs), high = lastN(cfg.highSecs);
-    if (st.level < 2 && low.length >= cfg.lowSecs && median(low) < cfg.lowFps) {
+    if (st.level < MAXL && low.length >= cfg.lowSecs && median(low) < cfg.lowFps) {
       if (now - st.lastUpAt < 90e3) st.holdUntil = Date.now() + cfg.holdAfterBounceMs;   // ça rebondit : on se calme
       setLevel(st.level + 1, 'auto');
       st.secs = [];
@@ -83,7 +100,7 @@
     }
   }
   function setLevel(l, why) {
-    l = Math.max(0, Math.min(2, l));
+    l = Math.max(0, Math.min(MAXL, l));
     if (l === st.level) return;
     st.level = l; LS('sb_quality_level', String(l));
     applyQuality();
@@ -115,6 +132,25 @@
         },
       });
     } catch (e) { console.warn('[qualité] moteur 3D non piloté :', e); }
+    // render : repère les secondes où la 3D dessine, et coupe / rétablit les ombres selon le niveau
+    try {
+      Object.defineProperty(S.THREE.WebGLRenderer.prototype, 'render', {
+        configurable: true,
+        set(fn) {
+          this._sbRender = fn;
+          if (!DEV && this.debug) this.debug.checkShaderErrors = false;   // pas de lecture synchrone des journaux de shaders
+        },
+        get() {
+          const self = this, fn = this._sbRender;
+          if (!fn) return undefined;
+          return function (scene, camera) {
+            st.drew3d = true;
+            if (scene && scene.isScene) shadowsFor(scene);
+            return fn.call(self, scene, camera);
+          };
+        },
+      });
+    } catch (e) { console.warn('[qualité] rendu 3D non piloté :', e); }
     if (S.UnrealBloomPass && S.UnrealBloomPass.prototype && S.UnrealBloomPass.prototype.render) {
       const B = S.UnrealBloomPass.prototype, origB = B.render;
       B.render = function () {
@@ -123,6 +159,52 @@
       };
     }
   }
+  // Ombres : coupées à partir d'Économe (la passe d'ombre redessine toute la scène, forêt comprise).
+  // On mémorise l'état d'origine de chaque lumière pour le rétablir ; nouvelle passe toutes les 3 s
+  // pour les lumières ajoutées entre-temps (bâtiments construits).
+  function shadowsFor(scene) {
+    const off = effLevel() >= 2, now = performance.now();
+    if (scene._sbShadowOff === off && now - (scene._sbShadowAt || 0) < 3000) return;
+    scene._sbShadowOff = off; scene._sbShadowAt = now;
+    scene.traverse((o) => {
+      if (!o.isLight || !o.shadow) return;
+      if (off) { if (o._sbCast === undefined) o._sbCast = o.castShadow; o.castShadow = false; }
+      else if (o._sbCast !== undefined) { o.castShadow = o._sbCast; delete o._sbCast; }
+    });
+  }
+
+  // Anticrénelage : décidé à la création du contexte WebGL. À partir d'Économe, plus de MSAA
+  // (le niveau est mémorisé, donc au rechargement suivant toute la 3D démarre allégée).
+  // Perte de contexte (mémoire du téléphone saturée) : comptée et qualité au plus bas.
+  try {
+    const HC = HTMLCanvasElement.prototype, origGC = HC.getContext;
+    HC.getContext = function (type, attrs) {
+      const gl = /^(webgl2?|experimental-webgl)$/.test(type);
+      if (gl && effLevel() >= 2) attrs = Object.assign({}, attrs || {}, { antialias: false });
+      const ctx = origGC.call(this, type, attrs);
+      if (gl && ctx && !this._sbLostHook) {
+        this._sbLostHook = true;
+        const canvas = this, ge = ctx.getExtension;
+        // une vue 3D qui se ferme libère son contexte exprès (forceContextLoss) : ce n'est pas une panne
+        ctx.getExtension = function (name) {
+          const ext = ge.call(this, name);
+          if (name === 'WEBGL_lose_context' && ext && !ext._sbW) {
+            ext._sbW = true; const lc = ext.loseContext;
+            ext.loseContext = function () { canvas._sbDeliberate = true; return lc.apply(this, arguments); };
+          }
+          return ext;
+        };
+        this.addEventListener('webglcontextlost', () => {
+          if (canvas._sbDeliberate) return;
+          st.ctxLost++;
+          console.warn('[qualité] contexte WebGL perdu');
+          if (st.mode === 'auto') setLevel(MAXL, 'auto');
+        });
+      }
+      return ctx;
+    };
+  } catch (e) {}
+
   function applyQuality() {
     patch3D();
     const L = effLevel(), cap = CAPS[L];
@@ -132,6 +214,7 @@
       try { if (r._sbPR && r._sbWantPR != null) r._sbPR.call(r, Math.min(r._sbWantPR, cap)); } catch (e) { renderers.delete(w); }
     }
     for (const w of blooms) { const bl = w.deref(); if (!bl) blooms.delete(w); else bl.enabled = L < 2; }
+    // les ombres suivent au prochain rendu de chaque scène (shadowsFor)
     document.documentElement.dataset.sbQuality = String(L);
   }
   // planet3d pose window.SB3D au chargement : on se branche à cet instant, avant la création des moteurs
@@ -182,6 +265,7 @@
       mem: navigator.deviceMemory || null,
       standalone: !!(window.navigator.standalone || (window.matchMedia && matchMedia('(display-mode: standalone)').matches)),
       tz,
+      ctxLost: st.ctxLost || 0,
     };
   }
 
@@ -245,7 +329,7 @@
       <div class="dash-section-card">
         <div style="font-size:12px;color:#c8d2d6;margin-bottom:8px">Qualité de la 3D : <strong style="color:#e6f0ff">${NAMES[effLevel()]}</strong>${st.mode === 'auto' ? ' · réglée automatiquement' : ''}</div>
         <div style="display:flex;gap:6px">${b('auto', 'Auto')}${b('high', 'Haute')}${b('eco', 'Économe')}</div>
-        <div style="font-size:10px;color:var(--mut);margin-top:8px;line-height:1.5">Auto : la 3D s'allège quand l'appareil peine et remonte dès que c'est fluide.</div>
+        <div style="font-size:10px;color:var(--mut);margin-top:8px;line-height:1.5">Auto : la 3D s'allège quand l'appareil peine et remonte dès que c'est fluide. Économe : la 3D la plus légère, sans ombres.</div>
         <label style="display:flex;align-items:center;gap:8px;margin-top:10px;font-size:12px;color:#c8d2d6;cursor:pointer">
           <input type="checkbox" style="accent-color:#c8d2d6" ${st.fpsOn ? 'checked' : ''} onchange="SBPerf.setCounter(this.checked)"> Compteur d'images (diagnostic)
         </label>

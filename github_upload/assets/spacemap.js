@@ -611,11 +611,14 @@
       const BG = 0x02050a;
       const scene = this.scene = new T.Scene();
       scene.background = new T.Color(BG);
-      scene.add(new T.HemisphereLight(0x5a7ca8, 0x05080a, 0.9));
+      // 14/10 — appareils faibles (qualité Économe) : pas de carte d'environnement préfiltrée (PMREM),
+      // c'était une bonne part du gel à la première ouverture ; la lumière d'ambiance compense.
+      const lite = !!(window.SBPerf && SBPerf.level >= 2);
+      scene.add(new T.HemisphereLight(0x5a7ca8, 0x05080a, lite ? 1.35 : 0.9));
       const sun = new T.DirectionalLight(0xdfe8ff, 1.6);
       sun.position.set(-260, 420, 300);
       scene.add(sun);
-      scene.environment = this._env(r);
+      scene.environment = lite ? null : this._env(r);
       scene.environmentIntensity = 0.5;
 
       const cam = this.camera = new T.PerspectiveCamera(28, 1, 2, 14000);
