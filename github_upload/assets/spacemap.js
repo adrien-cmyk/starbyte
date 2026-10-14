@@ -353,6 +353,24 @@
       flights.push({ kind: 'tanker', id: m.id, label: m.tankerName || 'Tanker', from: back ? at : 0, to: back ? 0 : at, toCk: back ? null : toCk, path,
         departedAt: back ? (m.returnDepartedAt || m.arrivalAt || m.departedAt) : m.departedAt, arrivalAt: back ? (m.returnArrivalAt || m.arrivalAt) : m.arrivalAt, target: tc, back });
     }
+    // 15/10 (E6) — flottes qui gagnent leur embuscade ou en reviennent : par la route connue quand elles l'empruntent
+    for (const f of ((G.fleet && G.fleet.prepared) || [])) {
+      const a = f.ambush;
+      if (!a || !(a.phase === 'going' || a.phase === 'returning')) continue;
+      const at = cell['sys:' + a.system];
+      if (at === undefined) continue;
+      const back = a.phase === 'returning';
+      let path = null;
+      if (Array.isArray(a.routeChain)) {
+        const ch = a.routeChain, j = ch.indexOf(a.system);
+        if (j >= 0) {
+          const cells = [0].concat(ch.slice(0, j + 1).map(k => cell['sys:' + k]).filter(i => i !== undefined && i !== 0));
+          if (cells.length > 2) path = back ? cells.slice().reverse() : cells;
+        }
+      }
+      flights.push({ kind: 'fleet', id: 'fl-' + f.id, fleetId: f.id, label: f.name || 'Flotte', from: back ? at : 0, to: back ? 0 : at, toCk: null, path,
+        departedAt: back ? (a.returnDepartedAt || (a.returnsAt - a.travelMs)) : a.departedAt, arrivalAt: back ? a.returnsAt : a.arrivesAt, target: a.system, back });
+    }
     return { systems, flights, occ, cell, items, routes, spotted: spottedPaths, home, lit: litRing() };
   }
 
@@ -550,6 +568,7 @@
       const f = state.flights.find(x => x.id === s.key);
       if (!f) { _sel = null; return panelMarkup(state); }
       const eta = formatTankerDuration(Math.max(0, (f.arrivalAt || 0) - Date.now()));
+      if (f.kind === 'fleet') return `<div class="sm-panel"><div class="sm-ptitle" style="color:#c9a8ff">${esc(f.label)}${f.back ? ' · retour' : ''}</div><div class="sm-psub">${f.back ? 'Rentre au port' : 'En route vers son embuscade sur ' + esc(f.target)} · ${f.back ? 'à quai' : 'en place'} dans ${esc(eta)}</div>${_sigBtn('#c9a8ff', 'Voir la flotte', `openFleetDetail('${esc(f.fleetId)}')`, '', true)}</div>`;
       return `<div class="sm-panel"><div class="sm-ptitle">${esc(f.label)}${f.back ? ' · retour' : ''}</div><div class="sm-psub">${f.back ? 'Rentre au port' : 'Vers ' + esc(f.target)} · arrivée dans ${esc(eta)}</div></div>`;
     }
     return '';
@@ -1087,7 +1106,7 @@
       // Vaisseaux en vol : fins, discrets ; ils filent vers le corps visé quand il est connu
       const wp = new T.Vector3();
       for (const f of st.flights) {
-        const c = f.kind === 'tanker' ? 0xffc864 : (f.tier === 'radar' ? 0xe6f0ff : f.tier === 'medium' ? 0x9a8aff : 0x5fcc8a);
+        const c = f.kind === 'tanker' ? 0xffc864 : f.kind === 'fleet' ? 0xc9a8ff : (f.tier === 'radar' ? 0xe6f0ff : f.tier === 'medium' ? 0x9a8aff : 0x5fcc8a);
         const H = 9;
         const pos = (idx, ck) => {
           if (ck && this.bodies[ck]) { this.content.updateMatrixWorld(true); this.bodies[ck].getWorldPosition(wp); return new T.Vector3(wp.x, H, wp.z); }
@@ -1545,9 +1564,11 @@
     const bcn = myBeacons().find(b => b.id === id);
     const lr = (bcn && window.SBLines) ? SBLines.routesBalisedBy(beaconSys(bcn)) : [];
     if (lr.length && typeof sbConfirmWarning === 'function') {
-      const ok = await sbConfirmWarning('Retirer le balisage', `Cette balise balise ${lr.map(r => '<strong>' + esc(r.name) + '</strong>').join(', ')}. La rappeler rend la route plus lente et plus exposée, pour toi comme pour ceux qui l'empruntent. La route reste connue.`, 'Rappeler quand même');
+      const sold = SBLines.salesOn ? SBLines.salesOn(beaconSys(bcn)) : [];
+      const ok = await sbConfirmWarning(sold.length ? 'Trahir ton acheteur ?' : 'Retirer le balisage', `Cette balise balise ${lr.map(r => '<strong>' + esc(r.name) + '</strong>').join(', ')}. La rappeler rend la route plus lente et plus exposée, pour toi comme pour ceux qui l'empruntent. La route reste connue.`
+        + (sold.length ? `<br><br><span style="color:#ff8a8a">Tu l'as vendue à ${sold.map(x => esc(x.buyer_pseudo || '?')).join(', ')} il y a moins de 7 jours : la rappeler, c'est trahir. Le port lui donne ta caution, et le comptoir en parlera.</span>` : ''), 'Rappeler quand même');
       if (!ok) return;
-      if (typeof recallBeacon === 'function') recallBeacon(id);
+      if (typeof recallBeacon === 'function') recallBeacon(id, true);
       if (typeof saveGame === 'function') saveGame();
       return refresh(true);
     }
@@ -1581,7 +1602,8 @@
   function postHere(k) { if (typeof launchRoutePost === 'function') { launchRoutePost(null, k); refresh(true); } }
   // Lignes PNJ : couloir de passage, écho de l'antenne, convois observés, lieu caché
   function laneHtml(sysKey, li) {
-    if (!li) return '';
+    if (!li && !(window.SBLines && SBLines.ambushAt && SBLines.ambushAt(sysKey).length)) return '';
+    li = li || { obs: [], port: null, lane: false, echo: false, fromCard: null };
     const ago = (t) => { const m = Math.max(1, Math.round((Date.now() - t) / 60000)); return m < 60 ? `il y a ${m} min` : m < 1440 ? `il y a ${Math.round(m / 60)} h` : `il y a ${Math.round(m / 1440)} j`; };
     const hasBeacon = myBeacons().some(b => beaconSys(b) === sysKey);
     const rows = [];
@@ -1593,6 +1615,16 @@
     if (li.fromCard && !li.obs.length && !li.port) rows.push(`<div class="sm-lane"><b>Piste de « ${esc(li.fromCard)} »</b><span>La carte mène ici. Pose une balise pour voir passer les convois et relever leur cap.</span></div>`);
     for (const o of li.obs) {
       rows.push(`<div class="sm-lane"><b>${esc(o.label)}</b><span>vu ${o.n} fois${o.periodMin ? ` · repasse toutes les ~${o.periodMin} min` : ''} · dernier ${ago(o.last)}</span></div>`);
+    }
+    // 15/10 (E6) — mes flottes postées ici, leurs ordres ; ou l'idée d'en poster une
+    if (window.SBLines && SBLines.ambushAt) {
+      const fl = SBLines.ambushAt(sysKey);
+      for (const f of fl) {
+        const a = f.ambush, H = SBLines.holdAll(a), n = ['metal', 'energie', 'cristal'].reduce((x, k) => x + (H[k] || 0), 0);
+        rows.push(`<div class="sm-lane" style="border-color:rgba(163,112,255,.45)"><b style="color:#c9a8ff">⚔ ${esc(f.name)} ${a.phase === 'going' ? 'arrive en embuscade' : 'en embuscade'}</b><span>${esc(SBLines.ordersLabel(f))}${n > 0 ? ' · ' + esc(_mpResLine(H)) + ' en cale' : ''}</span></div>`);
+        rows.push(_sigBtn('#c9a8ff', 'Changer les ordres', `SBLines.setOrders('${esc(f.id)}')`, '', true) + _sigBtn('#c9a8ff', 'Voir la flotte', `openFleetDetail('${esc(f.id)}')`, '', true));
+      }
+      if (!fl.length && hasBeacon && li.obs.length && !li.port) rows.push(`<div class="sm-lane"><b>Une flotte ici ?</b><span>Postée en embuscade sur ta balise, elle aborderait ou filerait ces convois (Flotte → Embuscade).</span></div>`);
     }
     if (!li.obs.length && !li.port) {
       if (hasBeacon) rows.push(`<div class="sm-lane"><b>Couloir sous surveillance</b><span>Ta balise attend le prochain passage.</span></div>`);
@@ -1757,7 +1789,7 @@
       const pct = Math.round(bal.ratio * 100);
       const dots = bal.chain.map(k => `<i class="${bal.beaconed.includes(k) ? 'on' : ''}" title="${esc(k)}"></i>`).join('');
       balHtml = `<div class="sm-bal"><div class="h"><b>Balisage</b><span>${bal.beaconed.length}/${bal.chain.length} jalons</span></div><div class="d">${dots}</div>`
-        + `<div class="t">${pct ? `Trajet −${Math.round(35 * bal.ratio)} % · risque −${Math.round(60 * bal.ratio)} %${bal.cover ? ' · voie balisée : pavillon masqué aux balises des autres' : ''}` : 'Non balisée : trajet nominal, exposée'}</div></div>`;
+        + `<div class="t">${pct ? `Trajet −${Math.round(35 * bal.ratio)} % · risque −${Math.round(60 * bal.ratio)} %${bal.cover ? ' · voie balisée : pavillon masqué aux balises des autres' : ''}${bal.seller ? ` · balisage entretenu par ${esc(bal.seller === true ? 'le vendeur' : bal.seller)} (7 jours après la vente)` : ''}` : 'Non balisée : trajet nominal, exposée'}</div></div>`;
       if (bal.next) balHtml += _sigBtn('#b48cff', 'Baliser le jalon suivant', `SBMap.beacon('${esc(bal.next)}')`, `${esc(bal.next)} · plus rapide, plus sûre, et tu vois qui l'emprunte`, true);
       else if (bal.pending) balHtml += _sigOff(`${bal.pending} balise${bal.pending > 1 ? 's' : ''} en route`);
     }

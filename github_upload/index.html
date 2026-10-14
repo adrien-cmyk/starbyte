@@ -8590,6 +8590,7 @@ var EXTRA_SAVE_KEYS = [
   'systemTags', 'mapSeen', 'beaconRoutes', 'spottedLegs',
   'lineObs', 'trafficEchoes', 'hiddenPorts', '_linesNet', '_linesRoutes',   // PATCH_1410_PISTES
   'lineUsers',   // PATCH_1410_BALISAGE — convois de joueurs vus sur mes lignes
+  'lineHeat', '_spiedPending', 'pendingRouteBuys',   // PATCH_1510_ORDRES — escortes renforcées après un pillage, filatures à relever, achats à vérifier
   'openedRoutes',   // PATCH_1410_ECLAIREUR — routes ouvertes par une Moyenne ou offertes par un allié
   'myRouteOffers', 'saleBeacons',   // PATCH_1410_MARCHE — mes cartes au comptoir, balisage au moment de la vente   // PATCH_1410_LIGNES — lignes observées, échos de l'antenne, lieux cachés découverts   // PATCH_1310_ROUTES2 — tronçons relevés par mes balises   // + routes entre balises (13/10)   // PATCH_1310_CARTE — marques de systèmes + systèmes déjà vus (survivent aux rapports supprimés)  // RUMORS_1110 — dernier palier de niveau annoncé au comptoir
   'mpDiplo',   // AMBASSADES_1210 — ambassades vues et dernière image des pactes
@@ -10463,6 +10464,7 @@ function _mpPirReport(type, d, key) {
   return r;
 }
 function _mpLegLabel(d) {
+  if (d.npc) return d.leg === 'back' ? (d.dock ? `au retour de ${d.dock}` : 'au retour d\'un lieu caché') : (d.dock ? `en route vers ${d.dock}` : 'en route vers un lieu caché');   // PATCH_1510_ORDRES
   if (d.kind === 'embassy') return 'en route vers une ambassade';
   if (d.leg === 'back') return d.dock ? `au retour de ${d.dock}` : 'au retour d\'un dock';
   return d.dock ? `en route vers ${d.dock}` : 'en route vers un dock';
@@ -10501,6 +10503,15 @@ function renderPiracyReportDetail(r) {
   } else if (d.type === 'convoy_boarded') {
     story = `<strong>${d.pseudo || 'Un pirate'}</strong> a arraisonné ton tanker <strong>${d.tanker || ''}</strong> ${_mpLegLabel(d)}, mais n'a rien pu emporter.`;
   }
+  if (d.npc) {   // PATCH_1510_ORDRES — convoi PNJ d'une ligne
+    const who = `<strong>${d.who || 'un convoi'}</strong> (${d.ships || '?'} vaisseaux, ${d.escort || 'escorte inconnue'})`;
+    if (d.type === 'robbed_ok') story = `Ta flotte <strong>${d.fleet || ''}</strong> a jailli de l'ombre de ta balise et abordé ${who}, ${_mpLegLabel(d)}.`;
+    else if (d.type === 'robbed_empty') story = `Ta flotte <strong>${d.fleet || ''}</strong> a arraisonné ${who}, mais ${d.noTanker ? 'sans tanker dans la flotte' : 'sa cale était pleine'} : rien n'a pu être emporté.`;
+    else if (d.type === 'robbed_fail') {
+      story = `${d.escort === 'sans escorte' ? 'L\'équipage' : 'L\'escorte'} d'${who} a repoussé ta flotte <strong>${d.fleet || ''}</strong>, ${_mpLegLabel(d)}.<br><br>La ligne se méfie : ses prochains convois seront mieux gardés pendant quelques heures.`;
+    }
+  }
+  if (d.auto) story += `<br><br><span style="color:#c9a8ff;font-size:12px">Selon tes ordres permanents.</span>`;
   el.innerHTML = `
     <div style="margin:0 16px 14px;padding:18px;border:1px solid ${T.color}55;border-radius:12px;background:rgba(20,25,30,.6);font-size:13px;line-height:1.6;color:#e6f0ff">${story}</div>
     ${rows ? `<div style="margin:0 16px 14px;padding:6px 14px;border:1px solid var(--border);border-radius:10px">${rows}</div>` : ''}`;
@@ -10584,7 +10595,7 @@ async function mpIngestPiracy(d, meId) {
         if (!Array.isArray(G.spottedLegs)) G.spottedLegs = [];
         if (!G.spottedLegs.some(l => l.convoyId === s.convoy_id && l.from === s.system)) {
           G.spottedLegs.unshift({ id: 'sp-' + s.convoy_id + '-' + s.system, convoyId: s.convoy_id, from: s.system, to: nx, pseudo: s.pseudo || null, at: Date.now(), onRoute: !!s.on_route });
-          G.spottedLegs = G.spottedLegs.slice(0, 40);
+          G.spottedLegs = (window.SBLines && SBLines.capLegs) ? SBLines.capLegs(G.spottedLegs) : G.spottedLegs.slice(0, 40);   // PATCH_1510_ORDRES
         }
         if (typeof SBMap !== 'undefined' && SBMap.render) { try { SBMap.render(); } catch (e) {} }
       }
@@ -10609,7 +10620,7 @@ async function mpIngestPiracy(d, meId) {
     if (!(L && L.settled)) {
       const f = fleets.find(x => x.id === i.fleet_id) || null;
       const type = i.outcome === 'won' ? 'robbed_ok' : i.outcome === 'evaded' ? 'robbed_evaded' : i.outcome === 'empty' ? 'robbed_empty' : 'robbed_fail';
-      if (type === 'robbed_ok' && window.SBLines && SBLines.noteRobbery) SBLines.noteRobbery(i.victim);   // PATCH_1410_MARCHE — dévaliser son acheteur = trahison
+      if (type === 'robbed_ok' && window.SBLines && SBLines.noteRobbery) SBLines.noteRobbery(i.victim, i.system);   // PATCH_1410_MARCHE (+ système : PATCH_1510_ORDRES) — dévaliser son acheteur = trahison
       const lossLine = i.losses ? _mpLossLine(i.losses, { tanker: {}, fregate: {}, cuirasse: {} }) : '';
       _mpPirReport(type, { icon: '⚔', pseudo: i.victim, system: i.system, fleet: f ? f.name : '', loot: i.loot,
         dock: i.dock_name, leg: i.leg, kind: i.kind, lossLine }, 'itc-' + i.id);
@@ -10682,16 +10693,26 @@ async function mpAmbushStart(fleetId) {
   const beacons = mpBeaconList();
   if (!beacons.length) { toast('Pose d\'abord une balise sur un système (Centre de prospection)'); return; }
   const taken = new Set((G.fleet.prepared || []).filter(x => x.ambush && x.id !== f.id).map(x => x.ambush.system));
-  const choice = beacons.length === 1 ? beacons[0] : await _mpChoose('Embuscade · choisis ta balise', beacons.map(b => ({
-    ...b, label: b.system, sub: `${Math.round(_mpAmbushTravelMs(b.system) / 60000)} min de trajet${taken.has(b.system) ? ' · une autre flotte y est déjà' : ''}` })));
+  // PATCH_1510_ORDRES — par une route connue (et balisée), la flotte arrive plus vite ; les jalons de lignes sont signalés
+  const _trv = (x) => (window.SBLines && SBLines.ambushTravel) ? SBLines.ambushTravel(x, _mpAmbushTravelMs(x)) : { ms: _mpAmbushTravelMs(x), route: null };
+  const _lineAt = (x) => { try { return !!(window.SBLines && (SBLines.network().bySys[x] || []).some(o => !o.isPort)); } catch (e) { return false; } };
+  const _esc = (x) => String(x == null ? '' : x).replace(/[<>&"]/g, '');
+  const choice = beacons.length === 1 ? beacons[0] : await _mpChoose('Embuscade · choisis ta balise', beacons.map(b => { const tv = _trv(b.system); return {
+    ...b, label: b.system, sub: `${Math.round(tv.ms / 60000)} min${tv.route ? ' par ' + _esc(tv.route.name) : ' de trajet'}${_lineAt(b.system) ? ' · des convois PNJ y passent' : ''}${taken.has(b.system) ? ' · une autre flotte y est déjà' : ''}` }; }));
   if (!choice) return;
   const sys = choice.system;
-  const travel = _mpAmbushTravelMs(sys);
+  const _tr = _trv(sys);
+  const travel = _tr.ms;
+  const orders = window.SBLines ? await SBLines.chooseOrders(null) : { mode: 'manual', players: false };
+  if (!orders) return;
+  const _ordTxt = window.SBLines ? SBLines.ORDER_MODES[orders.mode].label + (orders.mode === 'manual' ? '' : orders.players ? ' · convois de joueurs compris' : ' · convois PNJ seulement') : '';
   const fuel = computeMissionFuelCost(f, { distanceMult: typeof _carnetDistanceMult === 'function' ? _carnetDistanceMult(sys.split('-')[1]) : 3 });
   if ((G.res.energie.v || 0) < fuel) { toast(`Énergie insuffisante : ${fmt(fuel)} requis`); return; }
   const tankers = ['t1', 't2', 't3'].reduce((s, t) => s + ((f.composition.tanker && f.composition.tanker[t]) || 0), 0);
   const ok = await sbConfirmWarning('Embuscade',
-    `Poster <strong>${f.name}</strong> en embuscade sur <strong>${sys}</strong> ?<br><br>Trajet ${Math.round(travel / 60000)} min · ${fmt(fuel)} énergie.<br><br>Une fois en place, chaque convoi que ta balise repère peut être <strong>dévalisé</strong> ou <strong>espionné</strong>.`
+    `Poster <strong>${f.name}</strong> en embuscade sur <strong>${sys}</strong> ?<br><br>Trajet ${Math.round(travel / 60000)} min${_tr.route ? ` par <strong>${_esc(_tr.route.name)}</strong>` : ''} · ${fmt(fuel)} énergie.`
+    + (_ordTxt ? `<br>Ordres : <strong>${_ordTxt}</strong>` : '')
+    + `<br><br>Une fois en place, chaque convoi que ta balise repère peut être <strong>dévalisé</strong> ou <strong>espionné</strong>.`
     + (tankers ? '' : `<br><br><span style="color:#ffc864">Sans tanker dans la flotte, aucun butin ne pourra être emporté.</span>`)
     + `<br><br><em>Loin de ta planète, cette flotte ne la protège plus.</em>`, 'Partir en embuscade');
   if (!ok) return;
@@ -10701,7 +10722,8 @@ async function mpAmbushStart(fleetId) {
   f.missionStartedAt = now;
   f.missionEndsAt = null;
   f.missionTargetId = null;
-  f.ambush = { system: sys, beaconId: choice.local_id, phase: 'going', departedAt: now, arrivesAt: now + travel, travelMs: travel, hold: {}, mpAmbushId: null };
+  f.ambush = { system: sys, beaconId: choice.local_id, phase: 'going', departedAt: now, arrivesAt: now + travel, travelMs: travel, hold: {}, mpAmbushId: null,
+    orders, routeId: _tr.route ? _tr.route.id : null, routeChain: _tr.route ? _tr.route.chain.slice(0, 14) : null };   // PATCH_1510_ORDRES
   if (typeof startMissionTimerLoop === 'function') startMissionTimerLoop();
   toast(`${f.name} part en embuscade sur ${sys} · ${Math.round(travel / 60000)} min`);
   if (typeof saveGame === 'function') saveGame();
@@ -10716,6 +10738,7 @@ async function mpAmbushRegister(f) {
     payload.soldiers = { garde: 0, lourd: 0 };
     a.mpAmbushId = await window.SBMP.ambushPost(f.id, f.name, a.system, payload);
     a.blind = false;
+    if (window.SBLines && SBLines.pushOrders) { a.ordersSync = false; a.ordersTry = 0; SBLines.pushOrders(f, true); }   // PATCH_1510_ORDRES
     if (typeof saveGame === 'function') saveGame();
   } catch (e) {
     if (/no_beacon/.test(String(e && e.message)) && !a.blind) { a.blind = true; toast(`${f.name} : plus de balise sur ${a.system}, la flotte attend à l'aveugle`); }
@@ -10727,14 +10750,15 @@ function _mpAmbushTick(f, now) {
   const a = f.ambush;
   if (a.phase === 'going' && now >= a.arrivesAt) {
     a.phase = 'posted';
-    a.postedAt = now;
+    a.postedAt = a.arrivesAt;   // PATCH_1510_ORDRES — en place depuis l'arrivée (jeu fermé entre-temps : les passages comptent)
+    a.npcAt = a.arrivesAt;
     toast(`${f.name} en embuscade sur ${a.system}`);
     mpAmbushRegister(f);
     if (typeof saveGame === 'function') saveGame();
     if (typeof refreshCurrentScreen === 'function') refreshCurrentScreen();
   }
   if (a.phase === 'returning' && now >= a.returnsAt) {
-    const hold = a.hold || {};
+    const hold = (window.SBLines && SBLines.holdAll) ? SBLines.holdAll(a) : (a.hold || {});   // PATCH_1510_ORDRES
     if (_mpCargoSum(hold) > 0) _mpPay(hold, +1, true);
     toast(`${f.name} est rentrée${_mpCargoSum(hold) > 0 ? ' · butin déchargé : +' + _mpResLine(hold) : ''}`);
     delete f.ambush;
@@ -10752,7 +10776,7 @@ function _mpAmbushPhaseText(f) {
   const now = Date.now();
   if (a.phase === 'going') return `Arrivée dans ${formatMissionTimer(Math.max(0, a.arrivesAt - now))}`;
   if (a.phase === 'returning') return `Retour au port dans ${formatMissionTimer(Math.max(0, a.returnsAt - now))}`;
-  return a.blind ? 'En place · balise retirée : à l\'aveugle' : 'En place · à l\'affût';
+  return (a.blind ? 'En place · balise retirée : à l\'aveugle' : 'En place · à l\'affût') + (window.SBLines && SBLines.ordersLabel ? ' · ' + SBLines.ordersLabel(f).replace('Ordres : ', '') : '');   // PATCH_1510_ORDRES
 }
 async function mpAmbushRecall(fleetId) {
   const f = (G.fleet.prepared || []).find(x => x.id === fleetId);
@@ -10761,13 +10785,20 @@ async function mpAmbushRecall(fleetId) {
   const now = Date.now();
   if (a.phase === 'going') {
     a.phase = 'returning';
+    a.returnDepartedAt = now;   // PATCH_1510_ORDRES
     a.returnsAt = now + Math.max(5000, now - a.departedAt);
   } else {
     if (!_mpOnline()) { toast('Registre hors ligne : réessaie dans un instant'); return; }
-    const hold = a.hold || {};
+    if (window.SBLines && SBLines.tickAmbushes) { try { SBLines.tickAmbushes(now); } catch (e) {} }   // PATCH_1510_ORDRES
+    const hold = (window.SBLines && SBLines.holdAll) ? SBLines.holdAll(a) : (a.hold || {});
     const ok = await sbConfirmWarning('Rentrer au port', `Lever l'embuscade de <strong>${f.name}</strong> sur ${a.system} ?<br><br>Retour dans ${Math.round(a.travelMs / 60000)} min${_mpCargoSum(hold) > 0 ? ` avec <strong>${_mpResLine(hold)}</strong> en cale` : ''}.`, 'Rentrer');
     if (!ok) return;
     _mpAmbushBusy.add(fleetId);
+    // PATCH_1510_ORDRES — butin et pertes PNJ inscrits d'abord (sinon ils restent à bord, payés au retour)
+    if (window.SBLines && SBLines.pushNpc) {
+      const pn = await SBLines.pushNpc(f, true);
+      if (pn === false) { _mpAmbushBusy.delete(fleetId); toast('Registre hors ligne : réessaie dans un instant'); return; }
+    }
     try {
       // par identifiant, ou par flotte si l'inscription a eu lieu sans que la réponse arrive
       const res = a.mpAmbushId ? await window.SBMP.ambushLeave(a.mpAmbushId) : await window.SBMP.ambushLeaveFleet(f.id);
@@ -10776,6 +10807,7 @@ async function mpAmbushRecall(fleetId) {
     _mpAmbushBusy.delete(fleetId);
     if (!f.ambush || f.ambush.phase !== 'posted') return;
     a.phase = 'returning';
+    a.returnDepartedAt = Date.now();   // PATCH_1510_ORDRES
     a.returnsAt = Date.now() + a.travelMs;
   }
   if (typeof startMissionTimerLoop === 'function') startMissionTimerLoop();
@@ -14095,9 +14127,14 @@ function renderFleetDetail() {
         <div style="font-size:10px;letter-spacing:.14em;color:var(--mut);margin-bottom:8px">EMBUSCADE SUR</div>
         <div style="font-size:20px;color:#c9a8ff;font-weight:700;margin-bottom:10px;letter-spacing:.04em;font-family:'SF Mono',monospace">${a.system}</div>
         <div style="font-size:13px;color:#e6f0ff;font-family:'SF Mono',monospace;letter-spacing:.06em" id="fleet-detail-ambush-timer">${_mpAmbushPhaseText(fleet)}</div>
-        <div style="font-size:11px;color:var(--mut);margin-top:10px">Cale de butin : <span style="color:${_mpCargoSum(a.hold) > 0 ? '#ffc864' : 'var(--mut)'}">${_mpCargoSum(a.hold) > 0 ? _mpResLine(a.hold) : 'vide'}</span></div>
+        ${(() => { const H = window.SBLines && SBLines.holdAll ? SBLines.holdAll(a) : (a.hold || {}); const cap = window.SBLines && SBLines.holdCap ? SBLines.holdCap(fleet) : 0;   // PATCH_1510_ORDRES
+          return `<div style="font-size:11px;color:var(--mut);margin-top:10px">Cale de butin : <span style="color:${_mpCargoSum(H) > 0 ? '#ffc864' : 'var(--mut)'}">${_mpCargoSum(H) > 0 ? _mpResLine(H) : 'vide'}</span>${cap ? ` <span style="opacity:.7">/ ${fmt(cap)}</span>` : ' <span style="opacity:.7">· sans tanker</span>'}</div>`; })()}
+        ${window.SBLines && SBLines.ordersLabel && a.phase !== 'returning' ? `<div style="font-size:11px;color:#c9a8ff;margin-top:6px">${SBLines.ordersLabel(fleet)}</div>` : ''}
       </div>`;
     actionsHtml = a.phase === 'returning' ? '' : `
+      <div style="padding:0 16px 8px">
+        <button class="btn-ghost" onclick="SBLines.setOrders('${fleet.id}')" style="width:100%;padding:12px;color:#e6f0ff;border-color:rgba(163,112,255,.3)">Changer les ordres</button>
+      </div>
       <div style="padding:0 16px 14px">
         <button class="btn-ghost" onclick="mpAmbushRecall('${fleet.id}')" style="width:100%;padding:14px;color:#c9a8ff;border-color:rgba(163,112,255,.4)">${a.phase === 'going' ? 'Faire demi-tour' : 'Lever l\'embuscade · rentrer au port'}</button>
       </div>`;
@@ -23845,9 +23882,16 @@ function _generateBeaconDetectionTarget() {
 // ⚡ Phase 4 P1 — Rappel d'une balise déployée
 // V1 simplifié : retour immédiat au pool (état 'ready'), pas de timer.
 // V2+ : voyage de retour, possibilité d'interception, etc.
-function recallBeacon(beaconId) {
+function recallBeacon(beaconId, confirmed) {
   const pool = G.probesPool || [];
   const beacon = pool.find(p => p.id === beaconId && p.tier === 'beacon');
+  // PATCH_1510_ORDRES — balise sur une route vendue il y a moins de 7 jours : la retirer trahit l'acheteur
+  const _sold = (!confirmed && beacon && beacon.state === 'deployed' && window.SBLines && SBLines.salesOn) ? SBLines.salesOn(_mpSys(beacon.deployedSystem)) : [];
+  if (_sold.length && typeof sbConfirmWarning === 'function') {
+    sbConfirmWarning('Trahir ton acheteur ?', `Cette balise entretient le balisage de <strong>${_sold.map(x => String((x.route && x.route.name) || 'ta route').replace(/[<>&"]/g, '')).join(', ')}</strong>, vendue à ${_sold.map(x => String(x.buyer_pseudo || '?').replace(/[<>&"]/g, '')).join(', ')}.<br><br>La rappeler, c'est trahir : le port lui donne ta caution et le comptoir en parlera.`, 'Rappeler quand même')
+      .then(ok => { if (ok) { recallBeacon(beaconId, true); if (typeof saveGame === 'function') saveGame(); } });
+    return;
+  }
   if (!beacon) {
     if (typeof toast === 'function') toast('Balise introuvable');
     return;
@@ -34356,7 +34400,7 @@ function renderBeaconReportRow(r, isUnread) {
       <span style="opacity:.5;margin:0 4px">·</span>
       cargo ${t.cargoEstimate} (T${t.tankerTier})
     </div>
-    ${r.line ? `<div style="font-size:10px;color:var(--mut);margin-top:3px">${r.line.escort}${r.line.cap ? ` · cap relevé <span onclick="event.stopPropagation();openSystemOnMap('${r.line.cap}')" style="color:#ffd08a;font-family:'SF Mono',monospace;cursor:pointer;text-decoration:underline dotted;text-underline-offset:3px">${r.line.cap}</span>` : ' · se perd vers les marges'}${r.line.nth > 1 ? ` · ${r.line.nth}ᵉ passage observé sur cette ligne` : ''}</div>` : ''}
+    ${r.line ? `<div style="font-size:10px;color:var(--mut);margin-top:3px">${r.line.escort}${r.line.cap ? ` · cap relevé <span onclick="event.stopPropagation();openSystemOnMap('${r.line.cap}')" style="color:#ffd08a;font-family:'SF Mono',monospace;cursor:pointer;text-decoration:underline dotted;text-underline-offset:3px">${r.line.cap}</span>` : ' · se perd vers les marges'}${r.line.nth > 1 ? ` · ${r.line.nth}ᵉ passage observé sur cette ligne` : ''}${r.line.done ? ` · <span style="color:#c9a8ff">${({ robbed: 'abordé par ta flotte', repelled: 'ta flotte a été repoussée', tailed: 'filé par ta flotte', passed: 'laissé passer', tooStrong: 'escorte trop forte : ta flotte l\'a laissé passer' })[r.line.done] || ''}</span>` : (window.SBLines && SBLines.npcReportCan && SBLines.npcReportCan(r) ? ' · <span style="color:#c9a8ff">⚔ ta flotte est là : touche pour décider</span>' : '')}</div>` : ''}
     <div style="font-size:10px;color:var(--mut);margin-top:3px">
       Confiance <span style="color:${confColor}">${t.confidence}%</span>
       ${windowExpired
@@ -34389,6 +34433,11 @@ function markBeaconReportRead(reportId) {
   if (r.mp) {   // PIRATERIE_1210 — vrai convoi : fiche d'interception
     if (!r.read) { r.read = true; if (typeof updateProspectRapportsBadge === 'function') updateProspectRapportsBadge(); }
     mpOpenInterceptSheet(reportId);
+    return;
+  }
+  if (r.line && window.SBLines && SBLines.npcReportCan && SBLines.npcReportCan(r)) {   // PATCH_1510_ORDRES
+    if (!r.read) { r.read = true; if (typeof updateProspectRapportsBadge === 'function') updateProspectRapportsBadge(); }
+    SBLines.npcReportAction(r);
     return;
   }
   if (!r.read) {
@@ -45207,7 +45256,7 @@ if (G.knownTargets && Array.isArray(G.tankerMissions)) {
 <!-- PERF_1310 — mesure des performances chez les joueurs + qualité 3D automatique (assets/perf.js) -->
 <script src="assets/perf.js?v=20261014-1540"></script>
 <!-- PATCH_1410_LIGNES — lignes PNJ à horaire sur les routes cachées (assets/lines.js) -->
-<script src="assets/lines.js?v=20261015-0030"></script>
+<script src="assets/lines.js?v=20261015-0900"></script>
 <!-- CLOUD — sauvegarde Supabase (source : sb-build/src/cloud.js) -->
 <script type="module" src="assets/cloud.js?v=20261014-1440"></script>
 <!-- MATCH3 — Match-3 V2 (assets/match3.js, source src/match3.js + src/m3core.js) : remplace startM3 -->
@@ -45215,7 +45264,7 @@ if (G.knownTargets && Array.isArray(G.tankerMissions)) {
 <!-- HOME V2 — « monde d'abord » : planète plein écran, ressources en ligne, Flotte / Défense / Prospection (assets/home.js) -->
 <script type="module" src="assets/home.js?v=20261014-1440"></script>
 <!-- SPACE MAP v0 — carte du Centre de prospection (assets/spacemap.js, source src/spacemap.js) -->
-<script src="assets/spacemap.js?v=20261015-0000"></script>
+<script src="assets/spacemap.js?v=20261015-0900"></script>
 <!-- SPACE MAP niveau B — diorama 3D d'un système (assets/system3d.js, source src/system3d.js) -->
 <script type="module" src="assets/system3d.js?v=20261014-1440"></script>
 <!-- SHIP3D — fiches 3D : cuirassé KV-01, frégate SR-01, tanker TK-07, chantier orbital OS-01 (assets/ship3d.js, sur le moteur partagé window.SB3D) -->

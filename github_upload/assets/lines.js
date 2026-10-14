@@ -121,6 +121,8 @@
 
   /* ── état du joueur ── */
   const SYS = /^[A-Z]-[A-Z]-\d{4}$/;
+  // noms venus d'autres commandants (routes offertes, vendues) : jamais de balisage HTML
+  const clean = (x, n) => String(x == null ? '' : x).replace(/[<>&"`\\]/g, '').slice(0, n || 60);
   const sysOf = (c) => { const m = String(c || '').match(/^[A-Z]-[A-Z]-\d{4}/); return m ? m[0] : null; };
   function state() {
     if (!G.lineObs || typeof G.lineObs !== 'object') G.lineObs = {};       // lineId → { n, last, dirs:{out,in}, systems:[…] }
@@ -137,6 +139,20 @@
       G._linesNet = 3;
     }
     if (!G._linesRoutes) { G._linesRoutes = 1; for (const k of Object.keys(G.hiddenPorts)) { try { ensureRoute(k); } catch (e) {} } }
+  }
+  // tronçons relevés : ceux des lignes PNJ sont la connaissance des routes (jamais évincés, bornés par le réseau),
+  // ceux des convois de joueurs sont plafonnés aux 40 plus récents
+  function capLegs(list) {
+    const seen = new Set(), out = []; let players = 0;
+    for (const l of list || []) {
+      if (!l) continue;
+      const key = (l.npc ? 'n:' : 'p:' + (l.convoyId || '') + ':') + l.from + '>' + l.to;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      if (!l.npc && ++players > 40) continue;
+      out.push(l);
+    }
+    return out;
   }
   function myHome() { try { return `${MY_ADDRESS.cluster}-${MY_ADDRESS.sector}-${MY_ADDRESS.system}`; } catch (e) { return null; } }
 
@@ -174,12 +190,13 @@
     const ob = G.lineObs[line.id] = G.lineObs[line.id] || { n: 0, first: t, last: 0, dirs: {}, times: [] };
     ob.n++; ob.last = Math.max(ob.last, t); ob.dirs[dir] = (ob.dirs[dir] || 0) + 1;
     ob.times = (ob.times || []).concat([t]).slice(-6);
-    ob['t_' + dir] = (ob['t_' + dir] || []).concat([t]).slice(-5);   // pour estimer l'horaire, un seul sens
+    const tk = 't_' + dir + '@' + sys;   // pour estimer l'horaire : un seul sens, un seul jalon
+    ob[tk] = (ob[tk] || []).concat([t]).slice(-5);
     // tronçon relevé
     if (cap && SYS.test(cap)) {
       if (!G.spottedLegs.some(l => l.lineId === line.id && l.from === sys && l.to === cap)) {
         G.spottedLegs.unshift({ id: `ln-${line.id}-${sys}-${cap}`, lineId: line.id, from: sys, to: cap, pseudo: cv.label, at: t, npc: true, cargo: cv.cargo });
-        G.spottedLegs = G.spottedLegs.slice(0, 60);
+        G.spottedLegs = capLegs(G.spottedLegs);
       }
       if (!G.mapSeen) G.mapSeen = {};
       if (!G.mapSeen[cap]) G.mapSeen[cap] = now;
@@ -195,7 +212,7 @@
           id, kind: 'beacon', beaconId: b.id, beaconName: 'Balise', systemCoord: sys,
           createdAt: t, expiresAt: t + WINDOW_MS, read: false,
           target: { type: 'pnj', name: `${cv.label} · ${cv.ships} vaisseaux`, tankerTier: cv.tier, cargoEstimate: cv.cargo, confidence: 75 + (h32(id) % 20) },
-          line: { id: line.id, dir, cap, label: cv.label, escort: cv.escort, ships: cv.ships, nth: ob.n },
+          line: { id: line.id, dir, cap, label: cv.label, escort: cv.escort, ships: cv.ships, nth: ob.n, k, t, i, cargo: cv.cargo, port: !!isPort },
         });
         b.detectionCount = (b.detectionCount || 0) + 1;
         if (typeof toast === 'function') toast(`📡 ${sys} : ${cv.label.toLowerCase()} · ${cv.ships} vaisseaux${cap ? ' · cap sur ' + cap : ''}`);
@@ -266,7 +283,14 @@
   /* ── E3 · balisage : mes balises posées sur les jalons connus d'une route de ligne ── */
   // ratio = jalons balisés / jalons connus ; trajet −35 % et risque −60 % à pleine couverture ;
   // à partir de la moitié, le convoi passe en « voie balisée » au registre (pavillon masqué, un passage sur deux échappe aux balises).
-  function balisage(portSys) { return balisageChain(knownChain(portSys).slice(0, -1)); }
+  function balisage(portSys) {
+    const b = balisageChain(knownChain(portSys).slice(0, -1));
+    const r = (G.routes || []).find(x => x.portSys === portSys), sb = r && r.sellerBalise;
+    if (sb && Date.now() < sb.until && sb.ratio > b.ratio) {
+      b.ratio = sb.ratio; b.factor = 1 - 0.35 * b.ratio; b.riskMult = 1 - 0.6 * b.ratio; b.cover = b.ratio >= 0.5; b.seller = sb.seller || true;
+    }
+    return b;
+  }
   function balisageChain(chain) {
     const mine = new Set((G.probesPool || []).filter(p => p.tier === 'beacon' && p.state === 'deployed').map(p => sysOf(p.deployedSystem)));
     const going = new Set((G.probeMissions || []).filter(m => m.tier === 'beacon' && m.status === 'in_transit').map(m => sysOf(m.targetCoords)));
@@ -380,8 +404,8 @@
       const rt = g.route || {};
       const chain = (Array.isArray(rt.chain) ? rt.chain : []).filter(k => SYS.test(k)).slice(0, 12);
       if (chain.length >= 2 && !openedRoutes().some(o => o.id === 'gift-' + g.id)) {
-        const o = { id: 'gift-' + g.id, name: String(rt.name || 'Route offerte').slice(0, 60), color: '#ffb3e0', chain, to: chain[chain.length - 1],
-          toLabel: rt.toLabel ? String(rt.toLabel).slice(0, 40) : null, openedAt: Date.now(), by: String(g.from_pseudo || '?').slice(0, 20) };
+        const o = { id: 'gift-' + g.id, name: clean(rt.name || 'Route offerte'), color: '#ffb3e0', chain, to: chain[chain.length - 1],
+          toLabel: rt.toLabel ? clean(rt.toLabel, 40) : null, openedAt: Date.now(), by: clean(g.from_pseudo || '?', 24) };
         openedRoutes().push(o);
         if (!G.mapSeen) G.mapSeen = {};
         for (const k of chain) if (!G.mapSeen[k]) G.mapSeen[k] = Date.now();
@@ -416,7 +440,7 @@
     if (!force && c && Date.now() - c.at < 20000) return c;
     try {
       const rows = await _mpRpc('mp_route_offers', { p_dock_id: dockId });
-      _offers[dockId] = { at: Date.now(), rows: Array.isArray(rows) ? rows : [] };
+      _offers[dockId] = { at: Date.now(), rows: (Array.isArray(rows) ? rows : []).map(o => Object.assign({}, o, { name: clean(o.name), seller_pseudo: clean(o.seller_pseudo, 24) })) };
       if (typeof getCurrentScreen === 'function' && getCurrentScreen() === 'dock' && typeof renderDockScreen === 'function') { try { renderDockScreen(); } catch (e) {} }
     } catch (e) { _offers[dockId] = { at: Date.now(), rows: [], err: true }; }
     return _offers[dockId];
@@ -458,18 +482,29 @@
     }
     return html;
   }
+  // registre pas encore à jour (SQL v15 non passé) : on retombe sur les appels de la v14
+  let _v15;   // le registre a-t-il la v15 ? (sondé une fois)
+  const missingFn = (e) => /PGRST202|Could not find the function/.test(String(e && e.message || e));
+  const definite = (e) => /offer_quota|offer_invalid|offer_gone|offer_self|no_world/.test(String(e && e.message || e));
+  function save() { if (typeof saveGame === 'function') saveGame(); }
+  function redrawDock() { if (typeof renderDockScreen === 'function' && typeof getCurrentScreen === 'function' && getCurrentScreen() === 'dock') renderDockScreen(); }
+  // tracé balisé d'une route vendue, tel que le vendeur doit l'entretenir 7 jours
+  function soldChain(route) { const ch = (route && route.chain) || []; return route && route.kind === 'line' ? ch.slice(0, -1) : ch.slice(1, -1); }
+  // mes ventes surveillées qui passent par ce système (pour prévenir avant de rappeler une balise)
+  function salesOn(sys) { return (G._mySales || []).filter(s => soldChain(s.route).includes(sys)); }
   async function sellHere(missionId) {
     const m = (G.tankerMissions || []).find(x => x.id === missionId);
     if (!m || !online()) { toast('Registre hors de portée'); return; }
-    const dockId = mpDockIdForMission(m), dockName = (m.dock && m.dock.name) || 'Dock';
+    const dockId = mpDockIdForMission(m), dockName = clean((m.dock && m.dock.name) || 'Dock', 40);
     const list = sellableRoutes();
-    const it = await _mpChoose('Quelle route vendre ?', list.map(r => ({ r, label: r.name, sub: `${r.kind === 'line' ? 'vers un lieu caché' : 'route privée'} · ${r.chain.length - 1} tronçons` })));
+    const legs = (n) => `${n} tronçon${n > 1 ? 's' : ''}`;
+    const it = await _mpChoose('Quelle route vendre ?', list.map(r => ({ r, label: clean(r.name), sub: `${r.kind === 'line' ? 'vers un lieu caché' : 'route privée'} · ${legs(r.chain.length - 1)}` })));
     if (!it) return;
     const pr = await _mpChoose('À quel prix ?', PRICE_TIERS.map(t => ({ t, label: `${t.label} · ${t.price} CG`, sub: `caution ${Math.round(t.price / 2)} CG gardée par le port 7 jours` })));
     if (!pr) return;
     const how = await _mpChoose('Quelle carte remettre ?', [
-      { fake: false, label: 'La vraie carte', sub: 'La caution te revient dans 7 jours si tu ne trahis pas ton acheteur' },
-      { fake: true, label: 'Une carte truquée', sub: 'Elle mène dans le vide. Tu encaisses… et tu perds la caution quand il s\'en aperçoit. Le comptoir saura.' },
+      { fake: false, label: 'La vraie carte', sub: 'La caution te revient dans 7 jours si tu ne trahis pas ton acheteur (ni abordage sur cette route, ni balise retirée)' },
+      { fake: true, label: 'Une carte truquée', sub: 'Elle mène dans le vide. Tu encaisses… et tu perds la caution quand le port la démasque. Le comptoir saura.' },
     ]);
     if (!how) return;
     const price = pr.t.price, caution = Math.round(price / 2);
@@ -482,55 +517,75 @@
       chain = chain.slice(0, Math.max(1, chain.length - 2)).concat([0, 1].map(() => `A-${sec}-${1000 + Math.floor(rng() * 9000)}`));
       port = null;
     }
+    // le balisage que le vendeur entretient (l'acheteur en profite 7 jours)
+    const balise = how.fake ? 0 : Math.round(balisageChain(soldChain({ kind: r.kind, chain: r.chain })).ratio * 100) / 100;
+    const ckey = 'ck-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+    if (!Array.isArray(G.myRouteOffers)) G.myRouteOffers = [];
+    const mine = { id: null, ckey, dockId, dockName, name: clean(r.name), price, caution, fake: how.fake, status: 'pending', at: Date.now() };
     G.credits = credits() - caution;
+    G.myRouteOffers.push(mine);
+    save();
     try {
-      const id = await _mpRpc('mp_route_offer_post', { p_dock_id: dockId, p_dock_name: dockName, p_route: { name: r.name, kind: how.fake ? 'opened' : r.kind, port, toLabel: r.toLabel, fake: how.fake, chain }, p_price: price, p_caution: caution });
-      if (!Array.isArray(G.myRouteOffers)) G.myRouteOffers = [];
-      G.myRouteOffers.push({ id, dockId, dockName, name: r.name, price, caution, fake: how.fake, status: 'open', at: Date.now() });
-      toast(`« ${r.name} » en vente au comptoir de ${dockName} · ${price} CG`);
+      mine.id = await _mpRpc('mp_route_offer_post', { p_dock_id: dockId, p_dock_name: dockName, p_route: { name: r.name, kind: how.fake ? 'opened' : r.kind, port, toLabel: r.toLabel, fake: how.fake, chain, ckey, balise }, p_price: price, p_caution: caution });
+      mine.status = 'open';
+      toast(`« ${mine.name} » en vente au comptoir de ${dockName} · ${price} CG`);
     } catch (e) {
-      G.credits = credits() + caution;
-      toast(/offer_quota/.test(String(e.message)) ? '3 cartes en vente au plus' : 'Le comptoir ne répond pas, réessaie');
+      // refus net du comptoir : caution rendue ; réponse perdue : on vérifiera au registre (l'offre a peut-être été posée)
+      if (definite(e) || !_v15) { G.myRouteOffers = G.myRouteOffers.filter(o => o !== mine); G.credits = credits() + caution; }
+      toast(/offer_quota/.test(String(e.message)) ? '3 cartes en vente au plus' : definite(e) ? 'Le comptoir refuse cette carte' : 'Le comptoir ne répond pas : on vérifie au registre');
     }
-    if (typeof saveGame === 'function') saveGame();
+    save();
     fetchOffers(dockId, true);
-    if (typeof renderDockScreen === 'function' && getCurrentScreen() === 'dock') renderDockScreen();
+    redrawDock();
   }
   async function withdrawOffer(id) {
     const o = (G.myRouteOffers || []).find(x => x.id === id);
-    if (!o) return;
-    try {
-      const ok = await _mpRpc('mp_route_withdraw', { p_offer: id });
-      if (ok) { o.status = 'withdrawn'; G.credits = credits() + o.caution; toast(`Carte retirée · caution rendue (${o.caution} CG)`); }
-      else { o.status = 'sold'; toast('Trop tard : elle vient d\'être vendue'); }
-    } catch (e) { toast('Le comptoir ne répond pas, réessaie'); }
-    if (typeof saveGame === 'function') saveGame();
-    if (typeof renderDockScreen === 'function' && getCurrentScreen() === 'dock') renderDockScreen();
+    if (!o || o.status !== 'open') return;
+    let st;
+    try { st = await _mpRpc('mp_route_withdraw_state', { p_offer: id }); }
+    catch (e) {
+      if (!missingFn(e)) { toast('Le comptoir ne répond pas, réessaie'); return; }
+      try { st = (await _mpRpc('mp_route_withdraw', { p_offer: id })) ? 'withdrawn' : 'sold'; } catch (e2) { toast('Le comptoir ne répond pas, réessaie'); return; }
+    }
+    if (st === 'withdrawn' || st === 'unknown') { o.status = 'withdrawn'; G.credits = credits() + o.caution; toast(`Carte retirée · caution rendue (${o.caution} CG)`); }
+    else { o.status = 'sold'; toast('Trop tard : elle vient d\'être vendue'); }
+    save(); redrawDock();
   }
   async function buyOffer(id, dockId) {
     const row = ((_offers[dockId] || {}).rows || []).find(o => o.id === id);
     if (!row) return;
+    if ((G.pendingRouteBuys || []).some(b => b.id === id)) { toast('Achat en cours de vérification au registre'); return; }
     if (credits() < row.price) { toast(`Il faut ${row.price} CG`); return; }
-    const ok = typeof sbConfirm === 'function' ? await sbConfirm({ title: 'Acheter « ' + row.name + ' » ?', body: `${row.price} CG à ${row.seller_pseudo}. Le port garde sa caution (${row.caution} CG) 7 jours : si la carte est truquée ou s'il te trahit sur cette route, elle est pour toi.`, confirmLabel: 'Acheter', cancelLabel: 'Laisser' }) : true;
+    const ok = typeof sbConfirm === 'function' ? await sbConfirm({ title: 'Acheter « ' + clean(row.name) + ' » ?', body: `${row.price} CG à ${clean(row.seller_pseudo, 24)}. Le port garde sa caution (${row.caution} CG) 7 jours : si la carte est truquée ou s'il te trahit sur cette route, elle est pour toi.`, confirmLabel: 'Acheter', cancelLabel: 'Laisser' }) : true;
     if (!ok) return;
     G.credits = credits() - row.price;
+    save();
     let res;
     try { res = await _mpRpc('mp_route_buy', { p_offer: id }); }
-    catch (e) { G.credits = credits() + row.price; toast(/offer_gone/.test(String(e.message)) ? 'Quelqu\'un l\'a achetée avant toi' : 'Le comptoir ne répond pas, réessaie'); fetchOffers(dockId, true); return; }
+    catch (e) {
+      if (definite(e) || !_v15) { G.credits = credits() + row.price; toast(/offer_gone/.test(String(e.message)) ? 'Quelqu\'un l\'a achetée avant toi' : 'Le comptoir ne répond pas, réessaie'); }
+      else { (G.pendingRouteBuys = G.pendingRouteBuys || []).push({ id, price: row.price, at: Date.now() }); toast('Le comptoir ne répond pas : on vérifie au registre si la carte est à toi'); }
+      save(); fetchOffers(dockId, true); return;
+    }
     learnRoute(res);
-    if (typeof saveGame === 'function') saveGame();
+    save();
     fetchOffers(dockId, true);
-    if (typeof renderDockScreen === 'function' && getCurrentScreen() === 'dock') renderDockScreen();
+    redrawDock();
   }
   // la route achetée entre dans ma connaissance
   function learnRoute(res) {
     state();
-    const rt = (res && res.route) || {};
-    const chain = (rt.chain || []).filter(k => SYS.test(k));
+    const rt = Object.assign({}, (res && res.route) || {});
+    rt.name = clean(rt.name || 'Route'); rt.toLabel = rt.toLabel ? clean(rt.toLabel, 40) : null;
+    res.seller = clean(res.seller, 24);
+    const chain = (rt.chain || []).filter(k => SYS.test(k)).slice(0, 12);
     if (chain.length < 2) return;
+    if (openedRoutes().some(o => o.offerId === res.id) || (G.routes || []).some(r => r.boughtFrom && r.boughtFrom.offerId === res.id)) return;   // déjà apprise
+    const soldAt = Date.parse(res.sold_at || '') || Date.now();
+    const sellerBalise = Number(rt.balise) > 0 ? { ratio: Math.min(1, Number(rt.balise)), until: soldAt + 7 * 864e5, offerId: res.id, seller: res.seller } : null;
     if (!G.mapSeen) G.mapSeen = {};
     for (const k of chain) if (!G.mapSeen[k]) G.mapSeen[k] = Date.now();
-    if (rt.fake) {
+    if (rt.fake) {   // registre v14 : la carte dit encore qu'elle est truquée (le port la démasque ici)
       openedRoutes().push({ id: 'buy-' + res.id, name: rt.name, color: '#ffb3e0', chain, to: chain[chain.length - 1], toLabel: rt.toLabel || null,
         openedAt: Date.now(), by: res.seller, offerId: res.id, fake: true, fakeAt: Date.now() + (30 + Math.floor(Math.random() * 60)) * 60000 });
       toast(`🗺 « ${rt.name} » achetée à ${res.seller} · elle est sur ta carte`);
@@ -539,69 +594,461 @@
         if (!G.spottedLegs.some(l => l.npc && l.from === chain[i] && l.to === chain[i + 1]))
           G.spottedLegs.unshift({ id: `buy-${res.id}-${i}`, lineId: (network().bySys[chain[i]] || [{ line: { id: null } }])[0].line.id, from: chain[i], to: chain[i + 1], pseudo: 'Carte de ' + res.seller, at: Date.now(), npc: true, cargo: 'lourd' });
       }
+      G.spottedLegs = capLegs(G.spottedLegs);
       if (!G.hiddenPorts[rt.port]) { const p = network().ports[rt.port]; G.hiddenPorts[rt.port] = { dockId: p.dockId, name: p.name, type: p.type, typeLabel: p.typeLabel, at: Date.now(), boughtFrom: res.seller }; }
       const r = ensureRoute(rt.port);
-      if (r) r.boughtFrom = { seller: res.seller, offerId: res.id, at: Date.now() };
-      toast(`🗺 « ${rt.name} » achetée à ${res.seller} · route vers ${(r && r.dock && r.dock.name) || 'un lieu caché'} ajoutée`);
+      if (r) { r.boughtFrom = { seller: res.seller, offerId: res.id, at: Date.now() }; if (sellerBalise) r.sellerBalise = sellerBalise; }
+      toast(`🗺 « ${rt.name} » achetée à ${res.seller} · route vers ${(r && r.dock && r.dock.name) || 'un lieu caché'} ajoutée${sellerBalise ? ` · balisée à ${Math.round(sellerBalise.ratio * 100)} % par le vendeur` : ''}`);
     } else {
-      openedRoutes().push({ id: 'buy-' + res.id, name: rt.name, color: '#ffb3e0', chain, to: chain[chain.length - 1], toLabel: rt.toLabel || null, openedAt: Date.now(), by: res.seller, offerId: res.id });
+      openedRoutes().push({ id: 'buy-' + res.id, name: rt.name, color: '#ffb3e0', chain, to: chain[chain.length - 1], toLabel: rt.toLabel || null, openedAt: Date.now(), by: res.seller, offerId: res.id, sellerBalise });
       toast(`🗺 « ${rt.name} » achetée à ${res.seller} · elle est sur ta carte`);
     }
     if (window.SBMap && SBMap.render) { try { SBMap.render(); } catch (e) {} }
   }
-  // un acheteur dévalisé par son vendeur : trahison (appelé depuis la relève des abordages)
-  function noteRobbery(victim) {
+  // un acheteur dévalisé par son vendeur : trahison (le registre v15 le voit aussi de lui-même)
+  function noteRobbery(victim, system) {
     if (!victim) return;
-    const sale = (G._mySales || []).find(s => s.buyer_pseudo === victim);
+    // trahison seulement si l'abordage a eu lieu sur la route vendue à cet acheteur
+    const sale = (G._mySales || []).find(s => s.buyer_pseudo === victim && (!system || ((s.route && s.route.chain) || []).includes(system)));
     if (sale && online()) _mpRpc('mp_route_betray', { p_offer: sale.id, p_reason: 'robbed' }).then(ok => {
-      if (ok) toast(`⚠ Tu as dévalisé ${victim} sur une route que tu lui avais vendue : le port lui donne ta caution, et le comptoir en parle`);
+      if (ok) toast(`⚠ Tu as dévalisé ${clean(victim, 24)} sur une route que tu lui avais vendue : le port lui donne ta caution, et le comptoir en parle`);
     }).catch(() => {});
+  }
+  // la trahison du vendeur côté acheteur : la carte truquée disparaît, le balisage promis s'éteint
+  function betrayedOffer(offerId, why) {
+    if (why === 'fake') G.openedRoutes = openedRoutes().filter(o => o.offerId !== offerId);
+    for (const r of (G.routes || [])) if (r.sellerBalise && r.sellerBalise.offerId === offerId) r.sellerBalise = null;
+    for (const o of openedRoutes()) if (o.sellerBalise && o.sellerBalise.offerId === offerId) o.sellerBalise = null;
+    if (window.SBMap && SBMap.render) { try { SBMap.render(); } catch (e) {} }
   }
   async function tickMarket() {
     if (_marketBusy || !online() || typeof G === 'undefined' || !G) return;
     _marketBusy = true;
     try {
-      // vendeur : ventes à encaisser, cautions rendues
+      if (_v15 === undefined) { try { await _mpRpc('mp_route_mine', {}); _v15 = true; } catch (e) { if (missingFn(e)) _v15 = false; } }
+      // vendeur : ventes à encaisser, cautions rendues — encaissées une seule fois (le registre rend le montant)
       const sin = await _mpRpc('mp_route_seller_inbox', {});
       for (const r of Array.isArray(sin) ? sin : []) {
-        G.credits = credits() + (r.amount || 0);
+        let amt;
+        try { amt = await _mpRpc('mp_route_seller_claim', { p_offer: r.id, p_what: r.what }); _v15 = true; }
+        catch (e) { if (!missingFn(e)) throw e; _v15 = false; await _mpRpc('mp_route_seller_ack', { p_offer: r.id, p_what: r.what }); amt = r.amount; }
+        amt = Math.max(0, Math.floor(Number(amt) || 0));
         const mo = (G.myRouteOffers || []).find(o => o.id === r.id); if (mo) mo.status = 'sold';
-        toast(r.what === 'paid' ? `💰 ${r.buyer_pseudo} a acheté ta carte « ${r.name} » : +${r.amount} CG` : `Caution rendue par le port (${r.amount} CG) : « ${r.name} »`);
-        await _mpRpc('mp_route_seller_ack', { p_offer: r.id, p_what: r.what });
+        if (!amt) continue;
+        G.credits = credits() + amt; save();
+        toast(r.what === 'paid' ? `💰 ${clean(r.buyer_pseudo, 24)} a acheté ta carte « ${clean(r.name)} » : +${amt} CG` : `Caution rendue par le port (${amt} CG) : « ${clean(r.name)} »`);
       }
-      // acheteur : cautions gagnées
+      // acheteur : cautions gagnées (et cartes truquées démasquées par le port)
       const bin = await _mpRpc('mp_route_buyer_inbox', {});
       for (const r of Array.isArray(bin) ? bin : []) {
-        G.credits = credits() + (r.amount || 0);
-        toast(`⚖ Le port te verse la caution de ${r.seller_pseudo} (${r.amount} CG) : « ${r.name} » ${r.betrayal === 'fake' ? 'était truquée' : r.betrayal === 'robbed' ? '… il t\'attendait dessus' : 'a perdu son balisage'}`);
-        await _mpRpc('mp_route_buyer_ack', { p_offer: r.id });
+        let amt;
+        try { amt = await _mpRpc('mp_route_buyer_claim', { p_offer: r.id }); _v15 = true; }
+        catch (e) { if (!missingFn(e)) throw e; _v15 = false; await _mpRpc('mp_route_buyer_ack', { p_offer: r.id }); amt = r.amount; }
+        amt = Math.max(0, Math.floor(Number(amt) || 0));
+        betrayedOffer(r.id, r.betrayal);
+        if (!amt) continue;
+        G.credits = credits() + amt; save();
+        toast(`⚖ Le port te verse la caution de ${clean(r.seller_pseudo, 24)} (${amt} CG) : « ${clean(r.name)} » ${r.betrayal === 'fake' ? 'était truquée, ses coordonnées mènent dans le vide' : r.betrayal === 'robbed' ? '… il t\'attendait dessus' : 'a perdu son balisage'}`);
       }
       // mes ventes surveillées : balisage retiré = trahison
       const sales = await _mpRpc('mp_route_my_sales', {});
       G._mySales = Array.isArray(sales) ? sales : [];
       if (!G.saleBeacons || typeof G.saleBeacons !== 'object') G.saleBeacons = {};
       for (const sl of G._mySales) {
-        const ch = ((sl.route && sl.route.chain) || []).slice(1, -1);
-        const now = balisageChain(ch).beaconed;
+        const now = balisageChain(soldChain(sl.route)).beaconed;
         const snap = G.saleBeacons[sl.id];
         if (!snap) { G.saleBeacons[sl.id] = now; continue; }
         if (snap.some(k => !now.includes(k))) {
           const ok = await _mpRpc('mp_route_betray', { p_offer: sl.id, p_reason: 'recall' });
-          if (ok) toast(`⚠ Tu as retiré le balisage de « ${sl.route.name} », vendue à ${sl.buyer_pseudo} : le port lui donne ta caution`);
+          if (ok) toast(`⚠ Tu as retiré le balisage de « ${clean(sl.route.name)} », vendue à ${clean(sl.buyer_pseudo, 24)} : le port lui donne ta caution`);
           delete G.saleBeacons[sl.id];
         }
       }
-      // cartes truquées achetées : elles finissent par se révéler
+      for (const k of Object.keys(G.saleBeacons)) if (!G._mySales.some(s => s.id === k)) delete G.saleBeacons[k];
+      // cartes truquées achetées sous le registre v14 : le jeu les démasque (la route ne part qu'une fois le port averti)
       for (const o of openedRoutes().filter(x => x.fake && x.fakeAt && Date.now() > x.fakeAt)) {
+        try { await _mpRpc('mp_route_betray', { p_offer: o.offerId, p_reason: 'fake' }); } catch (e) { continue; }
         G.openedRoutes = openedRoutes().filter(x => x.id !== o.id);
-        toast(`✗ « ${o.name} » était truquée : ses coordonnées mènent dans le vide. Le port saisit la caution de ${o.by}.`);
-        try { await _mpRpc('mp_route_betray', { p_offer: o.offerId, p_reason: 'fake' }); } catch (e) {}
+        toast(`✗ « ${clean(o.name)} » était truquée : ses coordonnées mènent dans le vide. Le port saisit la caution de ${clean(o.by, 24)}.`);
       }
-      if (typeof saveGame === 'function') saveGame();
+      // réponses perdues : offres posées, achats conclus — le registre fait foi
+      const pendO = (G.myRouteOffers || []).filter(o => o.status === 'pending'), pendB = G.pendingRouteBuys || [];
+      if (pendO.length || pendB.length) {
+        let mine = null;
+        try { mine = await _mpRpc('mp_route_mine', {}); } catch (e) { if (missingFn(e)) mine = []; }
+        if (Array.isArray(mine)) {
+          for (const o of pendO) {
+            const row = mine.find(x => x.role === 'seller' && x.ckey === o.ckey);
+            if (row) { o.id = row.id; o.status = row.status === 'open' ? 'open' : row.status; if (row.status === 'withdrawn') G.credits = credits() + o.caution; }
+            else if (Date.now() - o.at > 60000) { G.myRouteOffers = G.myRouteOffers.filter(x => x !== o); G.credits = credits() + o.caution; toast(`« ${o.name} » n'a pas été posée au comptoir · caution rendue`); }
+          }
+          for (const b of pendB.slice()) {
+            const row = mine.find(x => x.role === 'buyer' && x.id === b.id);
+            if (row) learnRoute({ id: row.id, seller: row.seller_pseudo, route: row.route, sold_at: row.sold_at });
+            else if (Date.now() - b.at > 60000) { G.credits = credits() + b.price; toast(`Achat non conclu · ${b.price} CG rendus`); }
+            else continue;
+            G.pendingRouteBuys = (G.pendingRouteBuys || []).filter(x => x !== b);
+          }
+        }
+      }
+      save();
     } catch (e) { console.warn('[routes] comptoir :', String(e && e.message || e)); }
     finally { _marketBusy = false; }
   }
   setInterval(() => { if (document.visibilityState !== 'hidden') tickMarket(); }, 60000);
+
+  /* ── E6 · flottes sur les routes : ordres permanents, abordage des convois PNJ ── */
+  // Une flotte en embuscade sur un jalon de ligne voit passer les convois PNJ (retroactivement, selon l'horaire).
+  // Ses ordres décident : me demander (le rapport de balise propose d'aborder), dévaliser les cales pleines,
+  // dévaliser tout, ou filer sans se montrer (la route avance d'un tronçon). Le butin PNJ entre dans la même cale
+  // que celui des joueurs, au registre (mp_ambush_npc) ; hors ligne, il attend à bord (npcPending).
+  const ORDER_MODES = {
+    manual:    { label: 'Me demander', short: 'à tes ordres', sub: 'Chaque convoi repéré attend ta décision, pendant sa fenêtre de passage' },
+    rob_heavy: { label: 'Dévaliser les cales pleines', short: 'cales pleines', sub: 'Aborde les convois chargés, laisse filer les cales légères' },
+    rob_all:   { label: 'Dévaliser tout ce qui passe', short: 'tout ce qui passe', sub: 'Aborde chaque convoi : plus de butin, plus de combats' },
+    spy:       { label: 'Filer sans se montrer', short: 'filature', sub: 'Laisse passer et suit le convoi un tronçon de plus : la route avance, personne ne sait' },
+  };
+  const NPC_MIX = { marchand: { metal: .4, cristal: .3, energie: .3 }, contrebande: { cristal: .7, energie: .3 }, recup: { metal: .9, cristal: .1 },
+    arme: { metal: .5, energie: .5 }, pelerins: { energie: .6, metal: .4 } };
+  const FILL = { 'léger': .1, 'moyen': .3, 'lourd': .6 };
+  const HEAT_MS = 6 * 3600 * 1000;
+  const fleets = () => ((typeof G !== 'undefined' && G && G.fleet && G.fleet.prepared) || []);
+  const fleetById = (id) => fleets().find(x => x.id === id) || null;
+  const tiers = (typeof SHIP_TIERS !== 'undefined') ? SHIP_TIERS : null;
+  const cnt = (f, type, t) => Math.max(0, (f.composition && f.composition[type] && f.composition[type][t]) || 0);
+  const sumRes = (o) => ['metal', 'energie', 'cristal'].reduce((s, k) => s + Math.max(0, Math.floor(Number(o && o[k]) || 0)), 0);
+  const resLine = (o) => (typeof _mpResLine === 'function') ? _mpResLine(o) : JSON.stringify(o);
+  function ordersOf(f) {
+    const o = f && f.ambush && f.ambush.orders;
+    const mode = (o && ORDER_MODES[o.mode]) ? o.mode : 'manual';
+    return { mode, players: mode !== 'manual' && !!(o && o.players) };
+  }
+  function ordersLabel(f) {
+    const o = ordersOf(f);
+    return o.mode === 'manual' ? 'Ordres : à tes ordres' : `Ordres : ${ORDER_MODES[o.mode].short}${o.players ? ' · joueurs compris' : ' · PNJ seulement'}`;
+  }
+  async function chooseOrders(cur) {
+    if (typeof _mpChoose !== 'function') return null;
+    const m = await _mpChoose('Ordres permanents de la flotte', Object.entries(ORDER_MODES).map(([k, v]) => ({ k, label: v.label + (cur && cur.mode === k ? ' · actuel' : ''), sub: v.sub })));
+    if (!m) return null;
+    if (m.k === 'manual') return { mode: 'manual', players: false };
+    const p = await _mpChoose('Et les convois des autres commandants ?', [
+      { v: false, label: 'Seulement les convois PNJ', sub: 'Un convoi de joueur attend ta décision' },
+      { v: true, label: 'Les convois de joueurs aussi', sub: 'Même quand tu n\'es pas là. Pactes, saison et protections restent respectés' },
+    ]);
+    if (!p) return null;
+    return { mode: m.k, players: p.v };
+  }
+  async function pushOrders(f, force) {
+    const a = f && f.ambush;
+    if (!a || a.phase !== 'posted' || !a.mpAmbushId || a.ordersSync || !online()) return;
+    if (!force && Date.now() - (a.ordersTry || 0) < 5 * 60000) return;
+    a.ordersTry = Date.now();
+    try { await _mpRpc('mp_ambush_orders', { p_fleet_id: f.id, p_orders: ordersOf(f) }); a.ordersSync = true; if (typeof saveGame === 'function') saveGame(); }
+    catch (e) { console.warn('[routes] ordres :', String(e && e.message || e)); }
+  }
+  async function setOrders(fleetId) {
+    const f = fleetById(fleetId);
+    if (!f || !f.ambush || f.ambush.phase === 'returning') return;
+    const o = await chooseOrders(ordersOf(f));
+    if (!o || !f.ambush) return;
+    const was = ordersOf(f);
+    if (was.mode === 'spy' && was.players) G._spiedPending = true;   // ce qui a été filé avant le changement reste à relever
+    f.ambush.orders = o; f.ambush.ordersSync = false; f.ambush.ordersTry = 0;
+    pushOrders(f, true);
+    if (typeof toast === 'function') toast(`${f.name} · ${ordersLabel(f).replace('Ordres : ', 'ordres : ')}`);
+    if (typeof saveGame === 'function') saveGame();
+    if (typeof refreshCurrentScreen === 'function') refreshCurrentScreen();
+    if (window.SBMap && SBMap.render) { try { SBMap.render(); } catch (e) {} }
+  }
+
+  // ── cale de la flotte : capacité de ses tankers, ce qu'elle porte (registre + butin PNJ pas encore inscrit)
+  function holdCap(f) { return tiers ? [1, 2, 3].reduce((s, n) => s + cnt(f, 'tanker', 't' + n) * tiers.tanker[n].cargo, 0) : 0; }
+  function holdUsed(a) { return sumRes(a && a.hold) + sumRes(a && a.npcPending) + sumRes(a && a.npcInflight && a.npcInflight.sent); }
+  function holdAll(a) { const o = {}; for (const k of ['metal', 'energie', 'cristal']) { const v = Math.floor(Number((a && a.hold && a.hold[k]) || 0)) + Math.floor(Number((a && a.npcPending && a.npcPending[k]) || 0)) + Math.floor(Number((a && a.npcInflight && a.npcInflight.sent && a.npcInflight.sent[k]) || 0)); if (v > 0) o[k] = v; } return o; }
+  function fleetAtk(f) { return tiers ? ['fregate', 'cuirasse'].reduce((s, ty) => s + [1, 2, 3].reduce((x, n) => x + cnt(f, ty, 't' + n) * tiers[ty][n].atk, 0), 0) : 0; }
+  // ce que la ligne oppose : l'escorte du convoi, renforcée quand la ligne a été pillée récemment
+  function heatOf(lineId, t) {
+    const list = ((G.lineHeat || {})[lineId] || []).filter(x => x <= t && t - x < HEAT_MS);
+    return Math.min(3, 1 + 0.5 * list.length);
+  }
+  function escortOf(cv, lineId, t) {
+    if (!tiers) return 1;
+    const T = cv.tier;
+    const base = cv.escort === 'escorte lourde' ? tiers.cuirasse[T].def : cv.escort === 'escorte légère' ? tiers.fregate[T].def : tiers.tanker[T].def * 0.5;
+    return cv.ships * base * heatOf(lineId, t);
+  }
+  function odds(f, cv, lineId, t) { const A = fleetAtk(f), E = escortOf(cv, lineId, t); return A > 0 ? A / (A + E) : 0; }
+  function oddsLabel(p) { return p >= 0.7 ? 'chances favorables' : p >= 0.4 ? 'combat incertain' : p > 0 ? 'escorte trop forte' : 'aucun vaisseau armé'; }
+  // butin d'un convoi PNJ : la moitié de ce que portent ses cales, selon sa nature
+  function npcLoot(cv, kindKey) {
+    if (!tiers) return {};
+    const total = Math.floor(tiers.tanker[cv.tier].cargo * (FILL[cv.cargo] || 0.1) * cv.ships * 0.5);
+    const mix = NPC_MIX[kindKey] || NPC_MIX.marchand, out = {};
+    for (const [k, w] of Object.entries(mix)) { const v = Math.floor(total * w); if (v > 0) out[k] = v; }
+    return out;
+  }
+  function capLoot(loot, free) {
+    const out = {};
+    for (const k of ['metal', 'energie', 'cristal']) { const v = Math.min(Math.max(0, loot[k] || 0), free); if (v > 0) { out[k] = v; free -= v; } }
+    return out;
+  }
+  const seesHere = (sys) => (G.probesPool || []).some(p => p.tier === 'beacon' && p.state === 'deployed' && sysOf(p.deployedSystem) === sys);
+  const pidOf = (line, k, dir) => `${line.id}:${k}:${dir}`;
+  const CV_NAME = { marchand: 'un convoi marchand', contrebande: 'un convoi de contrebande', recup: 'un convoi de récupérateurs', arme: 'un convoi armé', pelerins: 'un convoi de pèlerins' };
+  const cvName = (cv) => CV_NAME[cv.kindKey] || 'un convoi';
+  function portLabel(line) { return G.hiddenPorts && G.hiddenPorts[line.port] ? G.hiddenPorts[line.port].name : null; }
+
+  // l'abordage d'un passage PNJ (résolu ici, déterministe pour cette flotte et ce passage)
+  function robNpc(f, line, i, k, dir, t, how) {
+    const a = f.ambush;
+    if (!a) return null;
+    const pid = pidOf(line, k, dir);
+    if (fleets().some(x => x.ambush && (x.ambush.npcDone || []).includes(pid))) return null;
+    a.npcDone = [pid].concat(a.npcDone || []).slice(0, 40);
+    const cv = convoyOf(line, k, dir);
+    const sys = a.system;
+    const r = rngOf(`rob:${f.id}:${pid}`);
+    const A = fleetAtk(f), E = escortOf(cv, line.id, t);
+    const p = A > 0 ? A / (A + E) : 0;
+    const win = r() < p;
+    // pertes : une part des vaisseaux armés (et des tankers si l'abordage échoue)
+    const before = JSON.parse(JSON.stringify(f.composition || {}));
+    const after = JSON.parse(JSON.stringify(f.composition || {}));
+    const q = win ? 0.25 * E / (A + E) : 0.15 + 0.45 * E / (A + E);
+    for (const ty of ['fregate', 'cuirasse', 'tanker']) for (const tt of ['t1', 't2', 't3']) {
+      const n = cnt(f, ty, tt); if (!n) continue;
+      const qq = ty === 'tanker' ? (win ? 0 : q * 0.3) : q;
+      const lost = Math.min(n, Math.floor(n * qq + r()));
+      if (lost > 0) { after[ty] = after[ty] || {}; after[ty][tt] = n - lost; }
+    }
+    if (typeof _mpSyncFleetLosses === 'function') _mpSyncFleetLosses(f, after);
+    else f.composition = after;
+    let loot = {};
+    if (win) {
+      loot = capLoot(npcLoot(cv, line.kind.key), Math.max(0, holdCap(f) - holdUsed(a)));
+      if (sumRes(loot) > 0) {
+        a.npcPending = a.npcPending || {};
+        for (const [kk, v] of Object.entries(loot)) a.npcPending[kk] = (a.npcPending[kk] || 0) + v;
+      }
+      if (!G.lineHeat || typeof G.lineHeat !== 'object') G.lineHeat = {};
+      G.lineHeat[line.id] = (G.lineHeat[line.id] || []).filter(x => t - x < HEAT_MS).concat([t]).slice(-6);
+    }
+    if (JSON.stringify(before) !== JSON.stringify(f.composition || {})) a.npcFleetDirty = true;
+    const lossLine = (typeof _mpLossLine === 'function') ? _mpLossLine(before, f.composition) : '';
+    const type = !win ? 'robbed_fail' : sumRes(loot) > 0 ? 'robbed_ok' : 'robbed_empty';
+    const port = portLabel(line);
+    if (typeof _mpPirReport === 'function') {
+      _mpPirReport(type, { icon: '⚔', npc: true, noTanker: holdCap(f) <= 0, pseudo: cv.label, who: cvName(cv), ships: cv.ships, escort: cv.escort, system: sys, fleet: f.name, loot,
+        leg: dir === 'out' ? 'out' : 'back', dock: port, auto: how === 'auto', lossLine }, 'npc-' + f.id + '-' + pid);
+    }
+    markReport(line, k, dir, sys, win ? 'robbed' : 'repelled');
+    if (typeof toast === 'function') toast(type === 'robbed_ok' ? `⚔ ${f.name} a dévalisé ${cvName(cv)} : +${resLine(loot)} en cale`
+      : type === 'robbed_empty' ? `⚔ ${f.name} a arraisonné ${cvName(cv)}, mais ${holdCap(f) > 0 ? 'sa cale est pleine' : 'elle n\'a pas de tanker'} : rien emporté`
+      : `⚔ ${cv.escort === 'sans escorte' ? 'L\'équipage' : 'L\'escorte'} d'${cvName(cv)} a repoussé ${f.name}${lossLine ? ' · pertes : ' + lossLine : ''}`);
+    return { win, loot, type };
+  }
+  // filer un convoi : un tronçon de plus dans le sens de sa marche
+  function tailNpc(f, line, i, k, dir) {
+    const a = f.ambush;
+    const pid = pidOf(line, k, dir);
+    a.npcDone = (a.npcDone || []);
+    if (a.npcDone.includes(pid)) return null;
+    a.npcDone = [pid].concat(a.npcDone).slice(0, 40);
+    const n = line.chain.length;
+    const next = capOf(line, i, dir);
+    const j = dir === 'out' ? i + 1 : i - 1;
+    const next2 = next && j >= 0 && j < n ? capOf(line, j, dir) : null;
+    markReport(line, k, dir, a.system, 'tailed');
+    if (!next || !next2 || !SYS.test(next) || !SYS.test(next2)) return null;
+    state();
+    if (G.spottedLegs.some(l => l.npc && l.from === next && l.to === next2)) return null;
+    const cv = convoyOf(line, k, dir);
+    G.spottedLegs.unshift({ id: `tl-${line.id}-${next}-${next2}`, lineId: line.id, from: next, to: next2, pseudo: cv.label + ' (filé)', at: Date.now(), npc: true, cargo: cv.cargo });
+    G.spottedLegs = capLegs(G.spottedLegs);
+    if (!G.mapSeen) G.mapSeen = {};
+    for (const x of [next, next2]) if (!G.mapSeen[x]) G.mapSeen[x] = Date.now();
+    if (network().ports[next2]) discoverPort(next2, Date.now());
+    if (typeof toast === 'function') toast(`🛰 ${f.name} a filé ${cvName(cv)} : tronçon ${next} → ${next2} relevé`, () => { if (typeof openSystemOnMap === 'function') openSystemOnMap(next2); });
+    return { from: next, to: next2 };
+  }
+  function markReport(line, k, dir, sys, done) {
+    const r = (G.beaconReports || []).find(x => x.id === `ln-${line.id}-${k}-${dir}-${sys}`);
+    if (r && r.line) { r.line.done = done; r.read = true; }
+  }
+  // inscrire au registre le butin et les pertes PNJ (un lot à la fois, rejouable sans double compte)
+  // renvoie true (inscrit, ou rien à inscrire), 'local' (le registre ne le prendra pas : le butin reste à bord,
+  // payé au retour) ou false (registre injoignable : réessayer)
+  let _npcBusy = false, _npcMissingAt = 0;
+  async function pushNpc(f, wait) {
+    const a = f && f.ambush;
+    if (wait) for (let n = 0; _npcBusy && n < 50; n++) await new Promise(r => setTimeout(r, 100));
+    if (!a || a.phase !== 'posted') return 'local';
+    if (!a.npcInflight && !(sumRes(a.npcPending) > 0 || a.npcFleetDirty)) return true;
+    if (!a.mpAmbushId || Date.now() - _npcMissingAt < 10 * 60000) return 'local';
+    if (_npcBusy || !online()) return false;
+    _npcBusy = true;
+    // un lot envoyé est figé : on le renvoie à l'identique tant que le registre n'a pas répondu (jamais compté deux fois)
+    if (!a.npcInflight) {
+      a.npcInflight = { key: 'nb-' + f.id + '-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5), sent: Object.assign({}, a.npcPending || {}), comp: JSON.stringify(f.composition || {}) };
+      a.npcPending = {};
+      a.npcFleetDirty = false;
+      if (typeof saveGame === 'function') saveGame();
+    }
+    const fl = a.npcInflight;
+    try {
+      const payload = (typeof _mpFleetPayload === 'function') ? _mpFleetPayload(f) : { composition: f.composition };
+      const res = await _mpRpc('mp_ambush_npc', { p_fleet_id: f.id, p_key: fl.key, p_loot: fl.sent, p_fleet: payload });
+      if (f.ambush !== a || a.npcInflight !== fl) return false;
+      if (res && res.hold) a.hold = { metal: +res.hold.metal || 0, energie: +res.hold.energie || 0, cristal: +res.hold.cristal || 0 };
+      a.npcInflight = null;
+      if (res && res.dup && JSON.stringify(f.composition || {}) !== fl.comp) a.npcFleetDirty = true;   // pertes à inscrire au lot suivant
+      if (typeof saveGame === 'function') saveGame();
+      return true;
+    } catch (e) {
+      const msg = String(e && e.message || e);
+      const back = () => { a.npcPending = a.npcPending || {}; for (const [k, v] of Object.entries(fl.sent)) a.npcPending[k] = (a.npcPending[k] || 0) + v; a.npcInflight = null; };
+      if (/PGRST202|Could not find the function/.test(msg)) { _npcMissingAt = Date.now(); back(); return 'local'; }   // registre pas encore à jour (v15) : à bord
+      if (/ambush_unknown/.test(msg)) { back(); return 'local'; }                                                     // embuscade déjà levée : à bord
+      console.warn('[routes] butin PNJ :', msg); return false;
+    } finally { _npcBusy = false; }
+  }
+  // tick : les passages PNJ devant mes flottes postées depuis le dernier passage du jeu
+  function tickAmbushes(now) {
+    if (typeof G === 'undefined' || !G) return;
+    state();
+    const net = network();
+    let dirty = false;
+    for (const f of fleets()) {
+      const a = f.ambush;
+      if (!a || a.phase !== 'posted') continue;
+      pushOrders(f);
+      if (a.blind || !seesHere(a.system)) { a.npcAt = now; pushNpc(f); continue; }   // sans balise : à l'aveugle
+      const on = (net.bySys[a.system] || []).filter(o => !o.isPort);
+      const from = Math.max(a.npcAt || a.postedAt || now, now - HEAT_MS);
+      a.npcAt = now;
+      if (!on.length) continue;
+      const o = ordersOf(f);
+      if (o.mode === 'manual') continue;
+      let list = [];
+      for (const { line, i } of on) for (const ps of passages(line, i, from, now)) list.push({ line, i, ...ps });
+      list.sort((x, y) => x.t - y.t);
+      let skipped = false;
+      for (const ps of list.slice(-6)) {
+        if (!f.ambush) break;
+        const cv = convoyOf(ps.line, ps.k, ps.dir);
+        if (o.mode === 'spy') { tailNpc(f, ps.line, ps.i, ps.k, ps.dir); dirty = true; continue; }
+        if (o.mode === 'rob_heavy' && cv.cargo === 'léger') continue;
+        if (fleetAtk(f) <= 0 || holdCap(f) - holdUsed(a) <= 0) continue;     // rien à gagner : la flotte regarde passer
+        // un capitaine ne se jette pas sur une escorte qui le dépasse : il laisse passer et le signale
+        if (odds(f, cv, ps.line.id, ps.t) < 0.35) {
+          markReport(ps.line, ps.k, ps.dir, a.system, 'tooStrong');
+          if (!skipped && typeof toast === 'function') toast(`${f.name} laisse passer ${cvName(cv)} : escorte trop forte pour elle`);
+          skipped = true; continue;
+        }
+        robNpc(f, ps.line, ps.i, ps.k, ps.dir, ps.t, 'auto');
+        dirty = true;
+      }
+      pushNpc(f);
+    }
+    if (dirty) {
+      if (typeof saveGame === 'function') saveGame();
+      if (typeof updateProspectRapportsBadge === 'function') { try { updateProspectRapportsBadge(); } catch (e) {} }
+      if (window.SBMap && SBMap.render) { try { SBMap.render(); } catch (e) {} }
+      if (typeof getCurrentScreen === 'function' && getCurrentScreen() === 'fleet-detail' && typeof refreshCurrentScreen === 'function') refreshCurrentScreen();
+    }
+    autoPlayers();
+    pollSpied();
+  }
+  // le registre applique les ordres aux convois de joueurs ; tout jeu ouvert l'y aide
+  let _autoAt = 0;
+  async function autoPlayers() {
+    if (!online() || Date.now() - _autoAt < 30000) return;
+    _autoAt = Date.now();
+    try {
+      const n = await _mpRpc('mp_auto_ambush', {});
+      if (n > 0 && window.SBMP && SBMP.resolveDue) SBMP.resolveDue(true);
+    } catch (e) {}
+  }
+  // routes de joueurs filées en mon absence
+  let _spiedAt = 0;
+  async function pollSpied() {
+    if (!online() || Date.now() - _spiedAt < 60000) return;
+    // une flotte qui file (ou qui vient de filer) des convois de joueurs : une relève de plus après son retour
+    const spying = fleets().some(f => f.ambush && ordersOf(f).players && ordersOf(f).mode === 'spy');
+    if (!spying && !G._spiedPending) return;
+    _spiedAt = Date.now();
+    let rows;
+    try { rows = await _mpRpc('mp_spied_inbox', {}); } catch (e) { return; }
+    G._spiedPending = spying;
+    for (const o of Array.isArray(rows) ? rows : []) {
+      const addr = /^[A-Z]-[A-Z]-\d{4}-\d{2}$/.test(o.address || '') ? o.address : null;
+      const okSys = (x) => SYS.test(x || '') ? x : null;
+      const who = clean(o.pseudo || '?', 24);
+      if (addr && o.pseudo && typeof _mpMergeSender === 'function') _mpMergeSender(addr, who);
+      const at = fleets().find(f => f.ambush && f.ambush.phase === 'posted' && [o.from_system, o.to_system].includes(f.ambush.system));
+      if (typeof _mpPirReport === 'function') _mpPirReport('spied', { icon: '👁', pseudo: who, address: addr, from: okSys(o.from_system), to: okSys(o.to_system),
+        dock: o.dock_name ? clean(o.dock_name, 40) : null, system: at ? at.ambush.system : null, auto: true }, 'spy-' + o.convoy_id);
+      if (typeof toast === 'function') toast(`👁 Ta flotte a filé le convoi de ${who} : route relevée`);
+    }
+    if (rows && rows.length && typeof saveGame === 'function') saveGame();
+  }
+  setInterval(() => { if (document.visibilityState !== 'hidden') { try { tickAmbushes(Date.now()); } catch (e) { console.warn('[routes] embuscades', e); } } }, 20000);
+
+  // rapport de balise PNJ + flotte postée sur ce jalon : aborder, filer, laisser passer (ordre « me demander »)
+  function npcReportCan(r) {
+    if (!r || !r.line || r.line.port || r.line.done || r.line.k == null || Date.now() > (r.expiresAt || 0)) return null;
+    const f = (typeof _mpPostedFleetAt === 'function') ? _mpPostedFleetAt(r.systemCoord) : null;
+    if (!f || !seesHere(r.systemCoord)) return null;
+    const line = network().byId[r.line.id];
+    if (!line) return null;
+    const i = line.chain.indexOf(r.systemCoord);
+    const pid = pidOf(line, r.line.k, r.line.dir);
+    if (i < 0 || fleets().some(x => x.ambush && (x.ambush.npcDone || []).includes(pid))) return null;   // déjà réglé
+    return { f, line, i };
+  }
+  async function npcReportAction(r) {
+    const c = npcReportCan(r);
+    if (!c) return false;
+    const { f, line, i } = c;
+    const cv = convoyOf(line, r.line.k, r.line.dir);
+    const p = odds(f, cv, line.id, r.line.t);
+    const free = holdCap(f) - holdUsed(f.ambush);
+    const est = capLoot(npcLoot(cv, line.kind.key), Math.max(0, free));
+    const it = await _mpChoose(`${cv.label} · ${cv.ships} vaisseaux · ${cv.escort} · cales ${cv.cargo === 'léger' ? 'légères' : 'pleines'}`, [
+      { k: 'rob', label: `Aborder avec ${f.name}`, sub: `${oddsLabel(p)} · ${free > 0 ? 'butin possible : ' + resLine(est) : holdCap(f) > 0 ? 'cale pleine : rien ne pourra être emporté' : 'pas de tanker : rien ne pourra être emporté'}` },
+      { k: 'tail', label: 'Le filer sans se montrer', sub: 'La route avance d\'un tronçon dans le sens de sa marche' },
+      { k: 'pass', label: 'Le laisser passer', sub: 'Rien ne bouge' },
+    ]);
+    if (!it || !f.ambush || f.ambush.phase !== 'posted') return true;
+    if (Date.now() > (r.expiresAt || 0)) { toast('Trop tard : le convoi est passé'); return true; }
+    if (it.k === 'rob') { if (fleetAtk(f) <= 0) { toast('Il faut des frégates ou des cuirassés pour aborder'); return true; } robNpc(f, line, i, r.line.k, r.line.dir, r.line.t, 'manual'); pushNpc(f); }
+    else if (it.k === 'tail') {
+      const leg = tailNpc(f, line, i, r.line.k, r.line.dir);
+      if (!leg) toast(r.line.dir === 'out' && i >= line.chain.length - 2 ? 'Le convoi entre au lieu caché : rien de plus à relever' : r.line.dir === 'in' && i <= 1 ? 'Le convoi se perd vers les marges' : 'Ta flotte le suit sur un tronçon déjà connu');
+    }
+    else { r.line.done = 'passed'; }
+    if (typeof saveGame === 'function') saveGame();
+    if (typeof updateProspectRapportsBadge === 'function') { try { updateProspectRapportsBadge(); } catch (e) {} }
+    if (typeof refreshCurrentScreen === 'function') refreshCurrentScreen();
+    if (window.SBMap && SBMap.render) { try { SBMap.render(); } catch (e) {} }
+    return true;
+  }
+  // trajet d'une flotte vers un jalon : par une route connue (et balisée), plus vite qu'à découvert
+  function ambushTravel(sys, baseMs) {
+    let best = null;
+    const consider = (id, name, chain, mids) => {
+      if (!chain.includes(sys)) return;
+      const b = balisageChain(mids);
+      const factor = 0.8 * b.factor;
+      if (!best || factor < best.factor) best = { id, name, chain, factor, ratio: b.ratio };
+    };
+    for (const r of (G.routes || [])) if (r.portSys) { const ch = knownChain(r.portSys); consider(r.id, r.name, ch, ch.slice(0, -1)); }
+    for (const o of openedRoutes()) if (!o.fake) consider(o.id, o.name, o.chain, o.chain.slice(1, -1));
+    return best ? { ms: Math.round(baseMs * best.factor), route: best } : { ms: baseMs, route: null };
+  }
+  // ce que la carte montre d'une embuscade sur ce système
+  function ambushAt(sys) { return fleets().filter(f => f.ambush && f.ambush.system === sys && f.ambush.phase !== 'returning'); }
 
   /* ── E2 · une carte de route devient une piste : elle place sur une ligne, plus ou moins près du lieu ── */
   function activateCard(card) {
@@ -644,7 +1091,7 @@
   function tickEcho(now) {
     if (typeof G === 'undefined' || !G || !antennaOn()) return;
     state();
-    const echoes = Object.entries(G.trafficEchoes);
+    const echoes = Object.entries(G.trafficEchoes).filter(([, e]) => !e.fromCard);   // les pistes des cartes ne comptent pas
     const last = echoes.reduce((m, [, e]) => Math.max(m, e.at || 0), 0);
     if (echoes.length && now - last < ECHO_EVERY_MS) return;
     // pas d'écho de plus tant que deux échos attendent une balise
@@ -693,7 +1140,7 @@
       if (!ob) continue;
       let per = null;
       for (const dir of ['out', 'in']) {
-        const ts = (ob['t_' + dir] || []).slice().sort((a, b) => a - b);
+        const ts = (ob['t_' + dir + '@' + sys] || []).slice().sort((a, b) => a - b);
         if (ts.length < 2) continue;
         const d = []; for (let i = 1; i < ts.length; i++) d.push(ts[i] - ts[i - 1]);
         d.sort((a, b) => a - b);
@@ -720,6 +1167,8 @@
     activateCard, ensureRoute, knownChain, balisage, balisageChain, routesBalisedBy, noteUser,
     openedRoutes, openedTo, scoutInFlight, scoutLaunch, scoutArrived, forgetOpened, giveRoute, pollGifts,
     dockMarketHtml, sellHere, withdrawOffer, buyOffer, learnRoute, noteRobbery, tickMarket, fetchOffers, sellableRoutes,
+    ORDER_MODES, ordersOf, ordersLabel, chooseOrders, setOrders, pushOrders, pushNpc, holdCap, holdUsed, holdAll, fleetAtk, odds, oddsLabel,
+    robNpc, tailNpc, tickAmbushes, capLegs, salesOn, soldChain, npcReportCan, npcReportAction, ambushTravel, ambushAt, pollSpied, autoPlayers,
     WINDOW_MS, EPOCH,
     _reset() { _net = null; },
   };
