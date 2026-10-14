@@ -9081,8 +9081,10 @@ function mpIsTestZone(cluster, sector) {
 }
 
 // Une sonde a révélé de vrais mondes dans un système : on les inscrit (remplace une planète inventée au même endroit)
-function mergeRealWorlds(sysKey, worlds) {
+// CARNET_ONLY_1410 — seule une sonde produit un rapport de mission ; voisins, pavillons, barman, expéditeurs → carnet seulement
+function mergeRealWorlds(sysKey, worlds, opts) {
   if (!Array.isArray(worlds) || !worlds.length) return;
+  const noReport = !!(opts && opts.noReport);
   const [cluster, sector, system] = sysKey.split('-');
   if (!G.knownSystems[sysKey]) {
     G.knownSystems[sysKey] = { cluster, sector, system: parseInt(system, 10), planets: [], discoveredAt: Date.now(), isMine: false };
@@ -9105,10 +9107,13 @@ function mergeRealWorlds(sysKey, worlds) {
       mpAddress: w.address,
       isMine: false,
       lastSeenDays: w.last_seen_days,
-      reportTimestamp: Date.now(),
-      report: (typeof makeReport === 'function') ? makeReport('player', sector, parseInt(system, 10), slot, w.pseudo, lvl, cluster) : null,
-      reportRead: false,
     };
+    if (!noReport) {
+      data.reportTimestamp = Date.now();
+      data.report = (typeof makeReport === 'function') ? makeReport('player', sector, parseInt(system, 10), slot, w.pseudo, lvl, cluster) : null;
+      data.reportRead = false;
+      data.reportSource = 'probe';
+    }
     const i = sys.planets.findIndex(p => p.coord === coord);
     if (i >= 0 && sys.planets[i].customName) {   // PROFIL_1310 — un ancien surnom local cède au vrai nom
       delete sys.planets[i].customName;
@@ -9469,7 +9474,7 @@ function mpIngestFlags(rows) {
     });
     if (f.from_address && typeof mergeRealWorlds === 'function') {
       const sysKey = String(f.from_address).split('-').slice(0, 3).join('-');
-      mergeRealWorlds(sysKey, [{ address: f.from_address, pseudo: f.from_pseudo, planet_name: f.from_planet, level_estimate: 1 }]);
+      mergeRealWorlds(sysKey, [{ address: f.from_address, pseudo: f.from_pseudo, planet_name: f.from_planet, level_estimate: 1 }], { noReport: true });
     }
     if (!f.seen) fresh.push(f);
   }
@@ -9600,7 +9605,7 @@ function _mpDiploReport(type, d, key) {
 }
 function _mpMergeSender(address, pseudo) {
   if (!address || typeof mergeRealWorlds !== 'function') return;
-  mergeRealWorlds(String(address).split('-').slice(0, 3).join('-'), [{ address, pseudo, planet_name: null, level_estimate: 1 }]);
+  mergeRealWorlds(String(address).split('-').slice(0, 3).join('-'), [{ address, pseudo, planet_name: null, level_estimate: 1 }], { noReport: true });
 }
 // Créditer une cale acceptée dans MA partie — une seule fois (registre local + drapeau du registre)
 function mpCreditOrbitCargo(o) {
@@ -10863,7 +10868,7 @@ function mpIngestNeighbors(rows) {
   for (const w of rows) {
     if (!w || !w.address || w.address === (typeof mpMyAddressString === 'function' ? mpMyAddressString() : '')) continue;
     const sysKey = String(w.address).split('-').slice(0, 3).join('-');
-    mergeRealWorlds(sysKey, [{ address: w.address, pseudo: w.pseudo, planet_name: w.planet_name, level_estimate: w.level_estimate }]);
+    mergeRealWorlds(sysKey, [{ address: w.address, pseudo: w.pseudo, planet_name: w.planet_name, level_estimate: w.level_estimate }], { noReport: true });
     if (!G.mpNeighbors[w.address]) {
       G.mpNeighbors[w.address] = Date.now();
       fresh.push(w);
@@ -11222,7 +11227,7 @@ async function mpBuyBarLead() {
     toast(row === undefined ? 'Le barman ne répond pas, réessaie' : 'Le barman hausse les épaules : il ne connaît personne que tu ne connaisses déjà. Remboursé.');
   } else {
     const sysKey = String(row.address).split('-').slice(0, 3).join('-');
-    mergeRealWorlds(sysKey, [row]);
+    mergeRealWorlds(sysKey, [row], { noReport: true });
     toast(`Le barman glisse une adresse : ${row.pseudo} · ${row.address}`);
   }
   saveGame();
@@ -11876,6 +11881,19 @@ function renderDashResGrid() {
     `;
   }).join('');
   grid.innerHTML = cells;
+}
+
+function mpTidyPlayerReports() {
+  let n = 0;
+  for (const sys of Object.values(G.knownSystems || {})) {
+    for (const pl of sys.planets || []) {
+      if (pl && pl.isReal && pl.report && pl.reportSource !== 'probe') {
+        delete pl.report; delete pl.reportRead; delete pl.reportTimestamp; n++;
+      }
+    }
+  }
+  if (n && typeof saveGame === 'function') { try { saveGame(); } catch (e) {} }
+  return n;
 }
 
 function collectUnreadReports() {
@@ -33272,6 +33290,7 @@ function toggleArchives() {
 function renderProspectRapports() {
   const list = document.getElementById('prospect-rapports-list');
   if (!list) return;
+  try { mpTidyPlayerReports(); } catch (e) {}
 
   // ─── Collecter tous les rapports (rapports planète + rapports sondes v1.1) ───
   const allReports = [];
@@ -37408,9 +37427,9 @@ function renderDefenseUnitDetail(key) {
 
 // ─── SHIP3D : fiche vaisseau en vue héros (3D plein écran derrière la fiche, comme le soldat lourd) ───
 const UNIT_SHIP3D_MODELS = {
-  cuirasse: { url: 'assets/3d/sb_kv01.glb?v=20261014-1430', code: 'KV-01 Kerath' },
-  fregate:  { url: 'assets/3d/sb_sr01.glb?v=20261014-1430', code: 'SR-01 Sentinelle', profile: 'sr01' },
-  tanker:   { url: 'assets/3d/sb_tk07.glb?v=20261014-1430', code: 'TK-07 Tanker', profile: 'tk07' },
+  cuirasse: { url: 'assets/3d/sb_kv01.glb?v=20261014-1440', code: 'KV-01 Kerath' },
+  fregate:  { url: 'assets/3d/sb_sr01.glb?v=20261014-1440', code: 'SR-01 Sentinelle', profile: 'sr01' },
+  tanker:   { url: 'assets/3d/sb_tk07.glb?v=20261014-1440', code: 'TK-07 Tanker', profile: 'tk07' },
 };
 let unitShip3D = null;   // { key, handle }
 function mountUnitShip3D(key, inService) {
@@ -37499,9 +37518,9 @@ function hasShipyardBuilt() {
   return !!(typeof G !== 'undefined' && G.planet && G.planet.parcels && G.planet.parcels.some(p => p && p.building === 'shipyard' && p.state === 'built'));
 }
 const DOCK_MODELS = {
-  tanker:   { url: 'assets/3d/sb_tk07_lod.glb?v=20261014-1430', engine: [1.0, 0.7, 0.4] },
-  fregate:  { url: 'assets/3d/sb_sr01_lod.glb?v=20261014-1430', engine: [0.5, 0.78, 1.0] },
-  cuirasse: { url: 'assets/3d/sb_kv01_lod.glb?v=20261014-1430', engine: [0.5, 0.78, 1.0] },
+  tanker:   { url: 'assets/3d/sb_tk07_lod.glb?v=20261014-1440', engine: [1.0, 0.7, 0.4] },
+  fregate:  { url: 'assets/3d/sb_sr01_lod.glb?v=20261014-1440', engine: [0.5, 0.78, 1.0] },
+  cuirasse: { url: 'assets/3d/sb_kv01_lod.glb?v=20261014-1440', engine: [0.5, 0.78, 1.0] },
 };
 function fleetStationedCount(k) {
   const c = (G.fleet && G.fleet.stationed && G.fleet.stationed[k]) || {};
@@ -37593,7 +37612,7 @@ function unmountFleetStation3D() {
 })();
 
 // ─── SHIP3D : fiche bâtiment en vue héros (chantier orbital OS-01) ───
-const BUILDING_SHIP3D = { shipyard: { url: 'assets/3d/sb_os01.glb?v=20261014-1430', code: 'OS-01 Chantier orbital', profile: 'os01' } };
+const BUILDING_SHIP3D = { shipyard: { url: 'assets/3d/sb_os01.glb?v=20261014-1440', code: 'OS-01 Chantier orbital', profile: 'os01' } };
 let bdShip3D = null;   // { key, handle }
 function mountBuildingShip3D(key, tier) {
   const scr = document.getElementById('scr-building-detail');
@@ -45005,6 +45024,7 @@ if (_SAVE_LOADED_AT_BOOT) {
 }
 // MULTIJOUEUR v0 : après un déménagement, le nouveau système d'origine est créé ici
 if (_SAVE_LOADED_AT_BOOT) ensureHomeSystem();
+if (_SAVE_LOADED_AT_BOOT) { try { mpTidyPlayerReports(); } catch (e) {} }
 // Démarrer l'autosave et brancher les hooks (beforeunload, visibilitychange)
 initSaveHooks();
 
@@ -45129,27 +45149,27 @@ if (G.knownTargets && Array.isArray(G.tankerMissions)) {
 
 </script>
 <!-- PLANET3D — carte 3D + boucle antenne (source : sb-build/src/planet3d.js) -->
-<script type="module" src="assets/planet3d.js?v=20261014-1430"></script>
+<script type="module" src="assets/planet3d.js?v=20261014-1440"></script>
 <!-- PERF_1310 — mesure des performances chez les joueurs + qualité 3D automatique (assets/perf.js) -->
-<script src="assets/perf.js?v=20261014-1430"></script>
+<script src="assets/perf.js?v=20261014-1440"></script>
 <!-- PATCH_1410_LIGNES — lignes PNJ à horaire sur les routes cachées (assets/lines.js) -->
-<script src="assets/lines.js?v=20261014-1430"></script>
+<script src="assets/lines.js?v=20261014-1440"></script>
 <!-- CLOUD — sauvegarde Supabase (source : sb-build/src/cloud.js) -->
-<script type="module" src="assets/cloud.js?v=20261014-1430"></script>
+<script type="module" src="assets/cloud.js?v=20261014-1440"></script>
 <!-- MATCH3 — Match-3 V2 (assets/match3.js, source src/match3.js + src/m3core.js) : remplace startM3 -->
-<script type="module" src="assets/match3.js?v=20261014-1430"></script>
+<script type="module" src="assets/match3.js?v=20261014-1440"></script>
 <!-- HOME V2 — « monde d'abord » : planète plein écran, ressources en ligne, Flotte / Défense / Prospection (assets/home.js) -->
-<script type="module" src="assets/home.js?v=20261014-1430"></script>
+<script type="module" src="assets/home.js?v=20261014-1440"></script>
 <!-- SPACE MAP v0 — carte du Centre de prospection (assets/spacemap.js, source src/spacemap.js) -->
-<script src="assets/spacemap.js?v=20261014-1430"></script>
+<script src="assets/spacemap.js?v=20261014-1440"></script>
 <!-- SPACE MAP niveau B — diorama 3D d'un système (assets/system3d.js, source src/system3d.js) -->
-<script type="module" src="assets/system3d.js?v=20261014-1430"></script>
+<script type="module" src="assets/system3d.js?v=20261014-1440"></script>
 <!-- SHIP3D — fiches 3D : cuirassé KV-01, frégate SR-01, tanker TK-07, chantier orbital OS-01 (assets/ship3d.js, sur le moteur partagé window.SB3D) -->
-<script src="assets/aftermath.js?v=20261014-1430"></script>
-<script src="assets/fete_caserne.js?v=20261014-1430"></script>
-<script src="assets/radio.js?v=20261014-1430"></script>
-<script type="module" src="assets/ship3d.js?v=20261014-1430"></script>
+<script src="assets/aftermath.js?v=20261014-1440"></script>
+<script src="assets/fete_caserne.js?v=20261014-1440"></script>
+<script src="assets/radio.js?v=20261014-1440"></script>
+<script type="module" src="assets/ship3d.js?v=20261014-1440"></script>
 <!-- FORMATION3D — flotte déployée en orbite, vue de haut en formation (remplace la vue orbite) -->
-<script src="assets/formation3d.js?v=20261014-1430"></script>
+<script src="assets/formation3d.js?v=20261014-1440"></script>
 </body>
 </html>
