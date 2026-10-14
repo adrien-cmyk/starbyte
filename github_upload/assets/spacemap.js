@@ -229,6 +229,8 @@
       if (!/^[A-Z]-[A-Z]-\d{4}$/.test(o.system || '')) continue;
       const sp = add(o.system, { known: true }); (sp.others = sp.others || []).push(o);
     }
+    // 14/10 — lignes PNJ : échos de trafic captés par l'antenne et lieux cachés découverts entrent sur la carte
+    if (window.SBLines) for (const k of SBLines.knownSystems()) if (/^[A-Z]-[A-Z]-\d{4}$/.test(k)) add(k, { known: true });
     // 13/10 — mémoire de la carte : un système vu reste sur la carte même si ses rapports sont supprimés
     if (!G.mapSeen) G.mapSeen = {};
     for (const k of Object.keys(G.mapSeen)) if (/^[A-Z]-[A-Z]-\d{4}$/.test(k)) add(k, { known: true });
@@ -286,7 +288,7 @@
       const k = `${m[1]}-${m[2]}-${m[3]}`, ci = cell['sys:' + k];
       return ci === undefined ? null : { ci, key: k };
     };
-    for (const r of (G.beaconRoutes || [])) {
+    for (const r of []) {   // 14/10 (routes & pistes v1) : plus de route « entre deux de mes balises »
       const A = beaconAt(r.a), B = beaconAt(r.b);
       if (!A || !B) { routes.push({ r, broken: true, path: [], a: A, b: B }); continue; }
       const blocked = new Set((r.avoid || []).map(k => cell['sys:' + k]).filter(i => i !== undefined && i !== A.ci && i !== B.ci));
@@ -298,9 +300,11 @@
     for (const l of spotted) {
       const fa = cell['sys:' + l.from], fb = cell['sys:' + l.to];
       if (fa === undefined || fb === undefined) continue;
-      spottedPaths.push({ l, path: hexPath(fa, fb, null) || [fa, fb] });
+      spottedPaths.push({ l, path: [fa, fb] });   // 14/10 : un cap relevé = un trait direct (pas de détour sur la grille)
     }
     const partial = { cell, occ, routes, home };
+    // ce que les lignes PNJ disent de chaque système (couloir, écho, lieu caché, convois observés)
+    if (window.SBLines) for (const sx of Object.values(systems)) { try { sx.li = SBLines.infoFor(sx.key); } catch (e) { sx.li = null; } }
 
     // Missions en vol
     const flights = [];
@@ -357,6 +361,7 @@
     const o = [];
     for (const [i, v] of st.occ) if (v.kind !== 'home') o.push(i + v.kind[0] + v.key);
     for (const s of Object.values(st.systems)) {
+      if (s.li) o.push('L' + s.key + (s.li.port ? 'P' : '') + (s.li.echo ? 'E' : '') + (s.li.lane ? 'C' : '') + s.li.obs.map(x => x.n).join('.'));
       o.push((s.known ? 'K' : '') + (s.scanning ? 'S' : '') + s.key + ':' + ((G.systemTags || {})[s.key] || '') + ':' + ((s.beacons || []).length) + ':' + ((s.posts || []).length) + ':' + (s.others || []).map(x => x.pseudo + (x.met ? '+' : '')).join('/'));
       for (const t of s.targets) o.push(t.key + ':' + (t.kt.status || ''));
       for (const g of s.sigs) o.push(g.id + ':' + (g.resolved ? 1 : 0));
@@ -462,7 +467,10 @@
       const insp = (window.SBSystem && sys && (sys.known || sys.scanning)) ? _sigBtn(COL.cyan, 'Inspecter le système', `SBSystem.open('${esc(s.key)}')`, '', true) : '';
       const tag = (G.systemTags || {})[s.key];
       const tagTxt = tag === 'star' ? ' · <span style="color:#ffc864">intéressant</span>' : tag === 'skip' ? ' · <span style="color:#8a96a0">sans intérêt</span>' : '';
-      return `<div class="sm-panel"><div class="sm-ptitle">Système ${esc(s.key)}</div><div class="sm-psub">${bits.join(' · ') || 'Balayé, rien de relevé.'}${tagTxt}</div>${postsHtml(s.key)}${spottedHtml(s.key)}${insp}${act}${beaconAction(s.key, sys)}</div>`;
+      const li = sys && sys.li;
+      const title = li && li.port ? `${esc(li.port.name)}` : `Système ${esc(s.key)}`;
+      const sub = li && li.port ? `<span class="mono">${esc(s.key)}</span> · ${esc(li.port.typeLabel || 'lieu caché')}` : (bits.join(' · ') || (li && (li.lane || li.echo || li.obs.length) ? 'Couloir de passage' : 'Balayé, rien de relevé.'));
+      return `<div class="sm-panel"><div class="sm-ptitle"${li && li.port ? ' style="color:#ffc864"' : ''}>${title}</div><div class="sm-psub">${sub}${tagTxt}</div>${laneHtml(s.key, li)}${postsHtml(s.key)}${spottedHtml(s.key)}${insp}${act}${beaconAction(s.key, sys)}</div>`;
     }
     if (s.kind === 'sig') {
       const sig = G.signatures && G.signatures[s.key];
@@ -1003,6 +1011,21 @@
           ret.renderOrder = 4; g.add(ret);
         }
 
+        // 14/10 — lignes PNJ
+        const li = s.li;
+        if (li && li.port) {
+          for (const [r0, r1, op] of [[8.2, 8.6, 0.85], [10.4, 10.65, 0.45]]) {
+            const ring = mark(new T.Mesh(Gm.ring(r0, r1, 64), this.M.add(0xffc864, op))); ring.position.y = 0.7; g.add(ring);
+          }
+          const lab = this._label(li.port.name, '#ffd08a', 0.3); lab.position.set(0, 1, -14); g.add(lab);
+        } else if (li && li.echo && !(s.beacons && s.beacons.length)) {
+          const w = new T.Mesh(Gm.ring(5.6, 5.95, 48), this.M.add(0xffc864, 0.35)); w.position.y = 0.6; g.add(w);
+          A.push((t) => { const u = (t * 0.35) % 1; w.scale.setScalar(0.7 + u * 1.8); w.material.opacity = 0.35 * (1 - u); });
+        }
+        if (li && (li.lane || li.obs.length) && !li.port) {
+          const d = mark(new T.Mesh(Gm.sphereLo, this.TICK.target)); d.scale.setScalar(0.8); d.position.set(-4.2, 5, -2.4); g.add(d); this.ticks.push(d);
+        }
+
         // 13/10 — postes de route : losanges près de l'étoile (or = le mien, orangé = un autre commandant)
         const nPosts = (s.posts || []).length, nOthers = (s.others || []).length;
         if (nPosts || nOthers) {
@@ -1102,11 +1125,19 @@
         this.routeGroup.add(mesh); this.routeMeshes[rt.r.id] = mesh;
       }
       // 13/10 — tronçons repérés par mes balises : un convoi est passé par là, cap sur le système suivant
+      // un seul trait par paire de systèmes ; une flèche seulement si un seul sens a été vu
+      const pairs = new Map();
       for (const sp of st.spotted || []) {
         if (sp.path.length < 2) continue;
+        const a0 = sp.path[0], b0 = sp.path[sp.path.length - 1], key = a0 < b0 ? a0 + ':' + b0 : b0 + ':' + a0;
+        const e = pairs.get(key);
+        if (e) { if (e.sp.path[0] !== a0) e.both = true; } else pairs.set(key, { sp, both: false });
+      }
+      for (const { sp, both } of pairs.values()) {
         const l = new T.Line(new T.BufferGeometry().setFromPoints(this._smooth(sp.path.map(i => CELLS[i])).map(q => new T.Vector3(q.x, 0.8, q.z))),
           new T.LineDashedMaterial({ color: 0xff8a5a, dashSize: 5, gapSize: 5, transparent: true, opacity: 0.55, depthWrite: false }));
         l.computeLineDistances(); this.routeGroup.add(l);
+        if (both) continue;
         const tip = CELLS[sp.path[sp.path.length - 1]], prev = CELLS[sp.path[sp.path.length - 2]];
         const ang = Math.atan2(tip.x - prev.x, tip.z - prev.z);
         const arrow = new T.Mesh(new T.ConeGeometry(2.6, 7, 3), new T.MeshBasicMaterial({ color: 0xff8a5a, transparent: true, opacity: 0.7, depthWrite: false }));
@@ -1502,16 +1533,33 @@
   const myBeacons = () => (G.probesPool || []).filter(b => b.tier === 'beacon' && b.state === 'deployed');
   const beaconSys = (b) => String((b && b.deployedSystem) || '').toUpperCase().split('-').slice(0, 3).join('-');
   const routeById = (id) => (G.beaconRoutes || []).find(r => r.id === id);
+  // 14/10 (routes & pistes v1) : une route ne se dessine plus entre deux balises.
+  // Depuis une balise : ouvrir un poste (ambassade miniature) — un tanker va là où ma balise est posée.
   function routesBlock(beacon) {
     if (!beacon) return '';
-    const rows = (G.beaconRoutes || []).filter(r => r.a === beacon.id || r.b === beacon.id).map(r => {
-      const other = myBeacons().find(b => b.id === (r.a === beacon.id ? r.b : r.a));
-      return `<button class="sm-rt" onclick="event.stopPropagation();SBMap.selectRoute('${esc(r.id)}')"><i style="background:${r.color}"></i><b>${esc(r.name)}</b><span>${other ? '→ ' + esc(beaconSys(other)) : 'rompue'}</span></button>`;
-    }).join('');
-    const open = myBeacons().length >= 2
-      ? _sigBtn('#b48cff', 'Ouvrir une route', `SBMap.openRoute('${esc(beacon.id)}')`, 'Vers une autre de tes balises · tracé et évitement au choix', true)
-      : _sigOff('Pose une 2ᵉ balise pour ouvrir une route');
-    return (rows ? `<div class="sm-rts">${rows}</div>` : '') + open;
+    const k = beaconSys(beacon);
+    if (!k || k === mySystemKey()) return '';
+    const mine = (G.tankerMissions || []).find(m => m.kind === 'route_post' && m.targetCoords === k && ['in_transit', 'posted'].includes(m.status));
+    if (mine) return '';
+    return _sigBtn('#ffc864', 'Ouvrir un poste ici', `SBMap.postHere('${esc(k)}')`, 'Un tanker en station : les commandants qui y tiennent un poste peuvent te parler', true);
+  }
+  function postHere(k) { if (typeof launchRoutePost === 'function') { launchRoutePost(null, k); refresh(true); } }
+  // Lignes PNJ : couloir de passage, écho de l'antenne, convois observés, lieu caché
+  function laneHtml(sysKey, li) {
+    if (!li) return '';
+    const ago = (t) => { const m = Math.max(1, Math.round((Date.now() - t) / 60000)); return m < 60 ? `il y a ${m} min` : m < 1440 ? `il y a ${Math.round(m / 60)} h` : `il y a ${Math.round(m / 1440)} j`; };
+    const hasBeacon = myBeacons().some(b => beaconSys(b) === sysKey);
+    const rows = [];
+    if (li.port) rows.push(`<div class="sm-lane port"><b>Lieu caché</b><span>Une ligne y mène. Bientôt : y envoyer un tanker par la route découverte.</span></div>`);
+    for (const o of li.obs) {
+      rows.push(`<div class="sm-lane"><b>${esc(o.label)}</b><span>vu ${o.n} fois${o.periodMin ? ` · repasse toutes les ~${o.periodMin} min` : ''} · dernier ${ago(o.last)}</span></div>`);
+    }
+    if (!li.obs.length && !li.port) {
+      if (hasBeacon) rows.push(`<div class="sm-lane"><b>Couloir sous surveillance</b><span>Ta balise attend le prochain passage.</span></div>`);
+      else if (li.echo) rows.push(`<div class="sm-lane"><b>Trafic capté par ton antenne</b><span>Pose une balise ici pour voir qui passe, et vers où.</span></div>`);
+      else if (li.lane) rows.push(`<div class="sm-lane"><b>Couloir de passage</b><span>Du trafic régulier traverse ce système. Une balise ici verrait qui passe.</span></div>`);
+    }
+    return rows.length ? `<div class="sm-lanes">${rows.join('')}</div>` : '';
   }
   async function openRoute(fromId) {
     const from = myBeacons().find(b => b.id === fromId);
@@ -1637,10 +1685,18 @@
     const legs = (st.spotted || []).filter(sp => sp.l.from === sysKey || sp.l.to === sysKey);
     if (!legs.length) return '';
     const ago = (t) => { const m = Math.max(1, Math.round((Date.now() - t) / 60000)); return m < 60 ? `il y a ${m} min` : m < 1440 ? `il y a ${Math.round(m / 60)} h` : `il y a ${Math.round(m / 1440)} j`; };
-    return `<div class="sm-spot">` + legs.slice(0, 3).map(sp => {
+    // un système voisin = une ligne : « cap relevé », « venu de », ou « dans les deux sens »
+    const by = new Map();
+    for (const sp of legs) {
       const out = sp.l.from === sysKey, other = out ? sp.l.to : sp.l.from;
-      return `<button onclick="event.stopPropagation();SBMap.select('system','${esc(other)}')"><span class="k">${out ? 'Cap relevé' : 'Venu de'}</span><span class="mono">${esc(other)}</span><span class="w">${esc(sp.l.pseudo || 'pavillon masqué')} · ${ago(sp.l.at)}</span></button>`;
-    }).join('') + `</div>`;
+      const e = by.get(other) || { other, out: false, inn: false, at: 0, who: sp.l.pseudo };
+      if (out) { e.out = true; if (sp.l.cargo) e.cargo = sp.l.cargo; } else e.inn = true;
+      if (sp.l.at > e.at) { e.at = sp.l.at; e.who = sp.l.pseudo; }
+      by.set(other, e);
+    }
+    return `<div class="sm-spot">` + [...by.values()].sort((a, b) => b.at - a.at).slice(0, 4).map(e =>
+      `<button onclick="event.stopPropagation();SBMap.select('system','${esc(e.other)}')"><span class="k">${e.out && e.inn ? 'Dans les deux sens' : e.out ? 'Cap relevé' : 'Venu de'}</span><span class="mono">${esc(e.other)}</span><span class="w">${esc(e.who || 'pavillon masqué')}${e.cargo ? ` · cales ${e.cargo === 'lourd' ? 'lourdes' : e.cargo === 'léger' ? 'légères' : 'moyennes'} vers ce système` : ''} · ${ago(e.at)}</span></button>`
+    ).join('') + `</div>`;
   }
   function routesSheetHtml() {
     const st = _state || collect();
@@ -1922,6 +1978,11 @@
       .sm-rt i{width:14px;height:3px;border-radius:2px;flex:none}
       .sm-rt b{font-weight:600;letter-spacing:.04em}
       .sm-rt span{margin-left:auto;font:500 10px/1 'JetBrains Mono',monospace;color:rgba(190,205,215,.6)}
+      .sm-lanes{display:flex;flex-direction:column;gap:5px;margin-top:8px}
+      .sm-lane{display:flex;flex-direction:column;gap:2px;padding:7px 9px;border-radius:7px;border:1px solid rgba(255,200,100,.22);background:rgba(255,200,100,.04)}
+      .sm-lane b{font:600 10px/1.2 'Space Grotesk',system-ui,sans-serif;letter-spacing:.12em;text-transform:uppercase;color:#ffd08a}
+      .sm-lane span{font-size:11px;line-height:1.4;color:rgba(220,228,235,.8)}
+      .sm-lane.port{border-color:rgba(255,200,100,.5);background:rgba(255,200,100,.08)}
       .sm-posts{display:flex;flex-direction:column;gap:5px;margin-top:8px}
       .sm-post{display:flex;align-items:center;gap:8px;padding:7px 9px;border-radius:7px;border:1px solid rgba(255,200,100,.28);background:rgba(255,200,100,.05);font-size:11px;color:rgba(220,228,235,.85)}
       .sm-post i{width:7px;height:7px;flex-shrink:0;transform:rotate(45deg);background:#ff9a6a}
@@ -1944,7 +2005,7 @@
   function panelFor(sel) { const keep = _sel; _sel = sel; let h = ''; try { h = panelMarkup(collect()); } finally { _sel = keep; } return h; }
   const API = {
     render, sweep, panelFor, tag, beacon, recallBeacon: recallBeaconFromMap, showFlight,
-    openRoute, selectRoute, showRoute, routeAvoid, routeUnavoid, routeColor, routeRename, routeDelete, sendOnRoute, postOnRoute,
+    openRoute, selectRoute, showRoute, routeAvoid, routeUnavoid, routeColor, routeRename, routeDelete, sendOnRoute, postOnRoute, postHere,
     planFor(destKey) { try { return planFrom(_state || collect(), destKey); } catch (e) { return null; } },
     select(kind, key) {
       if (_fallback) return;

@@ -8587,7 +8587,8 @@ var EXTRA_SAVE_KEYS = [
   'mpDeals',   // MP_DOCKS_V0 — marchés entre commandants (séquestre et règlement)
   'botState',  // BOTS_1110 — stocks des commandants automates après pillage
   'mpGrowthMilestone',
-  'systemTags', 'mapSeen', 'beaconRoutes', 'spottedLegs',   // PATCH_1310_ROUTES2 — tronçons relevés par mes balises   // + routes entre balises (13/10)   // PATCH_1310_CARTE — marques de systèmes + systèmes déjà vus (survivent aux rapports supprimés)  // RUMORS_1110 — dernier palier de niveau annoncé au comptoir
+  'systemTags', 'mapSeen', 'beaconRoutes', 'spottedLegs',
+  'lineObs', 'trafficEchoes', 'hiddenPorts',   // PATCH_1410_LIGNES — lignes observées, échos de l'antenne, lieux cachés découverts   // PATCH_1310_ROUTES2 — tronçons relevés par mes balises   // + routes entre balises (13/10)   // PATCH_1310_CARTE — marques de systèmes + systèmes déjà vus (survivent aux rapports supprimés)  // RUMORS_1110 — dernier palier de niveau annoncé au comptoir
   'mpDiplo',   // AMBASSADES_1210 — ambassades vues et dernière image des pactes
   'mpNeighbors',   // VOISINS_1310 — voisins déjà signalés
 ];
@@ -10353,16 +10354,17 @@ function launchRoutePost(routeId, sysKey) {
   const tier = _routePostFreeTier();
   if (!tier) { toast('Aucun tanker disponible'); return; }
   const plan = window.SBMap && SBMap.planFor ? SBMap.planFor(sysKey) : null;
-  const r = plan && plan.routes.find(x => x.id === routeId);
-  if (!r) { toast('Route rompue ou introuvable'); return; }
+  const r = routeId ? (plan && plan.routes.find(x => x.id === routeId)) : null;
+  if (routeId && !r) { toast('Route rompue ou introuvable'); return; }
   const now = Date.now();
-  const ms = 5 * 60 * 1000 * ROUTE_TYPES.own.durationFactor * Math.max(1, Math.min(3, r.len / Math.max(1, plan.direct.len)));
+  const ms = r ? 5 * 60 * 1000 * ROUTE_TYPES.own.durationFactor * Math.max(1, Math.min(3, r.len / Math.max(1, plan.direct.len)))
+               : 5 * 60 * 1000 * ROUTE_TYPES.direct.durationFactor;   // PATCH_1410_LIGNES : depuis une balise, voie directe
   const m = {
     id: 'tm-' + now + '-' + Math.random().toString(36).slice(2, 6),
     tankerName: pickTankerName(), tankerTier: tier, kind: 'route_post',
     targetCoords: sysKey, targetLabel: 'Poste ' + sysKey,
-    departedAt: now, arrivalAt: now + ms, status: 'in_transit', routeType: 'own',
-    ownRouteId: r.id, ownRouteName: r.name, via: r.via.slice(0, 24),
+    departedAt: now, arrivalAt: now + ms, status: 'in_transit', routeType: r ? 'own' : 'direct',
+    ownRouteId: r ? r.id : null, ownRouteName: r ? r.name : null, via: r ? r.via.slice(0, 24) : ((plan && plan.direct.via) || []).slice(0, 24),
     cargo: { soldiers: { garde: 0, lourd: 0 }, resources: { metal: 0, energie: 0, cristal: 0 } }, riskLossPct: 0,
   };
   if (!Array.isArray(G.tankerMissions)) G.tankerMissions = [];
@@ -23712,6 +23714,8 @@ function tickActiveBeacons() {
   const now = Date.now();
   if (!Array.isArray(G.beaconReports)) G.beaconReports = [];
 
+  // PATCH_1410_LIGNES — les balises ne voient plus que ce qui passe vraiment : les convois des lignes PNJ
+  if (window.SBLines) { SBLines.tickBeacons(beacons, now); return; }
   // PATCH_1310_BOTS — un seul tirage par tick pour toutes les balises, puis une balise au hasard
   if (now - (G._lastNpcBeaconAt || 0) < BEACON_NPC_MIN_GAP_MS) return;
   const _perTick = BEACON_NPC_PER_HOUR * Math.sqrt(beacons.length) / 360;   // 360 ticks de 10 s par heure
@@ -34278,7 +34282,7 @@ function renderBeaconReportRow(r, isUnread) {
   } else if (t.type === 'wandering') {
     typeLabel = 'CONTACT MOUVANT';
   } else {
-    typeLabel = 'TRANSIT DÉTECTÉ';
+    typeLabel = r.line ? 'CONVOI SUR UNE LIGNE' : 'TRANSIT DÉTECTÉ';   // PATCH_1410_LIGNES
   }
 
   // Identification : selon la confiance
@@ -34298,6 +34302,7 @@ function renderBeaconReportRow(r, isUnread) {
       <span style="opacity:.5;margin:0 4px">·</span>
       cargo ${t.cargoEstimate} (T${t.tankerTier})
     </div>
+    ${r.line ? `<div style="font-size:10px;color:var(--mut);margin-top:3px">${r.line.escort}${r.line.cap ? ` · cap relevé <span onclick="event.stopPropagation();openSystemOnMap('${r.line.cap}')" style="color:#ffd08a;font-family:'SF Mono',monospace;cursor:pointer;text-decoration:underline dotted;text-underline-offset:3px">${r.line.cap}</span>` : ' · se perd vers les marges'}${r.line.nth > 1 ? ` · ${r.line.nth}ᵉ passage observé sur cette ligne` : ''}</div>` : ''}
     <div style="font-size:10px;color:var(--mut);margin-top:3px">
       Confiance <span style="color:${confColor}">${t.confidence}%</span>
       ${windowExpired
@@ -44619,6 +44624,8 @@ if (G.knownTargets && Array.isArray(G.tankerMissions)) {
 <script type="module" src="assets/planet3d.js?v=20261013-2000"></script>
 <!-- PERF_1310 — mesure des performances chez les joueurs + qualité 3D automatique (assets/perf.js) -->
 <script src="assets/perf.js?v=20261013-2240"></script>
+<!-- PATCH_1410_LIGNES — lignes PNJ à horaire sur les routes cachées (assets/lines.js) -->
+<script src="assets/lines.js?v=20261014-1200"></script>
 <!-- CLOUD — sauvegarde Supabase (source : sb-build/src/cloud.js) -->
 <script type="module" src="assets/cloud.js?v=20261013-2000"></script>
 <!-- MATCH3 — Match-3 V2 (assets/match3.js, source src/match3.js + src/m3core.js) : remplace startM3 -->
@@ -44626,7 +44633,7 @@ if (G.knownTargets && Array.isArray(G.tankerMissions)) {
 <!-- HOME V2 — « monde d'abord » : planète plein écran, ressources en ligne, Flotte / Défense / Prospection (assets/home.js) -->
 <script type="module" src="assets/home.js?v=20261013-2000"></script>
 <!-- SPACE MAP v0 — carte du Centre de prospection (assets/spacemap.js, source src/spacemap.js) -->
-<script src="assets/spacemap.js?v=20261013-2215"></script>
+<script src="assets/spacemap.js?v=20261014-1200"></script>
 <!-- SPACE MAP niveau B — diorama 3D d'un système (assets/system3d.js, source src/system3d.js) -->
 <script type="module" src="assets/system3d.js?v=20261013-2215"></script>
 <!-- SHIP3D — fiches 3D : cuirassé KV-01, frégate SR-01, tanker TK-07, chantier orbital OS-01 (assets/ship3d.js, sur le moteur partagé window.SB3D) -->
