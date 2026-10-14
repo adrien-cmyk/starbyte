@@ -394,6 +394,215 @@
   }
   setInterval(() => { if (document.visibilityState !== 'hidden') pollGifts(); }, 20000);
 
+  /* ── E5 · marché des routes au comptoir des docks, caution, trahisons ── */
+  const PRICE_TIERS = [{ k: 'low', label: 'Modeste', price: 300 }, { k: 'mid', label: 'Juste', price: 800 }, { k: 'high', label: 'Chère', price: 2000 }];
+  const _offers = {};            // dock → { at, rows, mine }
+  let _marketBusy = false;
+  const online = () => !!(window.SBMP && SBMP.ready && SBMP.ready()) && typeof _mpRpc === 'function';
+  const credits = () => (G.credits || 0);
+  // mes routes vendables : routes de lignes remontées, routes ouvertes (les miennes ou reçues)
+  function sellableRoutes() {
+    const out = [];
+    for (const r of (G.routes || [])) if (r.portSys) {
+      const chain = knownChain(r.portSys);
+      if (chain.length >= 2) out.push({ ref: 'r:' + r.id, name: r.name, kind: 'line', port: r.portSys, chain, toLabel: (r.dock && r.dock.name) || null });
+    }
+    for (const o of openedRoutes()) if (!o.fake) out.push({ ref: 'o:' + o.id, name: o.name, kind: 'opened', chain: o.chain, toLabel: o.toLabel || null });
+    return out;
+  }
+  async function fetchOffers(dockId, force) {
+    if (!online() || !dockId) return null;
+    const c = _offers[dockId];
+    if (!force && c && Date.now() - c.at < 20000) return c;
+    try {
+      const rows = await _mpRpc('mp_route_offers', { p_dock_id: dockId });
+      _offers[dockId] = { at: Date.now(), rows: Array.isArray(rows) ? rows : [] };
+      if (typeof getCurrentScreen === 'function' && getCurrentScreen() === 'dock' && typeof renderDockScreen === 'function') { try { renderDockScreen(); } catch (e) {} }
+    } catch (e) { _offers[dockId] = { at: Date.now(), rows: [], err: true }; }
+    return _offers[dockId];
+  }
+  function myOpenOffers(dockId) { return ((G.myRouteOffers || []).filter(o => o.status === 'open' && (!dockId || o.dockId === dockId))); }
+  function dockMarketHtml(mission) {
+    if (!mission) return '';
+    const dockId = (typeof mpDockIdForMission === 'function') ? mpDockIdForMission(mission) : null;
+    if (!dockId) return '';
+    const head = (t) => `<div style="font-size:10px;color:var(--mut);letter-spacing:.12em;text-transform:uppercase;margin:14px 0 8px;padding:0 2px">${t}</div>`;
+    if (!online()) return head('Cartes au comptoir') + `<div style="font-size:11px;color:var(--mut);font-style:italic;padding:4px 2px">Registre hors de portée : le comptoir ne vend rien pour l'instant.</div>`;
+    const c = _offers[dockId];
+    if (!c || Date.now() - c.at > 20000) fetchOffers(dockId);
+    const rows = (c && c.rows) || [];
+    const esc2 = (x) => String(x == null ? '' : x).replace(/[&<>"]/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[ch]));
+    let html = head(`Cartes au comptoir${rows.length ? ' · ' + rows.length : ''}`);
+    if (!c) html += `<div style="font-size:11px;color:var(--mut);font-style:italic;padding:4px 2px">On fouille sous le comptoir…</div>`;
+    else if (!rows.length) html += `<div style="font-size:11px;color:var(--mut);font-style:italic;padding:4px 2px">Personne ne vend de route ici en ce moment.</div>`;
+    for (const o of rows) {
+      const rep = o.betrayals ? `<span style="color:#ff8a8a">${o.betrayals} trahison${o.betrayals > 1 ? 's' : ''} au comptoir</span>` : (o.sales ? `${o.sales} vente${o.sales > 1 ? 's' : ''}, aucune plainte` : 'jamais vendu de carte');
+      const can = credits() >= o.price;
+      html += `<div style="margin-bottom:8px;padding:11px 13px;border:1px solid rgba(255,200,100,.3);border-radius:8px;background:rgba(255,200,100,.04)">
+        <div style="display:flex;justify-content:space-between;gap:8px;align-items:baseline"><span style="font-size:13px;color:#ffe2a8;font-weight:600">${esc2(o.name)}</span><span style="font-family:var(--font-mono);font-size:12px;color:#ffc864">${o.price} CG</span></div>
+        <div style="font-size:11px;color:var(--mut);margin-top:3px">${o.kind === 'line' ? 'Route vers un lieu caché' : 'Route privée'} · ${Math.max(1, o.stops - 1)} tronçon${o.stops > 2 ? 's' : ''} · vendue par <b style="color:#e6f0ff">${esc2(o.seller_pseudo)}</b> (${rep})</div>
+        <div style="font-size:10px;color:var(--mut);margin-top:3px">Caution de ${o.caution} CG gardée par le port 7 jours : elle te revient si le vendeur te trahit.</div>
+        <button ${can ? `onclick="SBLines.buyOffer('${o.id}','${dockId}')"` : 'disabled'} style="margin-top:9px;width:100%;padding:9px;border-radius:6px;border:1px solid rgba(255,200,100,.55);background:transparent;color:${can ? '#ffc864' : 'var(--mut)'};font-family:inherit;font-size:11px;letter-spacing:.1em;${can ? 'cursor:pointer' : 'opacity:.5'}">${can ? 'ACHETER LA CARTE' : `IL TE MANQUE ${o.price - credits()} CG`}</button>
+      </div>`;
+    }
+    for (const o of myOpenOffers(dockId)) {
+      html += `<div style="margin-bottom:8px;padding:10px 12px;border:1px dashed rgba(255,200,100,.35);border-radius:8px;display:flex;align-items:center;gap:10px">
+        <div style="flex:1;font-size:11px;color:var(--mut)"><b style="color:#ffe2a8">${esc2(o.name)}</b> · en vente ${o.price} CG${o.fake ? ' · <span style="color:#ff8a8a">truquée</span>' : ''} · caution ${o.caution} CG</div>
+        <button onclick="SBLines.withdrawOffer('${o.id}')" style="padding:7px 10px;border-radius:6px;border:1px solid var(--border);background:transparent;color:var(--mut);font-family:inherit;font-size:10px;letter-spacing:.1em;cursor:pointer">RETIRER</button></div>`;
+    }
+    const sellable = sellableRoutes();
+    if (sellable.length && myOpenOffers().length < 3) {
+      html += `<div onclick="SBLines.sellHere('${mission.id}')" style="margin-top:4px;padding:10px 12px;border:1px dashed rgba(255,200,100,.35);border-radius:6px;cursor:pointer">
+        <div style="font-size:12px;color:#ffc864">🗺 Vendre une de tes routes ici</div>
+        <div style="font-size:10px;color:var(--mut);margin-top:2px">Le port garde une caution (la moitié du prix) pendant 7 jours</div></div>`;
+    }
+    return html;
+  }
+  async function sellHere(missionId) {
+    const m = (G.tankerMissions || []).find(x => x.id === missionId);
+    if (!m || !online()) { toast('Registre hors de portée'); return; }
+    const dockId = mpDockIdForMission(m), dockName = (m.dock && m.dock.name) || 'Dock';
+    const list = sellableRoutes();
+    const it = await _mpChoose('Quelle route vendre ?', list.map(r => ({ r, label: r.name, sub: `${r.kind === 'line' ? 'vers un lieu caché' : 'route privée'} · ${r.chain.length - 1} tronçons` })));
+    if (!it) return;
+    const pr = await _mpChoose('À quel prix ?', PRICE_TIERS.map(t => ({ t, label: `${t.label} · ${t.price} CG`, sub: `caution ${Math.round(t.price / 2)} CG gardée par le port 7 jours` })));
+    if (!pr) return;
+    const how = await _mpChoose('Quelle carte remettre ?', [
+      { fake: false, label: 'La vraie carte', sub: 'La caution te revient dans 7 jours si tu ne trahis pas ton acheteur' },
+      { fake: true, label: 'Une carte truquée', sub: 'Elle mène dans le vide. Tu encaisses… et tu perds la caution quand il s\'en aperçoit. Le comptoir saura.' },
+    ]);
+    if (!how) return;
+    const price = pr.t.price, caution = Math.round(price / 2);
+    if (credits() < caution) { toast(`Il faut ${caution} CG de caution`); return; }
+    const r = it.r;
+    let chain = r.chain.slice(), port = r.port || null;
+    if (how.fake) {   // la fin du tracé est remplacée : elle mène dans le vide
+      const rng = rngOf('fake:' + r.ref + ':' + Date.now());
+      const sec = chain[chain.length - 1].split('-')[1];
+      chain = chain.slice(0, Math.max(1, chain.length - 2)).concat([0, 1].map(() => `A-${sec}-${1000 + Math.floor(rng() * 9000)}`));
+      port = null;
+    }
+    G.credits = credits() - caution;
+    try {
+      const id = await _mpRpc('mp_route_offer_post', { p_dock_id: dockId, p_dock_name: dockName, p_route: { name: r.name, kind: how.fake ? 'opened' : r.kind, port, toLabel: r.toLabel, fake: how.fake, chain }, p_price: price, p_caution: caution });
+      if (!Array.isArray(G.myRouteOffers)) G.myRouteOffers = [];
+      G.myRouteOffers.push({ id, dockId, dockName, name: r.name, price, caution, fake: how.fake, status: 'open', at: Date.now() });
+      toast(`« ${r.name} » en vente au comptoir de ${dockName} · ${price} CG`);
+    } catch (e) {
+      G.credits = credits() + caution;
+      toast(/offer_quota/.test(String(e.message)) ? '3 cartes en vente au plus' : 'Le comptoir ne répond pas, réessaie');
+    }
+    if (typeof saveGame === 'function') saveGame();
+    fetchOffers(dockId, true);
+    if (typeof renderDockScreen === 'function' && getCurrentScreen() === 'dock') renderDockScreen();
+  }
+  async function withdrawOffer(id) {
+    const o = (G.myRouteOffers || []).find(x => x.id === id);
+    if (!o) return;
+    try {
+      const ok = await _mpRpc('mp_route_withdraw', { p_offer: id });
+      if (ok) { o.status = 'withdrawn'; G.credits = credits() + o.caution; toast(`Carte retirée · caution rendue (${o.caution} CG)`); }
+      else { o.status = 'sold'; toast('Trop tard : elle vient d\'être vendue'); }
+    } catch (e) { toast('Le comptoir ne répond pas, réessaie'); }
+    if (typeof saveGame === 'function') saveGame();
+    if (typeof renderDockScreen === 'function' && getCurrentScreen() === 'dock') renderDockScreen();
+  }
+  async function buyOffer(id, dockId) {
+    const row = ((_offers[dockId] || {}).rows || []).find(o => o.id === id);
+    if (!row) return;
+    if (credits() < row.price) { toast(`Il faut ${row.price} CG`); return; }
+    const ok = typeof sbConfirm === 'function' ? await sbConfirm({ title: 'Acheter « ' + row.name + ' » ?', body: `${row.price} CG à ${row.seller_pseudo}. Le port garde sa caution (${row.caution} CG) 7 jours : si la carte est truquée ou s'il te trahit sur cette route, elle est pour toi.`, confirmLabel: 'Acheter', cancelLabel: 'Laisser' }) : true;
+    if (!ok) return;
+    G.credits = credits() - row.price;
+    let res;
+    try { res = await _mpRpc('mp_route_buy', { p_offer: id }); }
+    catch (e) { G.credits = credits() + row.price; toast(/offer_gone/.test(String(e.message)) ? 'Quelqu\'un l\'a achetée avant toi' : 'Le comptoir ne répond pas, réessaie'); fetchOffers(dockId, true); return; }
+    learnRoute(res);
+    if (typeof saveGame === 'function') saveGame();
+    fetchOffers(dockId, true);
+    if (typeof renderDockScreen === 'function' && getCurrentScreen() === 'dock') renderDockScreen();
+  }
+  // la route achetée entre dans ma connaissance
+  function learnRoute(res) {
+    state();
+    const rt = (res && res.route) || {};
+    const chain = (rt.chain || []).filter(k => SYS.test(k));
+    if (chain.length < 2) return;
+    if (!G.mapSeen) G.mapSeen = {};
+    for (const k of chain) if (!G.mapSeen[k]) G.mapSeen[k] = Date.now();
+    if (rt.fake) {
+      openedRoutes().push({ id: 'buy-' + res.id, name: rt.name, color: '#ffb3e0', chain, to: chain[chain.length - 1], toLabel: rt.toLabel || null,
+        openedAt: Date.now(), by: res.seller, offerId: res.id, fake: true, fakeAt: Date.now() + (30 + Math.floor(Math.random() * 60)) * 60000 });
+      toast(`🗺 « ${rt.name} » achetée à ${res.seller} · elle est sur ta carte`);
+    } else if (rt.kind === 'line' && rt.port && network().ports[rt.port]) {
+      for (let i = 0; i < chain.length - 1; i++) {
+        if (!G.spottedLegs.some(l => l.npc && l.from === chain[i] && l.to === chain[i + 1]))
+          G.spottedLegs.unshift({ id: `buy-${res.id}-${i}`, lineId: (network().bySys[chain[i]] || [{ line: { id: null } }])[0].line.id, from: chain[i], to: chain[i + 1], pseudo: 'Carte de ' + res.seller, at: Date.now(), npc: true, cargo: 'lourd' });
+      }
+      if (!G.hiddenPorts[rt.port]) { const p = network().ports[rt.port]; G.hiddenPorts[rt.port] = { dockId: p.dockId, name: p.name, type: p.type, typeLabel: p.typeLabel, at: Date.now(), boughtFrom: res.seller }; }
+      const r = ensureRoute(rt.port);
+      if (r) r.boughtFrom = { seller: res.seller, offerId: res.id, at: Date.now() };
+      toast(`🗺 « ${rt.name} » achetée à ${res.seller} · route vers ${(r && r.dock && r.dock.name) || 'un lieu caché'} ajoutée`);
+    } else {
+      openedRoutes().push({ id: 'buy-' + res.id, name: rt.name, color: '#ffb3e0', chain, to: chain[chain.length - 1], toLabel: rt.toLabel || null, openedAt: Date.now(), by: res.seller, offerId: res.id });
+      toast(`🗺 « ${rt.name} » achetée à ${res.seller} · elle est sur ta carte`);
+    }
+    if (window.SBMap && SBMap.render) { try { SBMap.render(); } catch (e) {} }
+  }
+  // un acheteur dévalisé par son vendeur : trahison (appelé depuis la relève des abordages)
+  function noteRobbery(victim) {
+    if (!victim) return;
+    const sale = (G._mySales || []).find(s => s.buyer_pseudo === victim);
+    if (sale && online()) _mpRpc('mp_route_betray', { p_offer: sale.id, p_reason: 'robbed' }).then(ok => {
+      if (ok) toast(`⚠ Tu as dévalisé ${victim} sur une route que tu lui avais vendue : le port lui donne ta caution, et le comptoir en parle`);
+    }).catch(() => {});
+  }
+  async function tickMarket() {
+    if (_marketBusy || !online() || typeof G === 'undefined' || !G) return;
+    _marketBusy = true;
+    try {
+      // vendeur : ventes à encaisser, cautions rendues
+      const sin = await _mpRpc('mp_route_seller_inbox', {});
+      for (const r of Array.isArray(sin) ? sin : []) {
+        G.credits = credits() + (r.amount || 0);
+        const mo = (G.myRouteOffers || []).find(o => o.id === r.id); if (mo) mo.status = 'sold';
+        toast(r.what === 'paid' ? `💰 ${r.buyer_pseudo} a acheté ta carte « ${r.name} » : +${r.amount} CG` : `Caution rendue par le port (${r.amount} CG) : « ${r.name} »`);
+        await _mpRpc('mp_route_seller_ack', { p_offer: r.id, p_what: r.what });
+      }
+      // acheteur : cautions gagnées
+      const bin = await _mpRpc('mp_route_buyer_inbox', {});
+      for (const r of Array.isArray(bin) ? bin : []) {
+        G.credits = credits() + (r.amount || 0);
+        toast(`⚖ Le port te verse la caution de ${r.seller_pseudo} (${r.amount} CG) : « ${r.name} » ${r.betrayal === 'fake' ? 'était truquée' : r.betrayal === 'robbed' ? '… il t\'attendait dessus' : 'a perdu son balisage'}`);
+        await _mpRpc('mp_route_buyer_ack', { p_offer: r.id });
+      }
+      // mes ventes surveillées : balisage retiré = trahison
+      const sales = await _mpRpc('mp_route_my_sales', {});
+      G._mySales = Array.isArray(sales) ? sales : [];
+      if (!G.saleBeacons || typeof G.saleBeacons !== 'object') G.saleBeacons = {};
+      for (const sl of G._mySales) {
+        const ch = ((sl.route && sl.route.chain) || []).slice(1, -1);
+        const now = balisageChain(ch).beaconed;
+        const snap = G.saleBeacons[sl.id];
+        if (!snap) { G.saleBeacons[sl.id] = now; continue; }
+        if (snap.some(k => !now.includes(k))) {
+          const ok = await _mpRpc('mp_route_betray', { p_offer: sl.id, p_reason: 'recall' });
+          if (ok) toast(`⚠ Tu as retiré le balisage de « ${sl.route.name} », vendue à ${sl.buyer_pseudo} : le port lui donne ta caution`);
+          delete G.saleBeacons[sl.id];
+        }
+      }
+      // cartes truquées achetées : elles finissent par se révéler
+      for (const o of openedRoutes().filter(x => x.fake && x.fakeAt && Date.now() > x.fakeAt)) {
+        G.openedRoutes = openedRoutes().filter(x => x.id !== o.id);
+        toast(`✗ « ${o.name} » était truquée : ses coordonnées mènent dans le vide. Le port saisit la caution de ${o.by}.`);
+        try { await _mpRpc('mp_route_betray', { p_offer: o.offerId, p_reason: 'fake' }); } catch (e) {}
+      }
+      if (typeof saveGame === 'function') saveGame();
+    } catch (e) { console.warn('[routes] comptoir :', String(e && e.message || e)); }
+    finally { _marketBusy = false; }
+  }
+  setInterval(() => { if (document.visibilityState !== 'hidden') tickMarket(); }, 60000);
+
   /* ── E2 · une carte de route devient une piste : elle place sur une ligne, plus ou moins près du lieu ── */
   function activateCard(card) {
     state();
@@ -510,6 +719,7 @@
     network, passages, capOf, convoyOf, tickBeacons, tickEcho, infoFor, knownSystems, discoverPort,
     activateCard, ensureRoute, knownChain, balisage, balisageChain, routesBalisedBy, noteUser,
     openedRoutes, openedTo, scoutInFlight, scoutLaunch, scoutArrived, forgetOpened, giveRoute, pollGifts,
+    dockMarketHtml, sellHere, withdrawOffer, buyOffer, learnRoute, noteRobbery, tickMarket, fetchOffers, sellableRoutes,
     WINDOW_MS, EPOCH,
     _reset() { _net = null; },
   };

@@ -8590,7 +8590,8 @@ var EXTRA_SAVE_KEYS = [
   'systemTags', 'mapSeen', 'beaconRoutes', 'spottedLegs',
   'lineObs', 'trafficEchoes', 'hiddenPorts', '_linesNet', '_linesRoutes',   // PATCH_1410_PISTES
   'lineUsers',   // PATCH_1410_BALISAGE — convois de joueurs vus sur mes lignes
-  'openedRoutes',   // PATCH_1410_ECLAIREUR — routes ouvertes par une Moyenne ou offertes par un allié   // PATCH_1410_LIGNES — lignes observées, échos de l'antenne, lieux cachés découverts   // PATCH_1310_ROUTES2 — tronçons relevés par mes balises   // + routes entre balises (13/10)   // PATCH_1310_CARTE — marques de systèmes + systèmes déjà vus (survivent aux rapports supprimés)  // RUMORS_1110 — dernier palier de niveau annoncé au comptoir
+  'openedRoutes',   // PATCH_1410_ECLAIREUR — routes ouvertes par une Moyenne ou offertes par un allié
+  'myRouteOffers', 'saleBeacons',   // PATCH_1410_MARCHE — mes cartes au comptoir, balisage au moment de la vente   // PATCH_1410_LIGNES — lignes observées, échos de l'antenne, lieux cachés découverts   // PATCH_1310_ROUTES2 — tronçons relevés par mes balises   // + routes entre balises (13/10)   // PATCH_1310_CARTE — marques de systèmes + systèmes déjà vus (survivent aux rapports supprimés)  // RUMORS_1110 — dernier palier de niveau annoncé au comptoir
   'mpDiplo',   // AMBASSADES_1210 — ambassades vues et dernière image des pactes
   'mpNeighbors',   // VOISINS_1310 — voisins déjà signalés
   'tuto',          // TUTO_1410 — premiers pas (étape, vu, terminé)
@@ -10608,6 +10609,7 @@ async function mpIngestPiracy(d, meId) {
     if (!(L && L.settled)) {
       const f = fleets.find(x => x.id === i.fleet_id) || null;
       const type = i.outcome === 'won' ? 'robbed_ok' : i.outcome === 'evaded' ? 'robbed_evaded' : i.outcome === 'empty' ? 'robbed_empty' : 'robbed_fail';
+      if (type === 'robbed_ok' && window.SBLines && SBLines.noteRobbery) SBLines.noteRobbery(i.victim);   // PATCH_1410_MARCHE — dévaliser son acheteur = trahison
       const lossLine = i.losses ? _mpLossLine(i.losses, { tanker: {}, fregate: {}, cuirasse: {} }) : '';
       _mpPirReport(type, { icon: '⚔', pseudo: i.victim, system: i.system, fleet: f ? f.name : '', loot: i.loot,
         dock: i.dock_name, leg: i.leg, kind: i.kind, lossLine }, 'itc-' + i.id);
@@ -11256,6 +11258,14 @@ function _mpRumorText(r) {
       ? `${r.actor} a rappelé son ambassade de chez ${r.target}${s}. Le pacte est rompu.`
       : `${r.actor} a dénoncé son pacte avec ${r.target}${s}. Les quais retiennent leur souffle.`;
     case 'rare_discovery': return r.target ? `${r.actor} aurait trouvé ${r.target}${s}. Personne ne sait encore où.` : `${r.actor} aurait trouvé quelque chose de rare${s}.`;
+    // PATCH_1410_MARCHE — les bots du comptoir balancent
+    case 'route_betrayal': {
+      const why = r.payload && r.payload.reason;
+      return why === 'fake' ? `${r.actor} vend des cartes truquées. Demande à ${r.target || 'son dernier client'} où menait la sienne.`
+        : why === 'robbed' ? `${r.actor} a vendu une route à ${r.target || 'un capitaine'}… et l'attendait dessus. Le port a saisi sa caution.`
+        : `${r.actor} a vendu une route à ${r.target || 'un capitaine'}, puis en a arraché les balises. Ne lui achète rien.`;
+    }
+    case 'route_sold': return `${r.actor} vend des cartes${r.target ? ` au comptoir de ${r.target}` : ''}. Vraies ou fausses, ça reste à voir.`;
     default: return '';
   }
 }
@@ -11317,6 +11327,9 @@ function _renderDockPlayersSection(mission, dock) {
         </div>`;
     }).join('');
   }
+
+  // PATCH_1410_MARCHE — cartes au comptoir : routes à vendre / à acheter
+  if (window.SBLines && SBLines.dockMarketHtml) html += SBLines.dockMarketHtml(mission);
 
   // Le barman (piste payante, une par séjour)
   const canLead = !mission.mpLeadBought;
@@ -45194,7 +45207,7 @@ if (G.knownTargets && Array.isArray(G.tankerMissions)) {
 <!-- PERF_1310 — mesure des performances chez les joueurs + qualité 3D automatique (assets/perf.js) -->
 <script src="assets/perf.js?v=20261014-1540"></script>
 <!-- PATCH_1410_LIGNES — lignes PNJ à horaire sur les routes cachées (assets/lines.js) -->
-<script src="assets/lines.js?v=20261015-0000"></script>
+<script src="assets/lines.js?v=20261015-0030"></script>
 <!-- CLOUD — sauvegarde Supabase (source : sb-build/src/cloud.js) -->
 <script type="module" src="assets/cloud.js?v=20261014-1440"></script>
 <!-- MATCH3 — Match-3 V2 (assets/match3.js, source src/match3.js + src/m3core.js) : remplace startM3 -->
