@@ -10682,7 +10682,7 @@ function _mpChoose(title, items) {
     document.body.appendChild(ov);
   });
 }
-async function mpAmbushStart(fleetId) {
+async function mpAmbushStart(fleetId, onlySystems) {   // PATCH_1510_ROUTES_UX : onlySystems = jalons d'une route
   const f = (G.fleet.prepared || []).find(x => x.id === fleetId);
   if (!f || _mpAmbushBusy.has(fleetId)) return;
   if ((f.status || 'prepared') !== 'deployed') { toast('La flotte doit être en orbite'); return; }
@@ -10691,8 +10691,8 @@ async function mpAmbushStart(fleetId) {
   const armed = ['fregate', 'cuirasse'].some(type => ['t1', 't2', 't3'].some(t => (f.composition[type] && f.composition[type][t]) > 0));
   if (!armed) { toast('Il faut des frégates ou des cuirassés pour aborder un convoi'); return; }
   if (!_mpOnline()) { toast('Registre hors ligne : réessaie dans un instant'); return; }
-  const beacons = mpBeaconList();
-  if (!beacons.length) { toast('Pose d\'abord une balise sur un système (Centre de prospection)'); return; }
+  const beacons = mpBeaconList().filter(b => !Array.isArray(onlySystems) || onlySystems.includes(b.system));
+  if (!beacons.length) { toast(Array.isArray(onlySystems) ? 'Pose d\'abord une balise sur un jalon de cette route' : 'Pose d\'abord une balise sur un système (Centre de prospection)'); return; }
   const taken = new Set((G.fleet.prepared || []).filter(x => x.ambush && x.id !== f.id).map(x => x.ambush.system));
   // PATCH_1510_ORDRES — par une route connue (et balisée), la flotte arrive plus vite ; les jalons de lignes sont signalés
   const _trv = (x) => (window.SBLines && SBLines.ambushTravel) ? SBLines.ambushTravel(x, _mpAmbushTravelMs(x)) : { ms: _mpAmbushTravelMs(x), route: null };
@@ -34402,6 +34402,7 @@ function renderBeaconReportRow(r, isUnread) {
       <span style="opacity:.5;margin:0 4px">·</span>
       cargo ${t.cargoEstimate} (T${t.tankerTier})
     </div>
+    ${(window.SBLines && SBLines.routesOf ? SBLines.routesOf(r.systemCoord || '') : []).slice(0, 2).map(ro => `<div style="font-size:10px;margin-top:3px;color:${ro.color}">↳ ${String(ro.name).replace(/[<>&"]/g, '')} · ${ro.end ? 'arrivée' : ro.start ? 'départ' : 'jalon ' + ro.idx + ' sur ' + ro.n}</div>`).join('')}
     ${r.line ? `<div style="font-size:10px;color:var(--mut);margin-top:3px">${r.line.escort}${r.line.cap ? ` · cap relevé <span onclick="event.stopPropagation();openSystemOnMap('${r.line.cap}')" style="color:#ffd08a;font-family:'SF Mono',monospace;cursor:pointer;text-decoration:underline dotted;text-underline-offset:3px">${r.line.cap}</span>` : ' · se perd vers les marges'}${r.line.nth > 1 ? ` · ${r.line.nth}ᵉ passage observé sur cette ligne` : ''}${r.line.done ? ` · <span style="color:#c9a8ff">${({ robbed: 'abordé par ta flotte', repelled: 'ta flotte a été repoussée', tailed: 'filé par ta flotte', passed: 'laissé passer', tooStrong: 'escorte trop forte : ta flotte l\'a laissé passer' })[r.line.done] || ''}</span>` : (window.SBLines && SBLines.npcReportCan && SBLines.npcReportCan(r) ? ' · <span style="color:#c9a8ff">⚔ ta flotte est là : touche pour décider</span>' : '')}</div>` : ''}
     <div style="font-size:10px;color:var(--mut);margin-top:3px">
       Confiance <span style="color:${confColor}">${t.confidence}%</span>
@@ -45394,7 +45395,7 @@ if (G.knownTargets && Array.isArray(G.tankerMissions)) {
 <!-- PERF_1310 — mesure des performances chez les joueurs + qualité 3D automatique (assets/perf.js) -->
 <script src="assets/perf.js?v=20261014-1540"></script>
 <!-- PATCH_1410_LIGNES — lignes PNJ à horaire sur les routes cachées (assets/lines.js) -->
-<script src="assets/lines.js?v=20261015-1000"></script>
+<script src="assets/lines.js?v=20261015-1130"></script>
 <!-- CLOUD — sauvegarde Supabase (source : sb-build/src/cloud.js) -->
 <script type="module" src="assets/cloud.js?v=20261014-1440"></script>
 <!-- MATCH3 — Match-3 V2 (assets/match3.js, source src/match3.js + src/m3core.js) : remplace startM3 -->
@@ -45402,7 +45403,7 @@ if (G.knownTargets && Array.isArray(G.tankerMissions)) {
 <!-- HOME V2 — « monde d'abord » : planète plein écran, ressources en ligne, Flotte / Défense / Prospection (assets/home.js) -->
 <script type="module" src="assets/home.js?v=20261014-1440"></script>
 <!-- SPACE MAP v0 — carte du Centre de prospection (assets/spacemap.js, source src/spacemap.js) -->
-<script src="assets/spacemap.js?v=20261015-0900"></script>
+<script src="assets/spacemap.js?v=20261015-1130"></script>
 <!-- SPACE MAP niveau B — diorama 3D d'un système (assets/system3d.js, source src/system3d.js) -->
 <script type="module" src="assets/system3d.js?v=20261014-1440"></script>
 <!-- SHIP3D — fiches 3D : cuirassé KV-01, frégate SR-01, tanker TK-07, chantier orbital OS-01 (assets/ship3d.js, sur le moteur partagé window.SB3D) -->

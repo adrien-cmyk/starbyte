@@ -325,6 +325,19 @@
     return { chain, beaconed, ratio, next: chain.find(k => !mine.has(k) && !going.has(k)) || null, pending: chain.filter(k => going.has(k)).length,
       factor: 1 - 0.35 * ratio, riskMult: 1 - 0.6 * ratio, cover: ratio >= 0.5 };
   }
+  // 15/10 — les routes connues qui passent par ce système, et à quel jalon (pour relier carte, rapports et fiches)
+  function routesOf(sys) {
+    const out = [];
+    for (const r of (G.routes || [])) if (r.portSys) {
+      const ch = knownChain(r.portSys), i = ch.indexOf(sys);
+      if (i >= 0) out.push({ id: r.id, name: r.name, color: '#ffc864', kind: 'line', idx: i, n: ch.length - 2, end: i === ch.length - 1, start: i === 0 });
+    }
+    for (const o of openedRoutes()) {
+      const i = o.chain.indexOf(sys);
+      if (i >= 0) out.push({ id: o.id, name: o.name, color: o.color || OPEN_COLOR, kind: 'opened', idx: i, n: o.chain.length - 2, end: i === o.chain.length - 1, start: i === 0 });
+    }
+    return out;
+  }
   // routes de ligne qu'une balise posée sur ce système balise
   function routesBalisedBy(sys) {
     return (G.routes || []).filter(r => r.portSys && knownChain(r.portSys).slice(0, -1).includes(sys))
@@ -1194,7 +1207,7 @@
     openedRoutes, openedTo, scoutInFlight, scoutLaunch, scoutArrived, forgetOpened, giveRoute, pollGifts,
     dockMarketHtml, sellHere, withdrawOffer, buyOffer, learnRoute, noteRobbery, tickMarket, fetchOffers, sellableRoutes,
     ORDER_MODES, ordersOf, ordersLabel, chooseOrders, setOrders, pushOrders, pushNpc, holdCap, holdUsed, holdAll, fleetAtk, odds, oddsLabel,
-    robNpc, tailNpc, tickAmbushes, capLegs, salesOn, soldChain, npcReportCan, npcReportAction, ambushTravel, ambushAt, pollSpied, autoPlayers,
+    robNpc, tailNpc, tickAmbushes, capLegs, salesOn, soldChain, routesOf, npcReportCan, npcReportAction, ambushTravel, ambushAt, pollSpied, autoPlayers,
     WINDOW_MS, EPOCH, CROWN_DOCK_ID,
     _reset() { _net = null; },
   };

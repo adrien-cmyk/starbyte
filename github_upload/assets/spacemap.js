@@ -250,7 +250,19 @@
     occ.set(0, { kind: 'home', key: home });
     cell['sys:' + home] = 0;
     const keys = Object.keys(systems).filter(k => k !== home).sort();
+    // 15/10 (Adrien : « la route fait des courbes étranges ») — les jalons d'une route connue sont posés LE LONG de la route :
+    // ses deux bouts se placent comme les autres systèmes, ses systèmes de passage sur la ligne droite qui les relie, dans l'ordre.
+    const routeChains = [];
+    if (window.SBLines) {
+      try {
+        for (const o of SBLines.openedRoutes()) if (o.chain && o.chain.length > 2) routeChains.push(o.chain);
+        for (const r of (G.routes || [])) if (r.portSys) { const ch = SBLines.knownChain(r.portSys); if (ch.length > 2) routeChains.push(ch); }
+      } catch (e) {}
+    }
+    const ends = new Set(routeChains.flatMap(ch => [ch[0], ch[ch.length - 1]]));
+    const mids = new Set(routeChains.flatMap(ch => ch.slice(1, -1)).filter(k => !ends.has(k) && k !== home));
     for (const k of keys) {
+      if (mids.has(k)) continue;
       const { cands, k: p } = primarySlot(k);
       let placed = null;
       for (let j = 0; j < cands.length && !placed; j++) { const c = cands[(p + j) % cands.length]; if (!occ.has(c.idx)) placed = c; }
@@ -258,6 +270,37 @@
       if (!placed) continue;
       occ.set(placed.idx, { kind: 'system', key: k });
       cell['sys:' + k] = placed.idx;
+    }
+    // une route = une ligne régulière sur la grille : si ses deux bouts sont trop proches pour ses jalons, l'arrivée
+    // s'écarte dans la même direction ; les jalons se posent ensuite à intervalles réguliers sur le plus court chemin.
+    const nearestFree = (x, z, minRing) => { let best = null, bd = Infinity;
+      for (const c of CELLS) { if (c.ring > BOARD || c.ring < minRing || occ.has(c.idx)) continue; const d = Math.hypot(c.x - x, c.z - z); if (d < bd) { bd = d; best = c; } }
+      return best; };
+    for (const ch of routeChains) {
+      const n = ch.length - 1, kB = ch[n];
+      let ia = cell['sys:' + ch[0]], ib = cell['sys:' + kB];
+      if (ia === undefined || ib === undefined) continue;
+      const minRing = ia === 0 ? 2 : 1;   // l'anneau 1 autour de ma planète, c'est mon propre système
+      if (kB !== home && hexDist(CELLS[ia], CELLS[ib]) < n + 1) {
+        const A = CELLS[ia], B = CELLS[ib];
+        let dx = B.x - A.x, dz = B.z - A.z, L = Math.hypot(dx, dz);
+        if (L < 1) { const ang = _mulberry32(_hashSeed('SMr:' + kB))() * Math.PI * 2; dx = Math.cos(ang); dz = Math.sin(ang); L = 1; }
+        const far = nearestFree(A.x + dx / L * CELL * (n + 1.2), A.z + dz / L * CELL * (n + 1.2), minRing);
+        if (far) { occ.delete(ib); occ.set(far.idx, { kind: 'system', key: kB }); cell['sys:' + kB] = ib = far.idx; }
+      }
+      const path = hexPath(ia, ib, null) || [ia, ib];
+      for (let i = 1; i < n; i++) {
+        const k = ch[i];
+        if (!mids.has(k) || cell['sys:' + k] !== undefined || !systems[k]) continue;
+        const c0 = CELLS[path[Math.round(i * (path.length - 1) / n)]];
+        const c = (c0 && !occ.has(c0.idx) && c0.ring >= minRing) ? c0 : (c0 ? nearestFree(c0.x, c0.z, minRing) : null);
+        if (!c) continue;
+        occ.set(c.idx, { kind: 'system', key: k });
+        cell['sys:' + k] = c.idx;
+      }
+    }
+    for (const k of mids) if (cell['sys:' + k] === undefined && systems[k]) {   // jalon d'une route dont un bout manque
+      const c = freeAround(CELLS[0], 2, BOARD, occ, k)[0]; if (c) { occ.set(c.idx, { kind: 'system', key: k }); cell['sys:' + k] = c.idx; }
     }
     // 13/10 (Adrien) — zoom sémantique : chaque objet vit DANS la case de son système, sur une orbite.
     // De loin on ne voit qu'un point par système ; de près, la case s'ouvre et montre le système.
@@ -1149,7 +1192,7 @@
     _routes(st) {
       const T = this.T;
       if (!this.routeGroup) { this.routeGroup = new T.Group(); this.scene.add(this.routeGroup); this.routeFx = new T.Group(); this.scene.add(this.routeFx); }
-      while (this.routeGroup.children.length) { const o = this.routeGroup.children.pop(); o.geometry.dispose(); o.material.dispose(); }
+      while (this.routeGroup.children.length) { const o = this.routeGroup.children.pop(); if (!o.isSprite) o.geometry.dispose(); if (o.material.map) o.material.map.dispose(); o.material.dispose(); }
       this.routeMeshes = {};
       for (const rt of st.routes || []) {
         if (rt.broken || rt.path.length < 2) {
@@ -1167,6 +1210,12 @@
         const mesh = new T.Mesh(this._ribbon(pts, 0.3), new T.MeshBasicMaterial({ color: rt.r.color, transparent: true, opacity: 0.7, depthWrite: false, side: T.DoubleSide }));
         mesh.position.y = 0.9; mesh.renderOrder = 3; mesh.userData.route = rt.r.id; mesh.userData.glow = glow;
         this.routeGroup.add(mesh); this.routeMeshes[rt.r.id] = mesh;
+        // 15/10 — jalons numérotés le long de la route (1, 2, 3…), pour lire où elle passe et dans quel ordre
+        for (let i = 1; i < rt.path.length - 1; i++) {
+          const c = CELLS[rt.path[i]];
+          const tag = this._label(String(i), rt.r.color, 0.24); tag.position.set(c.x - 9, 2.2, c.z - 7);
+          this.routeGroup.add(tag);
+        }
       }
       // 13/10 — tronçons repérés par mes balises : un convoi est passé par là, cap sur le système suivant
       // un seul trait par paire de systèmes ; une flèche seulement si un seul sens a été vu
@@ -1602,7 +1651,8 @@
   function postHere(k) { if (typeof launchRoutePost === 'function') { launchRoutePost(null, k); refresh(true); } }
   // Lignes PNJ : couloir de passage, écho de l'antenne, convois observés, lieu caché
   function laneHtml(sysKey, li) {
-    if (!li && !(window.SBLines && SBLines.ambushAt && SBLines.ambushAt(sysKey).length)) return '';
+    if (!li && !(window.SBLines && ((SBLines.ambushAt && SBLines.ambushAt(sysKey).length) || (SBLines.routesOf && SBLines.routesOf(sysKey).length)))) return '';
+    const realLi = !!li;
     li = li || { obs: [], port: null, lane: false, echo: false, fromCard: null };
     const ago = (t) => { const m = Math.max(1, Math.round((Date.now() - t) / 60000)); return m < 60 ? `il y a ${m} min` : m < 1440 ? `il y a ${Math.round(m / 60)} h` : `il y a ${Math.round(m / 1440)} j`; };
     const hasBeacon = myBeacons().some(b => beaconSys(b) === sysKey);
@@ -1616,6 +1666,11 @@
     for (const o of li.obs) {
       rows.push(`<div class="sm-lane"><b>${esc(o.label)}</b><span>vu ${o.n} fois${o.periodMin ? ` · repasse toutes les ~${o.periodMin} min` : ''} · dernier ${ago(o.last)}</span></div>`);
     }
+    // 15/10 — ce système est sur une de mes routes : laquelle, à quel jalon
+    if (window.SBLines && SBLines.routesOf) for (const ro of SBLines.routesOf(sysKey)) {
+      const where = ro.end ? 'arrivée' : ro.start ? 'départ' : `jalon ${ro.idx} sur ${ro.n}`;
+      rows.push(`<button class="sm-it" style="--c:${ro.color};border:1px solid rgba(255,255,255,.08);border-radius:8px;margin:4px 0" onclick="event.stopPropagation();SBMap.selectRoute('${esc(ro.id)}')"><b>${ro.end ? '◆' : ro.start ? '◉' : ro.idx}</b><span style="color:${ro.color}">${esc(ro.name)}</span><i>${where} · voir la route →</i></button>`);
+    }
     // 15/10 (E6) — mes flottes postées ici, leurs ordres ; ou l'idée d'en poster une
     if (window.SBLines && SBLines.ambushAt) {
       const fl = SBLines.ambushAt(sysKey);
@@ -1626,7 +1681,7 @@
       }
       if (!fl.length && hasBeacon && li.obs.length && !li.port) rows.push(`<div class="sm-lane"><b>Une flotte ici ?</b><span>Postée en embuscade sur ta balise, elle aborderait ou filerait ces convois (Flotte → Embuscade).</span></div>`);
     }
-    if (!li.obs.length && !li.port) {
+    if (realLi && !li.obs.length && !li.port) {
       if (hasBeacon) rows.push(`<div class="sm-lane"><b>Couloir sous surveillance</b><span>Ta balise attend le prochain passage.</span></div>`);
       else if (li.echo && !li.fromCard) rows.push(`<div class="sm-lane"><b>Trafic capté par ton antenne</b><span>Pose une balise ici pour voir qui passe, et vers où.</span></div>`);
       else if (li.lane) rows.push(`<div class="sm-lane"><b>Couloir de passage</b><span>Du trafic régulier traverse ce système. Une balise ici verrait qui passe.</span></div>`);
@@ -1672,7 +1727,8 @@
       const pts = rt.path.map(i => CELLS[i]);
       const cx = pts.reduce((a, c) => a + c.x, 0) / pts.length, cz = pts.reduce((a, c) => a + c.z, 0) / pts.length;
       const span = Math.max(...pts.map(c => Math.hypot(c.x - cx, c.z - cz)));
-      E.moveTo(cx, cz, Math.max(360, Math.min(DIST_MAX, span * 3.2 + 200)), 800);
+      const d = Math.max(620, Math.min(DIST_MAX, span * 6.5 + 380));
+      E.moveTo(cx, cz + d * 0.24, d * 1.1, 800);   // la fiche couvre le bas de l'écran : la route se lit au-dessus   // 15/10 : toute la route dans le cadre, au-dessus de la fiche
     }
   }
   function routeAvoid(id) { _pickAvoid = id; if (typeof toast === 'function') toast('Touche le système à éviter'); }
@@ -1734,21 +1790,73 @@
     return _sigOff(st.why || 'Moyenne indisponible', 'Pour ouvrir une route jusqu\'ici');
   }
   function scout(sysKey, label) { if (window.SBLines) { SBLines.scoutLaunch(sysKey, label || null); refresh(true); } }
+  // 15/10 (Adrien : « je ne sais pas où elle passe, ni comment l'emprunter ») — l'itinéraire d'une route, jalon par jalon :
+  // départ, systèmes de passage numérotés comme sur la carte (balisé ou non, ce qu'on y a vu), arrivée et ce qu'on y connaît.
+  function itineraryHtml(chain, o) {
+    const mine = new Set(myBeacons().map(b => beaconSys(b)));
+    const going = new Set((G.probeMissions || []).filter(m => m.tier === 'beacon' && m.status === 'in_transit').map(m => String(m.targetCoords || '').split('-').slice(0, 3).join('-')));
+    const ago = (t) => { const m = Math.max(1, Math.round((Date.now() - t) / 60000)); return m < 60 ? `il y a ${m} min` : m < 1440 ? `il y a ${Math.round(m / 60)} h` : `il y a ${Math.round(m / 1440)} j`; };
+    const n = chain.length - 1;
+    const rows = chain.map((k, i) => {
+      const end = i === n, start = i === 0;
+      let tag, what;
+      if (start) { tag = '◉'; what = o.startLabel || 'départ'; }
+      else if (end) { tag = '◆'; what = o.endLabel || 'arrivée'; }
+      else {
+        tag = String(i);
+        const li = window.SBLines ? SBLines.infoFor(k) : null;
+        const seen = li && li.obs && li.obs.length ? li.obs.reduce((m, x) => Math.max(m, x.last || 0), 0) : 0;
+        what = (mine.has(k) ? '<em class="on">✓ balisé</em>' : going.has(k) ? '<em>balise en route</em>' : '<em class="off">non balisé</em>') + (seen ? ` · convoi vu ${ago(seen)}` : '');
+      }
+      return `<button class="sm-it${start ? ' s' : end ? ' e' : ''}" style="--c:${o.color}" onclick="event.stopPropagation();SBMap.select('system','${esc(k)}')"><b>${tag}</b><span class="mono">${esc(k)}</span><i>${what}</i></button>`;
+    }).join('');
+    return `<div class="sm-itin"><div class="h">Itinéraire · ${Math.max(0, n - 1)} système${n - 1 > 1 ? 's' : ''} de passage</div>${rows}</div>`;
+  }
+  // une flotte sur la route : embuscade sur un de ses jalons balisés (l'ordre est choisi ensuite)
+  async function fleetOnRoute(id) {
+    const ch = routeChainOf(id);
+    if (!ch) return;
+    const fleets = (G.fleet && G.fleet.prepared || []).filter(f => (f.status || 'prepared') === 'deployed' && ['fregate', 'cuirasse'].some(t => ['t1', 't2', 't3'].some(x => (f.composition[t] && f.composition[t][x]) > 0)));
+    if (!fleets.length) { toast('Aucune flotte armée en orbite : prépare-en une (Flotte)'); return; }
+    const f = fleets.length === 1 ? { f: fleets[0] } : await _mpChoose('Quelle flotte poster sur la route ?', fleets.map(f => ({ f, label: esc(f.name), sub: 'en orbite' })));
+    if (!f) return;
+    if (typeof mpAmbushStart === 'function') mpAmbushStart(f.f.id, ch);
+  }
+  function routeChainOf(id) {
+    const o = window.SBLines && SBLines.openedRoutes().find(x => x.id === id);
+    if (o) return o.chain.slice(1, -1).concat([o.to]);
+    const r = (G.routes || []).find(x => x.id === id);
+    return r && r.portSys && window.SBLines ? SBLines.knownChain(r.portSys).slice(0, -1) : null;
+  }
+  function fleetBtn(id, chain) {
+    const mine = new Set(myBeacons().map(b => beaconSys(b)));
+    const on = chain.filter(k => mine.has(k)).length;
+    const posted = (G.fleet && G.fleet.prepared || []).filter(f => f.ambush && chain.includes(f.ambush.system) && f.ambush.phase !== 'returning');
+    if (posted.length) return _sigBtn('#c9a8ff', `${esc(posted[0].name)} en embuscade · ${esc(posted[0].ambush.system)}`, `openFleetDetail('${esc(posted[0].id)}')`, window.SBLines && SBLines.ordersLabel ? esc(SBLines.ordersLabel(posted[0])) : '', true);
+    return on ? _sigBtn('#c9a8ff', 'Poster une flotte sur la route', `SBMap.fleetOnRoute('${esc(id)}')`, `Embuscade sur un jalon balisé · elle y arrive plus vite par la route`, true)
+      : _sigOff('Poster une flotte sur la route', 'Il faut d\'abord une balise sur un de ses jalons');
+  }
   function openedRouteCard(rt) {
     const o = SBLines.openedRoutes().find(x => x.id === rt.routeId);
     if (!o) return '';
     const n = Math.max(0, o.chain.length - 2);
     const bal = SBLines.balisageChain(o.chain.slice(1, -1));
-    const dots = bal.chain.map(k => `<i class="${bal.beaconed.includes(k) ? 'on' : ''}" title="${esc(k)}"></i>`).join('');
     const pct = Math.round(bal.ratio * 100);
     const st = _state || collect();
     const toSys = st.systems[o.to];
-    const pl = toSys && toSys.planets && toSys.planets[0];
+    const pls = (toSys && toSys.planets) || [];
+    const endLabel = pls.length ? esc(pls[0].playerName || pls[0].customName || pls[0].name || 'planète') + (pls.length > 1 ? ` (+${pls.length - 1})` : '') : (o.toLabel ? esc(o.toLabel) : 'rien de connu au bout');
+    const from = o.chain[0] === mySystemKey() ? 'ta planète' : (o.by ? 'système de ' + esc(o.by) : 'départ');
+    const sends = pls.slice(0, 2).map(pl => _sigBtn(o.color, 'Envoyer un tanker · ' + esc(pl.playerName || pl.customName || pl.name || pl.coord), `SBMap.sendOnOpened('${esc(o.id)}','${esc(pl.coord)}')`, 'Il suit cette route jusqu\'au bout', true)).join('');
+    const noEnd = pls.length ? '' : `<div class="sm-lane"><b>Au bout : rien de connu</b><span>Ta Moyenne a tracé le passage jusqu'à ${esc(o.to)}, sans y repérer de planète. Balaye le système : dès qu'une planète y est connue, tes tankers peuvent l'atteindre par cette route.</span></div>`
+      + _sigBtn(COL.cyan, 'Explorer la destination', `SBMap.select('system','${esc(o.to)}')`, esc(o.to), true);
     return `<div class="sm-panel"><div class="sm-ptitle" style="color:${o.color}">${esc(o.name)}</div>`
-      + `<div class="sm-psub">${o.by ? `Offerte par ${esc(o.by)} · ` : 'Ouverte par ta Moyenne · '}${n} système${n > 1 ? 's' : ''} de passage · <span class="mono">${esc(o.chain[0])} → ${esc(o.to)}</span></div>`
-      + `<div class="sm-bal"><div class="h"><b>Balisage</b><span>${bal.beaconed.length}/${bal.chain.length} jalons</span></div><div class="d">${dots}</div><div class="t">${pct ? `Plus rapide et plus sûre à mesure que tu la balises · ${pct} %` : 'Non balisée'}</div></div>`
-      + (bal.next ? _sigBtn('#b48cff', 'Baliser le jalon suivant', `SBMap.beacon('${esc(bal.next)}')`, esc(bal.next), true) : '')
-      + (pl ? _sigBtn(o.color, 'Envoyer un tanker', `SBMap.sendOnOpened('${esc(o.id)}','${esc(pl.coord)}')`, `Vers ${esc(pl.playerName || pl.name || pl.coord)} par cette route`, true) : '')
+      + `<div class="sm-psub">${o.by ? `Offerte par ${esc(o.by)}` : 'Ouverte par ta Moyenne'} · ${pct ? `balisée à ${pct} % : plus rapide, plus sûre` : 'non balisée'}</div>`
+      + itineraryHtml(o.chain, { color: o.color, startLabel: from, endLabel })
+      + `<div class="sm-use">À quoi elle sert : tes tankers et tes flottes qui vont vers ces systèmes la suivent, plus vite et à l'abri des regards — seuls ceux qui la connaissent l'empruntent. Balise ses jalons pour la rendre plus sûre.</div>`
+      + sends + noEnd
+      + (bal.next ? _sigBtn('#b48cff', `Baliser le jalon ${o.chain.indexOf(bal.next)}`, `SBMap.beacon('${esc(bal.next)}')`, esc(bal.next) + ' · plus rapide, plus sûre', true) : '')
+      + fleetBtn(o.id, o.chain.slice(1))
       + (o.by ? '' : _sigBtn('#ffb3e0', 'Donner à un allié', `SBMap.giveOpened('${esc(o.id)}')`, 'Seuls ceux à qui tu la donnes sauront y aller', true))
       + `<div class="sm-tags"><button class="sm-tag" onclick="event.stopPropagation();SBMap.forgetOpened('${esc(o.id)}')">Oublier la route</button></div>`
       + `</div>`;
@@ -1798,8 +1906,10 @@
     const usersHtml = users.length ? `<div class="sm-users"><b>Vus sur la ligne</b>${users.map(u => `<span>${esc(u.pseudo || 'pavillon masqué')} · ${esc(u.sys)} · ${ago(u.at)}</span>`).join('')}</div>` : '';
     return `<div class="sm-panel"><div class="sm-ptitle" style="color:#ffc864">${esc(r.name)}</div>`
       + `<div class="sm-psub">Vers ${esc((r.dock && r.dock.name) || 'un lieu caché')} · ${n} tronçon${n > 1 ? 's' : ''} connu${n > 1 ? 's' : ''}</div>`
+      + itineraryHtml(SBLines.knownChain(r.portSys), { color: '#ffc864', startLabel: 'début connu de la ligne', endLabel: esc((r.dock && r.dock.name) || 'lieu caché') })
       + balHtml + usersHtml
-      + _sigBtn('#ffc864', 'Envoyer un tanker', `openTankerComposeForRoute('${esc(r.id)}')`, busy ? `${busy} tanker${busy > 1 ? 's' : ''} sur cette route` : 'Il suit la ligne · les balises posées dessus le voient passer', true)
+      + _sigBtn('#ffc864', 'Envoyer un tanker', `openTankerComposeForRoute('${esc(r.id)}')`, busy ? `${busy} tanker${busy > 1 ? 's' : ''} sur cette route` : 'Il suit la ligne jusqu\'au dock · les balises posées dessus le voient passer', true)
+      + fleetBtn(r.id, SBLines.knownChain(r.portSys).slice(0, -1))
       + _sigBtn(COL.cyan, 'Voir le lieu', `SBMap.select('system','${esc(r.portSys)}')`, '', true)
       + `</div>`;
   }
@@ -1855,6 +1965,14 @@
       `<button onclick="event.stopPropagation();SBMap.select('system','${esc(e.other)}')"><span class="k">${e.out && e.inn ? 'Dans les deux sens' : e.out ? 'Cap relevé' : 'Venu de'}</span><span class="mono">${esc(e.other)}</span><span class="w">${esc(e.who || 'pavillon masqué')}${e.cargo ? ` · cales ${e.cargo === 'lourd' ? 'lourdes' : e.cargo === 'léger' ? 'légères' : 'moyennes'} vers ce système` : ''} · ${ago(e.at)}</span></button>`
     ).join('') + `</div>`;
   }
+  function routeSummary(rt) {
+    if (!window.SBLines) return (rt.path.length - 1) + ' cases';
+    const o = rt.opened ? SBLines.openedRoutes().find(x => x.id === rt.routeId) : null;
+    const r = rt.line ? (G.routes || []).find(x => x.id === rt.routeId) : null;
+    const mids = o ? o.chain.slice(1, -1) : r ? SBLines.knownChain(r.portSys).slice(0, -1) : [];
+    const pct = Math.round((o ? SBLines.balisageChain(mids) : r ? SBLines.balisage(r.portSys) : { ratio: 0 }).ratio * 100);
+    return `${mids.length} jalon${mids.length > 1 ? 's' : ''} · ${pct ? 'balisée ' + pct + ' %' : 'non balisée'}`;
+  }
   function routesSheetHtml() {
     const st = _state || collect();
     const rs = st.routes || [];
@@ -1862,7 +1980,7 @@
     return `<div class="smw-fl-h">Mes routes · ${rs.length}</div>` + rs.map(rt => `<button class="smw-fl" onclick="SBMap.showRoute('${esc(rt.r.id)}')">
         <span class="t" style="color:${rt.r.color}">${esc(rt.r.name)}</span>
         <span class="g">${rt.a ? esc(rt.a.key) : '—'} → ${rt.b ? esc(rt.b.key) : '—'}</span>
-        <span class="e">${rt.broken ? 'rompue' : (rt.path.length - 1) + ' cases'}</span></button>`).join('');
+        <span class="e">${rt.broken ? 'rompue' : routeSummary(rt)}</span></button>`).join('');
   }
   function showRoute(id) { W.closeSheet(); selectRoute(id); }
 
@@ -2135,6 +2253,16 @@
       .sm-rt i{width:14px;height:3px;border-radius:2px;flex:none}
       .sm-rt b{font-weight:600;letter-spacing:.04em}
       .sm-rt span{margin-left:auto;font:500 10px/1 'JetBrains Mono',monospace;color:rgba(190,205,215,.6)}
+      .sm-itin{margin-top:10px;border:1px solid rgba(255,255,255,.08);border-radius:8px;overflow:hidden}
+      .sm-itin .h{padding:7px 10px;font:600 10px/1.2 'Space Grotesk',system-ui,sans-serif;letter-spacing:.12em;text-transform:uppercase;color:#9fb3bf;background:rgba(255,255,255,.03)}
+      .sm-it{display:flex;align-items:center;gap:9px;width:100%;padding:7px 10px;border:0;border-top:1px solid rgba(255,255,255,.05);background:transparent;color:#e6f0ff;font:inherit;font-size:12px;text-align:left;cursor:pointer;position:relative}
+      .sm-it b{flex:0 0 20px;height:20px;border-radius:50%;border:1px solid var(--c);color:var(--c);font:600 10px/18px 'Space Grotesk',system-ui,sans-serif;text-align:center}
+      .sm-it.s b,.sm-it.e b{border:0;font-size:13px}
+      .sm-it span{flex:0 0 auto;font-size:11px}
+      .sm-it i{flex:1;font-style:normal;font-size:10px;color:#9fb3bf;text-align:right}
+      .sm-it i em{font-style:normal}.sm-it i em.on{color:#cdb4ff}.sm-it i em.off{color:#6a7a72}
+      .sm-it.e span,.sm-it.e i{color:#e6f0ff}
+      .sm-use{margin:9px 2px 2px;font-size:11px;line-height:1.5;color:#9fb3bf}
       .sm-bal{margin-top:9px;padding:8px 10px;border-radius:8px;border:1px solid rgba(180,140,255,.28);background:rgba(180,140,255,.05)}
       .sm-bal .h{display:flex;justify-content:space-between;align-items:baseline}
       .sm-bal .h b{font:600 10px/1.2 'Space Grotesk',system-ui,sans-serif;letter-spacing:.12em;text-transform:uppercase;color:#cdb4ff}
@@ -2172,7 +2300,7 @@
   function panelFor(sel) { const keep = _sel; _sel = sel; let h = ''; try { h = panelMarkup(collect()); } finally { _sel = keep; } return h; }
   const API = {
     render, sweep, panelFor, tag, beacon, recallBeacon: recallBeaconFromMap, showFlight,
-    openRoute, selectRoute, showRoute, routeAvoid, routeUnavoid, routeColor, routeRename, routeDelete, sendOnRoute, postOnRoute, postHere, scout, sendOnOpened, giveOpened, forgetOpened,
+    openRoute, selectRoute, showRoute, routeAvoid, routeUnavoid, routeColor, routeRename, routeDelete, sendOnRoute, postOnRoute, postHere, scout, sendOnOpened, giveOpened, forgetOpened, fleetOnRoute,
     planFor(destKey) { try { return planFrom(_state || collect(), destKey); } catch (e) { return null; } },
     select(kind, key) {
       if (_fallback) return;
