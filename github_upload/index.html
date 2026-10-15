@@ -43627,12 +43627,18 @@ function _crownCss2() {
     /* écran du dock de la Couronne : la 3D derrière, les cartes défilent par-dessus */
     #scr-dock.cr-scene > .stars,#scr-dock.cr-scene > .glow,#scr-dock.cr-scene .head,#scr-dock.cr-scene #dock-banner{display:none !important}
     #scr-dock.cr-scene{background:#010207}
-    /* PATCH_1510_CROWN_SHEET — le tiroir : fermé 190 px au-dessus des boutons, ouvert presque tout l'écran */
-    #scr-dock.cr-scene .screen-scroll{flex:0 0 auto;height:190px;margin-top:auto;overscroll-behavior:contain;transition:height .35s cubic-bezier(.2,.8,.2,1)}
-    #scr-dock.cr-scene.cr-open .screen-scroll{height:calc(100% - 215px - env(safe-area-inset-top,0px))}
-    #scr-dock.cr-scene #crown-space{display:none}
-    #scr-dock.cr-scene #crown-grip{position:sticky;top:0;z-index:3;touch-action:none}
-    #scr-dock.cr-open #crown-grip i{transform:scaleX(.7)}
+    /* PATCH_1510_HERO_SCROLL — comme la flotte : la 3D derrière, la fiche défile par-dessus, la zone du haut garde les gestes */
+    #scr-dock.cr-scene .screen-scroll{overscroll-behavior:contain}
+    #scr-dock.cr-scene #crown-space{touch-action:none}
+    #crown-scene3d.crh{z-index:auto}
+    #crown-scene3d .cr-ttl{z-index:1}
+    #crown-scene3d .cr-chips{z-index:3;transition:opacity .2s}
+    #crown-scene3d .cr-intro{z-index:4}
+    #crown-scene3d .cr-load{z-index:1}
+    .crh .cr-scrim{position:absolute;inset:0;z-index:1;pointer-events:none;background:rgba(3,5,9,.84);opacity:var(--hs,0)}
+    .crh canvas{filter:saturate(calc(1 - var(--hs, 0) * .5))}
+    .cr-scene .cr-chips,#crown-sp .cr-chips{opacity:calc(1 - var(--hs, 0) * 2.5)}
+    .cr-scene.cr-faded .cr-chips,#crown-sp.cr-faded .cr-chips{pointer-events:none}
     #crown-grip{margin:0 10px;padding:9px 14px 10px;border-radius:16px 16px 0 0;background:rgba(8,9,14,.92);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);border:1px solid rgba(240,181,74,.32);border-bottom:0;text-align:center;cursor:pointer}
     #crown-grip i{display:block;width:38px;height:4px;border-radius:2px;background:rgba(240,181,74,.45);margin:0 auto 8px}
     #crown-grip b{display:block;font-size:13px;letter-spacing:.08em;color:#ffd27a}
@@ -43644,7 +43650,12 @@ function _crownCss2() {
     /* vue spatiale (pas de tanker à quai) : par-dessus tout, une fiche refermable */
     #crown-sp{position:fixed;inset:0;z-index:9000;background:#010207}
     #crown-sp .crs-x{position:absolute;right:10px;top:calc(env(safe-area-inset-top,0px) + 10px);z-index:5;width:42px;height:42px;border-radius:50%;border:1px solid rgba(255,255,255,.22);background:rgba(1,2,7,.6);color:#e6f0ff;font-size:22px;line-height:40px;text-align:center;cursor:pointer;padding:0}
-    #crown-sp .crs-card{position:absolute;left:10px;right:10px;bottom:calc(env(safe-area-inset-bottom,0px) + 12px);z-index:4;max-height:56%;overflow-y:auto;padding:0 14px 14px;border-radius:16px;background:rgba(8,9,14,.92);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);border:1px solid rgba(240,181,74,.32);transition:transform .25s ease;opacity:0;transform:translateY(20px)}
+    #crown-sp .crh{z-index:auto}
+    #crown-sp .crh .cr-ttl{z-index:1}
+    #crown-sp .crh .cr-chips{z-index:3;transition:opacity .2s}
+    #crown-sp .crs-scroll{position:absolute;inset:0;z-index:2;overflow-y:auto;overflow-x:hidden;-webkit-overflow-scrolling:touch;overscroll-behavior:contain}
+    #crown-sp .crs-space{touch-action:none}
+    #crown-sp .crs-card{position:relative;margin:0 10px calc(env(safe-area-inset-bottom,0px) + 16px);padding:0 16px 18px;border-radius:16px;background:rgba(8,9,14,.92);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);border:1px solid rgba(240,181,74,.32);transition:transform .25s ease;opacity:0;transform:translateY(20px)}
     #crown-sp.shown .crs-card{opacity:1;transform:none;transition:opacity .5s,transform .5s}
     #crown-sp .crs-grip{padding:9px 0 4px;cursor:pointer;text-align:center}
     #crown-sp .crs-grip i{display:block;width:38px;height:4px;border-radius:2px;background:rgba(240,181,74,.45);margin:0 auto}
@@ -43655,9 +43666,8 @@ function _crownCss2() {
     #crown-sp .crs-row{display:flex;gap:8px;margin-top:8px}
     #crown-sp .crs-row button{flex:1;padding:11px 8px;border-radius:10px;border:1px solid rgba(240,181,74,.35);background:rgba(240,181,74,.06);color:#ffd27a;font:inherit;font-size:11.5px;cursor:pointer}
     #crown-sp .crs-note{font-size:11px;color:var(--mut);text-align:center;font-style:italic;line-height:1.5;margin-top:10px}
-    #crown-sp .crs-card.min .crs-body{display:none}
-    #crown-sp .crs-card.min .crs-s{margin-bottom:4px}
-    #crown-sp.shown:not(.cmin) .crh .cr-ttl{opacity:0}
+    #crown-sp .crs-body p{font-size:13.5px}
+    #crown-sp .crh .cr-ttl{opacity:calc(1 - var(--hs, 0) * 2)}
     #crown-sp .crh .cr-ttl{transition:opacity .3s}
     #crown-sp .crs-hint{position:absolute;left:0;right:0;top:calc(env(safe-area-inset-top,0px) + 128px);text-align:center;font-size:10px;letter-spacing:.08em;color:rgba(230,240,255,.5);z-index:3;pointer-events:none}
     /* carte : la fiche de la Couronne */
@@ -43739,14 +43749,14 @@ function crownDockHero(dock) {
   el.innerHTML = `<div class="cr-ttl"><small>${U.kicker}</small><b${U.long ? ' class="long"' : ''}>${U.title}</b><span>${sys ? '⌖ ' + sys + ' · ' : ''}${U.sub}</span></div>
     <div class="cr-chips"><button class="cr-chip" data-v="dock">${U.chips.dock}</button><button class="cr-chip" data-v="bar">${U.chips.bar}</button><button class="cr-chip" data-v="port">${U.chips.port}</button></div>
     <div class="cr-load"><i></i></div>
-    <div class="cr-intro"><b${U.long ? ' class="long"' : ''}>${U.title}</b><span>${U.intro}</span><button class="cr-big">${U.enter}</button></div>`;
+    <div class="cr-intro"><b${U.long ? ' class="long"' : ''}>${U.title}</b><span>${U.intro}</span><button class="cr-big">${U.enter}</button></div><div class="cr-scrim"></div>`;
   scr.insertBefore(el, scroll);
   const space = document.createElement('div'); space.id = 'crown-space';
   const grip = document.createElement('div'); grip.id = 'crown-grip';
   grip.innerHTML = `<i></i><b>${_crEsc(dock.name || 'The Drifting Crown')}</b><span>${_crEsc(sub)}</span>`;
   scroll.insertBefore(space, scroll.firstChild); space.after(grip);
   scr.classList.add('cr-scene'); if (first) scr.classList.add('cr-first');
-  const fit = () => {};   // PATCH_1510_CROWN_SHEET : le tiroir a sa propre hauteur
+  const fit = () => { if (_crown && _crown.space) _crown.space.style.height = Math.max(160, scroll.clientHeight - 170) + 'px'; };   // PATCH_1510_HERO_SCROLL
   _crown = { el, space, grip, scr, scroll, handle: null, state: want, first, fit, U };
   fit(); scroll.scrollTop = 0;
   window.addEventListener('resize', fit);
@@ -43767,30 +43777,19 @@ function crownDockHero(dock) {
     if (chip) { e.stopPropagation(); crownSetView(chip.dataset.v); return; }
     if (e.target.closest('.cr-big')) { e.stopPropagation(); _crownEnterPort(); return; }
   });
-  // toucher la 3D (sans glisser) : le panneau redescend et laisse voir la scène
-  let down = null;
-  el.addEventListener('pointerdown', (e) => { down = { x: e.clientX, y: e.clientY, t: performance.now() }; });
-  el.addEventListener('pointerup', (e) => {
-    if (!down || e.target.closest('.cr-chip,.cr-big')) return;
-    if (Math.hypot(e.clientX - down.x, e.clientY - down.y) < 8 && performance.now() - down.t < 350) crownSheet(false);
-    down = null;
-  });
-  // la poignée : toucher = monter / descendre ; glisser vers le haut ou le bas = pareil
-  let g0 = null;
-  grip.addEventListener('pointerdown', (e) => { g0 = { y: e.clientY, t: performance.now() }; });
-  grip.addEventListener('pointerup', (e) => {
-    if (!g0) return;
-    const dy = e.clientY - g0.y; g0 = null;
-    if (Math.abs(dy) < 10) crownSheet(!scr.classList.contains('cr-open'));
-    else crownSheet(dy < 0);
-  });
-  grip.addEventListener('pointercancel', () => { g0 = null; });
+  // la zone libre du haut : gestes 3D (tourner, pincer) ; un simple toucher fait redescendre la fiche
+  if (window.SBHero) {
+    SBHero.gestures(space, () => (_crown && _crown.el === el ? _crown.handle : null), () => crownSheet(false));
+    SBHero.fade(scroll, space, scr);
+    scroll.addEventListener('scroll', () => scr.classList.toggle('cr-faded', scroll.scrollTop > space.offsetHeight * 0.3), { passive: true });
+  }
+  // la poignée : toucher = la fiche monte (ou redescend)
+  grip.addEventListener('click', () => crownSheet(scroll.scrollTop < 30));
   if (first) { G[U.seen] = Date.now(); if (typeof saveGame === 'function') saveGame(); }
 }
 function crownSheet(open) {
   if (!_crown) return;
-  _crown.scr.classList.toggle('cr-open', !!open);
-  if (!open) _crScroll(_crown.scroll, 0);
+  _crScroll(_crown.scroll, open ? Math.max(0, _crown.space.offsetHeight - 70) : 0);
 }
 function _crownEnterPort() {
   if (!_crown) return;
@@ -43813,7 +43812,7 @@ function crownUnmount() {
   try { if (_crown.handle) _crown.handle.dispose(); } catch (e) {}
   window.removeEventListener('resize', _crown.fit);
   _crown.el.remove(); if (_crown.space) _crown.space.remove(); if (_crown.grip) _crown.grip.remove();
-  if (_crown.scr) _crown.scr.classList.remove('cr-scene', 'cr-first', 'cr-open');
+  if (_crown.scr) { _crown.scr.classList.remove('cr-scene', 'cr-first', 'cr-open', 'cr-faded'); _crown.scr.style.removeProperty('--hs'); }
   _crown = null;
   const banner = document.getElementById('dock-banner'); if (banner) banner.style.display = '';
 }
@@ -43842,15 +43841,23 @@ function crownSpaceOpen(id) {
   el.innerHTML = `<div class="crh">
       <div class="cr-ttl"><small>${U.kicker}</small><b${U.long ? ' class="long"' : ''}>${U.title}</b><span>${port ? '⌖ ' + e(port.sys) + ' · ' : ''}${e(st.label)}</span></div>
       <div class="cr-chips"><button class="cr-chip on" data-v="port">${U.chips.port}</button><button class="cr-chip" data-v="bar">${U.chips.bar}</button></div>
-      <div class="cr-load"><i></i></div>
+      <div class="cr-load"><i></i></div><div class="cr-scrim"></div>
     </div>
     <div class="crs-hint">Glisser pour tourner · pincer pour zoomer</div>
     <button class="crs-x" aria-label="Fermer">×</button>
-    <div class="crs-card"><div class="crs-grip"><i></i></div><div class="crs-k">${U.kicker}</div><div class="crs-t">${e(D.name)}</div><div class="crs-s">${e(st.label)}</div>
-      <div class="crs-body"><p>${e(D.ambience)}</p>${acts}</div></div>`;
+    <div class="crs-scroll"><div class="crs-space"></div><div class="crs-card"><div class="crs-grip"><i></i></div><div class="crs-k">${U.kicker}</div><div class="crs-t">${e(D.name)}</div><div class="crs-s">${e(st.label)}</div>
+      <div class="crs-body"><p>${e(D.ambience)}</p>${acts}</div></div></div>`;
   document.body.appendChild(el);
   const hero = el.querySelector('.crh'), load = el.querySelector('.cr-load i'), card = el.querySelector('.crs-card');
-  _crownSpace = { el, handle: null };
+  const csc = el.querySelector('.crs-scroll'), csp = el.querySelector('.crs-space');
+  const cfit = () => { csp.style.height = Math.max(200, csc.clientHeight - 210) + 'px'; };
+  cfit(); window.addEventListener('resize', cfit);
+  _crownSpace = { el, handle: null, cfit };
+  if (window.SBHero) {
+    SBHero.gestures(csp, () => (_crownSpace && _crownSpace.el === el ? _crownSpace.handle : null), () => SBHero.scrollTo(csc, 0));
+    SBHero.fade(csc, csp, el);
+    csc.addEventListener('scroll', () => el.classList.toggle('cr-faded', csc.scrollTop > csp.offsetHeight * 0.3), { passive: true });
+  }
   const start = () => {
     if (!_crownSpace || _crownSpace.el !== el) return;
     _crownSpace.handle = window.Station3D.mount(hero, { url: U.url, profile: U.profile, view: 'port', intro: true, interactive: true,
@@ -43864,10 +43871,10 @@ function crownSpaceOpen(id) {
     const chip = ev.target.closest('.cr-chip');
     if (chip && _crownSpace.handle) { _crownSpace.handle.setView(chip.dataset.v); _crownChips(chip.dataset.v); return; }
     if (ev.target.closest('.crs-x')) { crownSpaceClose(); return; }
-    if (ev.target.closest('.crs-grip')) { card.classList.toggle('min'); el.classList.toggle('cmin', card.classList.contains('min')); return; }
+    if (ev.target.closest('.crs-grip')) { if (window.SBHero) SBHero.scrollTo(csc, csc.scrollTop < 30 ? Math.max(0, csp.offsetHeight - 60) : 0); return; }
     const b = ev.target.closest('[data-a]'); if (!b) return;
     const a = b.dataset.a;
-    if (a === 'bar') { if (_crownSpace.handle) _crownSpace.handle.setView('bar'); _crownChips('bar'); card.classList.add('min'); el.classList.add('cmin'); return; }
+    if (a === 'bar') { if (_crownSpace.handle) _crownSpace.handle.setView('bar'); _crownChips('bar'); if (window.SBHero) SBHero.scrollTo(csc, 0); return; }
     crownSpaceClose();
     if (a === 'send' && route) openTankerComposeForRoute(route.id);
     else if (a === 'route' && route && window.SBMap) { if (typeof openSystemOnMap === 'function' && port) openSystemOnMap(port.sys); setTimeout(() => SBMap.selectRoute(route.id), 700); }
@@ -43877,6 +43884,7 @@ function crownSpaceOpen(id) {
 function crownSpaceClose() {
   if (!_crownSpace) return;
   try { if (_crownSpace.handle) _crownSpace.handle.dispose(); } catch (e) {}
+  if (_crownSpace.cfit) window.removeEventListener('resize', _crownSpace.cfit);
   _crownSpace.el.remove(); _crownSpace = null;
 }
 // anciens appels (carte, cheats) : on passe par l'entrée
@@ -45850,9 +45858,9 @@ if (G.knownTargets && Array.isArray(G.tankerMissions)) {
 <script src="assets/radio.js?v=20261014-1440"></script>
 <script type="module" src="assets/ship3d.js?v=20261014-1440"></script>
 <!-- PATCH_1510_MISSIONS — tout ce qui vole, fiche de mission des tankers -->
-<script src="assets/missions.js?v=20261015-2130"></script>
+<script src="assets/missions.js?v=20261015-2300"></script>
 <!-- PATCH_1510_CROWN — The Drifting Crown en 3D (assets/station3d.js, sur le moteur partagé window.SB3D) -->
-<script type="module" src="assets/station3d.js?v=20261015-2200"></script>
+<script type="module" src="assets/station3d.js?v=20261015-2300"></script>
 <!-- FORMATION3D — flotte déployée en orbite, vue de haut en formation (remplace la vue orbite) -->
 <script src="assets/formation3d.js?v=20261014-1440"></script>
 </body>

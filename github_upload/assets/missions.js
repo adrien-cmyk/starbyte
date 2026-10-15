@@ -126,6 +126,48 @@
 
   // la feuille Missions de la carte se referme quand on part vers un autre écran
   function closeSheets() { try { if (typeof G !== 'undefined') G.prospectTab = 'univers'; const sh = document.querySelector('.smw-sheet.on .smw-sh-x'); if (sh) sh.click(); } catch (e) {} }
+  /* ── 15/10 (Adrien) — vues 3D « comme la flotte » : la 3D plein écran, la fiche défile par-dessus ;
+     la zone libre en haut garde les gestes (tourner, pincer), lissés par le moteur 3D ── */
+  function heroGestures(space, getH, onTap) {
+    const pts = new Map(); let mode = null, last = null, pinch0 = 0;
+    const dist = () => { const v = [...pts.values()]; return Math.hypot(v[0].x - v[1].x, v[0].y - v[1].y); };
+    space.addEventListener('pointerdown', (e) => {
+      const h = getH(); if (!h) return;
+      pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      try { space.setPointerCapture(e.pointerId); } catch (_) {}
+      if (pts.size === 2) { mode = 'pinch'; pinch0 = dist(); }
+      else { mode = 'orbit'; last = { x: e.clientX, y: e.clientY, x0: e.clientX, y0: e.clientY, t0: performance.now() }; }
+      if (h.begin) h.begin();
+    });
+    space.addEventListener('pointermove', (e) => {
+      if (!pts.has(e.pointerId)) return;
+      const h = getH(); if (!h) return;
+      pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (mode === 'pinch' && pts.size === 2) { const d = dist(); if (d > 10 && pinch0 > 10 && h.dolly) h.dolly(pinch0 / d); pinch0 = d; return; }
+      if (mode === 'orbit' && h.orbit) { h.orbit(e.clientX - last.x, e.clientY - last.y); last.x = e.clientX; last.y = e.clientY; }
+    });
+    const up = (e) => {
+      if (!pts.has(e.pointerId)) return;
+      if (onTap && mode === 'orbit' && last && e.type === 'pointerup' && Math.hypot(e.clientX - last.x0, e.clientY - last.y0) < 8 && performance.now() - last.t0 < 350) onTap(e);
+      pts.delete(e.pointerId);
+      if (!pts.size) { mode = null; const h = getH(); if (h && h.end) h.end(); } else if (mode === 'pinch') mode = null;
+    };
+    space.addEventListener('pointerup', up); space.addEventListener('pointercancel', up);
+    space.addEventListener('wheel', (e) => { const h = getH(); if (!h || !h.dolly) return; e.preventDefault(); if (h.begin) h.begin(); h.dolly(1 + e.deltaY * 0.0012); if (h.end) h.end(); }, { passive: false });
+  }
+  // plus la fiche remonte, plus la scène s'assombrit ; les puces du haut s'effacent
+  function heroFade(scroll, space, root) {
+    const f = () => { const h = space.offsetHeight || 1; const v = Math.max(0, Math.min(1, (scroll.scrollTop - h * 0.12) / (h * 0.45))); root.style.setProperty('--hs', v.toFixed(3)); };
+    scroll.addEventListener('scroll', f, { passive: true }); f();
+  }
+  function heroScrollTo(sc, top) {
+    const from = sc.scrollTop, d = top - from, t0 = performance.now();
+    if (Math.abs(d) < 2) return;
+    const step = (now) => { const k = Math.min(1, (now - t0) / 380), e = 1 - Math.pow(1 - k, 3); sc.scrollTop = from + d * e; if (k < 1) requestAnimationFrame(step); };
+    requestAnimationFrame(step);
+  }
+  window.SBHero = { gestures: heroGestures, fade: heroFade, scrollTo: heroScrollTo };
+
   /* ── la fiche de mission d'un tanker ── */
   let _open = null;   // { id, el, ship, timer }
   function open(id, force) {
@@ -139,10 +181,14 @@
     css();
     const el = document.createElement('div');
     el.id = 'sbm-view';
-    el.innerHTML = `<div class="sbm-hero"><div class="sbm-3d"></div><div class="sbm-top"><div class="sbm-kind"></div><div class="sbm-name"></div><div class="sbm-state"></div></div><button class="sbm-x" aria-label="Fermer">✕</button></div><div class="sbm-body"></div>`;
+    el.innerHTML = `<div class="sbm-hero"><div class="sbm-3d"></div><div class="sbm-top"><div class="sbm-kind"></div><div class="sbm-name"></div><div class="sbm-state"></div></div><div class="sbm-scrim"></div></div>
+      <div class="sbm-scroll"><div class="sbm-space"></div><div class="sbm-body"></div></div><button class="sbm-x" aria-label="Fermer">✕</button>`;
     document.body.appendChild(el);
     el.querySelector('.sbm-x').onclick = () => close();
     _open = { id, el, ship: null, timer: null };
+    const _sc = el.querySelector('.sbm-scroll'), _sp = el.querySelector('.sbm-space');
+    heroGestures(_sp, () => _open && _open.el === el ? _open.ship : null, () => { if (_sc.scrollTop > 30) heroScrollTo(_sc, 0); });
+    heroFade(_sc, _sp, el);
     // le vaisseau, comme sur sa fiche d'unité
     const model = (typeof UNIT_SHIP3D_MODELS !== 'undefined') ? UNIT_SHIP3D_MODELS.tanker : null;
     const hero = el.querySelector('.sbm-3d');
@@ -266,16 +312,22 @@
       .sbm-row .d{grid-area:d;font-size:11px;color:#9fb3bf}
       .sbm-row .p{position:absolute;left:0;right:0;bottom:0;height:2px;background:rgba(255,255,255,.06)}
       .sbm-row .p b{display:block;height:100%}
-      #sbm-view{position:fixed;inset:0;z-index:9200;background:#05080d;display:flex;flex-direction:column;color:#e6f0ff;font-family:inherit}
-      #sbm-view .sbm-hero{position:relative;flex:0 0 38vh;min-height:220px;background:radial-gradient(ellipse at 50% 60%,rgba(255,200,100,.08),transparent 60%),#05080d;overflow:hidden}
+      #sbm-view{position:fixed;inset:0;z-index:9200;background:#05080d;color:#e6f0ff;font-family:inherit}
+      #sbm-view .sbm-hero{position:absolute;inset:0;background:radial-gradient(ellipse at 50% 45%,rgba(255,200,100,.08),transparent 60%),#05080d;overflow:hidden}
+      #sbm-view .sbm-scrim{position:absolute;inset:0;z-index:1;pointer-events:none;background:rgba(3,5,9,.84);opacity:var(--hs,0)}
+      #sbm-view .sbm-3d canvas{filter:saturate(calc(1 - var(--hs, 0) * .5))}
+      #sbm-view .sbm-scroll{position:absolute;inset:0;z-index:2;overflow-y:auto;overflow-x:hidden;-webkit-overflow-scrolling:touch;overscroll-behavior:contain}
+      #sbm-view .sbm-space{height:calc(100% - 230px);min-height:260px;touch-action:none}
       #sbm-view .sbm-3d{position:absolute;inset:0}
       #sbm-view .sbm-top{position:absolute;left:0;right:0;top:0;padding:calc(14px + env(safe-area-inset-top,0px)) 60px 26px 16px;pointer-events:none;background:linear-gradient(180deg,rgba(5,8,13,.92),rgba(5,8,13,.55) 65%,rgba(5,8,13,0));text-shadow:0 1px 6px rgba(0,0,0,.9);z-index:1}
-      #sbm-view .sbm-x{z-index:2}
+      #sbm-view .sbm-x{z-index:5}
       #sbm-view .sbm-kind{font:600 10px/1.3 'Space Grotesk',system-ui,sans-serif;letter-spacing:.14em;text-transform:uppercase;color:#9fb3bf}
       #sbm-view .sbm-name{font-size:24px;font-weight:700;letter-spacing:.04em;color:#ffc864;margin-top:2px}
       #sbm-view .sbm-state{font-size:12px;margin-top:4px;font-family:'SF Mono',monospace}
       #sbm-view .sbm-x{position:absolute;right:12px;top:calc(12px + env(safe-area-inset-top,0px));width:38px;height:38px;border-radius:50%;border:1px solid rgba(255,255,255,.22);background:rgba(5,8,13,.6);color:#e6f0ff;font-size:16px;cursor:pointer}
-      #sbm-view .sbm-body{flex:1;overflow:auto;padding:14px 16px calc(20px + env(safe-area-inset-bottom,0px));-webkit-overflow-scrolling:touch}
+      #sbm-view .sbm-body{padding:4px 16px calc(28px + env(safe-area-inset-bottom,0px));min-height:calc(100% - 120px)}
+      #sbm-view .sbm-body .sbm-card{background:rgba(8,12,18,.86);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px)}
+      #sbm-view .sbm-body .sbm-sec{text-shadow:0 1px 8px rgba(0,0,0,.9)}
       .sbm-prog{height:4px;border-radius:2px;background:rgba(255,255,255,.08);overflow:hidden}
       .sbm-prog.sm{height:3px;margin-top:8px}
       .sbm-prog b{display:block;height:100%;transition:width .9s linear}

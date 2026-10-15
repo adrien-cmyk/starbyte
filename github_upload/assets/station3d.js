@@ -642,6 +642,19 @@ function mount(container, opts = {}) {
     }, undefined, (e) => console.warn('[Station3D] tanker', e));
   }
 
+  /* ── gestes relayés (fiche par-dessus) : lissés, avec un peu d'élan, comme les fiches de vaisseaux ── */
+  const pend = { x: 0, y: 0, z: 0 };
+  function applyPend(dt) {
+    if (Math.abs(pend.x) + Math.abs(pend.y) < 0.05 && Math.abs(pend.z) < 1e-4) { pend.x = pend.y = pend.z = 0; return; }
+    const f = 1 - Math.exp(-dt * 7.0), ax = pend.x * f, ay = pend.y * f, az = pend.z * f;
+    pend.x -= ax; pend.y -= ay; pend.z -= az;
+    const off = camera.position.clone().sub(controls.target), sp = new THREE.Spherical().setFromVector3(off);
+    sp.theta -= ax * 0.006; sp.phi = THREE.MathUtils.clamp(sp.phi - ay * 0.006, controls.minPolarAngle, controls.maxPolarAngle);
+    if (isFinite(controls.minAzimuthAngle)) sp.theta = THREE.MathUtils.clamp(sp.theta, controls.minAzimuthAngle, controls.maxAzimuthAngle);
+    sp.radius = THREE.MathUtils.clamp(sp.radius * Math.exp(az), controls.minDistance, controls.maxDistance);
+    camera.position.copy(controls.target).add(new THREE.Vector3().setFromSpherical(sp)); camera.lookAt(controls.target);
+  }
+
   /* ── boucle (en pause hors écran) ── */
   const clock = new THREE.Clock();
   let swayFlip = 0;
@@ -658,7 +671,7 @@ function mount(container, opts = {}) {
       const k = h.userData.pulse ? 0.55 + 0.45 * Math.pow(0.5 + 0.5 * Math.sin(t * h.userData.pulse + h.userData.ph), 3) : 0.8 + 0.2 * Math.sin(t * 3 + h.userData.ph);
       h.scale.setScalar(h.userData.size * (0.7 + 0.5 * k)); h.material.opacity = 0.35 + 0.6 * k;
     }
-    if (ready) { if (move) updateMove(t); else controls.update(); }
+    if (ready) { if (move) updateMove(t); else { applyPend(dt); controls.update(); } }
     if (shot.sway && controls.autoRotate && !move && t - swayFlip > 2) {   // balancement : on repart dans l'autre sens à la butée
       const az = controls.getAzimuthalAngle();
       if (az < controls.minAzimuthAngle + 0.02 || az > controls.maxAzimuthAngle - 0.02) { controls.autoRotateSpeed = -controls.autoRotateSpeed; swayFlip = t; }
@@ -682,6 +695,11 @@ function mount(container, opts = {}) {
       else { camera.position.copy(shot.pos); controls.target.copy(shot.target); camera.lookAt(shot.target); }
     },
     setInteractive(on) { interactive = !!on; if (!move && ready) controls.enabled = interactive; },
+    // 15/10 — gestes venus d'une fiche qui défile par-dessus la 3D (zone libre en haut) : comme les vaisseaux
+    begin() { controls.autoRotate = false; clearTimeout(idleTimer); if (move && move.spherical) { move = null; controls.enabled = interactive; } },
+    orbit(dx, dy) { if (!move && ready) { pend.x += dx; pend.y += dy; } },
+    dolly(k) { if (!move && ready) pend.z += Math.log(k); },
+    end() { clearTimeout(idleTimer); if (!REDUCED) idleTimer = setTimeout(() => { controls.autoRotate = true; }, 6000); },
     replayIntro() { if (!ready || REDUCED) return; view = 'port'; shot = VIEWS.port(); applyLimits(); camera.position.copy(introFrom); controls.target.copy(shot.target); startMove(shot, 9.0, true); },
     dispose() {
       alive = false; cancelAnimationFrame(raf); ro.disconnect(); controls.dispose(); clearTimeout(idleTimer);
@@ -706,6 +724,7 @@ window.Station3D = {
     const call = (f) => { if (h) f(h); else pend.push(f); };
     return {
       setView(v) { call(x => x.setView(v)); }, setInteractive(on) { call(x => x.setInteractive(on)); }, replayIntro() { call(x => x.replayIntro()); },
+      begin() { if (h) h.begin(); }, orbit(dx, dy) { if (h) h.orbit(dx, dy); }, dolly(k) { if (h) h.dolly(k); }, end() { if (h) h.end(); },
       get view() { return h ? h.view : (o && o.view) || 'port'; },
       dispose() { dead = true; pend = []; if (h) h.dispose(); },
     };
