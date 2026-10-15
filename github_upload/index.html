@@ -34474,7 +34474,7 @@ function renderBeaconReportRow(r, isUnread) {
       cargo ${t.cargoEstimate} (T${t.tankerTier})
     </div>
     ${(window.SBLines && SBLines.routesOf ? SBLines.routesOf(r.systemCoord || '') : []).slice(0, 2).map(ro => `<div style="font-size:10px;margin-top:3px;color:${ro.color}">↳ ${String(ro.name).replace(/[<>&"]/g, '')} · ${ro.end ? 'arrivée' : ro.start ? 'départ' : 'jalon ' + ro.idx + ' sur ' + ro.n}</div>`).join('')}
-    ${r.line ? `<div style="font-size:10px;color:var(--mut);margin-top:3px">${r.line.escort}${r.line.cap ? ` · cap relevé <span onclick="event.stopPropagation();openSystemOnMap('${r.line.cap}')" style="color:#ffd08a;font-family:'SF Mono',monospace;cursor:pointer;text-decoration:underline dotted;text-underline-offset:3px">${r.line.cap}</span>` : ' · se perd vers les marges'}${r.line.nth > 1 ? ` · ${r.line.nth}ᵉ passage observé sur cette ligne` : ''}${r.line.done ? ` · <span style="color:#c9a8ff">${({ robbed: 'abordé par ta flotte', repelled: 'ta flotte a été repoussée', tailed: 'filé par ta flotte', passed: 'laissé passer', tooStrong: 'escorte trop forte : ta flotte l\'a laissé passer' })[r.line.done] || ''}</span>` : (window.SBLines && SBLines.npcReportCan && SBLines.npcReportCan(r) ? ' · <span style="color:#c9a8ff">⚔ ta flotte est là : touche pour décider</span>' : '')}</div>` : ''}
+    ${r.line ? `<div style="font-size:10px;color:var(--mut);margin-top:3px">${r.line.escort}${r.line.cap ? ` · cap relevé <span onclick="event.stopPropagation();openSystemOnMap('${r.line.cap}')" style="color:#ffd08a;font-family:'SF Mono',monospace;cursor:pointer;text-decoration:underline dotted;text-underline-offset:3px">${r.line.cap}</span>` : ' · se perd vers les marges'}${r.line.nth > 1 ? ` · ${r.line.nth}ᵉ passage observé sur cette ligne` : ''}${r.line.done ? ` · <span style="color:#c9a8ff">${({ robbed: 'abordé par ta flotte', repelled: 'ta flotte a été repoussée', tailed: 'filé par ta flotte', passed: 'laissé passer', tooStrong: 'escorte trop forte : ta flotte l\'a laissé passer' })[r.line.done] || ''}</span>` : (window.SBLines && SBLines.npcReportCan && SBLines.npcReportCan(r) ? ' · <span style="color:#c9a8ff">⚔ ta flotte est là : touche pour décider</span>' : ' · <span style="color:#a370ff">touche pour la suite →</span>')}</div>` : ''}
     <div style="font-size:10px;color:var(--mut);margin-top:3px">
       Confiance <span style="color:${confColor}">${t.confidence}%</span>
       ${windowExpired
@@ -34509,9 +34509,9 @@ function markBeaconReportRead(reportId) {
     mpOpenInterceptSheet(reportId);
     return;
   }
-  if (r.line && window.SBLines && SBLines.npcReportCan && SBLines.npcReportCan(r)) {   // PATCH_1510_ORDRES
-    if (!r.read) { r.read = true; if (typeof updateProspectRapportsBadge === 'function') updateProspectRapportsBadge(); }
-    SBLines.npcReportAction(r);
+  if (r.line && window.SBLines && SBLines.reportSheet) {   // PATCH_1510_REPORT_SHEET — la fiche du passage (et la décision si une flotte est là)
+    if (!r.read) { r.read = true; if (typeof updateProspectRapportsBadge === 'function') updateProspectRapportsBadge(); if (typeof refreshCurrentScreen === 'function') refreshCurrentScreen(); }
+    SBLines.reportSheet(r);
     return;
   }
   if (!r.read) {
@@ -45466,7 +45466,7 @@ if (G.knownTargets && Array.isArray(G.tankerMissions)) {
 <!-- PERF_1310 — mesure des performances chez les joueurs + qualité 3D automatique (assets/perf.js) -->
 <script src="assets/perf.js?v=20261014-1540"></script>
 <!-- PATCH_1410_LIGNES — lignes PNJ à horaire sur les routes cachées (assets/lines.js) -->
-<script src="assets/lines.js?v=20261015-1130"></script>
+<script src="assets/lines.js?v=20261015-1520"></script>
 <!-- CLOUD — sauvegarde Supabase (source : sb-build/src/cloud.js) -->
 <script type="module" src="assets/cloud.js?v=20261014-1440"></script>
 <!-- MATCH3 — Match-3 V2 (assets/match3.js, source src/match3.js + src/m3core.js) : remplace startM3 -->

@@ -1073,6 +1073,75 @@
     if (window.SBMap && SBMap.render) { try { SBMap.render(); } catch (e) {} }
     return true;
   }
+  // 15/10 (Adrien : « je touche un convoi sur une ligne, rien ne se passe ») — la fiche d'un passage PNJ :
+  // ce qu'on a vu, ce que ça veut dire pour remonter la ligne, et ce qu'on peut faire maintenant.
+  function reportSheet(r) {
+    if (!r || !r.line) return false;
+    state();
+    const line = network().byId[r.line.id];
+    const sys = r.systemCoord, cap = r.line.cap, dir = r.line.dir;
+    const t = r.target || {};
+    const label = (r.line.label || 'Convoi').toLowerCase();
+    const cvn = line ? cvName({ kindKey: line.kind.key }) : 'un convoi';
+    const heavy = (t.cargoEstimate || r.line.cargo) !== 'léger';
+    const ago = (x) => { const m = Math.max(0, Math.round((Date.now() - x) / 60000)); return m < 1 ? 'à l\'instant' : m < 60 ? `il y a ${m} min` : `il y a ${Math.round(m / 60)} h`; };
+    const open = Date.now() < (r.expiresAt || 0);
+    const info = infoFor(sys);
+    const ob = info && info.obs.find(o => o.lineId === r.line.id);
+    const port = line && G.hiddenPorts[line.port] ? G.hiddenPorts[line.port] : null;
+    const routes = routesOf(sys);
+    const P = (x) => `<p style="margin:0 0 9px;font-size:12.5px;line-height:1.55;color:#c8d4dc">${x}</p>`;
+    let body = P(`<b style="color:#e6f0ff">${cap1(cvn)}</b> (${r.line.ships || '?'} vaisseaux, ${r.line.escort || 'escorte inconnue'}, cales ${heavy ? 'pleines' : 'légères'}) est passé par ta balise en <b class="mono" style="color:#cdb4ff">${sys}</b>, ${ago(r.createdAt)}.`);
+    if (port) body += P(`Cette ligne mène à <b style="color:#ffd08a">${port.name}</b>${routes.length ? ', et tu connais la route.' : '.'}`);
+    else if (cap) body += heavy
+      ? P(`Il filait vers <b class="mono" style="color:#ffd08a">${cap}</b> : <b>cales pleines, il va vers le lieu caché</b>. Pose une balise sur ${cap} : au prochain passage, elle relèvera le tronçon suivant. Tronçon après tronçon, tu remontes jusqu'au lieu.`)
+      : P(`Il filait vers <b class="mono" style="color:#ffd08a">${cap}</b>, mais <b>cales légères : il revient du lieu caché</b>. Ce cap t'éloigne du lieu. Attends un convoi chargé (cales pleines) : son cap te montrera dans quel sens remonter.`);
+    else body += P(`Son cap n'a pas pu être relevé : il se perd vers les marges, au bout de la ligne.`);
+    if (ob) body += P(`<span style="color:#9fb3bf">${ob.n} passage${ob.n > 1 ? 's' : ''} observé${ob.n > 1 ? 's' : ''} sur cette ligne${ob.periodMin ? ` · repasse toutes les ~${ob.periodMin} min` : ''}.</span>`);
+    const acts = [];
+    const c = npcReportCan(r);
+    if (c) acts.push({ k: 'decide', label: `⚔ Décider avec ${c.f.name}`, sub: 'Aborder, le filer ou le laisser passer · ta flotte est sur ce jalon', col: '#c9a8ff' });
+    if (cap && heavy && !port) {
+      const has = (G.probesPool || []).some(p => p.tier === 'beacon' && p.state === 'deployed' && sysOf(p.deployedSystem) === cap);
+      const going = (G.probeMissions || []).some(m => m.tier === 'beacon' && m.status === 'in_transit' && sysOf(m.targetCoords) === cap);
+      const st = typeof _probeTierStatus === 'function' ? _probeTierStatus('beacon') : { ok: false };
+      if (has) acts.push({ k: 'map', sys: cap, label: `Ta balise surveille déjà ${cap}`, sub: 'Voir sur la carte', col: '#b48cff' });
+      else if (going) acts.push({ k: 'map', sys: cap, label: `Balise en route vers ${cap}`, sub: 'Voir sur la carte', col: '#b48cff' });
+      else if (st.ok) acts.push({ k: 'beacon', sys: cap, label: `Suivre le cap : poser une balise sur ${cap}`, sub: 'Elle relèvera le tronçon suivant au prochain passage', col: '#b48cff' });
+      else acts.push({ k: 'map', sys: cap, label: `Voir ${cap} sur la carte`, sub: st.why ? st.why + ' : construis ou rappelle une balise pour suivre le cap' : 'Il faut une balise prête pour suivre le cap', col: '#b48cff' });
+    }
+    for (const ro of routes.slice(0, 2)) acts.push({ k: 'route', id: ro.id, label: `Voir la route : ${clean(ro.name)}`, sub: ro.end ? 'arrivée' : `jalon ${ro.idx} sur ${ro.n}`, col: ro.color });
+    if (!c && open && !(fleets().some(f => f.ambush && f.ambush.system === sys))) acts.push({ k: 'fleet', label: 'Poster une flotte ici', sub: 'Les prochains convois de la ligne pourront être abordés ou filés', col: '#c9a8ff' });
+    acts.push({ k: 'map', sys, label: `Voir ${sys} sur la carte`, sub: 'La balise, les tronçons relevés, la ligne', col: '#5fffe8' });
+    const ov = document.createElement('div');
+    ov.id = 'sb-line-sheet';
+    ov.style.cssText = 'position:fixed;inset:0;z-index:9500;background:rgba(0,0,0,.6);display:flex;align-items:flex-end;justify-content:center';
+    ov.innerHTML = `<div style="width:100%;max-width:480px;max-height:86vh;overflow:auto;background:#0d1218;border-top:1px solid var(--border);border-radius:14px 14px 0 0;padding:18px 16px calc(18px + env(safe-area-inset-bottom,0px))">
+      <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:10px"><div style="font-size:11px;color:#a370ff;letter-spacing:.14em;text-transform:uppercase">Convoi sur une ligne</div><div style="font-size:10px;color:${open ? '#a370ff' : 'var(--mut)'}">${open ? 'fenêtre ' + Math.max(1, Math.ceil((r.expiresAt - Date.now()) / 60000)) + ' min' : 'passé'}</div></div>
+      ${body}
+      <div style="margin-top:6px">${acts.map((a, k) => `<button data-k="${k}" style="display:block;width:100%;text-align:left;padding:12px 14px;margin-bottom:8px;background:transparent;border:1px solid ${a.col}66;border-radius:8px;color:${a.col};font-family:inherit;font-size:13px;cursor:pointer">${a.label}<div style="font-size:10px;color:var(--mut);margin-top:3px">${a.sub || ''}</div></button>`).join('')}</div>
+      <button data-k="-1" style="width:100%;padding:11px;background:transparent;border:1px solid var(--border);color:var(--mut);border-radius:8px;font-family:inherit;font-size:12px;cursor:pointer">Fermer</button></div>`;
+    ov.addEventListener('click', async (e) => {
+      const b = e.target.closest('button[data-k]');
+      if (!b && e.target !== ov) return;
+      const a = b ? acts[+b.dataset.k] : null;
+      ov.remove();
+      if (!a) return;
+      if (a.k === 'decide') npcReportAction(r);
+      else if (a.k === 'beacon') {
+        const m = typeof launchProbe === 'function' ? launchProbe('beacon', a.sys, 'local', false) : null;
+        if (m) { if (typeof saveGame === 'function') saveGame(); toast(`Balise en route vers ${a.sys}`); if (window.SBMap && SBMap.render) { try { SBMap.render(); } catch (e2) {} } }
+      } else if (a.k === 'route') { if (typeof openSystemOnMap === 'function') openSystemOnMap(sys); setTimeout(() => { if (window.SBMap && SBMap.selectRoute) SBMap.selectRoute(a.id); }, 700); }
+      else if (a.k === 'fleet') {
+        const fl = fleets().filter(f => (f.status || 'prepared') === 'deployed' && fleetAtk(f) > 0);
+        if (!fl.length) { toast('Aucune flotte armée en orbite : prépare-en une (Flotte)'); return; }
+        const pick = fl.length === 1 ? { f: fl[0] } : await _mpChoose('Quelle flotte poster ici ?', fl.map(f => ({ f, label: clean(f.name, 40), sub: 'en orbite' })));
+        if (pick && typeof mpAmbushStart === 'function') mpAmbushStart(pick.f.id, [sys]);
+      } else if (a.k === 'map' && typeof openSystemOnMap === 'function') openSystemOnMap(a.sys);
+    });
+    document.body.appendChild(ov);
+    return true;
+  }
   // trajet d'une flotte vers un jalon : par une route connue (et balisée), plus vite qu'à découvert
   function ambushTravel(sys, baseMs) {
     let best = null;
@@ -1207,7 +1276,7 @@
     openedRoutes, openedTo, scoutInFlight, scoutLaunch, scoutArrived, forgetOpened, giveRoute, pollGifts,
     dockMarketHtml, sellHere, withdrawOffer, buyOffer, learnRoute, noteRobbery, tickMarket, fetchOffers, sellableRoutes,
     ORDER_MODES, ordersOf, ordersLabel, chooseOrders, setOrders, pushOrders, pushNpc, holdCap, holdUsed, holdAll, fleetAtk, odds, oddsLabel,
-    robNpc, tailNpc, tickAmbushes, capLegs, salesOn, soldChain, routesOf, npcReportCan, npcReportAction, ambushTravel, ambushAt, pollSpied, autoPlayers,
+    robNpc, tailNpc, tickAmbushes, capLegs, salesOn, soldChain, routesOf, reportSheet, npcReportCan, npcReportAction, ambushTravel, ambushAt, pollSpied, autoPlayers,
     WINDOW_MS, EPOCH, CROWN_DOCK_ID,
     _reset() { _net = null; },
   };
