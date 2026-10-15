@@ -494,6 +494,7 @@
       return `<div class="sm-panel"><div class="sm-ptitle">${bits.join(' · ')}</div><div class="sm-psub">Touche une case : un objet, ou une case noire pour la balayer.</div></div>`;
     }
     const s = _sel;
+    if (s.kind === 'leg') return legPanel(s.key);
     if (s.kind === 'far') {
       // Décision d'Adrien (10/10) : dire comment aller plus loin — c'est le Laboratoire qui étend la portée
       const lt = (typeof getLaboTier === 'function') ? getLaboTier() : 0;
@@ -1237,13 +1238,15 @@
         const l = new T.Line(new T.BufferGeometry().setFromPoints(this._smooth(sp.path.map(i => CELLS[i])).map(q => new T.Vector3(q.x, 0.8, q.z))),
           new T.LineDashedMaterial({ color: 0xff8a5a, dashSize: 5, gapSize: 5, transparent: true, opacity: 0.55, depthWrite: false }));
         l.computeLineDistances(); this.routeGroup.add(l);
-        if (both) continue;
+        // 15/10 (Adrien) — le tronçon se touche : qui est passé, d'où, vers où
+        const legHit = (x, z) => { const h = new T.Mesh(new T.SphereGeometry(8, 8, 6), new T.MeshBasicMaterial({ visible: false })); h.position.set(x, 1, z); h.userData.leg = sp.l.id; this.routeGroup.add(h); };
+        if (both) { const A = CELLS[sp.path[0]], B = CELLS[sp.path[sp.path.length - 1]]; legHit((A.x + B.x) / 2, (A.z + B.z) / 2); continue; }
         const tip = CELLS[sp.path[sp.path.length - 1]], prev = CELLS[sp.path[sp.path.length - 2]];
         const ang = Math.atan2(tip.x - prev.x, tip.z - prev.z);
         const arrow = new T.Mesh(new T.ConeGeometry(2.6, 7, 3), new T.MeshBasicMaterial({ color: 0xff8a5a, transparent: true, opacity: 0.7, depthWrite: false }));
         arrow.rotation.set(Math.PI / 2, ang, 0, 'YXZ');   // cône couché, pointe vers le système suivant
         const mx = tip.x - (tip.x - prev.x) * 0.45, mz = tip.z - (tip.z - prev.z) * 0.45;
-        arrow.position.set(mx, 0.9, mz); this.routeGroup.add(arrow);
+        arrow.position.set(mx, 0.9, mz); this.routeGroup.add(arrow); legHit(mx, mz);
       }
     },
     _reticleTex() {
@@ -1399,6 +1402,10 @@
         const st = ray.intersectObjects(this.content.children.filter(o => o.userData.cell !== undefined), true).find(h => h.object.userData.star);
         if (st) { let o = st.object; while (o && o.userData.cell === undefined) o = o.parent; if (o) return onPickCell(o.userData.cell); }
         if (this.homeBall && ray.intersectObject(this.homeBall).length) return onPickCell(0);
+        // 3 bis) un tronçon relevé (la flèche orange d'un convoi)
+        const legs = this.routeGroup ? this.routeGroup.children.filter(o => o.userData.leg) : [];
+        const lh = legs.length ? ray.intersectObjects(legs)[0] : null;
+        if (lh) return onPick({ kind: 'leg', key: lh.object.userData.leg });
         // 4) la case sous le doigt
         if (!ray.ray.intersectPlane(plane, hit)) return;
         const c = cellAtWorld(hit.x, hit.z);
@@ -1662,6 +1669,48 @@
     return _sigBtn('#ffc864', 'Ouvrir un poste ici', `SBMap.postHere('${esc(k)}')`, 'Un tanker en station : les commandants qui y tiennent un poste peuvent te parler', true);
   }
   function postHere(k) { if (typeof launchRoutePost === 'function') { launchRoutePost(null, k); refresh(true); } }
+  // 15/10 (Adrien) — un tronçon relevé (flèche orange) : ce qui est passé, d'où, vers où ; s'il est en route en ce moment
+  function legPanel(id) {
+    const l = (G.spottedLegs || []).find(x => x.id === id);
+    if (!l) return `<div class="sm-panel"><div class="sm-ptitle">Tronçon effacé</div><div class="sm-psub">Ce passage est trop ancien : il n'est plus sur la carte.</div></div>`;
+    const ago = (t) => { const m = Math.max(1, Math.round((Date.now() - t) / 60000)); return m < 60 ? `il y a ${m} min` : m < 1440 ? `il y a ${Math.round(m / 60)} h` : `il y a ${Math.round(m / 1440)} j`; };
+    const inMin = (ms) => { const m = Math.max(1, Math.round(ms / 60000)); return m < 60 ? `${m} min` : `${Math.floor(m / 60)} h ${String(m % 60).padStart(2, '0')}`; };
+    const net = window.SBLines ? SBLines.network() : null;
+    const line = net && l.lineId ? net.byId[l.lineId] : null;
+    const portKnown = line && G.hiddenPorts && G.hiddenPorts[line.port];
+    const toPort = line && l.to === line.port;
+    const toName = toPort && portKnown ? G.hiddenPorts[line.port].name : null;
+    const who = l.npc ? (l.pseudo || (line ? line.kind.label : 'Convoi')) : (l.pseudo ? `Convoi de ${l.pseudo}` : 'Convoi au pavillon masqué');
+    const rows = [];
+    rows.push(`<div class="sm-lane"><b>${esc(l.from)} → ${esc(l.to)}${toName ? ' · ' + esc(toName) : ''}</b><span>vu ${ago(l.at || Date.now())}${l.cargo ? ' · cale ' + esc(l.cargo) : ''}${line ? ' · ' + esc(line.kind.escort) : ''}</span></div>`);
+    // en ce moment : seulement si une de mes balises surveille le départ (elle le verrait passer)
+    const watched = myBeacons().some(b => beaconSys(b) === l.from);
+    let live = '';
+    if (line && watched) {
+      const i = line.chain.indexOf(l.from), n = line.chain.length, seg = line.travel / n, now = Date.now();
+      if (i >= 0) {
+        const ps = SBLines.passages(line, i, now - seg, now + line.period).filter(p => SBLines.capOf(line, i, p.dir) === l.to);
+        const cur = ps.find(p => p.t <= now), nxt = ps.find(p => p.t > now);
+        if (cur) live = `<div class="sm-lane" style="border-color:rgba(255,138,90,.55)"><b style="color:#ff9a6a">En route en ce moment</b><span>${esc(SBLines.convoyOf(line, cur.k, cur.dir).label)} · ${SBLines.convoyOf(line, cur.k, cur.dir).ships} vaisseaux · arrive en ${esc(l.to)} dans ${inMin(cur.t + seg - now)}</span></div>`;
+        else if (nxt) live = `<div class="sm-lane"><b>Prochain passage vu par ta balise</b><span>en ${esc(l.from)} dans ${inMin(nxt.t - now)}, cap sur ${esc(l.to)}</span></div>`;
+      }
+    }
+    // où mène la ligne
+    let where;
+    if (!line) where = `<div class="sm-lane"><b>${l.npc ? 'Ligne inconnue' : 'Route d\'un commandant'}</b><span>${l.onRoute ? 'Il suivait une route tracée.' : 'Cap relevé par ta balise.'} Pose une balise sur ${esc(l.to)} pour voir où il va ensuite.</span></div>`;
+    else if (portKnown) where = `<div class="sm-lane port"><b>Ligne vers ${esc(G.hiddenPorts[line.port].name)}</b><span>${esc(line.port)} · lieu connu</span></div>`;
+    else if (toPort) where = `<div class="sm-lane port"><b>Il entre dans un lieu caché</b><span>Le convoi a disparu en ${esc(l.to)} : il y a quelque chose là-bas.</span></div>`;
+    else where = `<div class="sm-lane"><b>Ligne vers un lieu inconnu</b><span>Remonte-la : une balise en ${esc(l.to)} relèvera le cap suivant.</span></div>`;
+    const acts = [];
+    acts.push(_sigBtn('#ff9a6a', 'Voir ' + l.to, `SBMap.select('system','${esc(l.to)}')`, toName ? esc(toName) : 'où il allait', true));
+    acts.push(_sigBtn('#ff9a6a', 'Voir ' + l.from, `SBMap.select('system','${esc(l.from)}')`, 'là où ta balise l\'a vu', true));
+    if (!myBeacons().some(b => beaconSys(b) === l.to) && !portKnown) acts.push(beaconAction(l.to, null));
+    const ro = window.SBLines && SBLines.routesOf ? SBLines.routesOf(l.from)[0] : null;
+    if (ro) acts.push(_sigBtn(ro.color, 'Voir la route', `SBMap.selectRoute('${esc(ro.id)}')`, esc(ro.name), true));
+    const rep = (G.beaconReports || []).find(r => r.line && r.line.id === l.lineId && String(r.systemCoord || '').startsWith(l.from));
+    if (rep && SBLines.reportSheet) acts.push(_sigBtn('#ffc864', 'Le rapport de balise', `SBLines.reportSheet((G.beaconReports||[]).find(r=>r.id==='${esc(rep.id)}'))`, '', true));
+    return `<div class="sm-panel"><div class="sm-ptitle" style="color:#ff9a6a">${live && live.includes('En route') ? 'Convoi en transit' : 'Cap relevé'} · ${esc(who)}</div><div class="sm-psub">Un convoi est passé par là : la flèche montre où il allait.</div><div class="sm-lanes">${live}${rows.join('')}${where}</div>${acts.join('')}</div>`;
+  }
   // Lignes PNJ : couloir de passage, écho de l'antenne, convois observés, lieu caché
   function laneHtml(sysKey, li) {
     if (!li && !(window.SBLines && ((SBLines.ambushAt && SBLines.ambushAt(sysKey).length) || (SBLines.routesOf && SBLines.routesOf(sysKey).length)))) return '';
@@ -2347,6 +2396,7 @@
       ensureDom(); focusSel(sel);
     },
     clear() { _sel = null; if (E.ready) E.setSelection(-1); renderPanel(); },
+    leg(id) { _sel = { kind: 'leg', key: id }; refresh(true); },   // 15/10 : la fiche d'un tronçon relevé
     resetView() { if (E.ready) E.moveTo(0, 0, homeDist(), 1); },
   };
   API._e = E; API._cells = CELLS; API._collect = collect;   // pour les tests headless
