@@ -43494,9 +43494,12 @@ function _crownCss2() {
     /* écran du dock de la Couronne : la 3D derrière, les cartes défilent par-dessus */
     #scr-dock.cr-scene > .stars,#scr-dock.cr-scene > .glow,#scr-dock.cr-scene .head,#scr-dock.cr-scene #dock-banner{display:none !important}
     #scr-dock.cr-scene{background:#010207}
-    #scr-dock.cr-scene .screen-scroll{pointer-events:none}
-    #scr-dock.cr-scene .screen-scroll > *{pointer-events:auto}
-    #scr-dock.cr-scene #crown-space{pointer-events:none}
+    /* PATCH_1510_CROWN_SHEET — le tiroir : fermé 190 px au-dessus des boutons, ouvert presque tout l'écran */
+    #scr-dock.cr-scene .screen-scroll{flex:0 0 auto;height:190px;margin-top:auto;overscroll-behavior:contain;transition:height .35s cubic-bezier(.2,.8,.2,1)}
+    #scr-dock.cr-scene.cr-open .screen-scroll{height:calc(100% - 215px - env(safe-area-inset-top,0px))}
+    #scr-dock.cr-scene #crown-space{display:none}
+    #scr-dock.cr-scene #crown-grip{position:sticky;top:0;z-index:3;touch-action:none}
+    #scr-dock.cr-open #crown-grip i{transform:scaleX(.7)}
     #crown-grip{margin:0 10px;padding:9px 14px 10px;border-radius:16px 16px 0 0;background:rgba(8,9,14,.92);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);border:1px solid rgba(240,181,74,.32);border-bottom:0;text-align:center;cursor:pointer}
     #crown-grip i{display:block;width:38px;height:4px;border-radius:2px;background:rgba(240,181,74,.45);margin:0 auto 8px}
     #crown-grip b{display:block;font-size:13px;letter-spacing:.08em;color:#ffd27a}
@@ -43586,7 +43589,7 @@ function crownDockHero(dock) {
   grip.innerHTML = `<i></i><b>${_crEsc(dock.name || 'The Drifting Crown')}</b><span>${_crEsc(sub)}</span>`;
   scroll.insertBefore(space, scroll.firstChild); space.after(grip);
   scr.classList.add('cr-scene'); if (first) scr.classList.add('cr-first');
-  const fit = () => { if (_crown && _crown.space) _crown.space.style.height = Math.max(120, scroll.clientHeight - 150) + 'px'; };
+  const fit = () => {};   // PATCH_1510_CROWN_SHEET : le tiroir a sa propre hauteur
   _crown = { el, space, grip, scr, scroll, handle: null, state: want, first, fit };
   fit(); scroll.scrollTop = 0;
   window.addEventListener('resize', fit);
@@ -43612,14 +43615,25 @@ function crownDockHero(dock) {
   el.addEventListener('pointerdown', (e) => { down = { x: e.clientX, y: e.clientY, t: performance.now() }; });
   el.addEventListener('pointerup', (e) => {
     if (!down || e.target.closest('.cr-chip,.cr-big')) return;
-    if (Math.hypot(e.clientX - down.x, e.clientY - down.y) < 8 && performance.now() - down.t < 350 && scroll.scrollTop > 30) _crScroll(scroll, 0);
+    if (Math.hypot(e.clientX - down.x, e.clientY - down.y) < 8 && performance.now() - down.t < 350) crownSheet(false);
     down = null;
   });
-  grip.addEventListener('click', () => {
-    const open = scroll.scrollTop > 30;
-    _crScroll(scroll, open ? 0 : Math.max(0, space.offsetHeight - 40));
+  // la poignée : toucher = monter / descendre ; glisser vers le haut ou le bas = pareil
+  let g0 = null;
+  grip.addEventListener('pointerdown', (e) => { g0 = { y: e.clientY, t: performance.now() }; });
+  grip.addEventListener('pointerup', (e) => {
+    if (!g0) return;
+    const dy = e.clientY - g0.y; g0 = null;
+    if (Math.abs(dy) < 10) crownSheet(!scr.classList.contains('cr-open'));
+    else crownSheet(dy < 0);
   });
+  grip.addEventListener('pointercancel', () => { g0 = null; });
   if (first) { G.crownSeen = Date.now(); if (typeof saveGame === 'function') saveGame(); }
+}
+function crownSheet(open) {
+  if (!_crown) return;
+  _crown.scr.classList.toggle('cr-open', !!open);
+  if (!open) _crScroll(_crown.scroll, 0);
 }
 function _crownEnterPort() {
   if (!_crown) return;
@@ -43642,7 +43656,7 @@ function crownUnmount() {
   try { if (_crown.handle) _crown.handle.dispose(); } catch (e) {}
   window.removeEventListener('resize', _crown.fit);
   _crown.el.remove(); if (_crown.space) _crown.space.remove(); if (_crown.grip) _crown.grip.remove();
-  if (_crown.scr) _crown.scr.classList.remove('cr-scene', 'cr-first');
+  if (_crown.scr) _crown.scr.classList.remove('cr-scene', 'cr-first', 'cr-open');
   _crown = null;
   const banner = document.getElementById('dock-banner'); if (banner) banner.style.display = '';
 }
@@ -43712,6 +43726,7 @@ function crownShowBar() {
   crownSetView('bar');
   const sc = document.querySelector('#scr-dock .screen-scroll');
   if (sc) _crScroll(sc, 0);   // PATCH_1510_CROWN_SCENE : le panneau redescend, la scène montre le bar
+  crownSheet(false);
 }
 
 function renderDockScreen() {
