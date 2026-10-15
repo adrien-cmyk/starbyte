@@ -611,6 +611,7 @@
       const f = state.flights.find(x => x.id === s.key);
       if (!f) { _sel = null; return panelMarkup(state); }
       const eta = formatTankerDuration(Math.max(0, (f.arrivalAt || 0) - Date.now()));
+      if (f.kind === 'tanker' && window.SBMissions) return `<div class="sm-panel"><div class="sm-ptitle" style="color:#ffc864">${esc(f.label)}${f.back ? ' · retour' : ''}</div><div class="sm-psub">${f.back ? 'Rentre au port' : 'Vers ' + esc(f.target)} · arrivée dans ${esc(eta)}</div>${_sigBtn('#ffc864', 'Voir la mission', `SBMissions.open('${esc(f.id)}')`, 'trajet, cale, temps restant', true)}</div>`;
       if (f.kind === 'fleet') return `<div class="sm-panel"><div class="sm-ptitle" style="color:#c9a8ff">${esc(f.label)}${f.back ? ' · retour' : ''}</div><div class="sm-psub">${f.back ? 'Rentre au port' : 'En route vers son embuscade sur ' + esc(f.target)} · ${f.back ? 'à quai' : 'en place'} dans ${esc(eta)}</div>${_sigBtn('#c9a8ff', 'Voir la flotte', `openFleetDetail('${esc(f.fleetId)}')`, '', true)}</div>`;
       return `<div class="sm-panel"><div class="sm-ptitle">${esc(f.label)}${f.back ? ' · retour' : ''}</div><div class="sm-psub">${f.back ? 'Rentre au port' : 'Vers ' + esc(f.target)} · arrivée dans ${esc(eta)}</div></div>`;
     }
@@ -1984,6 +1985,13 @@
   }
   function showRoute(id) { W.closeSheet(); selectRoute(id); }
 
+  // 15/10 — dans la feuille Sondes, un renvoi vers les missions en cours (les vols n'y sont plus listés)
+  function missionsLinkHtml() {
+    const n = window.SBMissions ? SBMissions.count() : 0;
+    const p = (G.probeMissions || []).filter(m => m.status === 'in_transit').length;
+    if (!n) return '';
+    return `<button class="smw-fl" onclick="setProspectTab('missions')"><span class="t" style="color:#ffc864">Missions en cours · ${n}</span><span class="g">${p ? p + ' sonde' + (p > 1 ? 's' : '') + ' en vol' : 'tankers, flottes'}</span><span class="e">voir →</span></button>`;
+  }
   /* ─── « En vol » dans la feuille Sondes : chaque sonde mène à sa cible sur la carte ─── */
   function flightsHtml() {
     const now = Date.now();
@@ -2020,11 +2028,12 @@
     sondes: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="6" height="6" rx="1"/><path d="M9 12H3.5M20.5 12H15M3.5 9v6M20.5 9v6M12 9V5.5M10.5 4h3"/></svg>',
     rapports: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M6 2.8h8.5L19 7.3v13.9H6z"/><path d="M14.5 2.8v4.5H19M9 11.5h7M9 15h7M9 18.4h4.5"/></svg>',
     carnet: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5.5 3.5h12a1 1 0 0 1 1 1v15a1 1 0 0 1-1 1h-12z"/><path d="M8.5 3.5v17M11.5 8h4M11.5 11.5h4"/></svg>',
+    missions: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 17.5l6-3 4 2 8-6"/><path d="M17 10.5h4v4"/><circle cx="4.5" cy="6.5" r="1.6"/><circle cx="12" cy="5" r="1"/></svg>',
     archives: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="4.5" rx="1"/><path d="M4.5 8.5v11h15v-11M9.5 12.5h5"/></svg>',
     center: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="12" cy="12" r="6.5"/><circle cx="12" cy="12" r="1.8" fill="currentColor"/><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3"/></svg>',
     wide: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><path d="M12 2.5l8.2 4.75v9.5L12 21.5l-8.2-4.75v-9.5z"/><path d="M12 8l3.5 2v4L12 16l-3.5-2v-4z"/></svg>',
   };
-  const SHEETS = { sondes: 'Hangar des sondes', rapports: 'Rapports de mission', carnet: 'Carnet', archives: 'Archives du vide' };
+  const SHEETS = { sondes: 'Hangar des sondes', missions: 'Missions en cours', rapports: 'Rapports de mission', carnet: 'Carnet', archives: 'Archives du vide' };
 
   const W = {
     on: false, tab: null,
@@ -2068,8 +2077,9 @@
 
       // Raccourcis bas — les badges existants (rapports, archives) sont déplacés dedans, le jeu continue de les tenir à jour
       const nav = document.createElement('nav'); nav.className = 'smw-nav';
-      nav.innerHTML = ['sondes', 'rapports', 'carnet', 'archives'].map((k) =>
-        `<button data-t="${k}">${ICO[k]}<span>${{ sondes: 'Sondes', rapports: 'Rapports', carnet: 'Carnet', archives: 'Archives' }[k]}</span></button>`).join('');
+      // 15/10 (Adrien) — « Missions » : tout ce qui vole (tankers, flottes, sondes), avec son badge
+      nav.innerHTML = ['sondes', 'missions', 'rapports', 'carnet', 'archives'].map((k) =>
+        `<button data-t="${k}">${ICO[k]}<span>${{ sondes: 'Sondes', missions: 'Missions', rapports: 'Rapports', carnet: 'Carnet', archives: 'Archives' }[k]}</span>${k === 'missions' ? '<i class="smw-mb" id="smw-missions-badge"></i>' : ''}</button>`).join('');
       scr.appendChild(nav);
       nav.querySelectorAll('button').forEach((b) => { b.onclick = () => window.setProspectTab(b.dataset.t); });
       const rb = document.getElementById('prospect-tab-rapports-badge'); if (rb) nav.querySelector('[data-t="rapports"]').appendChild(rb);
@@ -2101,6 +2111,7 @@
           // pendant un rafraîchissement de l'écran, garder le carnet ouvert
           if (tab === 'univers' && self._keepCarnet) tab = 'carnet';
           if (tab === 'carnet') { origTab.call(this, 'univers'); G.prospectTab = 'carnet'; self.openSheet('carnet'); return; }
+          if (tab === 'missions') { origTab.call(this, 'univers'); G.prospectTab = 'univers'; self.openSheet('missions'); return; }
           origTab.call(this, tab);
           if (G.prospectTab === 'univers') self.closeSheet(true); else self.openSheet(G.prospectTab);
         };
@@ -2135,19 +2146,25 @@
       // feuille Sondes : les sondes en vol d'abord, chacune mène à sa cible sur la carte
       let fl = this.sheet.querySelector('.smw-flights');
       if (!fl) { fl = document.createElement('div'); fl.className = 'smw-flights'; this.sheet.querySelector('.smw-sh-body').prepend(fl); }
-      fl.innerHTML = tab === 'sondes' ? flightsHtml() + routesSheetHtml() : '';
+      // 15/10 : les vols vont dans « Missions », « Mes routes » dans le Carnet
+      fl.innerHTML = tab === 'sondes' ? missionsLinkHtml() : tab === 'carnet' ? routesSheetHtml() : tab === 'missions' && window.SBMissions ? SBMissions.sheetHtml() : '';
+      this.sheet.classList.toggle('smw-only', tab === 'missions');
+      clearInterval(this._mt);
+      if (tab === 'missions') this._mt = setInterval(() => { if (this.tab === 'missions' && window.SBMissions) fl.innerHTML = SBMissions.sheetHtml(); else clearInterval(this._mt); }, 1000);
       this.nav.querySelectorAll('button').forEach((b) => b.classList.toggle('on', b.dataset.t === tab));
       this.sheet.classList.add('on');
     },
     closeSheet(fromTab) {
       if (!this.sheet) return;
-      this.tab = null;
+      this.tab = null; clearInterval(this._mt);
       this.sheet.classList.remove('on');
       this.nav.querySelectorAll('button').forEach((b) => b.classList.remove('on'));
       if (!fromTab && typeof G !== 'undefined') G.prospectTab = 'univers';
     },
 
     renderCard(st) {
+      const mb = document.getElementById('smw-missions-badge');
+      if (mb && window.SBMissions) { const n = SBMissions.count(); mb.textContent = n || ''; mb.style.display = n ? '' : 'none'; }
       const meta = document.getElementById('smw-meta');
       if (meta) {
         const sysN = Object.values(st.systems).filter(s => s.known && s.key !== mySystemKey()).length;
@@ -2199,6 +2216,9 @@
       .smw-nav{position:absolute;left:0;right:0;bottom:0;z-index:20;display:flex;justify-content:space-around;align-items:flex-end;padding:18px 10px calc(var(--sab,0px) + 10px);background:linear-gradient(to top,rgba(3,6,10,.88),rgba(3,6,10,0));pointer-events:none}
       .smw-nav button{pointer-events:auto;position:relative;display:flex;flex-direction:column;align-items:center;gap:4px;width:78px;background:none;border:0;color:#cfdbe4;cursor:pointer;padding:6px 0}
       .smw-nav svg{width:26px;height:26px;padding:10px;box-sizing:content-box;border-radius:50%;background:rgba(10,16,24,.72);border:1px solid rgba(150,190,220,.22)}
+      .smw-nav [data-t="missions"] svg{color:#ffc864}
+      .smw-nav button{position:relative}.smw-nav .smw-mb{position:absolute;top:2px;right:calc(50% - 26px);min-width:18px;height:18px;padding:0 5px;border-radius:9px;background:#ffc864;color:#1a1408;font:700 10px/18px 'Space Grotesk',system-ui,sans-serif;font-style:normal;text-align:center}
+      .smw-sheet.smw-only .smw-sh-body>:not(.smw-flights){display:none}
       .smw-nav [data-t="sondes"] svg{color:#5fa8e8}.smw-nav [data-t="rapports"] svg{color:#e6f0ff}.smw-nav [data-t="carnet"] svg{color:#a0c8ff}.smw-nav [data-t="archives"] svg{color:#ffc864}
       .smw-nav button.on svg,.smw-nav button:active svg{border-color:rgba(95,168,232,.8);background:rgba(20,40,60,.85)}
       .smw-nav span{font-size:9px;letter-spacing:.16em;text-transform:uppercase;color:rgba(200,215,225,.75)}

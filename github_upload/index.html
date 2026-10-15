@@ -10694,7 +10694,14 @@ async function mpAmbushStart(fleetId, onlySystems) {   // PATCH_1510_ROUTES_UX :
   if (!f || _mpAmbushBusy.has(fleetId)) return;
   if ((f.status || 'prepared') !== 'deployed') { toast('La flotte doit être en orbite'); return; }
   if (f.repair) { toast('Attends la fin des réparations'); return; }
-  if (((f.soldiers && f.soldiers.garde) || 0) + ((f.soldiers && f.soldiers.lourd) || 0) > 0) { toast('Embuscade spatiale : débarque d\'abord les soldats (Modifier la flotte au sol)'); return; }
+  if (((f.soldiers && f.soldiers.garde) || 0) + ((f.soldiers && f.soldiers.lourd) || 0) > 0) {   // PATCH_1510_MISSIONS
+    const n = ((f.soldiers.garde) || 0) + ((f.soldiers.lourd) || 0);
+    const okS = await sbConfirm({ title: 'Les soldats restent au sol', body: `Une embuscade est un combat spatial : on aborde des convois, on ne débarque pas.<br><br>Les <strong>${n} soldat${n > 1 ? 's' : ''}</strong> de ${f.name} retournent à la caserne et défendent la planète pendant l'absence de la flotte.`, confirmLabel: 'Débarquer et continuer', cancelLabel: 'Annuler' });
+    if (!okS) return;
+    f.soldiers = Object.assign({}, f.soldiers, { garde: 0, lourd: 0 });
+    if (typeof syncFleetIntegrity === 'function') syncFleetIntegrity(f);
+    if (typeof saveGame === 'function') saveGame();
+  }
   const armed = ['fregate', 'cuirasse'].some(type => ['t1', 't2', 't3'].some(t => (f.composition[type] && f.composition[type][t]) > 0));
   if (!armed) { toast('Il faut des frégates ou des cuirassés pour aborder un convoi'); return; }
   if (!_mpOnline()) { toast('Registre hors ligne : réessaie dans un instant'); return; }
@@ -10791,7 +10798,8 @@ async function mpAmbushRecall(fleetId) {
   const a = f && f.ambush;
   if (!a || a.phase === 'returning' || _mpAmbushBusy.has(fleetId)) return;
   const now = Date.now();
-  if (a.phase === 'going') {
+  if (a.phase === 'going') {   // PATCH_1510_MISSIONS — engagée pour de bon : pas de demi-tour en route
+    toast(`${f.name} est engagée : elle va jusqu'à sa balise`); return;
     a.phase = 'returning';
     a.returnDepartedAt = now;   // PATCH_1510_ORDRES
     a.returnsAt = now + Math.max(5000, now - a.departedAt);
@@ -14140,12 +14148,16 @@ function renderFleetDetail() {
           return `<div style="font-size:11px;color:var(--mut);margin-top:10px">Cale de butin : <span style="color:${_mpCargoSum(H) > 0 ? '#ffc864' : 'var(--mut)'}">${_mpCargoSum(H) > 0 ? _mpResLine(H) : 'vide'}</span>${cap ? ` <span style="opacity:.7">/ ${fmt(cap)}</span>` : ' <span style="opacity:.7">· sans tanker</span>'}</div>`; })()}
         ${window.SBLines && SBLines.ordersLabel && a.phase !== 'returning' ? `<div style="font-size:11px;color:#c9a8ff;margin-top:6px">${SBLines.ordersLabel(fleet)}</div>` : ''}
       </div>`;
-    actionsHtml = a.phase === 'returning' ? '' : `
+    actionsHtml = a.phase === 'returning' ? '' : a.phase === 'going' ? `
+      <div style="padding:0 16px 14px;font-size:11px;color:var(--mut);font-style:italic;text-align:center">Engagée : elle va jusqu'à sa balise. Une fois en place, tu pourras lever l'embuscade.</div>
+      <div style="padding:0 16px 14px">
+        <button class="btn-ghost" onclick="SBLines.setOrders('${fleet.id}')" style="width:100%;padding:12px;color:#e6f0ff;border-color:rgba(163,112,255,.3)">Changer les ordres</button>
+      </div>` : `
       <div style="padding:0 16px 8px">
         <button class="btn-ghost" onclick="SBLines.setOrders('${fleet.id}')" style="width:100%;padding:12px;color:#e6f0ff;border-color:rgba(163,112,255,.3)">Changer les ordres</button>
       </div>
       <div style="padding:0 16px 14px">
-        <button class="btn-ghost" onclick="mpAmbushRecall('${fleet.id}')" style="width:100%;padding:14px;color:#c9a8ff;border-color:rgba(163,112,255,.4)">${a.phase === 'going' ? 'Faire demi-tour' : 'Lever l\'embuscade · rentrer au port'}</button>
+        <button class="btn-ghost" onclick="mpAmbushRecall('${fleet.id}')" style="width:100%;padding:14px;color:#c9a8ff;border-color:rgba(163,112,255,.4)">Lever l'embuscade · rentrer au port</button>
       </div>`;
   } else if (isInMission) {
     // ÉTAT EN MISSION : remplacer le CTA par un panneau d'information mission en cours
@@ -38316,6 +38328,11 @@ function _toastRoute(msg) {
     const w = Object.values(G.knownSystems || {}).flatMap(k => k.planets || []).find(pl => pl.playerName && t.includes(pl.playerName) && pl.coord);
     if (w && typeof openEmbassy === 'function') return () => openEmbassy(w.coord);
   }
+  // PATCH_1510_MISSIONS — un tanker encore en mission → sa fiche
+  if (window.SBMissions && !/(revenu|rentré|ne reviendra pas|cargo perdu)/.test(t)) {
+    const _am = (G.tankerMissions || []).find(x => x.tankerName && t.includes(x.tankerName) && ['in_transit', 'exploring', 'docked', 'returning', 'posted', 'orbital_relay'].includes(x.status));
+    if (_am) return () => SBMissions.open(_am.id);
+  }
   // retour de tanker → son rapport
   if (/Σ-\d+.*(revenu|rentré|ne reviendra pas|déposé|cargo perdu)/.test(t)) {
     const r = (G.tankerReports || [])[0];
@@ -39952,6 +39969,7 @@ function renderCommerceRoutes() {
   }).join('');
 
   el.innerHTML = `
+    ${window.SBMissions ? SBMissions.commerceStrip() : ''}
     ${dockedBanners ? `<div style="padding:12px 0 4px">${dockedBanners}</div>` : ''}
     <div style="padding:8px 16px 4px;font-size:10px;color:var(--mut);letter-spacing:.1em;text-transform:uppercase">
       ${routes.length} route${routes.length > 1 ? 's' : ''} active${routes.length > 1 ? 's' : ''}
@@ -43207,6 +43225,9 @@ function openTankerComposeForRoute(routeId) {
     cargo: { metal: 0, energie: 0, cristal: 0 },
   };
   renderTankerComposeSheet(routeId);
+  // PATCH_1510_MISSIONS — depuis la carte, la fenêtre n'était pas encore ouverte : on l'ouvre
+  _commerceSheetContext = { type: 'route', id: routeId };
+  const _ov = document.getElementById('commerce-sheet-overlay'); if (_ov) _ov.classList.add('shown');
 }
 
 function renderTankerComposeSheet(routeId) {
@@ -45474,7 +45495,7 @@ if (G.knownTargets && Array.isArray(G.tankerMissions)) {
 <!-- HOME V2 — « monde d'abord » : planète plein écran, ressources en ligne, Flotte / Défense / Prospection (assets/home.js) -->
 <script type="module" src="assets/home.js?v=20261014-1440"></script>
 <!-- SPACE MAP v0 — carte du Centre de prospection (assets/spacemap.js, source src/spacemap.js) -->
-<script src="assets/spacemap.js?v=20261015-1130"></script>
+<script src="assets/spacemap.js?v=20261015-1600"></script>
 <!-- SPACE MAP niveau B — diorama 3D d'un système (assets/system3d.js, source src/system3d.js) -->
 <script type="module" src="assets/system3d.js?v=20261014-1440"></script>
 <!-- SHIP3D — fiches 3D : cuirassé KV-01, frégate SR-01, tanker TK-07, chantier orbital OS-01 (assets/ship3d.js, sur le moteur partagé window.SB3D) -->
@@ -45482,6 +45503,8 @@ if (G.knownTargets && Array.isArray(G.tankerMissions)) {
 <script src="assets/fete_caserne.js?v=20261014-1440"></script>
 <script src="assets/radio.js?v=20261014-1440"></script>
 <script type="module" src="assets/ship3d.js?v=20261014-1440"></script>
+<!-- PATCH_1510_MISSIONS — tout ce qui vole, fiche de mission des tankers -->
+<script src="assets/missions.js?v=20261015-1600"></script>
 <!-- PATCH_1510_CROWN — The Drifting Crown en 3D (assets/station3d.js, sur le moteur partagé window.SB3D) -->
 <script type="module" src="assets/station3d.js?v=20261015-1000"></script>
 <!-- FORMATION3D — flotte déployée en orbite, vue de haut en formation (remplace la vue orbite) -->
