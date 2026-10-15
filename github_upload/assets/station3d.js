@@ -1,4 +1,4 @@
-/* Starbyte — Station3D : The Drifting Crown, premier port franc (station pirate).
+/* Starbyte — Station3D : les stations en 3D — The Drifting Crown (port franc pirate) et le Sanctuaire du Linceul des Cendres (bastion impérial), option profile: 'crown' | 'sanctuary'.
    Source : vitrine validée par Adrien (artifact « The Drifting Crown », 14 oct. 2026), portée sur le moteur partagé
    du jeu (window.SB3D) : mêmes matériaux (lookdev procédural sans UV), même ciel (nébuleuse, géante gazeuse, soleil),
    même trafic (navettes sur les axes, ronde autour de l'anneau, transporteurs au loin). Sans GTAO (mobile).
@@ -7,38 +7,126 @@
    Usage : const h = window.Station3D.mount(container, { url, view: 'port'|'bar', intro, interactive, onProgress, onReady, onError });
            h.setView('bar'); h.setInteractive(true); h.replayIntro(); h.dispose();
 */
-const S = 0.01;   // 1 unité de scène = 100 m (glTF en mètres)
-// 15/10 (vitrine révisée) : finition mate — à l'échelle d'une station de 2,4 km, les reflets « vaisseau » font maquette
-const GLOSS = {
-  M_DC_HULL_CREAM: [0.86, 0.0], M_DC_HULL_GREY: [0.82, 0.12], M_DC_HULL_PATCH: [0.88, 0.05], M_DC_GUNMETAL: [0.74, 0.30],
-  M_DC_DARK: [0.84, 0.15], M_DC_RUST: [0.92, 0.05], M_DC_BRASS: [0.62, 0.45], M_DC_RED: [0.84, 0.0], M_DC_GLASS: [0.30, 0.1],
-};
 const GLOSS_ENV = 0.22;
-const GLOW = {
-  M_DC_WIN_AMBER: 3.4, M_DC_WIN_WARM: 2.8, M_DC_WIN_WHITE: 2.0, M_DC_NEON_GOLD: 4.5, M_DC_NEON_RED: 5.0,
-  M_DC_HANGAR_LIGHT: 4.0, M_DC_ENGINE: 5.0, M_DC_BEACON: 8.0, M_DC_NAV_RED: 4.0, M_DC_NAV_GREEN: 4.0,
+// 15/10 — deux stations, même moteur : chacune son modèle, son ciel, sa lumière, ses cadrages (repère Blender, m)
+const PROFILES = {
+  // The Drifting Crown : station pirate, nébuleuse rouge pourpre
+  crown: {
+    S: 0.01, near: 0.02, half: [9.8, 11.5], minFit: 16, bg: 0x050106, haze: 0x2a0b20, fog: [10, 27],
+    sun: [-0.52, 0.52, -0.68], core: [-0.50, 0.30, -0.81],
+    GLOSS: {
+      M_DC_HULL_CREAM: [0.86, 0.0], M_DC_HULL_GREY: [0.82, 0.12], M_DC_HULL_PATCH: [0.88, 0.05], M_DC_GUNMETAL: [0.74, 0.30],
+      M_DC_DARK: [0.84, 0.15], M_DC_RUST: [0.92, 0.05], M_DC_BRASS: [0.62, 0.45], M_DC_RED: [0.84, 0.0], M_DC_GLASS: [0.30, 0.1],
+    },
+    GLOW: {
+      M_DC_WIN_AMBER: 3.4, M_DC_WIN_WARM: 2.8, M_DC_WIN_WHITE: 2.0, M_DC_NEON_GOLD: 4.5, M_DC_NEON_RED: 5.0,
+      M_DC_HANGAR_LIGHT: 4.0, M_DC_ENGINE: 5.0, M_DC_BEACON: 8.0, M_DC_NAV_RED: 4.0, M_DC_NAV_GREEN: 4.0,
+    },
+    GLOW_COLOR: {
+      M_DC_WIN_AMBER: 0xff8a2c, M_DC_WIN_WARM: 0xffb468, M_DC_WIN_WHITE: 0xd8e4ff, M_DC_NEON_GOLD: 0xffa830, M_DC_NEON_RED: 0xff2a14,
+      M_DC_HANGAR_LIGHT: 0xffa860, M_DC_ENGINE: 0x8ab8ff, M_DC_BEACON: 0xfff2dc, M_DC_NAV_RED: 0xff1a10, M_DC_NAV_GREEN: 0x20ff60,
+    },
+    LOOK: {
+      M_DC_HULL_CREAM: { cell: [7.0, 4.5], seam: .14, depth: .10, tint: .07, rough: .10, grime: .42, wear: .25 },
+      M_DC_HULL_GREY:  { cell: [6.0, 4.0], seam: .14, depth: .25, tint: .08, rough: .12, grime: .34, wear: .35 },
+      M_DC_HULL_PATCH: { cell: [5.0, 3.5], seam: .16, depth: .20, tint: .14, rough: .14, grime: .46, wear: .35 },
+      M_DC_GUNMETAL:   { cell: [5.0, 3.0], seam: .14, depth: .40, tint: .08, rough: .14, grime: .24, wear: .45 },
+      M_DC_DARK:       { cell: [12.0, 7.0], seam: .20, depth: .14, tint: .14, rough: .18, grime: .18, wear: .25 },
+      M_DC_RUST:       { cell: [5.0, 3.5], seam: .16, depth: .16, tint: .18, rough: .16, grime: .40, wear: .20 },
+      M_DC_RED:        { cell: [6.0, 4.0], seam: .14, depth: .12, tint: .08, rough: .10, grime: .32, wear: .30 },
+      M_DC_BRASS:      { cell: [4.0, 3.0], seam: .10, depth: .10, tint: .10, rough: .10, grime: .30, wear: .50 },
+    },
+    glass: [.03, .02, .03], rockLift: null, nav: (n) => n.startsWith('M_DC_NAV_'), beacon: 'M_DC_BEACON', navPulse: [1.2, 3.6, 2.2],
+    cloud: { dust: [0x140409, 0x0e030a, 0x1a0612], gas: [0x6a0f1c, 0x5a1238, 0x34124e, 0x7a1e28], glow: [0xff3a48, 0xff5a64, 0xb04aff],
+             nearSize: [9, 13], farSize: [30, 36], nearR: [15, 17], farR: [40, 40], nearY: [-8, 9], farY: [-24, 34], w: 0.012 },
+    sky: { a: '.55, .03, .06', b: '.40, .04, .22', c: '.18, .04, .32', base: '.014, .004, .010', fil: '1.0, .36, .40', glow: '.85, .28, .40' },
+    sunStops: [
+      [42,  [[0, 'rgba(255,255,255,1)'], [.35, 'rgba(255,240,236,1)'], [.5, 'rgba(255,200,200,.6)'], [1, 'rgba(255,160,170,0)']], .95, 1],
+      [300, [[0, 'rgba(255,220,215,.85)'], [.12, 'rgba(255,150,160,.40)'], [.4, 'rgba(200,60,120,.10)'], [1, 'rgba(120,30,90,0)']], .85, 1],
+      [1000, [[0, 'rgba(255,170,170,.28)'], [.3, 'rgba(180,50,110,.08)'], [1, 'rgba(80,20,60,0)']], .8, 1],
+      [760, [[0, 'rgba(255,200,215,.7)'], [.25, 'rgba(220,110,170,.22)'], [1, 'rgba(140,60,140,0)']], .4, 0.03],
+    ],
+    key: [0xffd8c8, 2.9, 30, 15, 70], fill: [0xc8304e, 1.7], rim: [0x9a50ff, 0.9], hemi: [0x3a1634, 0x30070f],
+    // axes et flèches (angle Blender ° depuis l'est vers le nord, longueur m) → bouts des quais
+    tips: [[0, 1200], [90, 1180], [180, 1200], [270, 1294], [32, 1110], [54.5, 1100], [125, 1097], [202.5, 1245], [229, 1080], [316, 1350]]
+      .map(([a, L]) => { const r = a * Math.PI / 180; return [Math.cos(r) * L, Math.sin(r) * L, 0, 1]; }),
+    lane: { n: 96, nLite: 40, out: [10, 18], spread: 3, lift: [3, 2], size: [0.25, 0.55] },
+    orbit: { n: 54, nLite: 24, r: [7.6, 3.6], y: 2.4, size: [0.18, 0.35] },
+    target: [0, 0.9, 0], minDist: 1.6,
+    lights: (L, hv, P) => {
+      L(0xff9a50, 6, 3.2, P(751, 330, 0));
+      const bar = L(0xffa040, 5, 4.0, P(470, -230, 150));
+      L(0xffb070, 3, 3.0, P(-960, 0, 40));
+      hv(P(0, 0, 653), 0.6, 0xfff2dc, 1.2);
+      hv(P(0, -1160, 118), 0.9, 0xfff2dc, 0.7);
+      hv(P(470, -210, 220), 0.9, 0xffb048, 0);    // couronne du bar
+      return bar;
+    },
+    barShot: { t: [500, -215, 90], p: [150, -50, 300] }, barAt: [500, -220, 160], barMax: 6,
+    dockShot: { t: [1060, 110, -130], p: [1440, 480, 100] }, dockMax: 9,
+    tankerAt: { pos: [1050, 110, -40], rotZ: 0, scale: 2.5 },   // agrandi : à l'échelle, un tanker se perdrait contre 2,4 km de station
+  },
+  // Sanctuaire du Linceul des Cendres : bastion impérial sur astéroïde, dans un nuage bleuté (le Linceul)
+  sanctuary: {
+    S: 0.005, near: 0.03, half: [15.5, 17.0], minFit: 16, bg: 0x02050a, haze: 0x0c1d30, fog: [12, 32],
+    sun: [-0.50, 0.58, -0.64], core: [-0.50, 0.30, -0.81],
+    GLOSS: {
+      M_SC_IVORY: [0.86, 0.0], M_SC_PANEL: [0.84, 0.05], M_SC_STONE: [0.86, 0.10], M_SC_GUNMETAL: [0.74, 0.30], M_SC_DARK: [0.84, 0.15],
+      M_SC_BRONZE: [0.62, 0.45], M_SC_RED: [0.84, 0.0], M_SC_SIGIL: [0.80, 0.0], M_SC_ROCK: [0.95, 0.0], M_SC_ROCK2: [0.95, 0.0], M_SC_GLASS: [0.30, 0.1],
+    },
+    GLOW: { M_SC_WIN_AMBER: 3.4, M_SC_WIN_WARM: 2.8, M_SC_WIN_WHITE: 2.0, M_SC_LIGHT_RED: 4.0, M_SC_HANGAR: 1.5, M_SC_ENGINE: 1.4, M_SC_BEACON: 8.0 },
+    GLOW_COLOR: {
+      M_SC_WIN_AMBER: 0xff8a2c, M_SC_WIN_WARM: 0xffb468, M_SC_WIN_WHITE: 0xd8e4ff, M_SC_LIGHT_RED: 0xff1a10,
+      M_SC_HANGAR: 0xffa860, M_SC_ENGINE: 0x8ab8ff, M_SC_BEACON: 0xfff2dc,
+    },
+    LOOK: {   // cellules plus grandes : bastion de 5 km, plaques de blindage de 10 à 20 m
+      M_SC_IVORY:    { cell: [12.0, 7.0], seam: .22, depth: .12, tint: .08, rough: .10, grime: .46, wear: .25 },
+      M_SC_PANEL:    { cell: [10.0, 6.0], seam: .22, depth: .20, tint: .10, rough: .12, grime: .42, wear: .30 },
+      M_SC_STONE:    { cell: [14.0, 8.0], seam: .24, depth: .22, tint: .12, rough: .14, grime: .40, wear: .30 },
+      M_SC_GUNMETAL: { cell: [8.0, 5.0], seam: .18, depth: .40, tint: .08, rough: .14, grime: .24, wear: .45 },
+      M_SC_DARK:     { cell: [16.0, 9.0], seam: .24, depth: .14, tint: .14, rough: .18, grime: .18, wear: .25 },
+      M_SC_BRONZE:   { cell: [6.0, 4.0], seam: .12, depth: .10, tint: .10, rough: .10, grime: .30, wear: .50 },
+      M_SC_RED:      { cell: [12.0, 8.0], seam: .10, depth: .06, tint: .06, rough: .10, grime: .34, wear: .20 },
+      M_SC_ROCK:     { cell: [60.0, 40.0], seam: .0, depth: .0, tint: .22, rough: .05, grime: .30, wear: .55 },
+      M_SC_ROCK2:    { cell: [60.0, 40.0], seam: .0, depth: .0, tint: .22, rough: .05, grime: .30, wear: .55 },
+    },
+    glass: [.02, .03, .045], rockLift: 1.45, nav: (n) => n === 'M_SC_LIGHT_RED', beacon: 'M_SC_BEACON', navPulse: [1.6, 3.2, 1.4],
+    cloud: { dust: [0x04080e, 0x060b12, 0x0a1018], gas: [0x143252, 0x1b3f62, 0x22344e, 0x2a4a6a], glow: [0x6ab0ff, 0x8cc8ff, 0x9aa6ff],
+             nearSize: [12, 16], farSize: [38, 44], nearR: [19, 20], farR: [50, 45], nearY: [-12, 14], farY: [-30, 40], w: 0.010 },
+    sky: { a: '.06, .18, .42', b: '.10, .30, .48', c: '.20, .22, .40', base: '.004, .008, .016', fil: '.55, .80, 1.0', glow: '.40, .62, 1.0' },
+    sunStops: [
+      [42,  [[0, 'rgba(255,255,255,1)'], [.35, 'rgba(240,246,255,1)'], [.5, 'rgba(200,220,255,.6)'], [1, 'rgba(160,190,255,0)']], .95, 1],
+      [300, [[0, 'rgba(220,232,255,.85)'], [.12, 'rgba(150,185,255,.40)'], [.4, 'rgba(60,110,200,.10)'], [1, 'rgba(30,60,120,0)']], .85, 1],
+      [1000, [[0, 'rgba(170,200,255,.26)'], [.3, 'rgba(50,100,180,.08)'], [1, 'rgba(20,40,80,0)']], .8, 1],
+      [760, [[0, 'rgba(210,225,255,.7)'], [.25, 'rgba(120,160,230,.22)'], [1, 'rgba(60,90,160,0)']], .4, 0.03],
+    ],
+    key: [0xe4ecff, 2.9, 40, 18, 90], fill: [0x3f7fd0, 1.6], rim: [0x8c9cff, 0.85], hemi: [0x1c3050, 0x081626],
+    // extrémités des bras d'amarrage et bouches des baies
+    tips: [[-300, 2700, 600], [-1230, 2380, -500], [650, 2320, 640], [1000, 2300, 600], [-2470, 840, 1000], [-2650, 450, -280],
+      [-2750, -820, -1240], [-2650, -1120, -1360], [2950, 800, 780], [2900, -1380, -1180], [2650, 500, -150], [-500, -2480, -1480],
+      [300, 2450, -480], [-750, -2630, 560], [40, -2630, 560], [-1720, -2280, 520], [1300, -2130, 520]].map(t => t.concat([0])),
+    lane: { n: 70, nLite: 32, out: [12, 20], spread: 4, lift: [4, 2], size: [0.12, 0.35] },
+    orbit: { n: 26, nLite: 14, r: [17, 6], y: 9, size: [0.10, 0.22] },
+    target: [-0.4, 1.6, 0], minDist: 2.2,
+    lights: (L, hv, P) => {
+      L(0xff9a50, 3, 3.0, P(-750, -2700, 560));
+      L(0xff9a50, 3, 3.0, P(40, -2700, 560));
+      L(0xffa040, 4, 3.5, P(-920, -1500, -300));
+      const hall = L(0xffb070, 3, 3.0, P(-200, 2100, -300));
+      hv(P(-250, 1150, 2404), 0.7, 0xff6a50, 1.1);       // feu de la tour de commandement
+      return hall;
+    },
+    // « la halle » : la façade nord aux bannières, la halle vitrée où descendent les équipages
+    barShot: { t: [-200, 2100, 300], p: [-1700, 4700, -500] }, barAt: [-200, 2100, 300], barMax: 18,
+    // « le dock » : devant les baies sud illuminées, ton tanker en attente d'amarrage
+    dockShot: { t: [40, -2950, 420], p: [1100, -3750, 950] }, dockMax: 14,
+    tankerAt: { pos: [40, -3100, 560], rotZ: 0, scale: 6 },
+  },
 };
-const GLOW_COLOR = {
-  M_DC_WIN_AMBER: 0xff8a2c, M_DC_WIN_WARM: 0xffb468, M_DC_WIN_WHITE: 0xd8e4ff, M_DC_NEON_GOLD: 0xffa830, M_DC_NEON_RED: 0xff2a14,
-  M_DC_HANGAR_LIGHT: 0xffa860, M_DC_ENGINE: 0x8ab8ff, M_DC_BEACON: 0xfff2dc, M_DC_NAV_RED: 0xff1a10, M_DC_NAV_GREEN: 0x20ff60,
-};
-const LOOK = {
-  M_DC_HULL_CREAM: { cell: [7.0, 4.5], seam: .14, depth: .10, tint: .07, rough: .10, grime: .42, wear: .25 },
-  M_DC_HULL_GREY:  { cell: [6.0, 4.0], seam: .14, depth: .25, tint: .08, rough: .12, grime: .34, wear: .35 },
-  M_DC_HULL_PATCH: { cell: [5.0, 3.5], seam: .16, depth: .20, tint: .14, rough: .14, grime: .46, wear: .35 },
-  M_DC_GUNMETAL:   { cell: [5.0, 3.0], seam: .14, depth: .40, tint: .08, rough: .14, grime: .24, wear: .45 },
-  M_DC_DARK:       { cell: [12.0, 7.0], seam: .20, depth: .14, tint: .14, rough: .18, grime: .18, wear: .25 },
-  M_DC_RUST:       { cell: [5.0, 3.5], seam: .16, depth: .16, tint: .18, rough: .16, grime: .40, wear: .20 },
-  M_DC_RED:        { cell: [6.0, 4.0], seam: .14, depth: .12, tint: .08, rough: .10, grime: .32, wear: .30 },
-  M_DC_BRASS:      { cell: [4.0, 3.0], seam: .10, depth: .10, tint: .10, rough: .10, grime: .30, wear: .50 },
-};
-// axes et flèches (angle Blender ° depuis l'est vers le nord, longueur m)
-// 15/10 — le poste d'amarrage du joueur (repère Blender, m) : cadrage et tanker à quai
-const DOCK_SHOT = { t: [1060, 110, -130], p: [1440, 480, 100] };
-const DOCK_TANKER = { pos: [1050, 110, -40], rotZ: 0, scale: 2.5 };   // agrandi : à l'échelle, un tanker se perdrait contre 2,4 km de station
-const ARMS = [[0, 1200], [90, 1180], [180, 1200], [270, 1294], [32, 1110], [54.5, 1100], [125, 1097], [202.5, 1245], [229, 1080], [316, 1350]];
 
 function mount(container, opts = {}) {
+  const PR = PROFILES[opts.profile] || PROFILES.crown;
+  const S = PR.S, GLOSS = PR.GLOSS, GLOW = PR.GLOW, GLOW_COLOR = PR.GLOW_COLOR, LOOK = PR.LOOK;
   const { THREE, GLTFLoader, MapControls, RoomEnvironment, EffectComposer, RenderPass, UnrealBloomPass, OutputPass } = window.SB3D;
   const REDUCED = matchMedia('(prefers-reduced-motion: reduce)').matches;
   const LITE = !!(window.SBPerf && window.SBPerf.level >= 2);
@@ -57,23 +145,23 @@ function mount(container, opts = {}) {
   container.appendChild(renderer.domElement);
 
   const scene = new THREE.Scene(), bgScene = new THREE.Scene();
-  bgScene.background = new THREE.Color(0x050106);
-  const camera = new THREE.PerspectiveCamera(40, W() / H(), 0.02, 4000);
+  bgScene.background = new THREE.Color(PR.bg);
+  const camera = new THREE.PerspectiveCamera(40, W() / H(), PR.near, 4000);
   const portrait = () => W() / H() < 0.8;
   function fitDistance() {
     camera.fov = portrait() ? 54 : 40; camera.updateProjectionMatrix();
     const v = THREE.MathUtils.degToRad(camera.fov) / 2, h = Math.atan(Math.tan(v) * camera.aspect);
-    return Math.max(16, (portrait() ? 9.8 : 11.5) / Math.tan(Math.min(v, h)));
+    return Math.max(PR.minFit, (portrait() ? PR.half[0] : PR.half[1]) / Math.tan(Math.min(v, h)));
   }
-  const HAZE = new THREE.Color(0x2a0b20);   // brume pourpre de la nébuleuse
+  const HAZE = new THREE.Color(PR.haze);   // brume du nuage (pourpre au Crown, bleu-cendre au Linceul)
   scene.fog = new THREE.Fog(HAZE, 10, 60);
   const pmrem = new THREE.PMREMGenerator(renderer);
   const envTex = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
   scene.environment = envTex;
 
   const CAM_DIR = new THREE.Vector3(0.60, -0.34, 0.72).normalize();   // 3/4 dessous : la station écrase le cadre
-  const SUN_DIR = new THREE.Vector3(-0.52, 0.52, -0.68).normalize();   // étoile voilée par la nébuleuse, derrière la tour
-  const NEB_CORE = new THREE.Vector3(-0.50, 0.30, -0.81).normalize();  // cœur lumineux de la nébuleuse
+  const SUN_DIR = new THREE.Vector3(...PR.sun).normalize();   // étoile voilée par la nébuleuse, derrière la tour
+  const NEB_CORE = new THREE.Vector3(...PR.core).normalize();  // cœur lumineux de la nébuleuse
 
   /* ── fond : nébuleuse, étoiles, géante gazeuse, soleil ── */
   /* ── fond : nébuleuse rouge pourpre, rendue UNE fois dans un cube (coût nul par image) ── */
@@ -102,7 +190,7 @@ function mount(container, opts = {}) {
     const t = new THREE.CanvasTexture(c); t.needsUpdate = true; return t;
   }
   const CLOUD_TEX = [1, 2, 3, 4].map(cloudTex);
-  const CLOUD_DUST = [0x140409, 0x0e030a, 0x1a0612], CLOUD_GAS = [0x6a0f1c, 0x5a1238, 0x34124e, 0x7a1e28], CLOUD_GLOW = [0xff3a48, 0xff5a64, 0xb04aff];
+  const CLOUD_DUST = PR.cloud.dust, CLOUD_GAS = PR.cloud.gas, CLOUD_GLOW = PR.cloud.glow;
   const pick = (arr) => arr[(rand() * arr.length) | 0];
   const skyScene = new THREE.Scene();
   skyScene.add(new THREE.Mesh(new THREE.SphereGeometry(1500, 64, 32), new THREE.ShaderMaterial({
@@ -126,12 +214,12 @@ function mount(container, opts = {}) {
         float glow = pow(c, 2.5) * .8 + pow(c, 10.0) * 1.3;
         float lanes = smoothstep(.45, .72, fbm(d * 4.2 + w * 3.0 + 11.0));
         float hue = fbm(d * 1.6 + 5.0);
-        vec3 gas = mix(vec3(.55, .03, .06), vec3(.40, .04, .22), smoothstep(.40, .70, hue));
-        gas = mix(gas, vec3(.18, .04, .32), smoothstep(.58, .84, fbm(d * 1.2 + 19.0)));
-        vec3 col = vec3(.014, .004, .010);
+        vec3 gas = mix(vec3(${PR.sky.a}), vec3(${PR.sky.b}), smoothstep(.40, .70, hue));
+        gas = mix(gas, vec3(${PR.sky.c}), smoothstep(.58, .84, fbm(d * 1.2 + 19.0)));
+        vec3 col = vec3(${PR.sky.base});
         col += gas * mass * (.22 + 1.0 * glow + .25 * smoothstep(.2, .9, g)) * .42;
-        col += vec3(1.0, .36, .40) * pow(mass * g, 2.0) * (.14 + 1.5 * glow) * .32;
-        col += vec3(.85, .28, .40) * glow * .08;
+        col += vec3(${PR.sky.fil}) * pow(mass * g, 2.0) * (.14 + 1.5 * glow) * .32;
+        col += vec3(${PR.sky.glow}) * glow * .08;
         col *= 1.0 - .94 * lanes * (.45 + .55 * mass);
         gl_FragColor = vec4(col, 1.0);
       }`
@@ -188,12 +276,7 @@ function mount(container, opts = {}) {
     const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t;
   }
   const sunPos = SUN_DIR.clone().multiplyScalar(1100);
-  for (const [size, stops, opacity, sx] of [
-    [42,  [[0, 'rgba(255,255,255,1)'], [.35, 'rgba(255,240,236,1)'], [.5, 'rgba(255,200,200,.6)'], [1, 'rgba(255,160,170,0)']], .95, 1],
-    [300, [[0, 'rgba(255,220,215,.85)'], [.12, 'rgba(255,150,160,.40)'], [.4, 'rgba(200,60,120,.10)'], [1, 'rgba(120,30,90,0)']], .85, 1],
-    [1000, [[0, 'rgba(255,170,170,.28)'], [.3, 'rgba(180,50,110,.08)'], [1, 'rgba(80,20,60,0)']], .8, 1],
-    [760, [[0, 'rgba(255,200,215,.7)'], [.25, 'rgba(220,110,170,.22)'], [1, 'rgba(140,60,140,0)']], .4, 0.03],
-  ]) {
+  for (const [size, stops, opacity, sx] of PR.sunStops) {
     const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: radialTex(stops), blending: THREE.AdditiveBlending, depthWrite: false, transparent: true, opacity, fog: false }));
     sp.scale.set(size, size * sx, 1); sp.position.copy(sunPos); bgScene.add(sp);
   }
@@ -201,18 +284,18 @@ function mount(container, opts = {}) {
   /* ── lumière ── */
   const station = new THREE.Group();
   scene.add(station);
-  const key = new THREE.DirectionalLight(0xffd8c8, 2.9);
-  key.position.copy(SUN_DIR).multiplyScalar(30);
+  const key = new THREE.DirectionalLight(PR.key[0], PR.key[1]);
+  key.position.copy(SUN_DIR).multiplyScalar(PR.key[2]);
   key.castShadow = !LITE;
   key.shadow.mapSize.set(2048, 2048);
-  Object.assign(key.shadow.camera, { left: -15, right: 15, top: 15, bottom: -15, near: 1, far: 70 });
+  Object.assign(key.shadow.camera, { left: -PR.key[3], right: PR.key[3], top: PR.key[3], bottom: -PR.key[3], near: 1, far: PR.key[4] });
   key.shadow.bias = -0.0005; key.shadow.normalBias = 0.02;
   key.target = station;
   scene.add(key);
   // la nébuleuse éclaire par en dessous (rouge sang) ; liseré violet sur les flancs opposés
-  const nebFill = new THREE.DirectionalLight(0xc8304e, 1.7); nebFill.position.set(9, -16, 11); scene.add(nebFill);
-  const rimL = new THREE.DirectionalLight(0x9a50ff, 0.9); rimL.position.set(-14, -3, 10); scene.add(rimL);
-  scene.add(new THREE.HemisphereLight(0x3a1634, 0x30070f, 0.55));
+  const nebFill = new THREE.DirectionalLight(PR.fill[0], PR.fill[1]); nebFill.position.set(9, -16, 11); scene.add(nebFill);
+  const rimL = new THREE.DirectionalLight(PR.rim[0], PR.rim[1]); rimL.position.set(-14, -3, 10); scene.add(rimL);
+  scene.add(new THREE.HemisphereLight(PR.hemi[0], PR.hemi[1], 0.55));
   function glowLight(color, intensity, dist, x, y, z) { const l = new THREE.PointLight(color, intensity, dist, 1.8); l.position.set(x, y, z); station.add(l); return l; }
 
   /* ── lookdev procédural (sans UV) : panneaux triplanaires, joints, patine, coulures, usure d'arête ── */
@@ -283,7 +366,7 @@ function mount(container, opts = {}) {
             normal = normalize(abs(det) * normal - grad);
           }`);
     };
-    mat.customProgramCacheKey = () => 'dc-premium-' + mat.name;
+    mat.customProgramCacheKey = () => (opts.profile || 'crown') + '-premium-' + mat.name;
   }
 
   /* ── halos ── */
@@ -310,20 +393,20 @@ function mount(container, opts = {}) {
   })();
   const shipMat = new THREE.MeshStandardMaterial({ color: 0x8a8682, roughness: 0.75, metalness: 0.2, envMapIntensity: 0.25 });
   const TRAFFIC = [];
-  const armDir = (a) => { const r = THREE.MathUtils.degToRad(a); return new THREE.Vector3(Math.cos(r), 0, -Math.sin(r)); };
+  const B2S = (x, y, z) => new THREE.Vector3(x * S, z * S, -y * S);
   function laneShip(kind) {
-    const s = { kind, t: 0 };
+    const s = { kind, t: 0 }, LN = PR.lane, OR = PR.orbit;
     if (kind === 'lane') {
-      const [a, L] = ARMS[(Math.random() * ARMS.length) | 0];
-      const d = armDir(a + (Math.random() - .5) * 4), side = new THREE.Vector3(-d.z, 0, d.x);
+      const tp = PR.tips[(Math.random() * PR.tips.length) | 0], tip = B2S(tp[0], tp[1], tp[2]);
+      const d = new THREE.Vector3(tip.x, 0, tip.z).normalize(), side = new THREE.Vector3(-d.z, 0, d.x);
       const off = (Math.random() - .5) * 1.6, hgt = (Math.random() - .3) * 1.6;
-      s.a = d.clone().multiplyScalar(L * S + 10 + Math.random() * 18).addScaledVector(side, off * 3).add(new THREE.Vector3(0, hgt * 3 + 2, 0));
-      s.b = d.clone().multiplyScalar(L * S + 0.6).addScaledVector(side, off).add(new THREE.Vector3(0, hgt * 0.4, 0));
+      s.a = tip.clone().addScaledVector(d, LN.out[0] + Math.random() * LN.out[1]).addScaledVector(side, off * LN.spread).add(new THREE.Vector3(0, hgt * LN.lift[0] + LN.lift[1], 0));
+      s.b = tip.clone().addScaledVector(d, 0.6).addScaledVector(side, off * 0.8).add(new THREE.Vector3(0, hgt * 0.4, 0));
       if (Math.random() < .5) [s.a, s.b] = [s.b, s.a];
-      s.dur = 18 + Math.random() * 26; s.t = Math.random(); s.size = 0.25 + Math.random() * 0.55;
+      s.dur = 18 + Math.random() * 26; s.t = Math.random(); s.size = LN.size[0] + Math.random() * LN.size[1];
     } else if (kind === 'orbit') {
-      s.r = 7.6 + Math.random() * 3.6; s.y = (Math.random() - .5) * 2.4; s.w = (0.012 + Math.random() * .02) * (Math.random() < .5 ? 1 : -1);
-      s.ph = Math.random() * Math.PI * 2; s.size = 0.18 + Math.random() * 0.35;
+      s.r = OR.r[0] + Math.random() * OR.r[1]; s.y = (Math.random() - .5) * OR.y; s.w = (0.012 + Math.random() * .02) * (Math.random() < .5 ? 1 : -1);
+      s.ph = Math.random() * Math.PI * 2; s.size = OR.size[0] + Math.random() * OR.size[1];
     } else {
       const ang = Math.random() * Math.PI * 2, d = new THREE.Vector3(Math.cos(ang), 0, Math.sin(ang)), side = new THREE.Vector3(-d.z, 0, d.x);
       const y = (Math.random() < .5 ? -1 : 1) * (10 + Math.random() * 14), dist = 95 + Math.random() * 40;
@@ -333,8 +416,8 @@ function mount(container, opts = {}) {
     }
     return s;
   }
-  for (let i = 0; i < (LITE ? 40 : 96); i++) TRAFFIC.push(laneShip('lane'));
-  for (let i = 0; i < (LITE ? 24 : 54); i++) TRAFFIC.push(laneShip('orbit'));
+  for (let i = 0; i < (LITE ? PR.lane.nLite : PR.lane.n); i++) TRAFFIC.push(laneShip('lane'));
+  for (let i = 0; i < (LITE ? PR.orbit.nLite : PR.orbit.n); i++) TRAFFIC.push(laneShip('orbit'));
   for (let i = 0; i < 3; i++) TRAFFIC.push(laneShip('freighter'));
   const traffic = new THREE.InstancedMesh(shipGeo, shipMat, TRAFFIC.length);
   traffic.frustumCulled = false;
@@ -389,9 +472,10 @@ function mount(container, opts = {}) {
       blending: type === 'glow' ? THREE.AdditiveBlending : THREE.NormalBlending,
     }));
     sp.material.rotation = rand() * Math.PI * 2;
-    const size = near ? 9 + rand() * 13 : 30 + rand() * 36;
+    const C = PR.cloud, sz = near ? C.nearSize : C.farSize, rr = near ? C.nearR : C.farR, yy = near ? C.nearY : C.farY;
+    const size = sz[0] + rand() * sz[1];
     sp.scale.set(size, size * (0.55 + rand() * 0.35), 1);
-    sp.userData = { base, a: rand() * Math.PI * 2, r: near ? 15 + rand() * 17 : 40 + rand() * 40, y: near ? -8 + rand() * 9 : -24 + rand() * 34, w: (rand() - .5) * 0.012 };
+    sp.userData = { base, a: rand() * Math.PI * 2, r: rr[0] + rand() * rr[1], y: yy[0] + rand() * yy[1], w: (rand() - .5) * C.w };
     cloudGroup.add(sp);
   }
   const _cp = new THREE.Vector3();
@@ -408,12 +492,12 @@ function mount(container, opts = {}) {
   const P = (x, y, z) => new THREE.Vector3(x * S, z * S, -y * S);   // repère Blender (m) -> scène
   // le bar : sur l'anneau à −24°, façade tournée vers le noyau ; on le regarde depuis l'intérieur de l'anneau, un peu en surplomb
   const VIEWS = {
-    port: () => { const T = new THREE.Vector3(0, 0.9, 0); return { target: T, pos: T.clone().addScaledVector(CAM_DIR, fitDistance()), min: 1.6, max: fitDistance() * 1.6, auto: 0.22 }; },
-    bar: () => { fitDistance(); const B = opts.barShot || { t: [500, -215, 90], p: [150, -50, 300] }; const T = P(...B.t); return { target: T, pos: P(...B.p), min: 1.2, max: 6, auto: 0.08, sway: 0.35 }; },
+    port: () => { const T = new THREE.Vector3(...PR.target); return { target: T, pos: T.clone().addScaledVector(CAM_DIR, fitDistance()), min: PR.minDist, max: fitDistance() * 1.6, auto: 0.22 }; },
+    bar: () => { fitDistance(); const B = opts.barShot || PR.barShot; const T = P(...B.t); return { target: T, pos: P(...B.p), min: 1.2, max: PR.barMax, auto: 0.08, sway: 0.35 }; },
     // 15/10 — le dock : au bout d'un bras d'amarrage, ton tanker à quai sous la flèche
-    dock: () => { fitDistance(); const B = opts.dockShot || DOCK_SHOT; const T = P(...B.t); return { target: T, pos: P(...B.p), min: 1.0, max: 9, auto: 0.06, sway: 0.6 }; },
+    dock: () => { fitDistance(); const B = opts.dockShot || PR.dockShot; const T = P(...B.t); return { target: T, pos: P(...B.p), min: 1.0, max: PR.dockMax, auto: 0.06, sway: 0.6 }; },
   };
-  const BAR_AT = P(500, -220, 160);
+  const BAR_AT = P(...PR.barAt);
   let view = VIEWS[opts.view] ? opts.view : 'port';
   let shot = VIEWS[view]();
   const controls = new MapControls(camera, renderer.domElement);
@@ -517,27 +601,24 @@ function mount(container, opts = {}) {
       o.castShadow = !emissiveOnly && !LITE; o.receiveShadow = !LITE;
       for (const mat of mats) {
         if (GLOSS[mat.name]) { mat.roughness = GLOSS[mat.name][0]; mat.metalness = GLOSS[mat.name][1]; mat.envMapIntensity = GLOSS_ENV; }
-        if (mat.name === 'M_DC_GLASS') { mat.envMapIntensity = 0.6; mat.color.setRGB(.03, .02, .03); }
+        if (PR.rockLift && mat.name.startsWith('M_SC_ROCK') && !mat.userData.lift) { mat.userData.lift = 1; mat.color.multiplyScalar(PR.rockLift); }
+        if (/_GLASS$/.test(mat.name)) { mat.envMapIntensity = 0.6; mat.color.setRGB(...PR.glass); }
         const look = LOOK[mat.name];
         if (look && !mat.userData.dc) { mat.userData.dc = 1; premium(mat, look); }
         if (GLOW[mat.name]) {
           const c = new THREE.Color(GLOW_COLOR[mat.name]);
           mat.color.copy(c).multiplyScalar(.6); mat.emissive.copy(c); mat.emissiveIntensity = GLOW[mat.name];
           mat.roughness = .6; mat.metalness = 0; mat.side = THREE.DoubleSide; mat.fog = true;
-          if (mat.name.startsWith('M_DC_NAV_') && !navMats.includes(mat)) navMats.push(mat);
-          if (mat.name === 'M_DC_BEACON' && !beaconMats.includes(mat)) beaconMats.push(mat);
+          if (PR.nav(mat.name) && !navMats.includes(mat)) navMats.push(mat);
+          if (mat.name === PR.beacon && !beaconMats.includes(mat)) beaconMats.push(mat);
         }
       }
     });
     station.add(m);
     const L = (c, i, d, v) => glowLight(c, i, d, v.x, v.y, v.z);
-    L(0xff9a50, 6, 3.2, P(751, 330, 0));
-    barLight = L(0xffa040, 5, 4.0, P(470, -230, 150));
-    L(0xffb070, 3, 3.0, P(-960, 0, 40));
     const hv = (v, s, c, p) => halo(v.x, v.y, v.z, s, c, p);
-    hv(P(0, 0, 653), 0.6, 0xfff2dc, 1.2);
-    hv(P(0, -1160, 118), 0.9, 0xfff2dc, 0.7);
-    hv(P(470, -210, 220), 0.9, 0xffb048, 0);    // couronne du bar
+    barLight = PR.lights(L, hv, P);
+    const barLight0 = barLight ? barLight.intensity : 0; barLight && (barLight.userData.i0 = barLight0);
     ready = true;
     if (opts.tanker) loadTanker();
     if (opts.intro && !REDUCED && view === 'port') startMove(shot, 9.0, true);
@@ -549,7 +630,7 @@ function mount(container, opts = {}) {
   /* ── le tanker du joueur, amarré (vue « dock ») ── */
   let tankerObj = null;
   function loadTanker() {
-    const T = Object.assign({}, DOCK_TANKER, opts.tankerAt || {});
+    const T = Object.assign({}, PR.tankerAt, opts.tankerAt || {});
     new GLTFLoader().load(typeof opts.tanker === 'string' ? opts.tanker : 'assets/3d/sb_tk07_lod.glb', (g) => {
       if (!alive) return;
       const t = g.scene;
@@ -571,7 +652,7 @@ function mount(container, opts = {}) {
     if (document.hidden || !container.isConnected || !container.getClientRects().length) return;   // hors écran : en pause
     updateTraffic(t, dt);
     updateClouds(dt);
-    for (const m of navMats) m.emissiveIntensity = 1.2 + 3.6 * Math.pow(0.5 + 0.5 * Math.sin(t * 2.2 + (m.name.endsWith('GREEN') ? 1.6 : 0)), 3);
+    for (const m of navMats) m.emissiveIntensity = PR.navPulse[0] + PR.navPulse[1] * Math.pow(0.5 + 0.5 * Math.sin(t * PR.navPulse[2] + (m.name.endsWith('GREEN') ? 1.6 : 0)), 3);
     for (const m of beaconMats) m.emissiveIntensity = 4 + 6 * Math.pow(0.5 + 0.5 * Math.sin(t * 1.3), 4);
     for (const h of halos) {
       const k = h.userData.pulse ? 0.55 + 0.45 * Math.pow(0.5 + 0.5 * Math.sin(t * h.userData.pulse + h.userData.ph), 3) : 0.8 + 0.2 * Math.sin(t * 3 + h.userData.ph);
@@ -584,10 +665,10 @@ function mount(container, opts = {}) {
     }
     {   // de près, les néons du bar éblouiraient : bloom et lueur baissent avec la distance au bar
       const near = 1 - THREE.MathUtils.smoothstep(camera.position.distanceTo(BAR_AT), 2.5, 9);
-      bloom.strength = 0.85 - 0.5 * near; if (barLight) barLight.intensity = 5 - 3.2 * near;
+      bloom.strength = 0.85 - 0.5 * near; if (barLight) barLight.intensity = barLight.userData.i0 * (1 - 0.64 * near);
     }
     const d = camera.position.distanceTo(controls.target);
-    scene.fog.near = Math.max(0.6, d - 10.0); scene.fog.far = d + 27;
+    scene.fog.near = Math.max(0.6, d - PR.fog[0]); scene.fog.far = d + PR.fog[1];
     composer.render();
   }
   frame();

@@ -220,7 +220,7 @@
     // actions selon l'état
     const acts = [];
     if (m.status === 'docked') {
-      acts.push(`<button class="sbm-btn" style="--c:#f0b54a" onclick="SBMissions.close();openDockFromFleet('${esc(m.id)}')">${m.dock && m.dock.crown ? '⚓ Entrer à la Couronne' : '⚓ Entrer au dock'}<small>séjour, commandants à quai, marchés, bar</small></button>`);
+      acts.push(`<button class="sbm-btn" style="--c:#f0b54a" onclick="SBMissions.close();openDockFromFleet('${esc(m.id)}')">${m.dock && m.dock.station ? '⚓ Entrer · ' + esc(m.dock.name) : '⚓ Entrer au dock'}<small>séjour, commandants à quai, marchés, bar</small></button>`);
       acts.push(`<button class="sbm-btn" style="--c:#ffc864" onclick="SBMissions.recallDocked('${esc(m.id)}')">⌂ Rappeler le tanker<small>il quitte le dock et rentre au port</small></button>`);
     } else if (m.status === 'posted' || (m.kind === 'route_post' && m.status === 'in_transit')) {
       if (m.status === 'posted') acts.push(`<button class="sbm-btn" style="--c:#ffc864" onclick="SBMissions.close();openSystemOnMap('${esc(d.coords)}')">Voir le poste<small>les commandants qui y tiennent un poste peuvent te parler</small></button>`);

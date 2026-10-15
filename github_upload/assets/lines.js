@@ -26,12 +26,20 @@
     abandoned_station: { key: 'recup',      label: 'Récupérateurs',        cargo: ['moyen'],          tiers: [1, 2], escort: 'sans escorte' },
     derelict_carrier:  { key: 'arme',       label: 'Convoi armé',          cargo: ['lourd'],          tiers: [3],    escort: 'escorte lourde' },
     pilgrim_stop:      { key: 'pelerins',   label: 'Pèlerins',             cargo: ['léger'],          tiers: [1],    escort: 'sans escorte' },
+    imperial_convoy:   { key: 'imperial',   label: 'Convoi impérial',      cargo: ['lourd'],          tiers: [3],    escort: 'escorte lourde' },
   };
 
   // 15/10 (Adrien) : The Drifting Crown, la station pirate, prend la place du lieu du secteur M (l'ancien Relais d'Erebus) ;
   // ses deux lignes : des marchands et des contrebandiers
   const CROWN_DOCK_ID = 'dock-37oe89';
   const CROWN_KINDS = ['hidden_freeport', 'asteroid_bar'];
+  // 15/10 (soir) : le Sanctuaire du Linceul des Cendres, bastion impérial, est le lieu du secteur O ;
+  // ses lignes : des pèlerins et des convois impériaux (lourds, bien escortés)
+  const SANCT_DOCK_ID = 'dock-otqflf';
+  const STATION_PORTS = {
+    [CROWN_DOCK_ID]: { kinds: CROWN_KINDS, route: 'La Saigne de la Couronne', mood: 'grasse', flag: '_linesCrown' },
+    [SANCT_DOCK_ID]: { kinds: ['pilgrim_stop', 'imperial_convoy'], route: 'La Vieille Voie du Linceul', mood: 'imperiale', flag: '_linesSanct' },
+  };
 
   /* ── hachage déterministe (mêmes résultats sur tous les appareils) ── */
   function h32(s) { let h = 2166136261; s = String(s); for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619) >>> 0; } return h >>> 0; }
@@ -74,7 +82,7 @@
           const k = `${cl}-${sec}-${1000 + Math.floor(r() * 9000)}`;
           if (k !== port && !chain.includes(k) && !ports[k]) chain.push(k);
         }
-        const kind = dock.id === CROWN_DOCK_ID ? KINDS[CROWN_KINDS[j]] : (KINDS[dock.type] || KINDS.hidden_freeport);
+        const kind = STATION_PORTS[dock.id] ? KINDS[STATION_PORTS[dock.id].kinds[j]] : (KINDS[dock.type] || KINDS.hidden_freeport);
         const line = {
           id: dock.id + '-' + j, dockId: dock.id, port, chain, kind,
           period: (80 + Math.floor(r() * 70)) * 60000,      // un départ toutes les 80 à 150 min
@@ -237,28 +245,30 @@
   }
 
   /* ── E2 · un lieu découvert = une route connue : elle entre au Commerce, les tankers suivent la ligne ── */
-  const MOOD_BY_KIND = { marchand: 'grasse', contrebande: 'noire', recup: 'nerveuse', arme: 'imperiale', pelerins: 'morte' };
+  const MOOD_BY_KIND = { marchand: 'grasse', contrebande: 'noire', recup: 'nerveuse', arme: 'imperiale', pelerins: 'morte', imperial: 'imperiale' };
   const NOUN_BY_MOOD = { nerveuse: 'la Veine', grasse: 'la Saigne', morte: 'le Linceul', noire: 'la Voie Noire', imperiale: 'la Vieille Voie' };
   const cap1 = (x) => x.charAt(0).toUpperCase() + x.slice(1);
   function routeNameFor(dock, moodKey) {
-    return dock.id === CROWN_DOCK_ID ? 'La Saigne de la Couronne' : cap1(`${NOUN_BY_MOOD[moodKey] || 'la Route'} de ${dock.name}`);
+    return STATION_PORTS[dock.id] ? STATION_PORTS[dock.id].route : cap1(`${NOUN_BY_MOOD[moodKey] || 'la Route'} de ${dock.name}`);
   }
   // ce qui a été appris du lieu avant qu'il devienne la Couronne prend son nom (une fois)
   function migrateCrown() {
-    if (G._linesCrown === 1) return;
-    G._linesCrown = 1;
-    let d = null;
-    try { d = generateDockForRoute({ destinationHint: (Object.values(network().ports).find(x => x.dockId === CROWN_DOCK_ID) || {}).hint }); } catch (e) {}
-    if (!d || d.id !== CROWN_DOCK_ID || !d.crown) return;
-    const pick = ({ name, type, typeLabel, sub, accent, ambience, detail, crown }) => ({ name, type, typeLabel, sub, accent, ambience, detail, crown });
-    const F = pick(d);
-    if (G.universeDocks && G.universeDocks[CROWN_DOCK_ID]) Object.assign(G.universeDocks[CROWN_DOCK_ID], F);
-    for (const m of G.tankerMissions || []) if (m.dock && m.dock.id === CROWN_DOCK_ID) Object.assign(m.dock, F);
-    for (const r of G.routes || []) {
-      if (r.dock && r.dock.id === CROWN_DOCK_ID) Object.assign(r.dock, F);
-      if (r.id === 'rt-ln-' + CROWN_DOCK_ID) { r.moodKey = 'grasse'; r.name = routeNameFor(d, 'grasse'); if (r.sourceCard) r.sourceCard.name = d.name; }
+    for (const [ID, SP] of Object.entries(STATION_PORTS)) {
+      if (G[SP.flag] === 1) continue;
+      G[SP.flag] = 1;
+      let d = null;
+      try { d = generateDockForRoute({ destinationHint: (Object.values(network().ports).find(x => x.dockId === ID) || {}).hint }); } catch (e) {}
+      if (!d || d.id !== ID || !d.station) continue;
+      const pick = ({ name, type, typeLabel, sub, accent, ambience, detail, crown, station }) => ({ name, type, typeLabel, sub, accent, ambience, detail, crown, station });
+      const F = pick(d);
+      if (G.universeDocks && G.universeDocks[ID]) Object.assign(G.universeDocks[ID], F);
+      for (const m of G.tankerMissions || []) if (m.dock && m.dock.id === ID) Object.assign(m.dock, F);
+      for (const r of G.routes || []) {
+        if (r.dock && r.dock.id === ID) Object.assign(r.dock, F);
+        if (r.id === 'rt-ln-' + ID) { r.moodKey = SP.mood; r.name = SP.route; if (r.sourceCard) r.sourceCard.name = d.name; }
+      }
+      for (const [k, h] of Object.entries(G.hiddenPorts || {})) if (h.dockId === ID) Object.assign(h, { name: d.name, type: d.type, typeLabel: d.typeLabel });
     }
-    for (const [k, h] of Object.entries(G.hiddenPorts || {})) if (h.dockId === CROWN_DOCK_ID) Object.assign(h, { name: d.name, type: d.type, typeLabel: d.typeLabel });
   }
   function ensureRoute(portSys) {
     const p = network().ports[portSys];
@@ -273,7 +283,7 @@
     if (!G.universeDocks[dock.id]) G.universeDocks[dock.id] = dock;
     dock = G.universeDocks[dock.id];
     const line = network().byId[p.lines[0]];
-    const moodKey = MOOD_BY_KIND[line && line.kind.key] || 'grasse';
+    const moodKey = (STATION_PORTS[p.dockId] && STATION_PORTS[p.dockId].mood) || MOOD_BY_KIND[line && line.kind.key] || 'grasse';
     const mood = (typeof ROUTE_MOODS !== 'undefined' && ROUTE_MOODS[moodKey]) || { stabilityRange: [60, 80], label: '' };
     const [a0, a1] = mood.stabilityRange || [60, 80];
     r = {
@@ -1277,7 +1287,7 @@
     dockMarketHtml, sellHere, withdrawOffer, buyOffer, learnRoute, noteRobbery, tickMarket, fetchOffers, sellableRoutes,
     ORDER_MODES, ordersOf, ordersLabel, chooseOrders, setOrders, pushOrders, pushNpc, holdCap, holdUsed, holdAll, fleetAtk, odds, oddsLabel,
     robNpc, tailNpc, tickAmbushes, capLegs, salesOn, soldChain, routesOf, reportSheet, npcReportCan, npcReportAction, ambushTravel, ambushAt, pollSpied, autoPlayers,
-    WINDOW_MS, EPOCH, CROWN_DOCK_ID,
+    WINDOW_MS, EPOCH, CROWN_DOCK_ID, SANCT_DOCK_ID, STATION_PORTS,
     _reset() { _net = null; },
   };
 })();

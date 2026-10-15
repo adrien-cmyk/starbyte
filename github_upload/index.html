@@ -5814,6 +5814,10 @@ svg.map {
   <button onclick="cheatCrownDock()">⚓ Tanker amarré à la Couronne (arrivée)</button>
   <button onclick="cheatCrownReplay()">🎬 Revoir l'arrivée à la Couronne</button>
   <button onclick="cheatPlanetAtRouteEnds()">🌍 Une planète au bout de mes routes</button>
+  <!-- PATCH_1510_SANCT_CHEATS -->
+  <button onclick="cheatCrownRoute(false, SANCT_DOCK_ID)">🗺 Révéler la route du Sanctuaire</button>
+  <button onclick="cheatCrownDock(SANCT_DOCK_ID)">⚓ Tanker amarré au Sanctuaire (arrivée)</button>
+  <button onclick="G.sanctSeen = 0; saveGame(); toast('La prochaine ouverture du dock du Sanctuaire rejoue l\'arrivée')">🎬 Revoir l'arrivée au Sanctuaire</button>
   <div class="cheat-divider"></div>
   <div class="cheat-label">Ressources</div>
   <button onclick="cheatRes('all', 10000)">+10k toutes ressources</button>
@@ -8603,7 +8607,7 @@ var EXTRA_SAVE_KEYS = [
   'mpDiplo',   // AMBASSADES_1210 — ambassades vues et dernière image des pactes
   'mpNeighbors',   // VOISINS_1310 — voisins déjà signalés
   'tuto',          // TUTO_1410 — premiers pas (étape, vu, terminé)
-  '_linesCrown', 'crownSeen',   // PATCH_1510_CROWN — lieu du secteur M devenu la Couronne, première arrivée vue
+  '_linesCrown', 'crownSeen', '_linesSanct', 'sanctSeen',   // PATCH_1510_CROWN — lieu du secteur M devenu la Couronne, première arrivée vue
 ];
 
 // Sauvegarde G complet dans localStorage. Appelé fréquemment, doit être rapide.
@@ -28132,15 +28136,15 @@ function _cheatSpawnPlanet(coord, opts) {
 
 // Crée une planète habitable LIBRE (colonisable, target pour tanker dropoff)
 // PATCH_1510_CHEAT_CROWN — tester la Couronne sans remonter la ligne balise après balise
-function _cheatCrownLine() {
+function _cheatCrownLine(id) {
   if (!window.SBLines) return null;
   const net = SBLines.network();
-  const port = Object.values(net.ports).find(x => x.dockId === SBLines.CROWN_DOCK_ID);
+  const port = Object.values(net.ports).find(x => x.dockId === (id || SBLines.CROWN_DOCK_ID));
   return port ? { port, line: net.byId[port.lines[0]] } : null;
 }
-function cheatCrownRoute(silent) {
-  const c = _cheatCrownLine();
-  if (!c) { toast('Couronne introuvable'); return null; }
+function cheatCrownRoute(silent, id) {
+  const c = _cheatCrownLine(id);
+  if (!c) { toast('Lieu introuvable'); return null; }
   if (!Array.isArray(G.spottedLegs)) G.spottedLegs = [];
   const ch = c.line.chain;
   ch.forEach((k, i) => {
@@ -28156,19 +28160,19 @@ function cheatCrownRoute(silent) {
   if (!(G.fleet.stationed.tanker.t1 > 0)) G.fleet.stationed.tanker.t1 = 2;
   if (typeof saveGame === 'function') saveGame();
   if (!silent) {
-    toast(`🗺 Route de la Couronne révélée : ${route ? route.name : ''} · ${ch.length} jalons`);
+    toast(`🗺 Route révélée : ${route ? route.name : ''} · ${ch.length} jalons`);
     if (typeof openSystemOnMap === 'function') { openSystemOnMap(c.port.sys); if (route && window.SBMap) setTimeout(() => SBMap.selectRoute(route.id), 900); }
   }
   return route;
 }
-function cheatCrownDock() {
-  const route = cheatCrownRoute(true);
+function cheatCrownDock(id) {
+  const route = cheatCrownRoute(true, id);
   if (!route) return;
   // un vrai départ par la ligne, arrivé tout de suite : l'amarrage se fait par le jeu lui-même
   const m = launchTankerOnRoute(route.id, 't1', { metal: 0, energie: 0, cristal: 0 });
   if (!m) { toast('Le tanker n\'a pas pu partir'); return; }
   m.arrivalAt = Date.now() - 1000;
-  G.crownSeen = 0;
+  if (id === SANCT_DOCK_ID) G.sanctSeen = 0; else G.crownSeen = 0;
   if (typeof tickTankerMissions === 'function') tickTankerMissions();
   if (typeof saveGame === 'function') saveGame();
   if (m.status === 'docked') { toggleCheatPanel(); openDockFromFleet(m.id); }
@@ -40215,7 +40219,17 @@ var CROWN_DOCK = {
   ambience: 'Elle dérive depuis plus longtemps que les cartes ne s\'en souviennent. Une couronne de laiton et de coques rapiécées, dix bras tendus vers le vide, des milliers de hublots ambrés. On y entre sans pavillon ; on en ressort avec des dettes, une route ou un ennemi.',
   detail: 'Au bord de l\'anneau, sous l\'enseigne dorée, le bar de la Couronne. Ici tout se vend : cargaisons, adresses, routes. Les bots du comptoir ont la mémoire longue, et la langue plus longue encore.',
 };
-function _crownDock(d) { return (d && d.id === CROWN_DOCK_ID) ? Object.assign(d, CROWN_DOCK) : d; }
+// PATCH_1510_SANCTUAIRE — le Sanctuaire du Linceul des Cendres : le lieu caché du secteur O
+var SANCT_DOCK_ID = 'dock-otqflf';
+var SANCT_DOCK = {
+  name: 'Sanctuaire du Linceul des Cendres', typeLabel: 'Bastion impérial', sub: 'station-colonie sur astéroïde · 5,2 km',
+  accent: '#a9c4e8', station: 'sanctuary',
+  ambience: 'Un astéroïde que l\'Empire a cuirassé pierre après pierre, au cœur d\'un nuage de cendres bleues que les pilotes appellent le Linceul. Quatorze bras d\'amarrage, des tours aux aiguilles rouges, une citadelle qui ne dort jamais. On y vient en pèlerin, en marchand ou en prisonnier.',
+  detail: 'Sous la verrière nord, la halle : pèlerins, marchands sous licence, officiers en permission. Ici on parle bas. Les bannières écoutent, et le registre impérial n\'oublie personne.',
+};
+CROWN_DOCK.station = 'crown';
+var STATION_DOCKS = { [CROWN_DOCK_ID]: CROWN_DOCK, [SANCT_DOCK_ID]: SANCT_DOCK };
+function _crownDock(d) { return (d && STATION_DOCKS[d.id]) ? Object.assign(d, STATION_DOCKS[d.id]) : d; }
 
 // ─── Registre des docks de l'univers (canon 18/05) ───
 // Une destination = un dock. On stocke ici les docks déjà rencontrés.
@@ -43594,6 +43608,8 @@ function _crownCss2() {
     .crh .cr-ttl{position:absolute;left:0;right:0;top:0;padding:calc(16px + env(safe-area-inset-top,0px)) 60px 30px;text-align:center;background:linear-gradient(180deg,rgba(1,2,7,.8),rgba(1,2,7,0));pointer-events:none}
     .crh .cr-ttl small{display:block;font-size:9.5px;letter-spacing:.32em;color:#f0b54a;margin-bottom:4px}
     .crh .cr-ttl b{display:block;font-size:18px;letter-spacing:.14em;color:#ffd27a;font-weight:700;text-shadow:0 0 18px rgba(255,170,60,.45)}
+    .crh .cr-ttl b.long{font-size:15px;letter-spacing:.08em}
+    .crh .cr-intro b.long{font-size:19px;letter-spacing:.1em}
     .crh .cr-ttl span{display:block;margin-top:4px;font-size:10px;letter-spacing:.1em;color:rgba(230,240,255,.7)}
     .crh .cr-chips{position:absolute;left:0;right:0;top:calc(env(safe-area-inset-top,0px) + 92px);display:flex;justify-content:center;gap:6px}
     .crh .cr-chip{white-space:nowrap;padding:6px 12px;border-radius:999px;border:1px solid rgba(240,181,74,.4);background:rgba(10,8,4,.5);color:#ffd27a;font:inherit;font-size:10.5px;letter-spacing:.08em;cursor:pointer}
@@ -43650,21 +43666,42 @@ function _crownCss2() {
     .sm-panel .smc-enter{margin:12px -36px 4px 0;width:calc(100% + 36px)}`;
   document.head.appendChild(st);
 }
+// PATCH_1510_SANCTUAIRE — chaque station : son modèle, ses textes, ses cadrages
+var STATION_UI = {
+  crown: { id: 'dock-37oe89', profile: 'crown', url: 'assets/3d/sb_dc01.glb?v=20261015-1000', kicker: 'PORT-FRANC', title: 'THE DRIFTING CROWN',
+    sub: 'station pirate à la dérive', chips: { dock: 'Le dock', bar: 'Le bar', port: 'La station' }, crewAt: 'au bar', place: 'le bar', seen: 'crownSeen',
+    intro: 'Une couronne de laiton à la dérive. Dix bras tendus vers le vide, des milliers de hublots ambrés : ton tanker vient d\'entrer au port franc.', enter: 'ENTRER AU PORT',
+    hall: { t: 'Le bar de la Couronne', s: 'Sous l\'enseigne dorée, au bord de l\'anneau. Ceux qui sont à quai, les marchés, les rumeurs, les cartes au comptoir.', i: 'VOIR LE BAR ↑' } },
+  sanctuary: { id: 'dock-otqflf', profile: 'sanctuary', url: 'assets/3d/sb_sc01.glb?v=20261015-1900', kicker: 'BASTION IMPÉRIAL', title: 'SANCTUAIRE DU LINCEUL',
+    sub: 'bastion impérial sur astéroïde', long: true, chips: { dock: 'Le dock', bar: 'La halle', port: 'Le bastion' }, crewAt: 'à la halle', place: 'la halle', seen: 'sanctSeen',
+    intro: 'Un astéroïde cuirassé surgit du Linceul. Des tours aux aiguilles rouges, des baies qui s\'allument une à une : le Sanctuaire t\'a vu venir.', enter: 'ENTRER AU SANCTUAIRE',
+    hall: { t: 'La halle du Sanctuaire', s: 'Sous la verrière nord, entre les bannières impériales. Ceux qui sont à quai, les marchés, ce qui se murmure entre pèlerins.', i: 'VOIR LA HALLE ↑' } },
+};
+// une station en 3D pour ce dock (objet dock ou identifiant) ?
+function stationUI(d) {
+  const id = d && typeof d === 'object' ? d.id : d;
+  for (const k in STATION_UI) if (STATION_UI[k].id === id) return STATION_UI[k];
+  return null;
+}
 // PATCH_1510_CROWN_SCENE2
 function _crEsc(x) { return String(x == null ? '' : x).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
 // où en est-on à la Couronne : tanker amarré (dock), équipage au bar (séjour en cours), ou personne
-function crownMission() {
-  return (G.tankerMissions || []).find(m => m.status === 'docked' && m.dock && m.dock.id === CROWN_DOCK_ID) || null;
+function crownMission(id) {
+  id = id || CROWN_DOCK_ID;
+  return (G.tankerMissions || []).find(m => m.status === 'docked' && m.dock && m.dock.id === id) || null;
 }
-function crownState() {
-  const m = crownMission();
-  if (m) return { m, view: m.dockStay ? 'bar' : 'dock', label: m.dockStay ? `${m.tankerName} amarré · l'équipage est au bar` : `${m.tankerName} est amarré au dock` };
-  const inbound = (G.tankerMissions || []).find(x => x.status === 'in_transit' && ((x.dock && x.dock.id === CROWN_DOCK_ID) || x.routeId === 'rt-ln-' + CROWN_DOCK_ID));
+function crownState(id) {
+  id = id || CROWN_DOCK_ID;
+  const U = stationUI(id) || STATION_UI.crown;
+  const m = crownMission(id);
+  if (m) return { m, view: m.dockStay ? 'bar' : 'dock', label: m.dockStay ? `${m.tankerName} amarré · l'équipage est ${U.crewAt}` : `${m.tankerName} est amarré au dock` };
+  const inbound = (G.tankerMissions || []).find(x => x.status === 'in_transit' && ((x.dock && x.dock.id === id) || x.routeId === 'rt-ln-' + id));
   return { m: null, inbound, view: 'port', label: inbound ? `${inbound.tankerName} en route · arrivée dans ${typeof formatTankerDuration === 'function' ? formatTankerDuration(Math.max(0, (inbound.arrivalAt || 0) - Date.now())) : '…'}` : 'aucun tanker à quai' };
 }
-function _crownPort() {
+function _crownPort(id) {
   if (!window.SBLines) return null;
-  return Object.values(SBLines.network().ports).find(x => x.dockId === CROWN_DOCK_ID) || null;
+  id = id || CROWN_DOCK_ID;
+  return Object.values(SBLines.network().ports).find(x => x.dockId === id) || null;
 }
 // ENTRER : selon ce qui se passe là-bas, la bonne vue
 function _crScroll(sc, top) {
@@ -43674,32 +43711,35 @@ function _crScroll(sc, top) {
   const step = (now) => { const k = Math.min(1, (now - t0) / 380), e = 1 - Math.pow(1 - k, 3); sc.scrollTop = from + d * e; if (k < 1) requestAnimationFrame(step); };
   requestAnimationFrame(step);
 }
-function crownEnter() {
-  const st = crownState();
+function crownEnter(id) {
+  id = id || CROWN_DOCK_ID;
+  const st = crownState(id);
   if (st.m) { if (typeof crownSpaceClose === 'function') crownSpaceClose(); openDockFromFleet(st.m.id); return; }
-  crownSpaceOpen();
+  crownSpaceOpen(id);
 }
 function crownDockHero(dock) {
   const scr = document.getElementById('scr-dock');
   const scroll = scr && scr.querySelector('.screen-scroll');
-  if (!dock || !dock.crown || !scroll || !window.WebGLRenderingContext) { crownUnmount(); return; }
+  const U = stationUI(dock);
+  if (!dock || !U || !scroll || !window.WebGLRenderingContext) { crownUnmount(); return; }
+  if (_crown && _crown.U !== U) crownUnmount();   // on passe d'une station à l'autre
   const m = (G.tankerMissions || []).find(x => x.id === _activeDockMissionId);
   const want = m && m.dockStay ? 'bar' : 'dock';
-  const sub = m ? (m.dockStay ? `${m.tankerName} amarré · ton équipage est au bar` : `${m.tankerName} est amarré · choisis la durée du séjour`) : '';
+  const sub = m ? (m.dockStay ? `${m.tankerName} amarré · ton équipage est ${U.crewAt}` : `${m.tankerName} est amarré · choisis la durée du séjour`) : '';
   if (_crown && _crown.el.isConnected) {
     if (_crown.state !== want) { _crown.state = want; if (!_crown.first) crownSetView(want); }
     const gs = _crown.grip.querySelector('span'); if (gs.textContent !== sub) gs.textContent = sub;
     return;
   }
   _crownCss(); _crownCss2();
-  const first = !G.crownSeen;
+  const first = !G[U.seen];
   const sys = typeof mpDockSystem === 'function' ? mpDockSystem(dock) : '';
   const el = document.createElement('div');
   el.id = 'crown-scene3d'; el.className = 'crh';
-  el.innerHTML = `<div class="cr-ttl"><small>PORT-FRANC</small><b>THE DRIFTING CROWN</b><span>${sys ? '⌖ ' + sys + ' · ' : ''}station pirate à la dérive</span></div>
-    <div class="cr-chips"><button class="cr-chip" data-v="dock">Le dock</button><button class="cr-chip" data-v="bar">Le bar</button><button class="cr-chip" data-v="port">La station</button></div>
+  el.innerHTML = `<div class="cr-ttl"><small>${U.kicker}</small><b${U.long ? ' class="long"' : ''}>${U.title}</b><span>${sys ? '⌖ ' + sys + ' · ' : ''}${U.sub}</span></div>
+    <div class="cr-chips"><button class="cr-chip" data-v="dock">${U.chips.dock}</button><button class="cr-chip" data-v="bar">${U.chips.bar}</button><button class="cr-chip" data-v="port">${U.chips.port}</button></div>
     <div class="cr-load"><i></i></div>
-    <div class="cr-intro"><b>THE DRIFTING CROWN</b><span>Une couronne de laiton à la dérive. Dix bras tendus vers le vide, des milliers de hublots ambrés : ton tanker vient d'entrer au port franc.</span><button class="cr-big">ENTRER AU PORT</button></div>`;
+    <div class="cr-intro"><b${U.long ? ' class="long"' : ''}>${U.title}</b><span>${U.intro}</span><button class="cr-big">${U.enter}</button></div>`;
   scr.insertBefore(el, scroll);
   const space = document.createElement('div'); space.id = 'crown-space';
   const grip = document.createElement('div'); grip.id = 'crown-grip';
@@ -43707,14 +43747,14 @@ function crownDockHero(dock) {
   scroll.insertBefore(space, scroll.firstChild); space.after(grip);
   scr.classList.add('cr-scene'); if (first) scr.classList.add('cr-first');
   const fit = () => {};   // PATCH_1510_CROWN_SHEET : le tiroir a sa propre hauteur
-  _crown = { el, space, grip, scr, scroll, handle: null, state: want, first, fit };
+  _crown = { el, space, grip, scr, scroll, handle: null, state: want, first, fit, U };
   fit(); scroll.scrollTop = 0;
   window.addEventListener('resize', fit);
   const load = el.querySelector('.cr-load i');
   const start = () => {
     if (!_crown || _crown.el !== el) return;
     _crown.handle = window.Station3D.mount(el, {
-      url: CROWN_URL, view: first ? 'port' : want, intro: first, interactive: true, tanker: true,
+      url: U.url, profile: U.profile, view: first ? 'port' : want, intro: first, interactive: true, tanker: true,
       onProgress: (k) => { load.style.width = Math.round(k * 100) + '%'; },
       onReady: () => { el.classList.add('ready'); if (first) setTimeout(() => el.querySelector('.cr-intro').classList.add('on'), 3800); },
       onError: () => { crownUnmount(); },
@@ -43745,7 +43785,7 @@ function crownDockHero(dock) {
     else crownSheet(dy < 0);
   });
   grip.addEventListener('pointercancel', () => { g0 = null; });
-  if (first) { G.crownSeen = Date.now(); if (typeof saveGame === 'function') saveGame(); }
+  if (first) { G[U.seen] = Date.now(); if (typeof saveGame === 'function') saveGame(); }
 }
 function crownSheet(open) {
   if (!_crown) return;
@@ -43778,39 +43818,42 @@ function crownUnmount() {
   const banner = document.getElementById('dock-banner'); if (banner) banner.style.display = '';
 }
 // le bar : l'en-tête de la section des commandants à quai ; il envoie la caméra sur la façade
-function crownBarHeader() {
-  return `<div class="crown-bar" onclick="crownShowBar()"><b>🍸 Le bar de la Couronne</b><span>Sous l'enseigne dorée, au bord de l'anneau. Ceux qui sont à quai, les marchés, les rumeurs, les cartes au comptoir.</span><i>VOIR LE BAR ↑</i></div>`;
+function crownBarHeader(dock) {
+  const U = stationUI(dock) || STATION_UI.crown;
+  return `<div class="crown-bar" onclick="crownShowBar()"><b>${U.hall.t}</b><span>${U.hall.s}</span><i>${U.hall.i}</i></div>`;
 }
 // PATCH_1510_CROWN_SCENE — la vue spatiale : la station en plein écran, une fiche refermable par-dessus
 var _crownSpace = null;
-function crownSpaceOpen() {
+function crownSpaceOpen(id) {
   if (_crownSpace || !window.WebGLRenderingContext) return;
+  id = id || CROWN_DOCK_ID;
+  const U = stationUI(id) || STATION_UI.crown, D = STATION_DOCKS[id] || CROWN_DOCK;
   _crownCss(); _crownCss2();
-  const port = _crownPort();
-  const st = crownState();
-  const route = port && (G.routes || []).find(r => r.portSys === port.sys || r.dockId === CROWN_DOCK_ID);
+  const port = _crownPort(id);
+  const st = crownState(id);
+  const route = port && (G.routes || []).find(r => r.portSys === port.sys || r.dockId === id);
   const e = _crEsc;
   let acts = '';
   const _sendLbl = route && typeof routeNextTankerLabel === 'function' ? routeNextTankerLabel(route.id) : 'Envoyer un tanker';   // PATCH_1510_ROUTE_MULTI
   if (st.inbound) acts = (route ? `<button class="cr-big" data-a="send">${e(_sendLbl).toUpperCase()}</button>` : '') + `<div class="crs-row"><button data-a="mission">Voir la mission de ${e(st.inbound.tankerName)}</button></div>`;
-  else if (route) acts = `<button class="cr-big" data-a="send">${e(_sendLbl).toUpperCase()}</button><div class="crs-row"><button data-a="route">Voir la route</button><button data-a="bar">Voir le bar</button></div><div class="crs-note">Un tanker suit la ligne jusqu'au dock. Amarré, tu entres au port ; à quai, ton équipage descend au bar.</div>`;
-  else acts = `<div class="crs-row"><button data-a="bar">Voir le bar</button></div><div class="crs-note">Aucune route connue jusqu'ici : remonte la ligne balise après balise pour y envoyer un tanker.</div>`;
+  else if (route) acts = `<button class="cr-big" data-a="send">${e(_sendLbl).toUpperCase()}</button><div class="crs-row"><button data-a="route">Voir la route</button><button data-a="bar">Voir ${U.place}</button></div><div class="crs-note">Un tanker suit la ligne jusqu'au dock. Amarré, tu entres ; à quai, ton équipage descend ${U.crewAt}.</div>`;
+  else acts = `<div class="crs-row"><button data-a="bar">Voir ${U.place}</button></div><div class="crs-note">Aucune route connue jusqu'ici : remonte la ligne balise après balise pour y envoyer un tanker.</div>`;
   const el = document.createElement('div'); el.id = 'crown-sp';
   el.innerHTML = `<div class="crh">
-      <div class="cr-ttl"><small>PORT-FRANC</small><b>THE DRIFTING CROWN</b><span>${port ? '⌖ ' + e(port.sys) + ' · ' : ''}${e(st.label)}</span></div>
-      <div class="cr-chips"><button class="cr-chip on" data-v="port">La station</button><button class="cr-chip" data-v="bar">Le bar</button></div>
+      <div class="cr-ttl"><small>${U.kicker}</small><b${U.long ? ' class="long"' : ''}>${U.title}</b><span>${port ? '⌖ ' + e(port.sys) + ' · ' : ''}${e(st.label)}</span></div>
+      <div class="cr-chips"><button class="cr-chip on" data-v="port">${U.chips.port}</button><button class="cr-chip" data-v="bar">${U.chips.bar}</button></div>
       <div class="cr-load"><i></i></div>
     </div>
     <div class="crs-hint">Glisser pour tourner · pincer pour zoomer</div>
     <button class="crs-x" aria-label="Fermer">×</button>
-    <div class="crs-card"><div class="crs-grip"><i></i></div><div class="crs-k">PORT-FRANC</div><div class="crs-t">The Drifting Crown</div><div class="crs-s">${e(st.label)}</div>
-      <div class="crs-body"><p>${e(CROWN_DOCK.ambience)}</p>${acts}</div></div>`;
+    <div class="crs-card"><div class="crs-grip"><i></i></div><div class="crs-k">${U.kicker}</div><div class="crs-t">${e(D.name)}</div><div class="crs-s">${e(st.label)}</div>
+      <div class="crs-body"><p>${e(D.ambience)}</p>${acts}</div></div>`;
   document.body.appendChild(el);
   const hero = el.querySelector('.crh'), load = el.querySelector('.cr-load i'), card = el.querySelector('.crs-card');
   _crownSpace = { el, handle: null };
   const start = () => {
     if (!_crownSpace || _crownSpace.el !== el) return;
-    _crownSpace.handle = window.Station3D.mount(hero, { url: CROWN_URL, view: 'port', intro: true, interactive: true,
+    _crownSpace.handle = window.Station3D.mount(hero, { url: U.url, profile: U.profile, view: 'port', intro: true, interactive: true,
       onProgress: (k) => { load.style.width = Math.round(k * 100) + '%'; },
       onReady: () => { hero.classList.add('ready'); setTimeout(() => el.classList.add('shown'), 2600); },
       onError: () => crownSpaceClose() });
@@ -43914,7 +43957,7 @@ function renderDockScreen() {
     ${_renderDockStaySection(mission, dock)}
 
     <!-- MP : commandants à quai, marchés, rumeurs du comptoir -->
-    ${dock.crown ? crownBarHeader() : ''}
+    ${stationUI(dock) ? crownBarHeader(dock) : ''}
     ${_renderDockPlayersSection(mission, dock)}
 
     <!-- D3 : Autres convois amarrés -->
@@ -45790,7 +45833,7 @@ if (G.knownTargets && Array.isArray(G.tankerMissions)) {
 <!-- PERF_1310 — mesure des performances chez les joueurs + qualité 3D automatique (assets/perf.js) -->
 <script src="assets/perf.js?v=20261014-1540"></script>
 <!-- PATCH_1410_LIGNES — lignes PNJ à horaire sur les routes cachées (assets/lines.js) -->
-<script src="assets/lines.js?v=20261015-1520"></script>
+<script src="assets/lines.js?v=20261015-1900"></script>
 <!-- CLOUD — sauvegarde Supabase (source : sb-build/src/cloud.js) -->
 <script type="module" src="assets/cloud.js?v=20261014-1440"></script>
 <!-- MATCH3 — Match-3 V2 (assets/match3.js, source src/match3.js + src/m3core.js) : remplace startM3 -->
@@ -45809,7 +45852,7 @@ if (G.knownTargets && Array.isArray(G.tankerMissions)) {
 <!-- PATCH_1510_MISSIONS — tout ce qui vole, fiche de mission des tankers -->
 <script src="assets/missions.js?v=20261015-2130"></script>
 <!-- PATCH_1510_CROWN — The Drifting Crown en 3D (assets/station3d.js, sur le moteur partagé window.SB3D) -->
-<script type="module" src="assets/station3d.js?v=20261015-2000"></script>
+<script type="module" src="assets/station3d.js?v=20261015-2200"></script>
 <!-- FORMATION3D — flotte déployée en orbite, vue de haut en formation (remplace la vue orbite) -->
 <script src="assets/formation3d.js?v=20261014-1440"></script>
 </body>
