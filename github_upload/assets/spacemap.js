@@ -553,6 +553,11 @@
       const li = sys && sys.li;
       const title = li && li.port ? `${esc(li.port.name)}` : `Système ${esc(s.key)}`;
       const sub = li && li.port ? `<span class="mono">${esc(s.key)}</span> · ${esc(li.port.typeLabel || 'lieu caché')}` : (bits.join(' · ') || (li && (li.lane || li.echo || li.obs.length) ? 'Couloir de passage' : 'Balayé, rien de relevé.'));
+      // 15/10 (Adrien) — la Couronne : PORT-FRANC, son nom, un gros bouton ENTRER (la bonne vue 3D selon ce qui se passe là-bas)
+      if (li && li.port && window.SBLines && li.port.dockId === SBLines.CROWN_DOCK_ID && typeof crownEnter === 'function') {
+        const cs = typeof crownState === 'function' ? crownState() : { label: '' };
+        return `<div class="sm-panel"><div class="smc-k">PORT-FRANC</div><div class="smc-t">${esc(li.port.name)}</div><div class="sm-psub"><span class="mono">${esc(s.key)}</span> · ${esc(cs.label)}</div><button class="cr-big smc-enter" onclick="event.stopPropagation();crownEnter()">ENTRER</button>${laneHtml(s.key, li)}${postsHtml(s.key)}${spottedHtml(s.key)}${beaconAction(s.key, sys)}</div>`;
+      }
       return `<div class="sm-panel"><div class="sm-ptitle"${li && li.port ? ' style="color:#ffc864"' : ''}>${title}</div><div class="sm-psub">${sub}${tagTxt}</div>${laneHtml(s.key, li)}${postsHtml(s.key)}${spottedHtml(s.key)}${insp}${act}${scoutHtml(s.key, sys)}${beaconAction(s.key, sys)}</div>`;
     }
     if (s.kind === 'sig') {
@@ -1664,11 +1669,11 @@
     const ago = (t) => { const m = Math.max(1, Math.round((Date.now() - t) / 60000)); return m < 60 ? `il y a ${m} min` : m < 1440 ? `il y a ${Math.round(m / 60)} h` : `il y a ${Math.round(m / 1440)} j`; };
     const hasBeacon = myBeacons().some(b => beaconSys(b) === sysKey);
     const rows = [];
+    const isCrown = !!(li.port && window.SBLines && li.port.dockId === SBLines.CROWN_DOCK_ID);
     if (li.port) {
       const r = li.route;
-      rows.push(`<div class="sm-lane port"><b>Lieu caché</b><span>${r ? `Route connue : ${esc(r.name)}. Tes tankers peuvent s'y amarrer : dock, bar, marchés.` : 'Une ligne y mène.'}</span></div>`);
+      if (!isCrown) rows.push(`<div class="sm-lane port"><b>Lieu caché</b><span>${r ? `Route connue : ${esc(r.name)}. Tes tankers peuvent s'y amarrer : dock, bar, marchés.` : 'Une ligne y mène.'}</span></div>`);
       if (r) rows.push(_sigBtn('#ffc864', 'Envoyer un tanker', `openTankerComposeForRoute('${esc(r.id)}')`, 'Il suit la ligne jusqu\'au dock', true) + _sigBtn('#ffc864', 'Voir la route', `SBMap.selectRoute('${esc(r.id)}')`, '', true));
-      if (window.SBLines && li.port.dockId === SBLines.CROWN_DOCK_ID && typeof crownOpenViewer === 'function') rows.unshift(_sigBtn('#f0b54a', 'Voir la station en 3D', 'crownOpenViewer()', 'The Drifting Crown · la station et son bar', true));
     }
     if (li.fromCard && !li.obs.length && !li.port) rows.push(`<div class="sm-lane"><b>Piste de « ${esc(li.fromCard)} »</b><span>La carte mène ici. Pose une balise pour voir passer les convois et relever leur cap.</span></div>`);
     for (const o of li.obs) {

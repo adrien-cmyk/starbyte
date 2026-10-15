@@ -9514,7 +9514,7 @@ function renderFlagReportDetail(r) {
   document.getElementById('report-detail-meta').textContent = `${fl.from || '?'} · ${new Date(fl.at || r.returnedAt).toLocaleString('fr-FR')}`;
   const el = document.getElementById('report-detail-content');
   if (!el) return;
-  const canReply = !fl.replied && Date.now() - (fl.at || 0) < 24 * 3600e3 && window.SBMP && window.SBMP.ready();
+  const canReply = !fl.replied && !fl.tooOld && window.SBMP && window.SBMP.ready();   // PATCH_1510_FLAGS : plus de délai de 24 h
   el.innerHTML = `
     <div style="margin:0 16px 14px;padding:22px 18px;border:1px solid ${(def.color || '#5fffe8')}55;border-radius:12px;background:rgba(20,25,30,.6);text-align:center">
       <div style="font-size:10px;color:var(--mut);letter-spacing:.16em;text-transform:uppercase">Pavillon hissé ${MP_FLAG_CONTEXT[fl.context] || ''}</div>
@@ -9524,8 +9524,8 @@ function renderFlagReportDetail(r) {
     </div>
     <div style="margin:0 16px 14px">
       ${fl.replied ? `<div style="font-size:12px;color:var(--mut);font-style:italic;text-align:center;padding:10px">Tu as répondu à ce pavillon.</div>`
-        : canReply ? `<div style="font-size:10px;color:var(--mut);letter-spacing:.12em;text-transform:uppercase;margin-bottom:8px">Répondre · une fois, dans les 24 h</div>${_mpFlagChips(`mpReplyFlag.bind(null,'${r.id}')`)}`
-        : `<div style="font-size:12px;color:var(--mut);font-style:italic;text-align:center;padding:10px">${Date.now() - (fl.at || 0) >= 24 * 3600e3 ? 'Le délai de réponse est passé. Envoie un tanker en vigie chez lui pour rouvrir le canal.' : 'Registre hors ligne pour le moment.'}</div>`}
+        : canReply ? `<div style="font-size:10px;color:var(--mut);letter-spacing:.12em;text-transform:uppercase;margin-bottom:8px">Répondre · une fois</div>${_mpFlagChips(`mpReplyFlag.bind(null,'${r.id}')`)}`
+        : `<div style="font-size:12px;color:var(--mut);font-style:italic;text-align:center;padding:10px">${fl.tooOld ? 'Le registre refuse encore les réponses tardives (mise à jour du serveur à passer). Envoie un tanker en vigie chez lui pour rouvrir le canal.' : 'Registre hors ligne pour le moment.'}</div>`}
     </div>`;
 }
 async function mpReplyFlag(reportId, key) {
@@ -9536,7 +9536,7 @@ async function mpReplyFlag(reportId, key) {
     r.flag.replied = true;
     toast(`Réponse hissée : « ${(MP_FLAG_BY_KEY[key] || {}).label || key} »`);
     if (typeof saveGame === 'function') saveGame();
-  } catch (e) { toast(_mpFlagErr(e)); if (/already_replied/.test(String(e && e.message))) r.flag.replied = true; }
+  } catch (e) { toast(_mpFlagErr(e)); if (/already_replied/.test(String(e && e.message))) r.flag.replied = true; if (/flag_too_old/.test(String(e && e.message))) r.flag.tooOld = true; }
   renderFlagReportDetail(r);
 }
 // Défenseur → assaillant, depuis le rapport de défense
@@ -11708,6 +11708,7 @@ function prospectLocked() {
 
 function goto(scr, opts) {
   if (scr !== 'dock' && typeof crownUnmount === 'function') crownUnmount();   // PATCH_1510_CROWN
+  if (typeof crownSpaceClose === 'function') crownSpaceClose();   // PATCH_1510_CROWN_SCENE
   setTimeout(() => { const el = document.getElementById('scr-' + scr); const sc = el && el.querySelector('.screen-scroll'); if (sc) updateHeroScrim(sc); }, 60);
   opts = opts || {};
   // ORBITE = ARMER (10/10/2026) : la construction navale n'existe qu'avec le chantier orbital.
@@ -36817,7 +36818,7 @@ var MP_FLAG_KEY = { peace: 'paix', trade: 'commerce', alliance: 'alliance', why_
 var MP_FLAG_BY_KEY = {};
 PLAYER_MESSAGE_FLAGS.forEach(f => { MP_FLAG_BY_KEY[MP_FLAG_KEY[f.id]] = f; });
 var MP_FLAG_ERRORS = { flag_quota: 'Assez de pavillons pour aujourd\'hui (20 par jour)', target_unknown: 'Ce commandant n\'est plus au registre',
-  already_replied: 'Tu as déjà répondu à ce pavillon', flag_too_old: 'Trop tard pour répondre (24 h)', already_flagged_this_stay: 'Un pavillon par convoi et par séjour',
+  already_replied: 'Tu as déjà répondu à ce pavillon', flag_too_old: 'Le registre n\'accepte pas encore les réponses tardives', already_flagged_this_stay: 'Un pavillon par convoi et par séjour',
   convoy_gone: 'Ce convoi a quitté le dock', not_docked: 'Ton séjour est terminé', no_world: 'Ton monde n\'est pas encore au registre' };
 function _mpFlagErr(e) {
   const code = (String(e && e.message || e).match(/[a-z_]+/g) || []).find(c => MP_FLAG_ERRORS[c]);
@@ -43465,72 +43466,183 @@ function _crownCss() {
     .crown-bar i{display:inline-block;margin-top:8px;font-style:normal;font-size:10px;letter-spacing:.12em;color:#f0b54a}`;
   document.head.appendChild(st);
 }
+// ═══ PATCH_1510_CROWN_SCENE — la Couronne en plein écran, le panneau par-dessus (comme la flotte) ═══
+function _crownCss2() {
+  if (document.getElementById('crown-css2')) return;
+  const st = document.createElement('style'); st.id = 'crown-css2';
+  st.textContent = `
+    .crh{position:absolute;inset:0;z-index:0;overflow:hidden;background:#010207}
+    .crh canvas{touch-action:none}
+    .crh>div{z-index:2}
+    .crh .cr-ttl{position:absolute;left:0;right:0;top:0;padding:calc(16px + env(safe-area-inset-top,0px)) 60px 30px;text-align:center;background:linear-gradient(180deg,rgba(1,2,7,.8),rgba(1,2,7,0));pointer-events:none}
+    .crh .cr-ttl small{display:block;font-size:9.5px;letter-spacing:.32em;color:#f0b54a;margin-bottom:4px}
+    .crh .cr-ttl b{display:block;font-size:18px;letter-spacing:.14em;color:#ffd27a;font-weight:700;text-shadow:0 0 18px rgba(255,170,60,.45)}
+    .crh .cr-ttl span{display:block;margin-top:4px;font-size:10px;letter-spacing:.1em;color:rgba(230,240,255,.7)}
+    .crh .cr-chips{position:absolute;left:0;right:0;top:calc(env(safe-area-inset-top,0px) + 92px);display:flex;justify-content:center;gap:6px}
+    .crh .cr-chip{white-space:nowrap;padding:6px 12px;border-radius:999px;border:1px solid rgba(240,181,74,.4);background:rgba(10,8,4,.5);color:#ffd27a;font:inherit;font-size:10.5px;letter-spacing:.08em;cursor:pointer}
+    .crh .cr-chip.on{background:rgba(240,181,74,.22);border-color:#f0b54a;color:#fff3d6}
+    .crh .cr-load{position:absolute;left:16px;right:16px;top:46%;height:2px;background:rgba(255,255,255,.08);border-radius:2px;overflow:hidden}
+    .crh .cr-load i{display:block;height:100%;width:0;background:#f0b54a;transition:width .2s}
+    .crh.ready .cr-load{display:none}
+    .crh .cr-intro{position:absolute;left:0;right:0;bottom:calc(60px + env(safe-area-inset-bottom,0px));text-align:center;opacity:0;pointer-events:none;transition:opacity 1.6s}
+    .crh .cr-intro.on{opacity:1;pointer-events:auto}
+    .crh .cr-intro b{display:block;font-size:24px;letter-spacing:.2em;color:#ffd27a;text-shadow:0 0 24px rgba(255,170,60,.6)}
+    .crh .cr-intro span{display:block;margin:8px 0 18px;font-size:12px;color:rgba(230,240,255,.85);font-style:italic;font-family:'Charter','Iowan Old Style',Georgia,serif;padding:0 28px;line-height:1.55}
+    .cr-big{display:block;width:100%;padding:15px;border-radius:12px;border:1px solid #f0b54a;background:linear-gradient(180deg,rgba(240,181,74,.32),rgba(240,181,74,.14));color:#fff3d6;font:inherit;font-size:14px;font-weight:700;letter-spacing:.26em;cursor:pointer;box-shadow:0 0 22px rgba(240,181,74,.18)}
+    .cr-big:active{background:rgba(240,181,74,.4)}
+    .crh .cr-intro .cr-big{width:auto;display:inline-block;padding:13px 30px}
+    /* écran du dock de la Couronne : la 3D derrière, les cartes défilent par-dessus */
+    #scr-dock.cr-scene > .stars,#scr-dock.cr-scene > .glow,#scr-dock.cr-scene .head,#scr-dock.cr-scene #dock-banner{display:none !important}
+    #scr-dock.cr-scene{background:#010207}
+    #scr-dock.cr-scene .screen-scroll{pointer-events:none}
+    #scr-dock.cr-scene .screen-scroll > *{pointer-events:auto}
+    #scr-dock.cr-scene #crown-space{pointer-events:none}
+    #crown-grip{margin:0 10px;padding:9px 14px 10px;border-radius:16px 16px 0 0;background:rgba(8,9,14,.92);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);border:1px solid rgba(240,181,74,.32);border-bottom:0;text-align:center;cursor:pointer}
+    #crown-grip i{display:block;width:38px;height:4px;border-radius:2px;background:rgba(240,181,74,.45);margin:0 auto 8px}
+    #crown-grip b{display:block;font-size:13px;letter-spacing:.08em;color:#ffd27a}
+    #crown-grip span{display:block;margin-top:3px;font-size:10.5px;color:rgba(230,240,255,.7)}
+    #scr-dock.cr-scene #dock-body{margin:0 10px;padding:10px 12px 14px !important;background:rgba(8,9,14,.92);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);border:1px solid rgba(240,181,74,.18);border-top:0;border-radius:0 0 16px 16px}
+    #scr-dock.cr-scene footer.actions{background:linear-gradient(0deg,rgba(1,2,7,.92),rgba(1,2,7,.6));padding-top:10px}
+    #scr-dock.cr-first .screen-scroll,#scr-dock.cr-first footer.actions,#scr-dock.cr-first .cr-chips,#scr-dock.cr-first .w-screen-x{opacity:0;pointer-events:none !important}
+    #scr-dock.cr-first .cr-ttl{opacity:0}
+    /* vue spatiale (pas de tanker à quai) : par-dessus tout, une fiche refermable */
+    #crown-sp{position:fixed;inset:0;z-index:9000;background:#010207}
+    #crown-sp .crs-x{position:absolute;right:10px;top:calc(env(safe-area-inset-top,0px) + 10px);z-index:5;width:42px;height:42px;border-radius:50%;border:1px solid rgba(255,255,255,.22);background:rgba(1,2,7,.6);color:#e6f0ff;font-size:22px;line-height:40px;text-align:center;cursor:pointer;padding:0}
+    #crown-sp .crs-card{position:absolute;left:10px;right:10px;bottom:calc(env(safe-area-inset-bottom,0px) + 12px);z-index:4;max-height:56%;overflow-y:auto;padding:0 14px 14px;border-radius:16px;background:rgba(8,9,14,.92);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);border:1px solid rgba(240,181,74,.32);transition:transform .25s ease;opacity:0;transform:translateY(20px)}
+    #crown-sp.shown .crs-card{opacity:1;transform:none;transition:opacity .5s,transform .5s}
+    #crown-sp .crs-grip{padding:9px 0 4px;cursor:pointer;text-align:center}
+    #crown-sp .crs-grip i{display:block;width:38px;height:4px;border-radius:2px;background:rgba(240,181,74,.45);margin:0 auto}
+    #crown-sp .crs-k{font-size:9.5px;letter-spacing:.32em;color:#f0b54a;text-align:center;margin-top:6px}
+    #crown-sp .crs-t{font-size:20px;letter-spacing:.1em;color:#ffd27a;font-weight:700;text-align:center;margin-top:4px}
+    #crown-sp .crs-s{font-size:10.5px;color:rgba(230,240,255,.7);text-align:center;margin:4px 0 12px}
+    #crown-sp .crs-body p{margin:0 0 12px;font-size:12.5px;line-height:1.65;color:#e6f0ff;font-style:italic;font-family:'Charter','Iowan Old Style',Georgia,serif}
+    #crown-sp .crs-row{display:flex;gap:8px;margin-top:8px}
+    #crown-sp .crs-row button{flex:1;padding:11px 8px;border-radius:10px;border:1px solid rgba(240,181,74,.35);background:rgba(240,181,74,.06);color:#ffd27a;font:inherit;font-size:11.5px;cursor:pointer}
+    #crown-sp .crs-note{font-size:11px;color:var(--mut);text-align:center;font-style:italic;line-height:1.5;margin-top:10px}
+    #crown-sp .crs-card.min .crs-body{display:none}
+    #crown-sp .crs-card.min .crs-s{margin-bottom:4px}
+    #crown-sp.shown:not(.cmin) .crh .cr-ttl{opacity:0}
+    #crown-sp .crh .cr-ttl{transition:opacity .3s}
+    #crown-sp .crs-hint{position:absolute;left:0;right:0;top:calc(env(safe-area-inset-top,0px) + 128px);text-align:center;font-size:10px;letter-spacing:.08em;color:rgba(230,240,255,.5);z-index:3;pointer-events:none}
+    /* carte : la fiche de la Couronne */
+    .sm-panel .smc-k{font-size:9.5px;letter-spacing:.32em;color:#f0b54a}
+    .sm-panel .smc-t{font-size:19px;letter-spacing:.08em;color:#ffd27a;font-weight:700;margin:3px 0 2px}
+    .sm-panel .smc-enter{margin:12px -36px 4px 0;width:calc(100% + 36px)}`;
+  document.head.appendChild(st);
+}
+// PATCH_1510_CROWN_SCENE2
+function _crEsc(x) { return String(x == null ? '' : x).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
+// où en est-on à la Couronne : tanker amarré (dock), équipage au bar (séjour en cours), ou personne
+function crownMission() {
+  return (G.tankerMissions || []).find(m => m.status === 'docked' && m.dock && m.dock.id === CROWN_DOCK_ID) || null;
+}
+function crownState() {
+  const m = crownMission();
+  if (m) return { m, view: m.dockStay ? 'bar' : 'dock', label: m.dockStay ? `${m.tankerName} amarré · l'équipage est au bar` : `${m.tankerName} est amarré au dock` };
+  const inbound = (G.tankerMissions || []).find(x => x.status === 'in_transit' && ((x.dock && x.dock.id === CROWN_DOCK_ID) || x.routeId === 'rt-ln-' + CROWN_DOCK_ID));
+  return { m: null, inbound, view: 'port', label: inbound ? `${inbound.tankerName} en route · arrivée dans ${typeof formatTankerDuration === 'function' ? formatTankerDuration(Math.max(0, (inbound.arrivalAt || 0) - Date.now())) : '…'}` : 'aucun tanker à quai' };
+}
+function _crownPort() {
+  if (!window.SBLines) return null;
+  return Object.values(SBLines.network().ports).find(x => x.dockId === CROWN_DOCK_ID) || null;
+}
+// ENTRER : selon ce qui se passe là-bas, la bonne vue
+function _crScroll(sc, top) {
+  if (!sc) return;
+  const from = sc.scrollTop, d = top - from, t0 = performance.now();
+  if (Math.abs(d) < 2) return;
+  const step = (now) => { const k = Math.min(1, (now - t0) / 380), e = 1 - Math.pow(1 - k, 3); sc.scrollTop = from + d * e; if (k < 1) requestAnimationFrame(step); };
+  requestAnimationFrame(step);
+}
+function crownEnter() {
+  const st = crownState();
+  if (st.m) { if (typeof crownSpaceClose === 'function') crownSpaceClose(); openDockFromFleet(st.m.id); return; }
+  crownSpaceOpen();
+}
 function crownDockHero(dock) {
   const scr = document.getElementById('scr-dock');
   const scroll = scr && scr.querySelector('.screen-scroll');
-  const banner = document.getElementById('dock-banner');
-  if (!dock || !dock.crown || !scroll || !window.WebGLRenderingContext) { crownUnmount(); if (banner) banner.style.display = ''; return; }
-  if (_crown && _crown.el.isConnected) return;
-  _crownCss();
-  if (banner) banner.style.display = 'none';
+  if (!dock || !dock.crown || !scroll || !window.WebGLRenderingContext) { crownUnmount(); return; }
+  const m = (G.tankerMissions || []).find(x => x.id === _activeDockMissionId);
+  const want = m && m.dockStay ? 'bar' : 'dock';
+  const sub = m ? (m.dockStay ? `${m.tankerName} amarré · ton équipage est au bar` : `${m.tankerName} est amarré · choisis la durée du séjour`) : '';
+  if (_crown && _crown.el.isConnected) {
+    if (_crown.state !== want) { _crown.state = want; if (!_crown.first) crownSetView(want); }
+    const gs = _crown.grip.querySelector('span'); if (gs.textContent !== sub) gs.textContent = sub;
+    return;
+  }
+  _crownCss(); _crownCss2();
   const first = !G.crownSeen;
+  const sys = typeof mpDockSystem === 'function' ? mpDockSystem(dock) : '';
   const el = document.createElement('div');
-  el.id = 'crown-hero';
-  el.innerHTML = `<div class="cr-ttl"><b>THE DRIFTING CROWN</b><span>Port franc pirate · ${typeof mpDockSystem === 'function' && mpDockSystem(dock) ? '⌖ ' + mpDockSystem(dock) : 'station-bar à la dérive'}</span></div>
+  el.id = 'crown-scene3d'; el.className = 'crh';
+  el.innerHTML = `<div class="cr-ttl"><small>PORT-FRANC</small><b>THE DRIFTING CROWN</b><span>${sys ? '⌖ ' + sys + ' · ' : ''}station pirate à la dérive</span></div>
+    <div class="cr-chips"><button class="cr-chip" data-v="dock">Le dock</button><button class="cr-chip" data-v="bar">Le bar</button><button class="cr-chip" data-v="port">La station</button></div>
     <div class="cr-load"><i></i></div>
-    <div class="cr-intro"><b>THE DRIFTING CROWN</b><span>Une couronne de laiton à la dérive. Dix bras tendus vers le vide, des milliers de hublots ambrés : ton tanker vient d'entrer au port franc.</span></div>
-    <div class="cr-bot"><button class="cr-chip on" data-v="port">La station</button><button class="cr-chip" data-v="bar">Le bar</button><span class="cr-sp"></span><span class="cr-hint">Toucher pour explorer</span><button class="cr-enter">ENTRER AU PORT</button></div>
-    <div class="cr-x" title="Fermer">✕</div>`;
-  const head = scroll.querySelector('.head');
-  scroll.insertBefore(el, head ? head.nextSibling : scroll.firstChild);
-  _crown = { el, handle: null, home: scroll, fs: false };
-  const bar = el.querySelector('.cr-load i');
+    <div class="cr-intro"><b>THE DRIFTING CROWN</b><span>Une couronne de laiton à la dérive. Dix bras tendus vers le vide, des milliers de hublots ambrés : ton tanker vient d'entrer au port franc.</span><button class="cr-big">ENTRER AU PORT</button></div>`;
+  scr.insertBefore(el, scroll);
+  const space = document.createElement('div'); space.id = 'crown-space';
+  const grip = document.createElement('div'); grip.id = 'crown-grip';
+  grip.innerHTML = `<i></i><b>${_crEsc(dock.name || 'The Drifting Crown')}</b><span>${_crEsc(sub)}</span>`;
+  scroll.insertBefore(space, scroll.firstChild); space.after(grip);
+  scr.classList.add('cr-scene'); if (first) scr.classList.add('cr-first');
+  const fit = () => { if (_crown && _crown.space) _crown.space.style.height = Math.max(120, scroll.clientHeight - 150) + 'px'; };
+  _crown = { el, space, grip, scr, scroll, handle: null, state: want, first, fit };
+  fit(); scroll.scrollTop = 0;
+  window.addEventListener('resize', fit);
+  const load = el.querySelector('.cr-load i');
   const start = () => {
     if (!_crown || _crown.el !== el) return;
     _crown.handle = window.Station3D.mount(el, {
-      url: CROWN_URL, view: 'port', intro: first, interactive: false,
-      onProgress: (k) => { bar.style.width = Math.round(k * 100) + '%'; },
+      url: CROWN_URL, view: first ? 'port' : want, intro: first, interactive: true, tanker: true,
+      onProgress: (k) => { load.style.width = Math.round(k * 100) + '%'; },
       onReady: () => { el.classList.add('ready'); if (first) setTimeout(() => el.querySelector('.cr-intro').classList.add('on'), 3800); },
-      onError: () => { crownUnmount(); if (banner) banner.style.display = ''; },
+      onError: () => { crownUnmount(); },
     });
+    _crownChips(first ? 'port' : want);
   };
   if (window.Station3D) start(); else window.addEventListener('station3d-ready', start, { once: true });
   el.addEventListener('click', (e) => {
     const chip = e.target.closest('.cr-chip');
     if (chip) { e.stopPropagation(); crownSetView(chip.dataset.v); return; }
-    if (e.target.closest('.cr-x')) { e.stopPropagation(); crownFullscreen(false); return; }
-    if (e.target.closest('.cr-enter')) { e.stopPropagation(); crownFullscreen(false); return; }
-    if (!_crown.fs) crownFullscreen(true);
+    if (e.target.closest('.cr-big')) { e.stopPropagation(); _crownEnterPort(); return; }
   });
-  if (first) { G.crownSeen = Date.now(); if (typeof saveGame === 'function') saveGame(); el.classList.add('first'); crownFullscreen(true); }
+  // toucher la 3D (sans glisser) : le panneau redescend et laisse voir la scène
+  let down = null;
+  el.addEventListener('pointerdown', (e) => { down = { x: e.clientX, y: e.clientY, t: performance.now() }; });
+  el.addEventListener('pointerup', (e) => {
+    if (!down || e.target.closest('.cr-chip,.cr-big')) return;
+    if (Math.hypot(e.clientX - down.x, e.clientY - down.y) < 8 && performance.now() - down.t < 350 && scroll.scrollTop > 30) _crScroll(scroll, 0);
+    down = null;
+  });
+  grip.addEventListener('click', () => {
+    const open = scroll.scrollTop > 30;
+    _crScroll(scroll, open ? 0 : Math.max(0, space.offsetHeight - 40));
+  });
+  if (first) { G.crownSeen = Date.now(); if (typeof saveGame === 'function') saveGame(); }
+}
+function _crownEnterPort() {
+  if (!_crown) return;
+  _crown.first = false;
+  _crown.scr.classList.remove('cr-first');
+  _crown.el.querySelector('.cr-intro').classList.remove('on');
+  crownSetView(_crown.state);
+}
+function _crownChips(v) {
+  for (const root of [_crown && _crown.el, _crownSpace && _crownSpace.el]) if (root) root.querySelectorAll('.cr-chip').forEach(b => b.classList.toggle('on', b.dataset.v === v));
 }
 function crownSetView(v) {
   if (!_crown) return;
   if (_crown.handle) _crown.handle.setView(v);
-  _crown.el.querySelectorAll('.cr-chip').forEach(b => b.classList.toggle('on', b.dataset.v === v));
+  _crownChips(v);
 }
-// plein écran : la vue passe au-dessus de tout (on la sort de l'écran, dont les transitions la décaleraient)
-function crownFullscreen(on) {
-  if (!_crown) return;
-  const el = _crown.el;
-  if (on && !_crown.fs) {
-    _crown.fs = true; _crown.placeholder = document.createElement('div'); _crown.placeholder.style.height = el.offsetHeight + 'px'; _crown.placeholder.style.marginBottom = '16px';
-    el.parentNode.insertBefore(_crown.placeholder, el); document.body.appendChild(el); el.classList.add('fs');
-    el.querySelector('.cr-hint').textContent = 'Glisser pour tourner · pincer pour zoomer';
-    if (_crown.handle) _crown.handle.setInteractive(true);
-  } else if (!on && _crown.fs) {
-    _crown.fs = false; el.classList.remove('fs', 'first');
-    if (_crown.placeholder && _crown.placeholder.parentNode) { _crown.placeholder.parentNode.insertBefore(el, _crown.placeholder); _crown.placeholder.remove(); }
-    el.querySelector('.cr-intro').classList.remove('on');
-    el.querySelector('.cr-hint').textContent = 'Toucher pour explorer';
-    if (_crown.handle) _crown.handle.setInteractive(false);
-  }
-}
+function crownFullscreen() {}   // ancien plein écran : la scène est désormais toujours plein écran
 function crownUnmount() {
   if (!_crown) return;
   try { if (_crown.handle) _crown.handle.dispose(); } catch (e) {}
-  if (_crown.placeholder) _crown.placeholder.remove();
-  _crown.el.remove();
+  window.removeEventListener('resize', _crown.fit);
+  _crown.el.remove(); if (_crown.space) _crown.space.remove(); if (_crown.grip) _crown.grip.remove();
+  if (_crown.scr) _crown.scr.classList.remove('cr-scene', 'cr-first');
   _crown = null;
   const banner = document.getElementById('dock-banner'); if (banner) banner.style.display = '';
 }
@@ -43538,42 +43650,68 @@ function crownUnmount() {
 function crownBarHeader() {
   return `<div class="crown-bar" onclick="crownShowBar()"><b>🍸 Le bar de la Couronne</b><span>Sous l'enseigne dorée, au bord de l'anneau. Ceux qui sont à quai, les marchés, les rumeurs, les cartes au comptoir.</span><i>VOIR LE BAR ↑</i></div>`;
 }
-// PATCH_1510_CROWN_VIEW — la station en plein écran, depuis la carte (sans tanker amarré)
-var _crownView = null;
-function crownOpenViewer() {
-  if (_crownView || !window.WebGLRenderingContext) return;
-  _crownCss();
-  const el = document.createElement('div');
-  el.id = 'crown-hero'; el.className = 'fs ready-wait';
-  el.innerHTML = `<div class="cr-ttl"><b>THE DRIFTING CROWN</b><span>Port franc pirate · ${(window.SBLines && Object.values(SBLines.network().ports).find(x => x.dockId === SBLines.CROWN_DOCK_ID) || {}).sys || ''}</span></div>
-    <div class="cr-load"><i></i></div>
-    <div class="cr-bot"><button class="cr-chip on" data-v="port">La station</button><button class="cr-chip" data-v="bar">Le bar</button><span class="cr-sp"></span><span class="cr-hint">Glisser pour tourner · pincer pour zoomer</span></div>
-    <div class="cr-x" title="Fermer">✕</div>`;
+// PATCH_1510_CROWN_SCENE — la vue spatiale : la station en plein écran, une fiche refermable par-dessus
+var _crownSpace = null;
+function crownSpaceOpen() {
+  if (_crownSpace || !window.WebGLRenderingContext) return;
+  _crownCss(); _crownCss2();
+  const port = _crownPort();
+  const st = crownState();
+  const route = port && (G.routes || []).find(r => r.portSys === port.sys || r.dockId === CROWN_DOCK_ID);
+  const e = _crEsc;
+  let acts = '';
+  if (st.inbound) acts = `<div class="crs-row"><button data-a="mission">Voir la mission de ${e(st.inbound.tankerName)}</button></div>`;
+  else if (route) acts = `<button class="cr-big" data-a="send">ENVOYER UN TANKER</button><div class="crs-row"><button data-a="route">Voir la route</button><button data-a="bar">Voir le bar</button></div><div class="crs-note">Un tanker suit la ligne jusqu'au dock. Amarré, tu entres au port ; à quai, ton équipage descend au bar.</div>`;
+  else acts = `<div class="crs-row"><button data-a="bar">Voir le bar</button></div><div class="crs-note">Aucune route connue jusqu'ici : remonte la ligne balise après balise pour y envoyer un tanker.</div>`;
+  const el = document.createElement('div'); el.id = 'crown-sp';
+  el.innerHTML = `<div class="crh">
+      <div class="cr-ttl"><small>PORT-FRANC</small><b>THE DRIFTING CROWN</b><span>${port ? '⌖ ' + e(port.sys) + ' · ' : ''}${e(st.label)}</span></div>
+      <div class="cr-chips"><button class="cr-chip on" data-v="port">La station</button><button class="cr-chip" data-v="bar">Le bar</button></div>
+      <div class="cr-load"><i></i></div>
+    </div>
+    <div class="crs-hint">Glisser pour tourner · pincer pour zoomer</div>
+    <button class="crs-x" aria-label="Fermer">×</button>
+    <div class="crs-card"><div class="crs-grip"><i></i></div><div class="crs-k">PORT-FRANC</div><div class="crs-t">The Drifting Crown</div><div class="crs-s">${e(st.label)}</div>
+      <div class="crs-body"><p>${e(CROWN_DOCK.ambience)}</p>${acts}</div></div>`;
   document.body.appendChild(el);
-  const bar = el.querySelector('.cr-load i');
+  const hero = el.querySelector('.crh'), load = el.querySelector('.cr-load i'), card = el.querySelector('.crs-card');
+  _crownSpace = { el, handle: null };
   const start = () => {
-    if (!_crownView) return;
-    _crownView.handle = window.Station3D.mount(el, { url: CROWN_URL, view: 'port', intro: true, interactive: true,
-      onProgress: (k) => { bar.style.width = Math.round(k * 100) + '%'; }, onReady: () => el.classList.add('ready'), onError: () => crownCloseViewer() });
+    if (!_crownSpace || _crownSpace.el !== el) return;
+    _crownSpace.handle = window.Station3D.mount(hero, { url: CROWN_URL, view: 'port', intro: true, interactive: true,
+      onProgress: (k) => { load.style.width = Math.round(k * 100) + '%'; },
+      onReady: () => { hero.classList.add('ready'); setTimeout(() => el.classList.add('shown'), 2600); },
+      onError: () => crownSpaceClose() });
   };
-  _crownView = { el, handle: null };
-  el.addEventListener('click', (e) => {
-    const chip = e.target.closest('.cr-chip');
-    if (chip && _crownView.handle) { _crownView.handle.setView(chip.dataset.v); el.querySelectorAll('.cr-chip').forEach(b => b.classList.toggle('on', b === chip)); }
-    if (e.target.closest('.cr-x')) crownCloseViewer();
-  });
   if (window.Station3D) start(); else window.addEventListener('station3d-ready', start, { once: true });
+  setTimeout(() => el.classList.add('shown'), 6000);   // au cas où le modèle tarde : la fiche ne reste pas cachée
+  el.addEventListener('click', (ev) => {
+    const chip = ev.target.closest('.cr-chip');
+    if (chip && _crownSpace.handle) { _crownSpace.handle.setView(chip.dataset.v); _crownChips(chip.dataset.v); return; }
+    if (ev.target.closest('.crs-x')) { crownSpaceClose(); return; }
+    if (ev.target.closest('.crs-grip')) { card.classList.toggle('min'); el.classList.toggle('cmin', card.classList.contains('min')); return; }
+    const b = ev.target.closest('[data-a]'); if (!b) return;
+    const a = b.dataset.a;
+    if (a === 'bar') { if (_crownSpace.handle) _crownSpace.handle.setView('bar'); _crownChips('bar'); card.classList.add('min'); el.classList.add('cmin'); return; }
+    crownSpaceClose();
+    if (a === 'send' && route) openTankerComposeForRoute(route.id);
+    else if (a === 'route' && route && window.SBMap) { if (typeof openSystemOnMap === 'function' && port) openSystemOnMap(port.sys); setTimeout(() => SBMap.selectRoute(route.id), 700); }
+    else if (a === 'mission' && st.inbound && window.SBMissions) SBMissions.open(st.inbound.id);
+  });
 }
-function crownCloseViewer() {
-  if (!_crownView) return;
-  try { if (_crownView.handle) _crownView.handle.dispose(); } catch (e) {}
-  _crownView.el.remove(); _crownView = null;
+function crownSpaceClose() {
+  if (!_crownSpace) return;
+  try { if (_crownSpace.handle) _crownSpace.handle.dispose(); } catch (e) {}
+  _crownSpace.el.remove(); _crownSpace = null;
 }
+// anciens appels (carte, cheats) : on passe par l'entrée
+function crownOpenViewer() { crownEnter(); }
+function crownCloseViewer() { crownSpaceClose(); }
 function crownShowBar() {
   if (!_crown) return;
   crownSetView('bar');
   const sc = document.querySelector('#scr-dock .screen-scroll');
-  if (sc) sc.scrollTo({ top: 0, behavior: 'smooth' });
+  if (sc) _crScroll(sc, 0);   // PATCH_1510_CROWN_SCENE : le panneau redescend, la scène montre le bar
 }
 
 function renderDockScreen() {
@@ -45527,7 +45665,7 @@ if (G.knownTargets && Array.isArray(G.tankerMissions)) {
 <!-- HOME V2 — « monde d'abord » : planète plein écran, ressources en ligne, Flotte / Défense / Prospection (assets/home.js) -->
 <script type="module" src="assets/home.js?v=20261014-1440"></script>
 <!-- SPACE MAP v0 — carte du Centre de prospection (assets/spacemap.js, source src/spacemap.js) -->
-<script src="assets/spacemap.js?v=20261015-1700"></script>
+<script src="assets/spacemap.js?v=20261015-2000"></script>
 <!-- SPACE MAP niveau B — diorama 3D d'un système (assets/system3d.js, source src/system3d.js) -->
 <script type="module" src="assets/system3d.js?v=20261014-1440"></script>
 <!-- SHIP3D — fiches 3D : cuirassé KV-01, frégate SR-01, tanker TK-07, chantier orbital OS-01 (assets/ship3d.js, sur le moteur partagé window.SB3D) -->
@@ -45538,7 +45676,7 @@ if (G.knownTargets && Array.isArray(G.tankerMissions)) {
 <!-- PATCH_1510_MISSIONS — tout ce qui vole, fiche de mission des tankers -->
 <script src="assets/missions.js?v=20261015-1600"></script>
 <!-- PATCH_1510_CROWN — The Drifting Crown en 3D (assets/station3d.js, sur le moteur partagé window.SB3D) -->
-<script type="module" src="assets/station3d.js?v=20261015-1700"></script>
+<script type="module" src="assets/station3d.js?v=20261015-2000"></script>
 <!-- FORMATION3D — flotte déployée en orbite, vue de haut en formation (remplace la vue orbite) -->
 <script src="assets/formation3d.js?v=20261014-1440"></script>
 </body>

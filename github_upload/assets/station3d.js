@@ -2,7 +2,8 @@
    Source : vitrine validée par Adrien (artifact « The Drifting Crown », 14 oct. 2026), portée sur le moteur partagé
    du jeu (window.SB3D) : mêmes matériaux (lookdev procédural sans UV), même ciel (nébuleuse, géante gazeuse, soleil),
    même trafic (navettes sur les axes, ronde autour de l'anneau, transporteurs au loin). Sans GTAO (mobile).
-   Deux cadrages : « port » (la station entière, en orbite lente) et « bar » (la façade du bar sur l'anneau, de près).
+   Trois cadrages : « port » (la station entière, en orbite lente), « bar » (la façade du bar sur l'anneau, de près)
+   et « dock » (un bras d'amarrage, ton tanker à quai — option tanker: true).
    Usage : const h = window.Station3D.mount(container, { url, view: 'port'|'bar', intro, interactive, onProgress, onReady, onError });
            h.setView('bar'); h.setInteractive(true); h.replayIntro(); h.dispose();
 */
@@ -32,6 +33,9 @@ const LOOK = {
   M_DC_BRASS:      { cell: [4.0, 3.0], seam: .10, depth: .10, tint: .10, rough: .10, grime: .30, wear: .50 },
 };
 // axes et flèches (angle Blender ° depuis l'est vers le nord, longueur m)
+// 15/10 — le poste d'amarrage du joueur (repère Blender, m) : cadrage et tanker à quai
+const DOCK_SHOT = { t: [1060, 110, -130], p: [1440, 480, 100] };
+const DOCK_TANKER = { pos: [1050, 110, -40], rotZ: 0, scale: 2.5 };   // agrandi : à l'échelle, un tanker se perdrait contre 2,4 km de station
 const ARMS = [[0, 1200], [90, 1180], [180, 1200], [270, 1294], [32, 1110], [54.5, 1100], [125, 1097], [202.5, 1245], [229, 1080], [316, 1350]];
 
 function mount(container, opts = {}) {
@@ -405,7 +409,9 @@ function mount(container, opts = {}) {
   // le bar : sur l'anneau à −24°, façade tournée vers le noyau ; on le regarde depuis l'intérieur de l'anneau, un peu en surplomb
   const VIEWS = {
     port: () => { const T = new THREE.Vector3(0, 0.9, 0); return { target: T, pos: T.clone().addScaledVector(CAM_DIR, fitDistance()), min: 1.6, max: fitDistance() * 1.6, auto: 0.22 }; },
-    bar: () => { fitDistance(); const B = opts.barShot || { t: [500, -215, 170], p: [180, -60, 380] }; const T = P(...B.t); return { target: T, pos: P(...B.p), min: 1.2, max: 6, auto: 0.08, sway: 0.35 }; },
+    bar: () => { fitDistance(); const B = opts.barShot || { t: [500, -215, 90], p: [150, -50, 300] }; const T = P(...B.t); return { target: T, pos: P(...B.p), min: 1.2, max: 6, auto: 0.08, sway: 0.35 }; },
+    // 15/10 — le dock : au bout d'un bras d'amarrage, ton tanker à quai sous la flèche
+    dock: () => { fitDistance(); const B = opts.dockShot || DOCK_SHOT; const T = P(...B.t); return { target: T, pos: P(...B.p), min: 1.0, max: 9, auto: 0.06, sway: 0.6 }; },
   };
   const BAR_AT = P(500, -220, 160);
   let view = VIEWS[opts.view] ? opts.view : 'port';
@@ -533,11 +539,27 @@ function mount(container, opts = {}) {
     hv(P(0, -1160, 118), 0.9, 0xfff2dc, 0.7);
     hv(P(470, -210, 220), 0.9, 0xffb048, 0);    // couronne du bar
     ready = true;
+    if (opts.tanker) loadTanker();
     if (opts.intro && !REDUCED && view === 'port') startMove(shot, 9.0, true);
     else { controls.enabled = interactive; controls.autoRotate = !REDUCED; }
     if (opts.onReady) opts.onReady();
   }, (ev) => { if (opts.onProgress && ev.total) opts.onProgress(ev.loaded / ev.total); },
   (err) => { console.warn('[Station3D]', err); if (opts.onError) opts.onError(err); });
+
+  /* ── le tanker du joueur, amarré (vue « dock ») ── */
+  let tankerObj = null;
+  function loadTanker() {
+    const T = Object.assign({}, DOCK_TANKER, opts.tankerAt || {});
+    new GLTFLoader().load(typeof opts.tanker === 'string' ? opts.tanker : 'assets/3d/sb_tk07_lod.glb', (g) => {
+      if (!alive) return;
+      const t = g.scene;
+      t.scale.setScalar(S * (T.scale || 1));
+      t.position.copy(P(...T.pos));
+      t.rotation.y = (T.rotZ || 0) * Math.PI / 180;
+      t.traverse(o => { if (o.isMesh) { o.castShadow = !LITE; o.receiveShadow = !LITE; const ms = Array.isArray(o.material) ? o.material : [o.material]; for (const m of ms) { if (m.envMapIntensity !== undefined) m.envMapIntensity = 0.35; if (m.emissive) m.emissiveIntensity = Math.min(m.emissiveIntensity || 0, 0.6); } } });
+      station.add(t); tankerObj = t;
+    }, undefined, (e) => console.warn('[Station3D] tanker', e));
+  }
 
   /* ── boucle (en pause hors écran) ── */
   const clock = new THREE.Clock();
