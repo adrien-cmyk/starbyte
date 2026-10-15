@@ -43441,7 +43441,7 @@ function _crownCss() {
     #crown-hero .cr-ttl span{display:block;margin-top:3px;font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:rgba(230,240,255,.65)}
     #crown-hero .cr-bot{position:absolute;left:0;right:0;bottom:0;display:flex;align-items:center;gap:8px;padding:30px 12px calc(12px + env(safe-area-inset-bottom,0px));background:linear-gradient(0deg,rgba(1,2,7,.8),rgba(1,2,7,0))}
     #crown-hero:not(.fs) .cr-bot{padding-bottom:12px}
-    #crown-hero .cr-chip{padding:7px 12px;border-radius:999px;border:1px solid rgba(240,181,74,.45);background:rgba(10,8,4,.55);color:#ffd27a;font:inherit;font-size:11px;letter-spacing:.08em;cursor:pointer}
+    #crown-hero .cr-chip{white-space:nowrap;padding:7px 12px;border-radius:999px;border:1px solid rgba(240,181,74,.45);background:rgba(10,8,4,.55);color:#ffd27a;font:inherit;font-size:11px;letter-spacing:.08em;cursor:pointer}
     #crown-hero .cr-chip.on{background:rgba(240,181,74,.22);border-color:#f0b54a;color:#fff3d6}
     #crown-hero .cr-sp{flex:1}
     #crown-hero .cr-hint{font-size:10px;color:rgba(230,240,255,.6);letter-spacing:.06em}
@@ -43537,6 +43537,37 @@ function crownUnmount() {
 // le bar : l'en-tête de la section des commandants à quai ; il envoie la caméra sur la façade
 function crownBarHeader() {
   return `<div class="crown-bar" onclick="crownShowBar()"><b>🍸 Le bar de la Couronne</b><span>Sous l'enseigne dorée, au bord de l'anneau. Ceux qui sont à quai, les marchés, les rumeurs, les cartes au comptoir.</span><i>VOIR LE BAR ↑</i></div>`;
+}
+// PATCH_1510_CROWN_VIEW — la station en plein écran, depuis la carte (sans tanker amarré)
+var _crownView = null;
+function crownOpenViewer() {
+  if (_crownView || !window.WebGLRenderingContext) return;
+  _crownCss();
+  const el = document.createElement('div');
+  el.id = 'crown-hero'; el.className = 'fs ready-wait';
+  el.innerHTML = `<div class="cr-ttl"><b>THE DRIFTING CROWN</b><span>Port franc pirate · ${(window.SBLines && Object.values(SBLines.network().ports).find(x => x.dockId === SBLines.CROWN_DOCK_ID) || {}).sys || ''}</span></div>
+    <div class="cr-load"><i></i></div>
+    <div class="cr-bot"><button class="cr-chip on" data-v="port">La station</button><button class="cr-chip" data-v="bar">Le bar</button><span class="cr-sp"></span><span class="cr-hint">Glisser pour tourner · pincer pour zoomer</span></div>
+    <div class="cr-x" title="Fermer">✕</div>`;
+  document.body.appendChild(el);
+  const bar = el.querySelector('.cr-load i');
+  const start = () => {
+    if (!_crownView) return;
+    _crownView.handle = window.Station3D.mount(el, { url: CROWN_URL, view: 'port', intro: true, interactive: true,
+      onProgress: (k) => { bar.style.width = Math.round(k * 100) + '%'; }, onReady: () => el.classList.add('ready'), onError: () => crownCloseViewer() });
+  };
+  _crownView = { el, handle: null };
+  el.addEventListener('click', (e) => {
+    const chip = e.target.closest('.cr-chip');
+    if (chip && _crownView.handle) { _crownView.handle.setView(chip.dataset.v); el.querySelectorAll('.cr-chip').forEach(b => b.classList.toggle('on', b === chip)); }
+    if (e.target.closest('.cr-x')) crownCloseViewer();
+  });
+  if (window.Station3D) start(); else window.addEventListener('station3d-ready', start, { once: true });
+}
+function crownCloseViewer() {
+  if (!_crownView) return;
+  try { if (_crownView.handle) _crownView.handle.dispose(); } catch (e) {}
+  _crownView.el.remove(); _crownView = null;
 }
 function crownShowBar() {
   if (!_crown) return;
@@ -45328,11 +45359,12 @@ var SBProspectGuide = (function () {
         btn = document.createElement('button'); btn.id = 'sb-pguide-btn'; btn.setAttribute('aria-label', 'Guide du centre de prospection'); btn.textContent = '?';
         btn.onclick = () => open(0); scr.appendChild(btn);
       }
-      if (btn) {
-        btn.style.display = vis ? 'block' : 'none';
-        if (vis) {   // aligné sous la colonne de boutons ronds en haut à droite
-          const rs = [...scr.querySelectorAll('button')].filter(b => b !== btn && b.offsetParent && b.getBoundingClientRect().right > innerWidth - 70 && b.getBoundingClientRect().top < innerHeight * 0.35);
-          const bottom = rs.reduce((m, b) => Math.max(m, b.getBoundingClientRect().bottom), 0);
+      if (btn) {   // PATCH_1510_GUIDE_BTN — place fixe sous les outils de la carte ; caché quand une fiche ou une feuille est ouverte
+        const busy = !!scr.querySelector('.smw-card.on, .smw-sheet.on');
+        btn.style.display = vis && !busy ? 'block' : 'none';
+        if (vis && !busy) {
+          const tools = [...scr.querySelectorAll('.smw-tools button')].filter(b => b.offsetParent);
+          const bottom = tools.reduce((m, b) => Math.max(m, b.getBoundingClientRect().bottom), 0);
           const top = Math.round((bottom || 150) + 10) + 'px'; if (btn.style.top !== top) btn.style.top = top;
         }
       }
@@ -45495,7 +45527,7 @@ if (G.knownTargets && Array.isArray(G.tankerMissions)) {
 <!-- HOME V2 — « monde d'abord » : planète plein écran, ressources en ligne, Flotte / Défense / Prospection (assets/home.js) -->
 <script type="module" src="assets/home.js?v=20261014-1440"></script>
 <!-- SPACE MAP v0 — carte du Centre de prospection (assets/spacemap.js, source src/spacemap.js) -->
-<script src="assets/spacemap.js?v=20261015-1600"></script>
+<script src="assets/spacemap.js?v=20261015-1700"></script>
 <!-- SPACE MAP niveau B — diorama 3D d'un système (assets/system3d.js, source src/system3d.js) -->
 <script type="module" src="assets/system3d.js?v=20261014-1440"></script>
 <!-- SHIP3D — fiches 3D : cuirassé KV-01, frégate SR-01, tanker TK-07, chantier orbital OS-01 (assets/ship3d.js, sur le moteur partagé window.SB3D) -->
@@ -45506,7 +45538,7 @@ if (G.knownTargets && Array.isArray(G.tankerMissions)) {
 <!-- PATCH_1510_MISSIONS — tout ce qui vole, fiche de mission des tankers -->
 <script src="assets/missions.js?v=20261015-1600"></script>
 <!-- PATCH_1510_CROWN — The Drifting Crown en 3D (assets/station3d.js, sur le moteur partagé window.SB3D) -->
-<script type="module" src="assets/station3d.js?v=20261015-1000"></script>
+<script type="module" src="assets/station3d.js?v=20261015-1700"></script>
 <!-- FORMATION3D — flotte déployée en orbite, vue de haut en formation (remplace la vue orbite) -->
 <script src="assets/formation3d.js?v=20261014-1440"></script>
 </body>

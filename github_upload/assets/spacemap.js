@@ -1450,6 +1450,12 @@
       const ci = ck ? st.cell[ck] : undefined;
       return onPickCell(ci === undefined ? -1 : ci);
     }
+    // 15/10 (Adrien) — toucher un tanker ou une flotte en vol ouvre sa fiche, comme partout dans le jeu
+    if (sel && sel.kind === 'flight') {
+      const f = ((_state || collect()).flights || []).find(x => x.id === sel.key);
+      if (f && f.kind === 'tanker' && window.SBMissions) { SBMissions.open(f.id); return; }
+      if (f && f.kind === 'fleet' && f.fleetId && typeof openFleetDetail === 'function') { openFleetDetail(f.fleetId); return; }
+    }
     _sel = sel; refresh(true);
   }
 
@@ -1662,6 +1668,7 @@
       const r = li.route;
       rows.push(`<div class="sm-lane port"><b>Lieu caché</b><span>${r ? `Route connue : ${esc(r.name)}. Tes tankers peuvent s'y amarrer : dock, bar, marchés.` : 'Une ligne y mène.'}</span></div>`);
       if (r) rows.push(_sigBtn('#ffc864', 'Envoyer un tanker', `openTankerComposeForRoute('${esc(r.id)}')`, 'Il suit la ligne jusqu\'au dock', true) + _sigBtn('#ffc864', 'Voir la route', `SBMap.selectRoute('${esc(r.id)}')`, '', true));
+      if (window.SBLines && li.port.dockId === SBLines.CROWN_DOCK_ID && typeof crownOpenViewer === 'function') rows.unshift(_sigBtn('#f0b54a', 'Voir la station en 3D', 'crownOpenViewer()', 'The Drifting Crown · la station et son bar', true));
     }
     if (li.fromCard && !li.obs.length && !li.port) rows.push(`<div class="sm-lane"><b>Piste de « ${esc(li.fromCard)} »</b><span>La carte mène ici. Pose une balise pour voir passer les convois et relever leur cap.</span></div>`);
     for (const o of li.obs) {
@@ -2110,6 +2117,8 @@
           if (tab === 'sonder' || tab === 'sonde') tab = 'sondes';
           // pendant un rafraîchissement de l'écran, garder le carnet ouvert
           if (tab === 'univers' && self._keepCarnet) tab = 'carnet';
+          // 15/10 : un rafraîchissement de l'écran ne referme pas la feuille Missions
+          if (tab === 'univers' && self._keepMissions) { origTab.call(this, 'univers'); return; }
           if (tab === 'carnet') { origTab.call(this, 'univers'); G.prospectTab = 'carnet'; self.openSheet('carnet'); return; }
           if (tab === 'missions') { origTab.call(this, 'univers'); G.prospectTab = 'univers'; self.openSheet('missions'); return; }
           origTab.call(this, tab);
@@ -2122,7 +2131,8 @@
         const self = this;
         window.renderProspectScreen = function () {
           self._keepCarnet = G.prospectTab === 'carnet';
-          try { return origRender.apply(this, arguments); } finally { self._keepCarnet = false; }
+          self._keepMissions = self.tab === 'missions';
+          try { return origRender.apply(this, arguments); } finally { self._keepCarnet = false; self._keepMissions = false; }
         };
         window.renderProspectScreen._smw = true;
       }
