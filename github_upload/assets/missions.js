@@ -124,11 +124,17 @@
     if (m && typeof openSystemOnMap === 'function') openSystemOnMap(m.targetCoords);
   }
 
+  // la feuille Missions de la carte se referme quand on part vers un autre écran
+  function closeSheets() { try { if (typeof G !== 'undefined') G.prospectTab = 'univers'; const sh = document.querySelector('.smw-sheet.on .smw-sh-x'); if (sh) sh.click(); } catch (e) {} }
   /* ── la fiche de mission d'un tanker ── */
   let _open = null;   // { id, el, ship, timer }
-  function open(id) {
+  function open(id, force) {
     const m = (G.tankerMissions || []).find(x => x.id === id);
     if (!m) { if (typeof toast === 'function') toast('Cette mission est terminée : son rapport est dans les rapports'); return; }
+    // 15/10 (Adrien) — pas de doublon : un tanker en ambassade ouvre l'ambassade (canal, pavillons),
+    // un tanker amarré ouvre l'écran de son dock (la Couronne en 3D, son tanker sous le bras d'amarrage)
+    if (!force && m.status === 'orbital_relay' && m.mpTarget && m.mpTarget.address && typeof openEmbassy === 'function') { close(); closeSheets(); openEmbassy(m.mpTarget.address); return; }
+    if (!force && m.status === 'docked' && m.dock && typeof openDockFromFleet === 'function') { close(); closeSheets(); openDockFromFleet(m.id); return; }
     close();
     css();
     const el = document.createElement('div');

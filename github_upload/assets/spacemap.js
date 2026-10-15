@@ -1673,7 +1673,9 @@
     if (li.port) {
       const r = li.route;
       if (!isCrown) rows.push(`<div class="sm-lane port"><b>Lieu caché</b><span>${r ? `Route connue : ${esc(r.name)}. Tes tankers peuvent s'y amarrer : dock, bar, marchés.` : 'Une ligne y mène.'}</span></div>`);
-      if (r) rows.push(_sigBtn('#ffc864', 'Envoyer un tanker', `openTankerComposeForRoute('${esc(r.id)}')`, 'Il suit la ligne jusqu\'au dock', true) + _sigBtn('#ffc864', 'Voir la route', `SBMap.selectRoute('${esc(r.id)}')`, '', true));
+      const _nl = (id) => (typeof routeNextTankerLabel === 'function' ? routeNextTankerLabel(id) : 'Envoyer un tanker');
+      const _nb = (id) => (typeof routeLiveMissions === 'function' ? routeLiveMissions(id).length : 0);
+      if (r) rows.push(_sigBtn('#ffc864', _nl(r.id), `openTankerComposeForRoute('${esc(r.id)}')`, _nb(r.id) ? `${_nb(r.id)} tanker${_nb(r.id) > 1 ? 's' : ''} déjà sur cette route · il suit la ligne jusqu'au dock` : 'Il suit la ligne jusqu\'au dock', true) + _sigBtn('#ffc864', 'Voir la route', `SBMap.selectRoute('${esc(r.id)}')`, '', true));
     }
     if (li.fromCard && !li.obs.length && !li.port) rows.push(`<div class="sm-lane"><b>Piste de « ${esc(li.fromCard)} »</b><span>La carte mène ici. Pose une balise pour voir passer les convois et relever leur cap.</span></div>`);
     for (const o of li.obs) {
@@ -1921,7 +1923,7 @@
       + `<div class="sm-psub">Vers ${esc((r.dock && r.dock.name) || 'un lieu caché')} · ${n} tronçon${n > 1 ? 's' : ''} connu${n > 1 ? 's' : ''}</div>`
       + itineraryHtml(SBLines.knownChain(r.portSys), { color: '#ffc864', startLabel: 'début connu de la ligne', endLabel: esc((r.dock && r.dock.name) || 'lieu caché') })
       + balHtml + usersHtml
-      + _sigBtn('#ffc864', 'Envoyer un tanker', `openTankerComposeForRoute('${esc(r.id)}')`, busy ? `${busy} tanker${busy > 1 ? 's' : ''} sur cette route` : 'Il suit la ligne jusqu\'au dock · les balises posées dessus le voient passer', true)
+      + _sigBtn('#ffc864', typeof routeNextTankerLabel === 'function' ? routeNextTankerLabel(r.id) : 'Envoyer un tanker', `openTankerComposeForRoute('${esc(r.id)}')`, busy ? `${busy} tanker${busy > 1 ? 's' : ''} sur cette route` : 'Il suit la ligne jusqu\'au dock · les balises posées dessus le voient passer', true)
       + fleetBtn(r.id, SBLines.knownChain(r.portSys).slice(0, -1))
       + _sigBtn(COL.cyan, 'Voir le lieu', `SBMap.select('system','${esc(r.portSys)}')`, '', true)
       + `</div>`;
@@ -2045,7 +2047,7 @@
     center: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="12" cy="12" r="6.5"/><circle cx="12" cy="12" r="1.8" fill="currentColor"/><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3"/></svg>',
     wide: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><path d="M12 2.5l8.2 4.75v9.5L12 21.5l-8.2-4.75v-9.5z"/><path d="M12 8l3.5 2v4L12 16l-3.5-2v-4z"/></svg>',
   };
-  const SHEETS = { sondes: 'Hangar des sondes', missions: 'Missions en cours', rapports: 'Rapports de mission', carnet: 'Carnet', archives: 'Archives du vide' };
+  const SHEETS = { sondes: 'Hangar des sondes', missions: 'Missions en cours', rapports: 'Rapports', carnet: 'Carnet', archives: 'Archives du vide' };
 
   const W = {
     on: false, tab: null,

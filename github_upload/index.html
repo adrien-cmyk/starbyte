@@ -10471,6 +10471,31 @@ function _mpPirReport(type, d, key) {
   G.reports.unshift(r);
   return r;
 }
+// PATCH_1510_FLEET_AMBUSH_VIEW — les abordages de cette embuscade : qui (PNJ ou joueur), quoi, quand
+function fleetAmbushLootHtml(fleet) {
+  const a = fleet && fleet.ambush; if (!a) return '';
+  const since = (a.departedAt || 0) - 60000;
+  const esc = (x) => String(x == null ? '' : x).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const rows = (G.reports || []).filter(r => r.kind === 'piracy' && r.piracy && /^robbed_/.test(r.piracy.type) && r.piracy.fleet === fleet.name && (r.returnedAt || 0) >= since);
+  const sum = { metal: 0, energie: 0, cristal: 0 };
+  for (const r of rows) if (r.piracy.type === 'robbed_ok') for (const k in sum) sum[k] += (r.piracy.loot && r.piracy.loot[k]) || 0;
+  const ago = (t) => { const m = Math.max(1, Math.round((Date.now() - t) / 60000)); return m < 60 ? `il y a ${m} min` : m < 1440 ? `il y a ${Math.round(m / 60)} h` : `il y a ${Math.round(m / 1440)} j`; };
+  const T = { robbed_ok: ['Dévalisé', '#ffc864'], robbed_fail: ['Repoussé', '#ff8a8a'], robbed_evaded: ['Échappé', '#cececd'], robbed_empty: ['Sans butin', '#cececd'] };
+  const list = rows.slice(0, 8).map(r => {
+    const d = r.piracy, t = T[d.type] || ['', '#cececd'];
+    const who = d.npc ? `<span style="color:var(--mut)">PNJ</span> · ${esc(d.who || d.pseudo || 'un convoi')}` : `<span style="color:#ff8a8a">Joueur</span> · <b style="color:#e6f0ff">${esc(d.pseudo || 'pavillon inconnu')}</b>`;
+    return `<div onclick="openReportDetail('${r.id}')" style="display:flex;align-items:center;gap:10px;padding:10px 12px;border-top:1px solid rgba(163,112,255,.15);cursor:pointer">
+      <div style="flex:1;min-width:0;text-align:left"><div style="font-size:12px;color:#e6f0ff;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${who}</div>
+        <div style="font-size:10px;color:var(--mut);margin-top:2px">${ago(r.returnedAt)}${d.type === 'robbed_ok' && _mpCargoSum(d.loot) > 0 ? ` · <span style="color:#ffc864">+${_mpResLine(d.loot)}</span>` : ''}</div></div>
+      <div style="font-size:10px;letter-spacing:.06em;color:${t[1]};white-space:nowrap">${t[0]}</div><div style="color:var(--mut)">›</div></div>`;
+  }).join('');
+  return `<div style="margin-top:12px;border:1px solid rgba(163,112,255,.3);border-radius:12px;background:rgba(20,14,40,.55);overflow:hidden">
+    <div style="display:flex;justify-content:space-between;align-items:baseline;padding:11px 12px 9px"><span style="font-size:10px;letter-spacing:.14em;color:var(--mut)">PILLAGES DE CETTE EMBUSCADE</span>
+      <span style="font-size:11px;color:${_mpCargoSum(sum) > 0 ? '#ffc864' : 'var(--mut)'}">${rows.length ? (_mpCargoSum(sum) > 0 ? '+' + _mpResLine(sum) : rows.length + ' abordage' + (rows.length > 1 ? 's' : '')) : ''}</span></div>
+    ${list || `<div style="padding:4px 12px 12px;font-size:11px;color:var(--mut);font-style:italic">${a.phase === 'going' ? 'En route vers sa balise : rien encore.' : 'Aucun convoi abordé pour l\'instant. Elle guette.'}</div>`}
+    ${rows.length > 8 ? `<div style="padding:8px 12px;font-size:10px;color:var(--mut);border-top:1px solid rgba(163,112,255,.15)">+ ${rows.length - 8} autres dans les rapports</div>` : ''}
+  </div>`;
+}
 function _mpLegLabel(d) {
   if (d.npc) return d.leg === 'back' ? (d.dock ? `au retour de ${d.dock}` : 'au retour d\'un lieu caché') : (d.dock ? `en route vers ${d.dock}` : 'en route vers un lieu caché');   // PATCH_1510_ORDRES
   if (d.kind === 'embassy') return 'en route vers une ambassade';
@@ -14143,12 +14168,13 @@ function renderFleetDetail() {
     primaryHtml = `
       <div style="background:linear-gradient(180deg, rgba(60,40,95,.55), rgba(30,20,60,.7));border:1.5px solid rgba(163,112,255,.45);border-radius:12px;padding:18px;text-align:center;box-shadow:0 0 14px rgba(163,112,255,.18)">
         <div style="font-size:10px;letter-spacing:.14em;color:var(--mut);margin-bottom:8px">EMBUSCADE SUR</div>
-        <div style="font-size:20px;color:#c9a8ff;font-weight:700;margin-bottom:10px;letter-spacing:.04em;font-family:'SF Mono',monospace">${a.system}</div>
+        <div onclick="openSystemOnMap('${a.system}')" style="font-size:20px;color:#c9a8ff;font-weight:700;margin-bottom:10px;letter-spacing:.04em;font-family:'SF Mono',monospace;cursor:pointer;text-decoration:underline dotted rgba(201,168,255,.5);text-underline-offset:5px">${a.system} <span style="font-size:11px;font-weight:500;letter-spacing:.06em;color:rgba(201,168,255,.7)">carte →</span></div>
         <div style="font-size:13px;color:#e6f0ff;font-family:'SF Mono',monospace;letter-spacing:.06em" id="fleet-detail-ambush-timer">${_mpAmbushPhaseText(fleet)}</div>
         ${(() => { const H = window.SBLines && SBLines.holdAll ? SBLines.holdAll(a) : (a.hold || {}); const cap = window.SBLines && SBLines.holdCap ? SBLines.holdCap(fleet) : 0;   // PATCH_1510_ORDRES
           return `<div style="font-size:11px;color:var(--mut);margin-top:10px">Cale de butin : <span style="color:${_mpCargoSum(H) > 0 ? '#ffc864' : 'var(--mut)'}">${_mpCargoSum(H) > 0 ? _mpResLine(H) : 'vide'}</span>${cap ? ` <span style="opacity:.7">/ ${fmt(cap)}</span>` : ' <span style="opacity:.7">· sans tanker</span>'}</div>`; })()}
         ${window.SBLines && SBLines.ordersLabel && a.phase !== 'returning' ? `<div style="font-size:11px;color:#c9a8ff;margin-top:6px">${SBLines.ordersLabel(fleet)}</div>` : ''}
-      </div>`;
+      </div>
+      ${fleetAmbushLootHtml(fleet)}`;   // PATCH_1510_FLEET_AMBUSH_VIEW
     actionsHtml = a.phase === 'returning' ? '' : a.phase === 'going' ? `
       <div style="padding:0 16px 14px;font-size:11px;color:var(--mut);font-style:italic;text-align:center">Engagée : elle va jusqu'à sa balise. Une fois en place, tu pourras lever l'embuscade.</div>
       <div style="padding:0 16px 14px">
@@ -33496,8 +33522,13 @@ function renderProspectRapports() {
     });
   }
 
+  // PATCH_1510_RAPPORTS_TABS — SONDES | MISSIONS, puis Radar · Légère · Moyenne · Furtive
+  const _rt = _rapTabs(allReports);
+  const _tabsHtml = _rt.html;
+  const _all0 = allReports.length;
+  allReports.length = 0; allReports.push(..._rt.list);
   if (allReports.length === 0) {
-    list.innerHTML = prospectRuleHtml() + `<div class="empty-line">Aucun rapport de mission. Envoie une sonde pour collecter des données.</div>`;
+    list.innerHTML = _tabsHtml + (_rt.tab === 'sondes' ? prospectRuleHtml() : '') + `<div class="empty-line">${_all0 === 0 ? 'Aucun rapport de mission. Envoie une sonde pour collecter des données.' : _rt.tab === 'missions' ? 'Aucun retour de tanker ni passage relevé par tes balises pour l\'instant.' : 'Aucun rapport de ce type.'}</div>`;
     return;
   }
 
@@ -33526,7 +33557,64 @@ function renderProspectRapports() {
     ${_archivesUnfolded ? `<div style="padding:0 0 8px">${archives.map(r => renderReportRow(r)).join('')}</div>` : ''}
   `;
 
-  list.innerHTML = prospectRuleHtml() + `<div style="padding:0 0 8px">${recentsHtml}${archivesHtml}</div>`;
+  list.innerHTML = _tabsHtml + (_rt.tab === 'sondes' ? prospectRuleHtml() : '') + `<div style="padding:0 0 8px">${recentsHtml}${archivesHtml}</div>`;
+}
+// PATCH_1510_RAPPORTS_TABS — rangement des rapports
+var RAP_SUBS = [['radar', 'Radar', '#e6f0ff'], ['light', 'Légère', '#5fcc8a'], ['medium', 'Moyenne', '#9a8aff'], ['stealth', 'Furtive', '#ff8a8a'], ['other', 'Autres', '#cececd']];
+function _rapSubOf(x) {
+  if (x.kind !== 'probe') return 'other';
+  const t = x.report && x.report.tier;
+  return ['radar', 'light', 'medium', 'stealth'].includes(t) && !x.report.isSecret ? t : 'other';
+}
+function _rapTabs(all) {
+  const sondes = all.filter(x => x.kind === 'probe' || x.kind === 'planet');
+  const missions = all.filter(x => x.kind === 'tanker' || x.kind === 'beacon');
+  const unread = (arr) => arr.filter(x => x.unread).length;
+  let tab = G._rapTab === 'missions' ? 'missions' : 'sondes';
+  if (!G._rapTab && !sondes.length && missions.length) tab = 'missions';
+  const subs = RAP_SUBS.map(([k, l, c]) => ({ k, l, c, items: sondes.filter(x => _rapSubOf(x) === k) })).filter(o => o.items.length || o.k !== 'other');
+  let sub = G._rapSub;
+  if (!subs.some(o => o.k === sub && o.items.length)) sub = (subs.find(o => o.items.some(x => x.unread)) || subs.find(o => o.items.length) || subs[0]).k;
+  const badge = (n) => n ? `<i class="rap-n">${n}</i>` : '';
+  const fleetUnread = (G.reports || []).filter(r => !r.read).length;
+  let html = `<div class="rap-tabs">
+      <button class="rap-tab${tab === 'sondes' ? ' on' : ''}" onclick="setRapTab('sondes')"><b>Sondes</b><span>${sondes.length} rapport${sondes.length > 1 ? 's' : ''}</span>${badge(unread(sondes))}</button>
+      <button class="rap-tab${tab === 'missions' ? ' on' : ''}" onclick="setRapTab('missions')"><b>Missions</b><span>tankers · balises</span>${badge(unread(missions))}</button>
+    </div>`;
+  let list;
+  if (tab === 'sondes') {
+    html += `<div class="rap-subs">${subs.map(o => `<button class="rap-sub${o.k === sub ? ' on' : ''}" style="--c:${o.c}" onclick="setRapSub('${o.k}')">${o.l}${o.items.length ? ` <em>${o.items.length}</em>` : ''}${unread(o.items) ? '<i></i>' : ''}</button>`).join('')}</div>`;
+    list = (subs.find(o => o.k === sub) || { items: [] }).items;
+  } else {
+    if ((G.reports || []).length) html += `<div class="rap-link" onclick="goto('reports')"><span>Rapports de flotte, de pillage et d'ambassade${fleetUnread ? ` · <b>${fleetUnread} non lu${fleetUnread > 1 ? 's' : ''}</b>` : ''}</span><i>→</i></div>`;
+    list = missions;
+  }
+  return { html: _rapCss() + html, list, tab };
+}
+function setRapTab(t) { G._rapTab = t; _archivesUnfolded = false; renderProspectRapports(); }
+function setRapSub(k) { G._rapSub = k; _archivesUnfolded = false; renderProspectRapports(); }
+function _rapCss() {
+  if (document.getElementById('rap-css')) return '';
+  const st = document.createElement('style'); st.id = 'rap-css';
+  st.textContent = `
+    .rap-tabs{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:2px 16px 10px}
+    .rap-tab{position:relative;padding:12px 10px 10px;border-radius:12px;border:1px solid rgba(120,160,190,.22);background:rgba(10,16,24,.6);color:#cfdbe4;font:inherit;text-align:center;cursor:pointer}
+    .rap-tab b{display:block;font-size:13px;letter-spacing:.2em;text-transform:uppercase;font-weight:600}
+    .rap-tab span{display:block;margin-top:3px;font-size:10px;color:var(--mut);letter-spacing:.04em}
+    .rap-tab.on{border-color:rgba(95,255,232,.6);background:linear-gradient(180deg,rgba(95,255,232,.14),rgba(95,255,232,.04));color:#5fffe8;box-shadow:0 0 18px rgba(95,255,232,.08)}
+    .rap-tab .rap-n{position:absolute;top:-6px;right:-4px;min-width:20px;height:20px;padding:0 6px;border-radius:10px;background:#ffc864;color:#1a1204;font:700 11px/20px 'SF Mono',monospace;font-style:normal}
+    .rap-subs{display:flex;gap:6px;margin:0 16px 12px;overflow-x:auto;scrollbar-width:none}
+    .rap-subs::-webkit-scrollbar{display:none}
+    .rap-sub{position:relative;flex:1 0 auto;padding:7px 12px;border-radius:999px;border:1px solid rgba(255,255,255,.12);background:transparent;color:var(--mut);font:inherit;font-size:11px;letter-spacing:.06em;white-space:nowrap;cursor:pointer}
+    .rap-sub em{font-style:normal;opacity:.6;margin-left:3px}
+    .rap-sub.on{border-color:var(--c);color:var(--c);background:color-mix(in srgb,var(--c) 12%,transparent)}
+    .rap-sub i{position:absolute;top:4px;right:4px;width:6px;height:6px;border-radius:50%;background:#ffc864}
+    .rap-link{display:flex;justify-content:space-between;align-items:center;margin:0 16px 12px;padding:11px 14px;border:1px solid rgba(255,192,96,.28);border-radius:10px;background:rgba(255,192,96,.05);font-size:11.5px;color:#e6dcc8;cursor:pointer}
+    .rap-link b{color:#ffc864;font-weight:600}
+    .rap-link i{font-style:normal;color:#ffc864}
+    #scr-prospect.sm-world #rapports-section-label{display:none}`;
+  document.head.appendChild(st);
+  return '';
 }
 
 /* ═══════════ PROSPECTION — RÈGLE VISIBLE + ACTION SUIVANTE (10/10/2026) ═══════════
@@ -33638,6 +33726,17 @@ function openPlanetOnMap(coord) {
   const p = (typeof findPlanetByCoord === 'function') ? findPlanetByCoord(coord) : null;
   if (p && p.isMine) return openOnMap('home', `${MY_ADDRESS.cluster}-${MY_ADDRESS.sector}-${MY_ADDRESS.system}`);
   openOnMap('planet', (p && p.coord) || coord);
+}
+// PATCH_1510_CARNET_SIG — une signature sur la carte : elle-même, sinon sa cible, sa planète, son système
+function openSigOnMap(id) {
+  const sig = (G.signatures || {})[id];
+  if (!sig) return;
+  const sysOf = (k) => String(k || '').toUpperCase().split('-').slice(0, 3).join('-');
+  const has = (fn) => { try { return !!fn(); } catch (e) { return false; } };
+  if (sig.fixedAddress && has(() => Object.values(G.knownSystems || {}).some(s => (s.planets || []).some(pl => pl.coord === sig.fixedAddress)))) return openOnMap('planet', sig.fixedAddress);
+  if (sig.resolvedType === 'moving' && sig.movingCoordKey && G.knownTargets && G.knownTargets[sig.movingCoordKey]) return openOnMap('target', sig.movingCoordKey);
+  if (!sig.resolved) return openOnMap('sig', sig.id);
+  openSystemOnMap(sig.system || sig.fixedAddress || sig.movingCoordKey || '');
 }
 function openSystemOnMap(sys) {
   const m = String(sys || '').toUpperCase().match(/^([A-Z])-([A-Z])-(\d{4})/);
@@ -35979,9 +36078,9 @@ function renderCarnetView() {
     }
 
     return `
-      <div id="carnet-sig-${sig.id}" style="padding:12px 14px;border:1px solid var(--border);border-radius:8px;margin:0 16px 8px;background:var(--bg-soft)">
+      <div id="carnet-sig-${sig.id}" onclick="if(!event.target.closest('button'))openSigOnMap('${sig.id}')" style="padding:12px 14px;border:1px solid var(--border);border-radius:8px;margin:0 16px 8px;background:var(--bg-soft);cursor:pointer">
         <div style="display:flex;align-items:baseline;justify-content:space-between">
-          <span style="font-family:'SF Mono',monospace;font-size:13px;color:#5fffe8;letter-spacing:.06em">${sig.id}</span>
+          <span style="font-family:'SF Mono',monospace;font-size:13px;color:#5fffe8;letter-spacing:.06em">${sig.id} <span style="font-family:inherit;font-size:10px;color:var(--mut);letter-spacing:.04em">carte →</span></span>
           ${sig.resolved
             ? (sig.resolvedType === 'moving'
                 ? `<span style="font-size:8px;background:rgba(255,200,100,.15);color:#ffc864;padding:1px 6px;border-radius:3px;letter-spacing:.06em">RÉSOLUE</span>`
@@ -39597,6 +39696,10 @@ function renderCommerceRouteSheet(routeId) {
     } else {
       actionsHtml = `<button class="commerce-sheet-btn commerce-sheet-btn-secondary" onclick="closeCommerceSheet()">Fermer</button>`;
     }
+    // PATCH_1510_ROUTE_MULTI — les autres tankers de la route, et l'envoi d'un suivant
+    const _others = routeLiveMissions(route.id, route.activeMissionId);
+    actionsHtml = (_others.length ? `<div style="font-size:11px;color:var(--mut);text-align:center;margin-bottom:8px">Aussi sur cette route : ${_others.map(o => `<span style="color:#ffc864;cursor:pointer" onclick="window.SBMissions&&SBMissions.open('${o.id}')">${o.tankerName}</span>`).join(' · ')}</div>` : '')
+      + `<button class="commerce-sheet-btn commerce-sheet-btn-primary" style="margin-bottom:8px" onclick="openTankerComposeForRoute('${route.id}')">${routeNextTankerLabel(route.id)}</button>` + actionsHtml;
   } else {
     // Active, dispo
     actionsHtml = `
@@ -40157,6 +40260,21 @@ function getOrCreateDockForDestination(destinationHint) {
 // ─── Envoi tanker sur route ───
 // Crée une mission de type 'route_run'. Le tanker part avec un cargo, consomme du fuel,
 // arrive à un dock procédural. Phase D1 : durée test 5-10 min, pas encore de séjour.
+// PATCH_1510_ROUTE_MULTI — les tankers d'une route (en vol, à quai, au retour)
+function routeLiveMissions(routeId, exceptId) {
+  return (G.tankerMissions || []).filter(m => m.routeId === routeId && m.id !== exceptId && ['in_transit', 'docked', 'returning'].includes(m.status));
+}
+function routeNextTankerLabel(routeId) {
+  const n = routeLiveMissions(routeId).length;
+  return n ? `Envoyer un ${n + 1}e tanker` : 'Envoyer un tanker';
+}
+// un tanker quitte la route : elle reste en service si un autre y est encore
+function routeReleaseMission(route, missionId) {
+  if (!route) return;
+  const live = routeLiveMissions(route.id, missionId);
+  if (live.length) { route.status = route.status === 'collapsed' ? 'collapsed' : 'in_use'; route.activeMissionId = live[live.length - 1].id; }
+  else { route.activeMissionId = null; if (route.status === 'in_use') route.status = 'active'; }
+}
 function launchTankerOnRoute(routeId, tierKey, cargo) {
   if (!Array.isArray(G.tankerMissions)) G.tankerMissions = [];
   const route = (G.routes || []).find(r => r.id === routeId);
@@ -40168,10 +40286,7 @@ function launchTankerOnRoute(routeId, tierKey, cargo) {
     if (typeof toast === 'function') toast('Cette route s\'est effondrée');
     return null;
   }
-  if (route.status === 'in_use') {
-    if (typeof toast === 'function') toast('Un tanker est déjà en route');
-    return null;
-  }
+  // PATCH_1510_ROUTE_MULTI : un 2e tanker peut suivre le 1er sur la même route
 
   const tier = parseInt(String(tierKey).replace('t', ''), 10);
   const tierCfg = TANKER_TIER_CONFIG[tier];
@@ -42782,7 +42897,7 @@ function _completeCancelledRouteRun(missionId) {
     if (q > 0 && G.res[k]) { G.res[k].v = Math.min(Math.max(G.res[k].max, G.res[k].v), G.res[k].v + q); back.push(`${fmt(q)} ${k}`); }
   }
   const route = (G.routes || []).find(r => r.id === m.routeId);
-  if (route && route.activeMissionId === m.id) { route.activeMissionId = null; if (route.status === 'in_use') route.status = 'active'; }
+  if (route) routeReleaseMission(route, m.id);   // PATCH_1510_ROUTE_MULTI
   G.tankerMissions.splice(idx, 1);
   if (typeof toast === 'function') toast(`${m.tankerName} est rentré · ${back.length ? back.join(' · ') + ' rendus' : 'cale vide'}`);
   if (typeof saveGame === 'function') saveGame();
@@ -42842,6 +42957,7 @@ function _completeRouteRunReturn(missionId) {
       route.stability = Math.max(0, (route.stability || 50) - 7);
       route.status = (route.stability <= 0) ? 'collapsed' : 'active';
       route.activeMissionId = null;
+      routeReleaseMission(route, mission.id);   // PATCH_1510_ROUTE_MULTI
       // D5.1 : tracker l'historique même en cas de perte
       if (!route.stabilityHistory) route.stabilityHistory = [];
       route.stabilityHistory.push({ at: Date.now(), value: route.stability, lost: true });
@@ -42880,6 +42996,7 @@ function _completeRouteRunReturn(missionId) {
     route.lastUsedAt = Date.now();
     route.status = 'active';
     route.activeMissionId = null;
+    routeReleaseMission(route, mission.id);   // PATCH_1510_ROUTE_MULTI
     // Connaissance : montée plus rapide en début, plus lente en haut
     if (route.knowledgeLevel < 3) route.knowledgeLevel = Math.min(10, (route.knowledgeLevel || 0) + 1);
     else if (route.knowledgeLevel < 7 && Math.random() < 0.6) route.knowledgeLevel++;
@@ -43674,8 +43791,9 @@ function crownSpaceOpen() {
   const route = port && (G.routes || []).find(r => r.portSys === port.sys || r.dockId === CROWN_DOCK_ID);
   const e = _crEsc;
   let acts = '';
-  if (st.inbound) acts = `<div class="crs-row"><button data-a="mission">Voir la mission de ${e(st.inbound.tankerName)}</button></div>`;
-  else if (route) acts = `<button class="cr-big" data-a="send">ENVOYER UN TANKER</button><div class="crs-row"><button data-a="route">Voir la route</button><button data-a="bar">Voir le bar</button></div><div class="crs-note">Un tanker suit la ligne jusqu'au dock. Amarré, tu entres au port ; à quai, ton équipage descend au bar.</div>`;
+  const _sendLbl = route && typeof routeNextTankerLabel === 'function' ? routeNextTankerLabel(route.id) : 'Envoyer un tanker';   // PATCH_1510_ROUTE_MULTI
+  if (st.inbound) acts = (route ? `<button class="cr-big" data-a="send">${e(_sendLbl).toUpperCase()}</button>` : '') + `<div class="crs-row"><button data-a="mission">Voir la mission de ${e(st.inbound.tankerName)}</button></div>`;
+  else if (route) acts = `<button class="cr-big" data-a="send">${e(_sendLbl).toUpperCase()}</button><div class="crs-row"><button data-a="route">Voir la route</button><button data-a="bar">Voir le bar</button></div><div class="crs-note">Un tanker suit la ligne jusqu'au dock. Amarré, tu entres au port ; à quai, ton équipage descend au bar.</div>`;
   else acts = `<div class="crs-row"><button data-a="bar">Voir le bar</button></div><div class="crs-note">Aucune route connue jusqu'ici : remonte la ligne balise après balise pour y envoyer un tanker.</div>`;
   const el = document.createElement('div'); el.id = 'crown-sp';
   el.innerHTML = `<div class="crh">
@@ -45680,7 +45798,7 @@ if (G.knownTargets && Array.isArray(G.tankerMissions)) {
 <!-- HOME V2 — « monde d'abord » : planète plein écran, ressources en ligne, Flotte / Défense / Prospection (assets/home.js) -->
 <script type="module" src="assets/home.js?v=20261014-1440"></script>
 <!-- SPACE MAP v0 — carte du Centre de prospection (assets/spacemap.js, source src/spacemap.js) -->
-<script src="assets/spacemap.js?v=20261015-2000"></script>
+<script src="assets/spacemap.js?v=20261015-2130"></script>
 <!-- SPACE MAP niveau B — diorama 3D d'un système (assets/system3d.js, source src/system3d.js) -->
 <script type="module" src="assets/system3d.js?v=20261014-1440"></script>
 <!-- SHIP3D — fiches 3D : cuirassé KV-01, frégate SR-01, tanker TK-07, chantier orbital OS-01 (assets/ship3d.js, sur le moteur partagé window.SB3D) -->
@@ -45689,7 +45807,7 @@ if (G.knownTargets && Array.isArray(G.tankerMissions)) {
 <script src="assets/radio.js?v=20261014-1440"></script>
 <script type="module" src="assets/ship3d.js?v=20261014-1440"></script>
 <!-- PATCH_1510_MISSIONS — tout ce qui vole, fiche de mission des tankers -->
-<script src="assets/missions.js?v=20261015-1600"></script>
+<script src="assets/missions.js?v=20261015-2130"></script>
 <!-- PATCH_1510_CROWN — The Drifting Crown en 3D (assets/station3d.js, sur le moteur partagé window.SB3D) -->
 <script type="module" src="assets/station3d.js?v=20261015-2000"></script>
 <!-- FORMATION3D — flotte déployée en orbite, vue de haut en formation (remplace la vue orbite) -->
