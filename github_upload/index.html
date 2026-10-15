@@ -5808,6 +5808,13 @@ svg.map {
 <button id="cheat-toggle" onclick="toggleCheatPanel()" style="display:none"><span class="icon-static" data-icon="settings" data-icon-size="11" style="margin-right:4px"></span>CHEAT</button>
 
 <div id="cheat-panel">
+  <!-- PATCH_1510_CHEAT_CROWN -->
+  <div class="cheat-label">Routes &amp; la Couronne</div>
+  <button onclick="cheatCrownRoute()">🗺 Révéler la route de la Couronne</button>
+  <button onclick="cheatCrownDock()">⚓ Tanker amarré à la Couronne (arrivée)</button>
+  <button onclick="cheatCrownReplay()">🎬 Revoir l'arrivée à la Couronne</button>
+  <button onclick="cheatPlanetAtRouteEnds()">🌍 Une planète au bout de mes routes</button>
+  <div class="cheat-divider"></div>
   <div class="cheat-label">Ressources</div>
   <button onclick="cheatRes('all', 10000)">+10k toutes ressources</button>
   <button onclick="cheatRes('all', 100000)">+100k toutes ressources</button>
@@ -28085,6 +28092,70 @@ function _cheatSpawnPlanet(coord, opts) {
 }
 
 // Crée une planète habitable LIBRE (colonisable, target pour tanker dropoff)
+// PATCH_1510_CHEAT_CROWN — tester la Couronne sans remonter la ligne balise après balise
+function _cheatCrownLine() {
+  if (!window.SBLines) return null;
+  const net = SBLines.network();
+  const port = Object.values(net.ports).find(x => x.dockId === SBLines.CROWN_DOCK_ID);
+  return port ? { port, line: net.byId[port.lines[0]] } : null;
+}
+function cheatCrownRoute(silent) {
+  const c = _cheatCrownLine();
+  if (!c) { toast('Couronne introuvable'); return null; }
+  if (!Array.isArray(G.spottedLegs)) G.spottedLegs = [];
+  const ch = c.line.chain;
+  ch.forEach((k, i) => {
+    const to = i < ch.length - 1 ? ch[i + 1] : c.port.sys;
+    if (!G.spottedLegs.some(l => l.npc && l.from === k && l.to === to))
+      G.spottedLegs.unshift({ id: 'cheat-' + c.line.id + '-' + i, lineId: c.line.id, from: k, to, pseudo: c.line.kind.label, at: Date.now(), npc: true, cargo: 'lourd' });
+  });
+  if (!G.mapSeen) G.mapSeen = {};
+  for (const k of ch.concat([c.port.sys])) G.mapSeen[k] = Date.now();
+  SBLines.discoverPort(c.port.sys, Date.now());
+  const route = SBLines.ensureRoute(c.port.sys);
+  if (!G.fleet.stationed.tanker) G.fleet.stationed.tanker = { t1: 0, t2: 0, t3: 0 };
+  if (!(G.fleet.stationed.tanker.t1 > 0)) G.fleet.stationed.tanker.t1 = 2;
+  if (typeof saveGame === 'function') saveGame();
+  if (!silent) {
+    toast(`🗺 Route de la Couronne révélée : ${route ? route.name : ''} · ${ch.length} jalons`);
+    if (typeof openSystemOnMap === 'function') { openSystemOnMap(c.port.sys); if (route && window.SBMap) setTimeout(() => SBMap.selectRoute(route.id), 900); }
+  }
+  return route;
+}
+function cheatCrownDock() {
+  const route = cheatCrownRoute(true);
+  if (!route) return;
+  // un vrai départ par la ligne, arrivé tout de suite : l'amarrage se fait par le jeu lui-même
+  const m = launchTankerOnRoute(route.id, 't1', { metal: 0, energie: 0, cristal: 0 });
+  if (!m) { toast('Le tanker n\'a pas pu partir'); return; }
+  m.arrivalAt = Date.now() - 1000;
+  G.crownSeen = 0;
+  if (typeof tickTankerMissions === 'function') tickTankerMissions();
+  if (typeof saveGame === 'function') saveGame();
+  if (m.status === 'docked') { toggleCheatPanel(); openDockFromFleet(m.id); }
+  else toast(`Tanker parti vers la Couronne (${m.status}) : ouvre-le depuis le Commerce`);
+}
+function cheatCrownReplay() {
+  G.crownSeen = 0;
+  if (typeof saveGame === 'function') saveGame();
+  toast('La prochaine ouverture du dock de la Couronne rejoue l\'arrivée');
+}
+function cheatPlanetAtRouteEnds() {
+  const list = (window.SBLines ? SBLines.openedRoutes() : []).filter(o => !o.fake);
+  let n = 0;
+  for (const o of list) {
+    const sys = G.knownSystems && G.knownSystems[o.to];
+    if (sys && (sys.planets || []).length) continue;
+    const coord = o.to + '-' + String(10 + (n * 17) % 80).padStart(2, '0');
+    _cheatSpawnPlanet(coord, { name: 'Avant-poste ' + o.to.split('-')[2], type: 'habitable', desc: 'Planète de test au bout d\'une route.', playerName: null, playerLevel: null,
+      report: 'Planète de test posée au bout de la route pour essayer le trajet des tankers.' });
+    n++;
+  }
+  toast(n ? `🌍 ${n} planète${n > 1 ? 's' : ''} posée${n > 1 ? 's' : ''} au bout de tes routes` : 'Tes routes mènent déjà quelque part');
+  if (typeof saveGame === 'function') saveGame();
+  if (window.SBMap && SBMap.render) { try { SBMap.render(); } catch (e) {} }
+}
+
 function cheatSpawnHabitablePlanet() {
   // Utilise une coord facilement reconnaissable
   const coord = 'A-D-7777-42';
