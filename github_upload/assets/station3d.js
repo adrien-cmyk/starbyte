@@ -7,6 +7,7 @@
    Usage : const h = window.Station3D.mount(container, { url, view: 'port'|'bar', intro, interactive, onProgress, onReady, onError });
            h.setView('bar'); h.setInteractive(true); h.replayIntro(); h.dispose();
 */
+import { MeshoptDecoder } from './meshopt_decoder.module.js';   // 16/10 — modèles compressés (EXT_meshopt_compression)
 const GLOSS_ENV = 0.22;
 // 15/10 — deux stations, même moteur : chacune son modèle, son ciel, sa lumière, ses cadrages (repère Blender, m)
 const PROFILES = {
@@ -55,16 +56,18 @@ const PROFILES = {
     target: [0, 0.9, 0], minDist: 1.6,
     lights: (L, hv, P) => {
       L(0xff9a50, 6, 3.2, P(751, 330, 0));
-      const bar = L(0xffa040, 5, 4.0, P(470, -230, 150));
+      const bar = L(0xffa040, 3, 4.0, P(470, -230, 150));   // 16/10 — lueur du bar adoucie
       L(0xffb070, 3, 3.0, P(-960, 0, 40));
       hv(P(0, 0, 653), 0.6, 0xfff2dc, 1.2);
       hv(P(0, -1160, 118), 0.9, 0xfff2dc, 0.7);
       hv(P(470, -210, 220), 0.9, 0xffb048, 0);    // couronne du bar
       return bar;
     },
-    barShot: { t: [500, -215, 90], p: [150, -50, 300] }, barAt: [500, -220, 160], barMax: 6,
+    barShot: { t: [495, -210, 110], p: [350, -140, 215] }, barAt: [500, -220, 160], barMax: 6,   // 16/10 — caméra ressortie du nouveau noyau (plus large)
     dockShot: { t: [1060, 110, -130], p: [1440, 480, 100] }, dockMax: 9,
     tankerAt: { pos: [1050, 110, -40], rotZ: 0, scale: 2.5 },   // agrandi : à l'échelle, un tanker se perdrait contre 2,4 km de station
+    // 16/10 — éclairage obscur : station dans la pénombre, éclairée de loin et pâlement ; lumières sans éblouir
+    night: { light: 0.32, glow: 0.4, tex: 0.6, halo: 0.4, bloom: [0.38, 0.4, 0.92], albedo: 0.7 },
   },
   // Sanctuaire du Linceul des Cendres : bastion impérial sur astéroïde, dans un nuage bleuté (le Linceul)
   sanctuary: {
@@ -126,6 +129,7 @@ const PROFILES = {
 
 function mount(container, opts = {}) {
   const PR = PROFILES[opts.profile] || PROFILES.crown;
+  const NT = Object.assign({ light: 1, glow: 1, tex: 1, halo: 1, bloom: null, albedo: 0 }, PR.night || {});
   const S = PR.S, GLOSS = PR.GLOSS, GLOW = PR.GLOW, GLOW_COLOR = PR.GLOW_COLOR, LOOK = PR.LOOK;
   const { THREE, GLTFLoader, MapControls, RoomEnvironment, EffectComposer, RenderPass, UnrealBloomPass, OutputPass } = window.SB3D;
   const REDUCED = matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -284,7 +288,7 @@ function mount(container, opts = {}) {
   /* ── lumière ── */
   const station = new THREE.Group();
   scene.add(station);
-  const key = new THREE.DirectionalLight(PR.key[0], PR.key[1]);
+  const key = new THREE.DirectionalLight(PR.key[0], PR.key[1] * NT.light);
   key.position.copy(SUN_DIR).multiplyScalar(PR.key[2]);
   key.castShadow = !LITE;
   key.shadow.mapSize.set(2048, 2048);
@@ -293,10 +297,10 @@ function mount(container, opts = {}) {
   key.target = station;
   scene.add(key);
   // la nébuleuse éclaire par en dessous (rouge sang) ; liseré violet sur les flancs opposés
-  const nebFill = new THREE.DirectionalLight(PR.fill[0], PR.fill[1]); nebFill.position.set(9, -16, 11); scene.add(nebFill);
-  const rimL = new THREE.DirectionalLight(PR.rim[0], PR.rim[1]); rimL.position.set(-14, -3, 10); scene.add(rimL);
-  scene.add(new THREE.HemisphereLight(PR.hemi[0], PR.hemi[1], 0.55));
-  function glowLight(color, intensity, dist, x, y, z) { const l = new THREE.PointLight(color, intensity, dist, 1.8); l.position.set(x, y, z); station.add(l); return l; }
+  const nebFill = new THREE.DirectionalLight(PR.fill[0], PR.fill[1] * NT.light); nebFill.position.set(9, -16, 11); scene.add(nebFill);
+  const rimL = new THREE.DirectionalLight(PR.rim[0], PR.rim[1] * NT.light); rimL.position.set(-14, -3, 10); scene.add(rimL);
+  scene.add(new THREE.HemisphereLight(PR.hemi[0], PR.hemi[1], 0.55 * NT.light));
+  function glowLight(color, intensity, dist, x, y, z) { const l = new THREE.PointLight(color, intensity * NT.glow, dist, 1.8); l.position.set(x, y, z); station.add(l); return l; }
 
   /* ── lookdev procédural (sans UV) : panneaux triplanaires, joints, patine, coulures, usure d'arête ── */
   function premium(mat, p) {
@@ -556,7 +560,8 @@ function mount(container, opts = {}) {
   const composer = new EffectComposer(renderer);
   composer.addPass(new RenderPass(bgScene, camera));
   const mainPass = new RenderPass(scene, camera); mainPass.clear = false; composer.addPass(mainPass);
-  const bloom = new UnrealBloomPass(new THREE.Vector2(W() / 2, H() / 2), 0.85, 0.5, 1.0);
+  const BLOOM = NT.bloom || [0.85, 0.5, 1.0];
+  const bloom = new UnrealBloomPass(new THREE.Vector2(W() / 2, H() / 2), BLOOM[0], BLOOM[1], BLOOM[2]);
   composer.addPass(bloom);
   composer.addPass(new OutputPass());
   composer.setPixelRatio(renderer.getPixelRatio());
@@ -574,10 +579,15 @@ function mount(container, opts = {}) {
   let barLight = null;
   let ready = false;
   const loader = new GLTFLoader();
+  if (loader.setMeshoptDecoder) loader.setMeshoptDecoder(MeshoptDecoder);
   loader.load(opts.url, (gltf) => {
     if (!alive) return;
     const m = gltf.scene;
     m.updateMatrixWorld(true);
+    {   // 16/10 — géométries partagées (tours, forteresses dupliquées) : une copie par objet AVANT d'y cuire chaque transformation
+      const seen = new Set();
+      m.traverse(o => { if (!o.isMesh) return; if (seen.has(o.geometry)) o.geometry = o.geometry.clone(); else seen.add(o.geometry); });
+    }
     m.traverse(o => {
       if (!o.isMesh) return;
       // positions et normales quantifiées (KHR_mesh_quantization) : remises en flottants avant d'y cuire la transformation
@@ -601,14 +611,15 @@ function mount(container, opts = {}) {
       o.castShadow = !emissiveOnly && !LITE; o.receiveShadow = !LITE;
       for (const mat of mats) {
         if (GLOSS[mat.name]) { mat.roughness = GLOSS[mat.name][0]; mat.metalness = GLOSS[mat.name][1]; mat.envMapIntensity = GLOSS_ENV; }
-        else if (mat.map) { mat.envMapIntensity = 0.22; mat.metalness = Math.min(mat.metalness, 0.3); mat.roughness = Math.max(mat.roughness, 0.9); }   // 16/10 — pièces texturées (noyau de la Couronne) : reflets retenus comme le reste
+        else if (mat.map) { mat.envMapIntensity = 0.22 * (NT.albedo ? 0.55 : 1); mat.metalness = Math.min(mat.metalness, 0.3); mat.roughness = Math.max(mat.roughness, 0.9); if (!mat.userData.nt) { mat.userData.nt = 1; if (mat.emissiveMap) mat.emissiveIntensity *= NT.tex; if (NT.albedo) mat.color.multiplyScalar(NT.albedo); } }   // 16/10 — pièces texturées (noyau de la Couronne) : reflets retenus comme le reste
         if (PR.rockLift && mat.name.startsWith('M_SC_ROCK') && !mat.userData.lift) { mat.userData.lift = 1; mat.color.multiplyScalar(PR.rockLift); }
         if (/_GLASS$/.test(mat.name)) { mat.envMapIntensity = 0.6; mat.color.setRGB(...PR.glass); }
+        if (!GLOW[mat.name] && !mat.map && mat.emissive && mat.emissiveIntensity > 0 && !mat.userData.ng) { mat.userData.ng = 1; mat.emissiveIntensity *= NT.glow; }   // néons, enseigne, salon VIP : sans éblouir
         const look = LOOK[mat.name];
         if (look && !mat.userData.dc) { mat.userData.dc = 1; premium(mat, look); }
         if (GLOW[mat.name]) {
           const c = new THREE.Color(GLOW_COLOR[mat.name]);
-          mat.color.copy(c).multiplyScalar(.6); mat.emissive.copy(c); mat.emissiveIntensity = GLOW[mat.name];
+          mat.color.copy(c).multiplyScalar(.6); mat.emissive.copy(c); mat.emissiveIntensity = GLOW[mat.name] * NT.glow;
           mat.roughness = .6; mat.metalness = 0; mat.side = THREE.DoubleSide; mat.fog = true;
           if (PR.nav(mat.name) && !navMats.includes(mat)) navMats.push(mat);
           if (mat.name === PR.beacon && !beaconMats.includes(mat)) beaconMats.push(mat);
@@ -666,11 +677,11 @@ function mount(container, opts = {}) {
     if (document.hidden || !container.isConnected || !container.getClientRects().length) return;   // hors écran : en pause
     updateTraffic(t, dt);
     updateClouds(dt);
-    for (const m of navMats) m.emissiveIntensity = PR.navPulse[0] + PR.navPulse[1] * Math.pow(0.5 + 0.5 * Math.sin(t * PR.navPulse[2] + (m.name.endsWith('GREEN') ? 1.6 : 0)), 3);
-    for (const m of beaconMats) m.emissiveIntensity = 4 + 6 * Math.pow(0.5 + 0.5 * Math.sin(t * 1.3), 4);
+    for (const m of navMats) m.emissiveIntensity = NT.glow * (PR.navPulse[0] + PR.navPulse[1] * Math.pow(0.5 + 0.5 * Math.sin(t * PR.navPulse[2] + (m.name.endsWith('GREEN') ? 1.6 : 0)), 3));
+    for (const m of beaconMats) m.emissiveIntensity = NT.glow * (4 + 6 * Math.pow(0.5 + 0.5 * Math.sin(t * 1.3), 4));
     for (const h of halos) {
       const k = h.userData.pulse ? 0.55 + 0.45 * Math.pow(0.5 + 0.5 * Math.sin(t * h.userData.pulse + h.userData.ph), 3) : 0.8 + 0.2 * Math.sin(t * 3 + h.userData.ph);
-      h.scale.setScalar(h.userData.size * (0.7 + 0.5 * k)); h.material.opacity = 0.35 + 0.6 * k;
+      h.scale.setScalar(h.userData.size * (0.7 + 0.5 * k)); h.material.opacity = (0.35 + 0.6 * k) * NT.halo;
     }
     if (ready) { if (move) updateMove(t); else { applyPend(dt); controls.update(); } }
     if (shot.sway && controls.autoRotate && !move && t - swayFlip > 2) {   // balancement : on repart dans l'autre sens à la butée
@@ -679,7 +690,7 @@ function mount(container, opts = {}) {
     }
     {   // de près, les néons du bar éblouiraient : bloom et lueur baissent avec la distance au bar
       const near = 1 - THREE.MathUtils.smoothstep(camera.position.distanceTo(BAR_AT), 2.5, 9);
-      bloom.strength = 0.85 - 0.5 * near; if (barLight) barLight.intensity = barLight.userData.i0 * (1 - 0.64 * near);
+      bloom.strength = BLOOM[0] * (1 - 0.59 * near); if (barLight) barLight.intensity = barLight.userData.i0 * (1 - 0.64 * near);
     }
     const d = camera.position.distanceTo(controls.target);
     scene.fog.near = Math.max(0.6, d - PR.fog[0]); scene.fog.far = d + PR.fog[1];
