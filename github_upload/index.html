@@ -11821,7 +11821,7 @@ function renderDashboard() {
   document.getElementById('dash-planet-prod').innerHTML = prodEntries.length > 0
     ? prodEntries.map(([k,r]) => {
         const t = tileInfo(k);
-        return `<span>${t.label.toLowerCase()} <b>+${r.rate}/h</b></span>`;
+        return `<span>${t.label.toLowerCase()} <b>+${rateNum(effRate(k))}/h</b></span>`;
       }).join('')
     : '';
 
@@ -11976,7 +11976,7 @@ function renderDashResGrid() {
           <span class="res-cell-dot" style="background:${t.color}"></span>
           <span>${t.label}</span>
         </div>
-        ${r.rate > 0 ? `<div class="res-cell-rate">+${Math.round(r.rate * (window.SBSkills ? SBSkills.prodMult(k) : 1) * 10) / 10}</div>` : ''}
+        ${r.rate > 0 ? `<div class="res-cell-rate">+${rateNum(effRate(k))}</div>` : ''}
         <div class="res-cell-val" style="color:${t.color}">${fmt(r.v)}</div>
         <div class="res-cell-cap">/ ${fmt(RES_CAP)}</div>
         <div class="res-cell-bar"><div class="res-cell-fill" style="width:${pct}%;background:${t.color}"></div></div>
@@ -12025,7 +12025,7 @@ function renderResourcesScreen() {
     if (r.rate > 0 && r.v >= r.max) {
       info = 'Stock plein : la production est en pause. Dépense ou agrandis ton stockage.';
     } else if (r.rate > 0) {
-      info = `Production active. Stock plein dans ${formatTime(Math.round((r.max - r.v) / (r.rate / 3600)))}.`;
+      info = `Production active${skillMult(key) > 1.0001 ? ` (dont +${Math.round((skillMult(key) - 1) * 100)} % skills)` : ''}. Stock plein dans ${formatTime(Math.round((r.max - r.v) / (effRate(key) / 3600)))}.`;
     } else if (r.v > 0) {
       info = 'Aucune source de production active.';
     } else {
@@ -12041,7 +12041,7 @@ function renderResourcesScreen() {
         <div class="res-detail-head" style="display:flex;align-items:center;gap:10px">
           ${resIcon}
           <span class="res-detail-name" style="color:${t.color};flex:1">${t.label}</span>
-          <span class="res-detail-rate ${r.rate > 0 ? '' : 'zero'}">${r.rate > 0 ? `+${r.rate}/h` : '— inactif'}</span>
+          <span class="res-detail-rate ${r.rate > 0 ? '' : 'zero'}">${r.rate > 0 ? `+${rateNum(effRate(key))}/h` : '— inactif'}</span>
         </div>
         <div class="res-detail-bar-wrap">
           <span class="res-detail-val">${fmt(r.v)} <span class="max">/ ${fmt(r.max)}</span></span>
@@ -37472,6 +37472,8 @@ function renderTierProduction(tierData, buildingMeta, prevTierForCompare) {
       const label = resInfo?.label || res;
       const color = resInfo?.color || 'var(--txt)';
       let txt = `<span style="color:${color}">${label}</span> <strong style="color:${color}">${rateLbl(res, rate)}</strong>`;
+      const _sm = skillMult(res);   // PATCH_1610_SKILLS_DISPLAY : la part des skills, lisible
+      if (_sm > 1.0001) txt += ` <span style="color:var(--green);font-size:10px">dont +${Math.round((_sm - 1) * 100)} % skills</span>`;
       if (prevTierForCompare?.prod?.[res]) {
         const factor = (rate / prevTierForCompare.prod[res]).toFixed(1);
         txt += ` <span style="color:var(--mut);font-size:10px">(×${factor})</span>`;
@@ -38327,13 +38329,17 @@ function tileInfo(key) {
 }
 
 function totalRate() {
-  return Object.values(G.res).reduce((s, r) => s + r.rate, 0);
+  return Object.keys(G.res).reduce((s, k) => s + effRate(k), 0);
 }
+// PATCH_1610_SKILLS_DISPLAY — taux réellement produit : base × bonus des skills (c'est ce que simulateTo applique)
+function skillMult(res) { return window.SBSkills ? SBSkills.prodMult(res) : 1; }
+function effRate(k) { const r = G.res && G.res[k]; return r && r.rate > 0 ? r.rate * skillMult(k) : 0; }
+function rateNum(x) { return Math.round(x * 10) / 10; }
 
 // Unités de production (décision 10/10) : toute la production est HORAIRE
 // (ressources, crédits, carburant — simulateTo : rate × heures).
 function rateUnit(res) { return '/h'; }
-function rateLbl(res, rate) { return `+${rate}${rateUnit(res)}`; }
+function rateLbl(res, rate) { return `+${rateNum(rate * skillMult(res))}${rateUnit(res)}`; }   // PATCH_1610_SKILLS_DISPLAY
 // Crédits et carburant ne sont pas des tuiles : tileInfo() renverrait Métal par défaut.
 // (fonction et non const : appelée depuis loadGame, déclarée plus bas → pas de TDZ)
 function prodInfo(res) {
@@ -45535,7 +45541,7 @@ function openCapitalSheet() {
   const lvl = (() => { try { return mpWorldSnapshot().level; } catch (e) { return null; } })();
   const ps = (G.planet && G.planet.parcels) || [];
   const built = ps.filter(q => q && q.state === 'built').length, owned = ps.filter(q => q && q.state !== 'locked').length;
-  const rate = (k) => { const r = G.res && G.res[k]; return r && r.rate ? `+${fmt(Math.round(r.rate))}/h` : '—'; };
+  const rate = (k) => { const v = effRate(k); return v ? `+${fmt(Math.round(v))}/h` : '—'; };
   const def = (() => { try { return fmt(Math.round(totalDefense())); } catch (e) { return '—'; } })();
   const el = _sbSheet(`
     <div class="hd"><div class="ic" style="color:var(--cyan)">${renderIcon('globe', { size: 26 })}</div>
@@ -45855,7 +45861,7 @@ if (G.knownTargets && Array.isArray(G.tankerMissions)) {
 <!-- MATCH3 — Match-3 V2 (assets/match3.js, source src/match3.js + src/m3core.js) : remplace startM3 -->
 <script type="module" src="assets/match3.js?v=20261014-1440"></script>
 <!-- HOME V2 — « monde d'abord » : planète plein écran, ressources en ligne, Flotte / Défense / Prospection (assets/home.js) -->
-<script type="module" src="assets/home.js?v=20261014-1440"></script>
+<script type="module" src="assets/home.js?v=20261016-1800"></script>
 <!-- SPACE MAP v0 — carte du Centre de prospection (assets/spacemap.js, source src/spacemap.js) -->
 <script src="assets/spacemap.js?v=20261015-2200"></script>
 <!-- SPACE MAP niveau B — diorama 3D d'un système (assets/system3d.js, source src/system3d.js) -->
@@ -45868,7 +45874,7 @@ if (G.knownTargets && Array.isArray(G.tankerMissions)) {
 <!-- PATCH_1510_MISSIONS — tout ce qui vole, fiche de mission des tankers -->
 <script src="assets/missions.js?v=20261015-2300"></script>
 <!-- PATCH_1610_SKILLS — skills des bâtiments : apprendre, découvrir, effets -->
-<script src="assets/skills.js?v=20261016-1600"></script>
+<script src="assets/skills.js?v=20261016-1800"></script>
 <!-- PATCH_1510_CROWN — The Drifting Crown en 3D (assets/station3d.js, sur le moteur partagé window.SB3D) -->
 <script type="module" src="assets/station3d.js?v=20261016-1715"></script>
 <!-- FORMATION3D — flotte déployée en orbite, vue de haut en formation (remplace la vue orbite) -->

@@ -128,6 +128,8 @@
     learned()[key] = { at: Date.now(), via: via || 'recherche' };
     if (G.research && G.research.key === key) G.research = null;
     if (typeof toast === 'function') toast(`Skill acquis : ${s.name} · ${s.effect}`);
+    // les chiffres de production affichés suivent le bonus (cartes de parcelle, fiches, tableau de bord)
+    try { if (typeof refreshParcelProdLabels === 'function') refreshParcelProdLabels(); if (typeof renderDashboard === 'function') renderDashboard(); } catch (e) {}
     if (typeof saveGame === 'function') saveGame();
     refresh();
     return true;
