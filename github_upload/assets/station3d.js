@@ -70,7 +70,7 @@ const PROFILES = {
     // 16/10 — éclairage obscur : station dans la pénombre, éclairée de loin et pâlement ; lumières sans éblouir
     night: { light: 0.085, glow: 0.6, tex: 1.3, halo: 0.45, bloom: [0.5, 0.45, 0.85], albedo: 0.12, hull: 0.14, env: 0.03, envScene: 0.06, exposure: 0.9, hideCoreAtBar: true },
     // 16/10 — la nuit : ce sont les feux qui éclairent, comme des lanternes sur le pont d'un bateau pirate (positions posées sur les ponts, repère Blender)
-    lamps: { url: 'assets/3d/sb_dc02_lamps.json?v=20261016-2130', light: [0xffa860, 8.0, 3.4], lightsMax: 11, lightsLite: 5, post: 7, lantern: 1.7 },
+    lamps: { url: 'assets/3d/sb_dc02_lamps.json?v=20261016-2130', light: [0xffb060, 5.0, 3.8], lift: 45, lightsMax: 12, lightsLite: 5, under: [[560, 0, -110], [-280, 485, -110], [-280, -485, -110], [0, 0, -260]], post: 7, lantern: 1.7 },
     // 16/10 — brume épaisse par endroits : bancs de brouillard posés dans la station (entre anneau, bras et noyau)
     mist: { n: 60, nLite: 26, r: [2.5, 11.0], y: [-3.0, 4.5], size: [4.5, 7.0], op: [0.6, 0.35], col: [0x26101a, 0x1e0c1c, 0x2c1220, 0x180c16] },
   },
@@ -705,9 +705,16 @@ function mount(container, opts = {}) {
       const gg = new THREE.BufferGeometry(); gg.setAttribute('position', new THREE.BufferAttribute(gp, 3));
       lampGlow = new THREE.Points(gg, new THREE.PointsMaterial({ map: haloTex, color: 0xff9a48, size: 0.55, sizeAttenuation: true, transparent: true, opacity: 0.8, blending: THREE.AdditiveBlending, depthWrite: false, fog: true }));
       station.add(lampGlow);
-      const nL = Math.min(J.lights.length, LITE ? LP.lightsLite : LP.lightsMax);
-      J.lights.slice(0, nL).forEach(([x, y, z]) => {
-        const b = P(x, y, z + LP.post + 6);
+      const nL = LITE ? LP.lightsLite : LP.lightsMax;
+      const spots = J.lights.slice(0, nL);   // 16/10 — comme au bar : des nappes de lumière chaude, réparties sur toute la station
+      while (spots.length < nL) {
+        let best = null, bd = -1;
+        for (const q of J.lamps) { if (q[2] > 260) continue; let d = 1e9; for (const s2 of spots) d = Math.min(d, Math.hypot(q[0] - s2[0], q[1] - s2[1])); if (Math.hypot(q[0] - 470, q[1] + 230) < 160) d = 0; if (d > bd) { bd = d; best = q; } }
+        if (!best) break; spots.push(best);
+      }
+      if (!LITE && LP.under) for (const u of LP.under) spots.push([u[0], u[1], u[2] - (LP.lift || 0)]);   // lueur pâle sous l'anneau et le noyau (vue d'en dessous)
+      spots.forEach(([x, y, z]) => {
+        const b = P(x, y, z + (LP.lift || LP.post + 6));
         const l = new THREE.PointLight(LP.light[0], LP.light[1], LP.light[2], 1.6); l.position.copy(b); l.userData.i0 = LP.light[1];
         station.add(l); lampLights.push(l);
       });
