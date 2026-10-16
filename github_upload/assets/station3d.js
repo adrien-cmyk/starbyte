@@ -53,7 +53,7 @@ const PROFILES = {
       .map(([a, L]) => { const r = a * Math.PI / 180; return [Math.cos(r) * L, Math.sin(r) * L, 0, 1]; }),
     lane: { n: 96, nLite: 40, out: [10, 18], spread: 3, lift: [3, 2], size: [0.25, 0.55] },
     orbit: { n: 54, nLite: 24, r: [7.6, 3.6], y: 2.4, size: [0.18, 0.35] },
-    target: [0, -2.2, 0], minDist: 1.6,   // 16/10 — cible abaissée : la station remonte vers le haut de l'écran
+    target: [0, -2.2, 0], introTarget: [0, 0.9, 0], minDist: 1.6,   // 16/10 — cible abaissée : la station remonte vers le haut de l'écran
     lights: (L, hv, P) => {
       L(0xff9a50, 6, 3.2, P(751, 330, 0));
       const bar = L(0xffb060, 5.5, 3.6, P(470, -230, 150));
@@ -70,7 +70,7 @@ const PROFILES = {
     // 16/10 — éclairage obscur : station dans la pénombre, éclairée de loin et pâlement ; lumières sans éblouir
     night: { light: 0.085, glow: 0.6, tex: 1.3, halo: 0.45, bloom: [0.5, 0.45, 0.85], albedo: 0.12, hull: 0.14, env: 0.03, envScene: 0.06, exposure: 0.9, hideCoreAtBar: true },
     // 16/10 — la nuit : ce sont les feux qui éclairent, comme des lanternes sur le pont d'un bateau pirate (positions posées sur les ponts, repère Blender)
-    lamps: { url: 'assets/3d/sb_dc02_lamps.json?v=20261016-2130', light: [0xffb060, 5.0, 3.8], lift: 45, lightsMax: 12, lightsLite: 5, under: [[560, 0, -110], [-280, 485, -110], [-280, -485, -110], [0, 0, -260]], post: 7, lantern: 1.7 },
+    lamps: { url: 'assets/3d/sb_dc02_lamps.json?v=20261016-2130', light: [0xffb060, 9.0, 4.4], lift: 45, lightsMax: 12, lightsLite: 5, under: [[560, 0, -110], [-280, 485, -110], [-280, -485, -110], [0, 0, -260]], post: 7, lantern: 1.7 },
     // 16/10 — brume épaisse par endroits : bancs de brouillard posés dans la station (entre anneau, bras et noyau)
     mist: { n: 60, nLite: 26, r: [2.5, 11.0], y: [-3.0, 4.5], size: [4.5, 7.0], op: [0.6, 0.35], col: [0x26101a, 0x1e0c1c, 0x2c1220, 0x180c16] },
   },
@@ -555,11 +555,12 @@ function mount(container, opts = {}) {
   controls.target.copy(shot.target);
   // ouverture : on glisse depuis le large en contournant la flèche est (7,5 s) ; sinon on est déjà en place
   const fit0 = fitDistance();
-  const introFrom = shot.target.clone().addScaledVector(new THREE.Vector3(0.94, -0.66, 0.10).normalize(), fit0 * 3.1)   // on remonte depuis les profondeurs de la nébuleuse;
+  const INTRO_T = PR.introTarget ? new THREE.Vector3(...PR.introTarget) : null;   // 16/10 — l'approche vise le cœur de la station, puis glisse vers le cadrage final
+  const introFrom = (INTRO_T && view === 'port' ? INTRO_T : shot.target).clone().addScaledVector(new THREE.Vector3(0.94, -0.66, 0.10).normalize(), fit0 * 3.1)   // on remonte depuis les profondeurs de la nébuleuse;
   let move = null;   // { from: {pos, target}, to: shot, t0, dur, spherical }
   let interactive = !!opts.interactive, idleTimer = null;
   camera.position.copy(shot.pos); camera.lookAt(shot.target);
-  if (opts.intro && !REDUCED && view === 'port') { camera.position.copy(introFrom); }
+  if (opts.intro && !REDUCED && view === 'port') { camera.position.copy(introFrom); if (INTRO_T) { controls.target.copy(INTRO_T); camera.lookAt(INTRO_T); } }
   controls.addEventListener('start', () => { controls.autoRotate = false; clearTimeout(idleTimer); if (opts.onGesture) opts.onGesture(); });
   controls.addEventListener('end', () => { clearTimeout(idleTimer); if (!REDUCED) idleTimer = setTimeout(() => { controls.autoRotate = true; }, 6000); });
   const ease = (x) => (x < .5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2);
@@ -671,7 +672,7 @@ function mount(container, opts = {}) {
     ready = true;
     if (opts.tanker) loadTanker();
     loadLamps();
-    if (opts.intro && !REDUCED && view === 'port') startMove(shot, 9.0, true);
+    if (opts.intro && !REDUCED && view === 'port') startMove(shot, opts.introDur || 9.0, true);
     else { controls.enabled = interactive; controls.autoRotate = !REDUCED; }
     if (opts.onReady) opts.onReady();
   }, (ev) => { if (opts.onProgress && ev.total) opts.onProgress(ev.loaded / ev.total); },
@@ -795,7 +796,7 @@ function mount(container, opts = {}) {
     orbit(dx, dy) { if (!move && ready) { pend.x += dx; pend.y += dy; } },
     dolly(k) { if (!move && ready) pend.z += Math.log(k); },
     end() { clearTimeout(idleTimer); if (!REDUCED) idleTimer = setTimeout(() => { controls.autoRotate = true; }, 6000); },
-    replayIntro() { if (!ready || REDUCED) return; view = 'port'; shot = VIEWS.port(); applyLimits(); syncCore(); camera.position.copy(introFrom); controls.target.copy(shot.target); startMove(shot, 9.0, true); },
+    replayIntro() { if (!ready || REDUCED) return; view = 'port'; shot = VIEWS.port(); applyLimits(); syncCore(); camera.position.copy(introFrom); controls.target.copy(INTRO_T || shot.target); startMove(shot, 9.0, true); },
     dispose() {
       alive = false; cancelAnimationFrame(raf); ro.disconnect(); controls.dispose(); clearTimeout(idleTimer);
       for (const sc of [scene, bgScene]) sc.traverse(o => {
