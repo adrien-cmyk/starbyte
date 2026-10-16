@@ -63,11 +63,13 @@ const PROFILES = {
       hv(P(470, -210, 220), 0.9, 0xffb048, 0);    // couronne du bar
       return bar;
     },
-    barShot: { t: [495, -210, 110], p: [350, -140, 215] }, barAt: [500, -220, 160], barMax: 6,   // 16/10 — caméra ressortie du nouveau noyau (plus large)
+    barShot: { t: [500, -215, 100], p: [408, 33, 140] }, barAt: [500, -220, 160], barMax: 6,   // 16/10 — caméra collée au noyau, façade vue à 45°
     dockShot: { t: [1060, 110, -130], p: [1440, 480, 100] }, dockMax: 9,
     tankerAt: { pos: [1050, 110, -40], rotZ: 0, scale: 2.5 },   // agrandi : à l'échelle, un tanker se perdrait contre 2,4 km de station
     // 16/10 — éclairage obscur : station dans la pénombre, éclairée de loin et pâlement ; lumières sans éblouir
-    night: { light: 0.32, glow: 0.4, tex: 0.6, halo: 0.4, bloom: [0.38, 0.4, 0.92], albedo: 0.7 },
+    night: { light: 0.2, glow: 0.4, tex: 0.6, halo: 0.4, bloom: [0.38, 0.4, 0.92], albedo: 0.5, env: 0.3, exposure: 0.8 },
+    // 16/10 — brume épaisse par endroits : bancs de brouillard posés dans la station (entre anneau, bras et noyau)
+    mist: { n: 40, nLite: 18, r: [3.0, 10.0], y: [-2.5, 4.0], size: [4.0, 6.0], op: [0.45, 0.35], col: [0x4a1c2c, 0x3c1630, 0x5a2434, 0x2e1428] },
   },
   // Sanctuaire du Linceul des Cendres : bastion impérial sur astéroïde, dans un nuage bleuté (le Linceul)
   sanctuary: {
@@ -129,7 +131,7 @@ const PROFILES = {
 
 function mount(container, opts = {}) {
   const PR = PROFILES[opts.profile] || PROFILES.crown;
-  const NT = Object.assign({ light: 1, glow: 1, tex: 1, halo: 1, bloom: null, albedo: 0 }, PR.night || {});
+  const NT = Object.assign({ light: 1, glow: 1, tex: 1, halo: 1, bloom: null, albedo: 0, env: 1, exposure: 1 }, PR.night || {});
   const S = PR.S, GLOSS = PR.GLOSS, GLOW = PR.GLOW, GLOW_COLOR = PR.GLOW_COLOR, LOOK = PR.LOOK;
   const { THREE, GLTFLoader, MapControls, RoomEnvironment, EffectComposer, RenderPass, UnrealBloomPass, OutputPass } = window.SB3D;
   const REDUCED = matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -142,7 +144,7 @@ function mount(container, opts = {}) {
   renderer.setPixelRatio(Math.min(devicePixelRatio, LITE ? 1 : 2));
   renderer.setSize(W(), H());
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 1.0;
+  renderer.toneMappingExposure = NT.exposure;
   renderer.shadowMap.enabled = !LITE;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   renderer.domElement.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;display:block;z-index:0';
@@ -482,13 +484,25 @@ function mount(container, opts = {}) {
     sp.userData = { base, a: rand() * Math.PI * 2, r: rr[0] + rand() * rr[1], y: yy[0] + rand() * yy[1], w: (rand() - .5) * C.w };
     cloudGroup.add(sp);
   }
+  if (PR.mist) {   // brume dans la station : sprites testés en profondeur contre la coque, ils voilent des pans entiers
+    const M = PR.mist;
+    for (let i = 0; i < (LITE ? M.nLite : M.n); i++) {
+      const base = M.op[0] + rand() * M.op[1];
+      const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: CLOUD_TEX[(rand() * 4) | 0], transparent: true, depthWrite: false, fog: false, opacity: base, color: pick(M.col) }));
+      sp.material.rotation = rand() * Math.PI * 2;
+      const size = M.size[0] + rand() * M.size[1];
+      sp.scale.set(size * 1.6, size * (0.45 + rand() * 0.3), 1);
+      sp.userData = { base, a: rand() * Math.PI * 2, r: M.r[0] + rand() * M.r[1], y: M.y[0] + rand() * M.y[1], w: (rand() - .5) * 0.02, mist: 1 };
+      cloudGroup.add(sp);
+    }
+  }
   const _cp = new THREE.Vector3();
   function updateClouds(dt) {
     for (const sp of cloudGroup.children) {
       const u = sp.userData;
       u.a += u.w * dt;
       sp.position.set(Math.cos(u.a) * u.r, u.y, Math.sin(u.a) * u.r);
-      sp.material.opacity = u.base * sstep(3, 11, _cp.copy(sp.position).distanceTo(camera.position));
+      sp.material.opacity = u.base * (u.mist ? sstep(0.8, 4, _cp.copy(sp.position).distanceTo(camera.position)) : sstep(3, 11, _cp.copy(sp.position).distanceTo(camera.position)));
     }
   }
 
@@ -611,7 +625,7 @@ function mount(container, opts = {}) {
       o.castShadow = !emissiveOnly && !LITE; o.receiveShadow = !LITE;
       for (const mat of mats) {
         if (GLOSS[mat.name]) { mat.roughness = GLOSS[mat.name][0]; mat.metalness = GLOSS[mat.name][1]; mat.envMapIntensity = GLOSS_ENV; }
-        else if (mat.map) { mat.envMapIntensity = 0.22 * (NT.albedo ? 0.55 : 1); mat.metalness = Math.min(mat.metalness, 0.3); mat.roughness = Math.max(mat.roughness, 0.9); if (!mat.userData.nt) { mat.userData.nt = 1; if (mat.emissiveMap) mat.emissiveIntensity *= NT.tex; if (NT.albedo) mat.color.multiplyScalar(NT.albedo); } }   // 16/10 — pièces texturées (noyau de la Couronne) : reflets retenus comme le reste
+        else if (mat.map) { mat.envMapIntensity = 0.22 * NT.env; mat.metalness = Math.min(mat.metalness, 0.3); mat.roughness = Math.max(mat.roughness, 0.9); if (NT.albedo) { mat.roughnessMap = null; mat.roughness = 0.93; } if (!mat.userData.nt) { mat.userData.nt = 1; if (mat.emissiveMap) mat.emissiveIntensity *= NT.tex; if (NT.albedo) mat.color.multiplyScalar(NT.albedo); } }   // 16/10 — pièces texturées (noyau de la Couronne) : reflets retenus comme le reste
         if (PR.rockLift && mat.name.startsWith('M_SC_ROCK') && !mat.userData.lift) { mat.userData.lift = 1; mat.color.multiplyScalar(PR.rockLift); }
         if (/_GLASS$/.test(mat.name)) { mat.envMapIntensity = 0.6; mat.color.setRGB(...PR.glass); }
         if (!GLOW[mat.name] && !mat.map && mat.emissive && mat.emissiveIntensity > 0 && !mat.userData.ng) { mat.userData.ng = 1; mat.emissiveIntensity *= NT.glow; }   // néons, enseigne, salon VIP : sans éblouir
