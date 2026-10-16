@@ -67,7 +67,7 @@ const PROFILES = {
     dockShot: { t: [1060, 110, -130], p: [1440, 480, 100] }, dockMax: 9,
     tankerAt: { pos: [1050, 110, -40], rotZ: 0, scale: 2.5 },   // agrandi : à l'échelle, un tanker se perdrait contre 2,4 km de station
     // 16/10 — éclairage obscur : station dans la pénombre, éclairée de loin et pâlement ; lumières sans éblouir
-    night: { light: 0.045, glow: 0.6, tex: 1.3, halo: 0.45, bloom: [0.5, 0.45, 0.85], albedo: 0.42, env: 0.1, exposure: 0.9, hideCoreAtBar: true },
+    night: { light: 0.045, glow: 0.6, tex: 1.3, halo: 0.45, bloom: [0.5, 0.45, 0.85], albedo: 0.26, hull: 0.4, env: 0.12, exposure: 0.9, hideCoreAtBar: true },
     // 16/10 — la nuit : ce sont les feux qui éclairent, comme des lanternes sur le pont d'un bateau pirate (positions posées sur les ponts, repère Blender)
     lamps: { url: 'assets/3d/sb_dc02_lamps.json?v=20261016-2130', light: [0xff8a34, 7.0, 3.2], lightsMax: 8, lightsLite: 4, post: 7, lantern: 1.7 },
     // 16/10 — brume épaisse par endroits : bancs de brouillard posés dans la station (entre anneau, bras et noyau)
@@ -640,8 +640,9 @@ function mount(container, opts = {}) {
       const emissiveOnly = mats.every(mt => GLOW[mt.name]);
       o.castShadow = !emissiveOnly && !LITE; o.receiveShadow = !LITE;
       for (const mat of mats) {
-        if (GLOSS[mat.name]) { mat.roughness = GLOSS[mat.name][0]; mat.metalness = GLOSS[mat.name][1]; mat.envMapIntensity = GLOSS_ENV; }
-        else if (mat.map) { mat.envMapIntensity = 0.22 * NT.env; mat.metalness = Math.min(mat.metalness, 0.3); mat.roughness = Math.max(mat.roughness, 0.9); if (NT.albedo) { mat.roughnessMap = null; mat.roughness = 0.93; } if (!mat.userData.nt) { mat.userData.nt = 1; if (mat.emissiveMap) mat.emissiveIntensity *= NT.tex; if (NT.albedo) mat.color.multiplyScalar(NT.albedo); } }   // 16/10 — pièces texturées (noyau de la Couronne) : reflets retenus comme le reste
+        if (GLOSS[mat.name]) { mat.roughness = GLOSS[mat.name][0]; mat.metalness = GLOSS[mat.name][1]; mat.envMapIntensity = GLOSS_ENV * (NT.albedo ? 0.5 : 1);
+          if (NT.hull && !mat.userData.nh) { mat.userData.nh = 1; mat.color.multiplyScalar(NT.hull); } }   // 16/10 — coques crème/grises assombries la nuit (fini l'effet plastique)
+        else if (mat.map) { mat.envMapIntensity = 0.22 * NT.env; mat.metalness = Math.min(mat.metalness, 0.3); mat.roughness = Math.max(mat.roughness, 0.9); if (NT.albedo) { mat.roughness = 1.0; mat.metalness = Math.max(mat.metalness, 0.45); }   /* acier sombre, rugosité de la patine conservée */ if (!mat.userData.nt) { mat.userData.nt = 1; if (mat.emissiveMap) mat.emissiveIntensity *= NT.tex; if (NT.albedo) mat.color.multiplyScalar(NT.albedo); } }   // 16/10 — pièces texturées (noyau de la Couronne) : reflets retenus comme le reste
         if (PR.rockLift && mat.name.startsWith('M_SC_ROCK') && !mat.userData.lift) { mat.userData.lift = 1; mat.color.multiplyScalar(PR.rockLift); }
         if (/_GLASS$/.test(mat.name)) { mat.envMapIntensity = 0.6; mat.color.setRGB(...PR.glass); }
         if (!GLOW[mat.name] && !mat.map && mat.emissive && mat.emissiveIntensity > 0 && !mat.userData.ng) { mat.userData.ng = 1; mat.emissiveIntensity *= NT.glow; }   // néons, enseigne, salon VIP : sans éblouir
