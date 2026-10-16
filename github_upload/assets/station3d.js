@@ -67,7 +67,9 @@ const PROFILES = {
     dockShot: { t: [1060, 110, -130], p: [1440, 480, 100] }, dockMax: 9,
     tankerAt: { pos: [1050, 110, -40], rotZ: 0, scale: 2.5 },   // agrandi : à l'échelle, un tanker se perdrait contre 2,4 km de station
     // 16/10 — éclairage obscur : station dans la pénombre, éclairée de loin et pâlement ; lumières sans éblouir
-    night: { light: 0.12, glow: 0.6, tex: 1.3, halo: 0.45, bloom: [0.42, 0.4, 0.88], albedo: 0.38, env: 0.25, exposure: 0.8, hideCoreAtBar: true },
+    night: { light: 0.045, glow: 0.6, tex: 1.3, halo: 0.45, bloom: [0.5, 0.45, 0.85], albedo: 0.42, env: 0.1, exposure: 0.9, hideCoreAtBar: true },
+    // 16/10 — la nuit : ce sont les feux qui éclairent, comme des lanternes sur le pont d'un bateau pirate (positions posées sur les ponts, repère Blender)
+    lamps: { url: 'assets/3d/sb_dc02_lamps.json?v=20261016-2130', light: [0xff8a34, 7.0, 3.2], lightsMax: 8, lightsLite: 4, post: 7, lantern: 1.7 },
     // 16/10 — brume épaisse par endroits : bancs de brouillard posés dans la station (entre anneau, bras et noyau)
     mist: { n: 60, nLite: 26, r: [2.5, 11.0], y: [-3.0, 4.5], size: [4.5, 7.0], op: [0.6, 0.35], col: [0x4a1c2c, 0x3c1630, 0x5a2434, 0x2e1428] },
   },
@@ -518,7 +520,19 @@ function mount(container, opts = {}) {
   const BAR_AT = P(...PR.barAt);
   let view = VIEWS[opts.view] ? opts.view : 'port';
   const coreObjs = [];   // 16/10 — le noyau s'efface en vue « bar » pour dégager la façade
-  const syncCore = () => { const hide = !!NT.hideCoreAtBar && view === 'bar'; for (const o of coreObjs) o.visible = !hide; };
+  let coreA = 1;
+  const syncCore = () => {};   // le noyau s'efface au dernier moment (voir la boucle)
+  function fadeCore(dt, t) {
+    if (!coreObjs.length) return;
+    const late = !move || (t - move.t0) / move.dur > 0.88;
+    const want = (NT.hideCoreAtBar && view === 'bar' && late) ? 0 : 1;
+    if (coreA === want) return;
+    coreA = want > coreA ? Math.min(1, coreA + dt * 3) : Math.max(0, coreA - dt * 2.5);
+    for (const o of coreObjs) {
+      o.visible = coreA > 0.01;
+      for (const m of (Array.isArray(o.material) ? o.material : [o.material])) { m.transparent = coreA < 1; m.opacity = coreA; m.depthWrite = coreA > 0.6; }
+    }
+  }
   let shot = VIEWS[view]();
   const controls = new MapControls(camera, renderer.domElement);
   controls.screenSpacePanning = true;
@@ -652,11 +666,49 @@ function mount(container, opts = {}) {
     const barLight0 = barLight ? barLight.intensity : 0; barLight && (barLight.userData.i0 = barLight0);
     ready = true;
     if (opts.tanker) loadTanker();
+    loadLamps();
     if (opts.intro && !REDUCED && view === 'port') startMove(shot, 9.0, true);
     else { controls.enabled = interactive; controls.autoRotate = !REDUCED; }
     if (opts.onReady) opts.onReady();
   }, (ev) => { if (opts.onProgress && ev.total) opts.onProgress(ev.loaded / ev.total); },
   (err) => { console.warn('[Station3D]', err); if (opts.onError) opts.onError(err); });
+
+  /* ── 16/10 — lanternes : poteaux, globes, lueurs et quelques vrais feux qui éclairent les ponts ── */
+  const lampLights = [];
+  let lampGlow = null;
+  function updateLamps(t) {
+    for (let i = 0; i < lampLights.length; i++) { const l = lampLights[i];
+      l.intensity = l.userData.i0 * (0.82 + 0.1 * Math.sin(t * 7.1 + i * 2.3) + 0.08 * Math.sin(t * 13.7 + i)); }
+    if (lampGlow) lampGlow.material.opacity = 0.78 + 0.06 * Math.sin(t * 5.3);
+  }
+  function loadLamps() {
+    const LP = PR.lamps; if (!LP) return;
+    fetch(LP.url).then(r => r.json()).then(J => {
+      if (!alive) return;
+      const n = J.lamps.length, m4 = new THREE.Matrix4();
+      const postG = new THREE.CylinderGeometry(0.25 * S, 0.35 * S, LP.post * S, 6); postG.translate(0, LP.post * S / 2, 0);
+      const globeG = new THREE.SphereGeometry(LP.lantern * S, 10, 8);
+      const posts = new THREE.InstancedMesh(postG, new THREE.MeshStandardMaterial({ color: 0x1a1512, roughness: 0.8, metalness: 0.3 }), n);
+      const globes = new THREE.InstancedMesh(globeG, new THREE.MeshStandardMaterial({ color: 0x3a1a08, emissive: 0xffa040, emissiveIntensity: 3.2, roughness: 0.5 }), n);
+      const gp = new Float32Array(n * 3);
+      J.lamps.forEach(([x, y, z], i) => {
+        const b = P(x, y, z);
+        m4.makeTranslation(b.x, b.y, b.z); posts.setMatrixAt(i, m4);
+        m4.makeTranslation(b.x, b.y + LP.post * S, b.z); globes.setMatrixAt(i, m4);
+        gp.set([b.x, b.y + LP.post * S, b.z], i * 3);
+      });
+      station.add(posts, globes);
+      const gg = new THREE.BufferGeometry(); gg.setAttribute('position', new THREE.BufferAttribute(gp, 3));
+      lampGlow = new THREE.Points(gg, new THREE.PointsMaterial({ map: haloTex, color: 0xff9a48, size: 0.55, sizeAttenuation: true, transparent: true, opacity: 0.8, blending: THREE.AdditiveBlending, depthWrite: false, fog: true }));
+      station.add(lampGlow);
+      const nL = Math.min(J.lights.length, LITE ? LP.lightsLite : LP.lightsMax);
+      J.lights.slice(0, nL).forEach(([x, y, z]) => {
+        const b = P(x, y, z + LP.post + 6);
+        const l = new THREE.PointLight(LP.light[0], LP.light[1], LP.light[2], 1.6); l.position.copy(b); l.userData.i0 = LP.light[1];
+        station.add(l); lampLights.push(l);
+      });
+    }).catch(e => console.warn('[Station3D] lanternes', e));
+  }
 
   /* ── le tanker du joueur, amarré (vue « dock ») ── */
   let tankerObj = null;
@@ -703,6 +755,7 @@ function mount(container, opts = {}) {
       h.scale.setScalar(h.userData.size * (0.7 + 0.5 * k)); h.material.opacity = (0.35 + 0.6 * k) * NT.halo;
     }
     if (ready) { if (move) updateMove(t); else { applyPend(dt); controls.update(); } }
+    fadeCore(dt, t); updateLamps(t);
     if (shot.sway && controls.autoRotate && !move && t - swayFlip > 2) {   // balancement : on repart dans l'autre sens à la butée
       const az = controls.getAzimuthalAngle();
       if (az < controls.minAzimuthAngle + 0.02 || az > controls.maxAzimuthAngle - 0.02) { controls.autoRotateSpeed = -controls.autoRotateSpeed; swayFlip = t; }
