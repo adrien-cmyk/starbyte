@@ -98,7 +98,7 @@ const PROFILES = {
       M_SC_ROCK:     { cell: [60.0, 40.0], seam: .0, depth: .0, tint: .22, rough: .05, grime: .30, wear: .55 },
       M_SC_ROCK2:    { cell: [60.0, 40.0], seam: .0, depth: .0, tint: .22, rough: .05, grime: .30, wear: .55 },
     },
-    glass: [.02, .03, .045], rockLift: 1.45, nav: (n) => n === 'M_SC_LIGHT_RED', beacon: 'M_SC_BEACON', navPulse: [1.6, 3.2, 1.4],
+    glass: [.02, .03, .045], rockLift: null, nav: (n) => n === 'M_SC_LIGHT_RED', beacon: 'M_SC_BEACON', navPulse: [1.6, 3.2, 1.4],
     cloud: { dust: [0x04080e, 0x060b12, 0x0a1018], gas: [0x143252, 0x1b3f62, 0x22344e, 0x2a4a6a], glow: [0x6ab0ff, 0x8cc8ff, 0x9aa6ff],
              nearSize: [12, 16], farSize: [38, 44], nearR: [19, 20], farR: [50, 45], nearY: [-12, 14], farY: [-30, 40], w: 0.010 },
     sky: { a: '.06, .18, .42', b: '.10, .30, .48', c: '.20, .22, .40', base: '.004, .008, .016', fil: '.55, .80, 1.0', glow: '.40, .62, 1.0' },
@@ -129,6 +129,9 @@ const PROFILES = {
     // « le dock » : devant les baies sud illuminées, ton tanker en attente d'amarrage
     dockShot: { t: [40, -2950, 420], p: [1100, -3750, 950] }, dockMax: 14,
     tankerAt: { pos: [40, -3100, 560], rotZ: 0, scale: 6 },
+    // 16/10 — la nuit bleutée : roches sombres, plus d'éclairage général, des nappes de lumière froide rasante qui révèlent murs et structures
+    night: { light: 0.06, glow: 0.35, tex: 1, halo: 0.3, bloom: [0.4, 0.4, 0.88], hull: 0.3, rock: 0.45, env: 0.03, envScene: 0.05, exposure: 0.9 },
+    lamps: { url: 'assets/3d/sb_sc01_lights.json?v=20261016-2345', light: [0xa8ccff, 30.0, 8.0], lift: 0, lightsMax: 16, lightsLite: 6 },
   },
 };
 
@@ -645,7 +648,7 @@ function mount(container, opts = {}) {
       o.castShadow = !emissiveOnly && !LITE; o.receiveShadow = !LITE;
       for (const mat of mats) {
         if (GLOSS[mat.name]) { mat.roughness = GLOSS[mat.name][0]; mat.metalness = GLOSS[mat.name][1]; mat.envMapIntensity = GLOSS_ENV * (NT.albedo ? 0.5 : 1);
-          if (NT.hull && !mat.userData.nh) { mat.userData.nh = 1; mat.color.multiplyScalar(NT.hull); } }   // 16/10 — coques crème/grises assombries la nuit (fini l'effet plastique)
+          if (NT.hull && !mat.userData.nh) { mat.userData.nh = 1; mat.color.multiplyScalar(NT.hull * (NT.rock && /ROCK/.test(mat.name) ? NT.rock : 1)); } }   // 16/10 — coques crème/grises assombries la nuit (fini l'effet plastique)
         else if (mat.map) { mat.envMapIntensity = 0.22 * NT.env; mat.metalness = Math.min(mat.metalness, 0.3); mat.roughness = Math.max(mat.roughness, 0.9); if (NT.albedo) { mat.roughness = 1.0; mat.metalness = Math.min(mat.metalness, 0.15); }   /* matière qui boit la lumière : presque noire, sans reflet */ if (!mat.userData.nt) { mat.userData.nt = 1; if (mat.emissiveMap) mat.emissiveIntensity *= NT.tex; if (NT.albedo) mat.color.multiplyScalar(NT.albedo); } }   // 16/10 — pièces texturées (noyau de la Couronne) : reflets retenus comme le reste
         if (PR.rockLift && mat.name.startsWith('M_SC_ROCK') && !mat.userData.lift) { mat.userData.lift = 1; mat.color.multiplyScalar(PR.rockLift); }
         if (/_GLASS$/.test(mat.name)) { mat.envMapIntensity = 0.6; mat.color.setRGB(...PR.glass); }
@@ -691,6 +694,7 @@ function mount(container, opts = {}) {
     fetch(LP.url).then(r => r.json()).then(J => {
       if (!alive) return;
       const n = J.lamps.length, m4 = new THREE.Matrix4();
+      if (n) {
       const postG = new THREE.CylinderGeometry(0.25 * S, 0.35 * S, LP.post * S, 6); postG.translate(0, LP.post * S / 2, 0);
       const globeG = new THREE.SphereGeometry(LP.lantern * S, 10, 8);
       const posts = new THREE.InstancedMesh(postG, new THREE.MeshStandardMaterial({ color: 0x1a1512, roughness: 0.8, metalness: 0.3 }), n);
@@ -706,6 +710,7 @@ function mount(container, opts = {}) {
       const gg = new THREE.BufferGeometry(); gg.setAttribute('position', new THREE.BufferAttribute(gp, 3));
       lampGlow = new THREE.Points(gg, new THREE.PointsMaterial({ map: haloTex, color: 0xff9a48, size: 0.55, sizeAttenuation: true, transparent: true, opacity: 0.8, blending: THREE.AdditiveBlending, depthWrite: false, fog: true }));
       station.add(lampGlow);
+      }
       const nL = LITE ? LP.lightsLite : LP.lightsMax;
       const spots = J.lights.slice(0, nL);   // 16/10 — comme au bar : des nappes de lumière chaude, réparties sur toute la station
       while (spots.length < nL) {
@@ -715,7 +720,7 @@ function mount(container, opts = {}) {
       }
       if (!LITE && LP.under) for (const u of LP.under) spots.push([u[0], u[1], u[2] - (LP.lift || 0)]);   // lueur pâle sous l'anneau et le noyau (vue d'en dessous)
       spots.forEach(([x, y, z]) => {
-        const b = P(x, y, z + (LP.lift || LP.post + 6));
+        const b = P(x, y, z + (LP.lift ?? (LP.post + 6)));
         const l = new THREE.PointLight(LP.light[0], LP.light[1], LP.light[2], 1.6); l.position.copy(b); l.userData.i0 = LP.light[1];
         station.add(l); lampLights.push(l);
       });
