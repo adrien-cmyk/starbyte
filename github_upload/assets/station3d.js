@@ -133,6 +133,52 @@ const PROFILES = {
     night: { light: 0.06, glow: 0.35, tex: 1, halo: 0.3, bloom: [0.4, 0.4, 0.88], hull: 0.3, rock: 0.45, env: 0.03, envScene: 0.05, exposure: 0.9 },
     lamps: { url: 'assets/3d/sb_sc01_lights.json?v=20261016-2345', light: [0xa8ccff, 30.0, 8.0], lift: 0, lightsMax: 16, lightsLite: 6 },
   },
+  // 16/10 — Station O'Neill « Série Noire » (Confédération impériale) : le lieu caché du secteur N ; très sombre et furtive,
+  // nuit quasi noire, poussière froide gris-violet, étoile blanche en contre-jour derrière la poupe ; elle se lit par ses arêtes et ses feux rouges
+  noire: {
+    S: 0.005, near: 0.03, half: [10.5, 12.5], minFit: 16, bg: 0x010103, haze: 0x06070b, fog: [8, 30],
+    sun: [0.55, 0.50, -0.67], core: [0.50, 0.35, -0.79], camDir: [-0.66, -0.30, 0.69], introDir: [-0.30, -0.80, 0.52],
+    GLOSS: { M_ON_HULL: [0.70, 0.35], M_ON_PANEL: [0.68, 0.30], M_ON_PLATE: [0.60, 0.45], M_ON_STEEL: [0.50, 0.60], M_ON_BLACK: [0.82, 0.20], M_ON_GUNMETAL: [0.60, 0.55], M_ON_GLASS: [0.30, 0.10] },
+    GLOW: { M_ON_RED: 4.5, M_ON_RED_DIM: 2.0, M_ON_WHITE: 2.2, M_ON_REACTOR: 6.0 },
+    GLOW_COLOR: { M_ON_RED: 0xff2010, M_ON_RED_DIM: 0xff3a18, M_ON_WHITE: 0xcfe0ff, M_ON_REACTOR: 0xff2a12 },
+    LOOK: {
+      M_ON_HULL:     { cell: [12.0, 7.0], seam: .18, depth: .20, tint: .10, rough: .10, grime: .16, wear: .30 },
+      M_ON_PANEL:    { cell: [10.0, 6.0], seam: .18, depth: .22, tint: .10, rough: .12, grime: .16, wear: .35 },
+      M_ON_PLATE:    { cell: [8.0, 5.0], seam: .16, depth: .20, tint: .08, rough: .10, grime: .14, wear: .40 },
+      M_ON_STEEL:    { cell: [6.0, 4.0], seam: .12, depth: .10, tint: .06, rough: .08, grime: .12, wear: .50 },
+      M_ON_GUNMETAL: { cell: [8.0, 5.0], seam: .16, depth: .35, tint: .08, rough: .12, grime: .14, wear: .45 },
+      M_ON_BLACK:    { cell: [16.0, 9.0], seam: .20, depth: .14, tint: .14, rough: .14, grime: .10, wear: .20 },
+    },
+    glass: [.01, .015, .02], rockLift: null, nav: (n) => n === 'M_ON_RED', beacon: 'M_ON_REACTOR', navPulse: [1.2, 3.4, 1.8],
+    cloud: { dust: [0x020203, 0x030305, 0x040408], gas: [0x121119, 0x16141e, 0x10141a, 0x1a1620], glow: [0x48465a, 0x5a6074, 0x5e4c58],
+             nearSize: [12, 16], farSize: [38, 44], nearR: [19, 20], farR: [50, 45], nearY: [-12, 14], farY: [-30, 40], w: 0.010 },
+    sky: { a: '.07, .065, .10', b: '.055, .07, .10', c: '.11, .07, .10', base: '.002, .002, .004', fil: '.40, .42, .52', glow: '.36, .38, .46' },
+    sunStops: [
+      [28,  [[0, 'rgba(255,255,255,1)'], [.35, 'rgba(240,244,255,1)'], [.5, 'rgba(200,210,240,.6)'], [1, 'rgba(160,170,220,0)']], .95, 1],
+      [300, [[0, 'rgba(220,232,255,.85)'], [.12, 'rgba(150,185,255,.40)'], [.4, 'rgba(60,110,200,.10)'], [1, 'rgba(30,60,120,0)']], .85, 1],
+      [1000, [[0, 'rgba(170,175,210,.14)'], [.3, 'rgba(60,60,90,.05)'], [1, 'rgba(20,20,40,0)']], .8, 1],
+      [760, [[0, 'rgba(210,225,255,.7)'], [.25, 'rgba(120,160,230,.22)'], [1, 'rgba(60,90,160,0)']], .4, 0.03],
+    ],
+    key: [0xdfe6ff, 3.2, 40, 17, 90], fill: [0x7f8aa8, 0.55], rim: [0x6870a0, 0.6], hemi: [0x161a26, 0x050508],
+    tips: [[-1845, 690, 0], [-1845, -690, 0], [1343, 690, 0], [1343, -690, 0], [-985, 560, 0], [-985, -560, 0], [-985, 0, 560],
+      [-985, 0, -560], [630, 560, 0], [630, -560, 0], [630, 0, 560], [630, 0, -560], [-3113, 0, 0]].map(t => t.concat([1])),
+    lane: { n: 34, nLite: 16, out: [12, 20], spread: 4, lift: [4, 2], size: [0.12, 0.35] },
+    orbit: { n: 14, nLite: 8, r: [5.2, 3.5], y: 9, size: [0.10, 0.22] },
+    target: [-1.4, 0.3, 0], minDist: 2.2,
+    lights: (L, hv, P) => {
+      L(0xff2a14, 5, 4.0, P(2400, 0, 0));
+      for (const [y, z] of [[88, 0], [-88, 0], [0, 88], [0, -88]]) hv(P(2305, y, z), 0.45, 0xff3018, 0);
+      hv(P(-3100, 0, 0), 0.35, 0xff2010, 1.3);
+      return L(0xc8d2ff, 3, 3.0, P(1343, -640, 160));   // pont d'observation de l'anneau arrière
+    },
+    // « le pont » : l'anneau d'habitat arrière, ses modules et son port d'amarrage
+    barShot: { t: [1343, -560, 60], p: [2350, -1650, 420] }, barAt: [1343, -560, 60], barMax: 16,
+    // « le dock » : un bras d'amarrage du cylindre, ton tanker à quai
+    dockShot: { t: [630, -620, 0], p: [1350, -1500, 380] }, dockMax: 14,
+    tankerAt: { pos: [630, -760, 0], rotZ: 90, scale: 5 },
+    night: { light: 0.08, glow: 0.4, tex: 1, halo: 0.35, bloom: [0.4, 0.4, 0.88], hull: 0.35, env: 0.03, envScene: 0.05, exposure: 0.9 },
+    lamps: { url: 'assets/3d/sb_on01_lights.json?v=20261017-0000', light: [0xc4ccf4, 26.0, 7.0], lift: 0, lightsMax: 14, lightsLite: 6 },
+  },
 };
 
 function mount(container, opts = {}) {
@@ -173,7 +219,7 @@ function mount(container, opts = {}) {
   // 16/10 — avec scene.environment, three applique scene.environmentIntensity (pas envMapIntensity des matériaux) : la nuit, on l'éteint presque
   if (NT.envScene !== undefined && 'environmentIntensity' in scene) scene.environmentIntensity = NT.envScene;
 
-  const CAM_DIR = new THREE.Vector3(0.60, -0.34, 0.72).normalize();   // 3/4 dessous : la station écrase le cadre
+  const CAM_DIR = new THREE.Vector3(...(PR.camDir || [0.60, -0.34, 0.72])).normalize();   // 3/4 dessous : la station écrase le cadre
   const SUN_DIR = new THREE.Vector3(...PR.sun).normalize();   // étoile voilée par la nébuleuse, derrière la tour
   const NEB_CORE = new THREE.Vector3(...PR.core).normalize();  // cœur lumineux de la nébuleuse
 
@@ -559,7 +605,7 @@ function mount(container, opts = {}) {
   // ouverture : on glisse depuis le large en contournant la flèche est (7,5 s) ; sinon on est déjà en place
   const fit0 = fitDistance();
   const INTRO_T = PR.introTarget ? new THREE.Vector3(...PR.introTarget) : null;   // 16/10 — l'approche vise le cœur de la station, puis glisse vers le cadrage final
-  const introFrom = (INTRO_T && view === 'port' ? INTRO_T : shot.target).clone().addScaledVector(new THREE.Vector3(0.94, -0.66, 0.10).normalize(), fit0 * 3.1)   // on remonte depuis les profondeurs de la nébuleuse;
+  const introFrom = (INTRO_T && view === 'port' ? INTRO_T : shot.target).clone().addScaledVector(new THREE.Vector3(...(PR.introDir || [0.94, -0.66, 0.10])).normalize(), fit0 * 3.1)   // on remonte depuis les profondeurs de la nébuleuse;
   let move = null;   // { from: {pos, target}, to: shot, t0, dur, spherical }
   let interactive = !!opts.interactive, idleTimer = null;
   camera.position.copy(shot.pos); camera.lookAt(shot.target);

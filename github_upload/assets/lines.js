@@ -36,9 +36,12 @@
   // 15/10 (soir) : le Sanctuaire du Linceul des Cendres, bastion impérial, est le lieu du secteur O ;
   // ses lignes : des pèlerins et des convois impériaux (lourds, bien escortés)
   const SANCT_DOCK_ID = 'dock-otqflf';
+  const NOIRE_DOCK_ID = 'dock-uguzli';
   const STATION_PORTS = {
     [CROWN_DOCK_ID]: { kinds: CROWN_KINDS, route: 'La Saigne de la Couronne', mood: 'grasse', flag: '_linesCrown' },
     [SANCT_DOCK_ID]: { kinds: ['pilgrim_stop', 'imperial_convoy'], route: 'La Vieille Voie du Linceul', mood: 'imperiale', flag: '_linesSanct' },
+    // 16/10 : la Station O'Neill Série Noire, station furtive de la Confédération, est le lieu du secteur N ; ses lignes : convois armés et convois impériaux
+    [NOIRE_DOCK_ID]: { kinds: ['derelict_carrier', 'imperial_convoy'], route: 'La Voie Noire', mood: 'noire', flag: '_linesNoire' },
   };
 
   /* ── hachage déterministe (mêmes résultats sur tous les appareils) ── */
@@ -1287,7 +1290,7 @@
     dockMarketHtml, sellHere, withdrawOffer, buyOffer, learnRoute, noteRobbery, tickMarket, fetchOffers, sellableRoutes,
     ORDER_MODES, ordersOf, ordersLabel, chooseOrders, setOrders, pushOrders, pushNpc, holdCap, holdUsed, holdAll, fleetAtk, odds, oddsLabel,
     robNpc, tailNpc, tickAmbushes, capLegs, salesOn, soldChain, routesOf, reportSheet, npcReportCan, npcReportAction, ambushTravel, ambushAt, pollSpied, autoPlayers,
-    WINDOW_MS, EPOCH, CROWN_DOCK_ID, SANCT_DOCK_ID, STATION_PORTS,
+    WINDOW_MS, EPOCH, CROWN_DOCK_ID, SANCT_DOCK_ID, NOIRE_DOCK_ID, STATION_PORTS,
     _reset() { _net = null; },
   };
 })();
