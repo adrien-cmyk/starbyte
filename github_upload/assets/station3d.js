@@ -53,7 +53,7 @@ const PROFILES = {
       .map(([a, L]) => { const r = a * Math.PI / 180; return [Math.cos(r) * L, Math.sin(r) * L, 0, 1]; }),
     lane: { n: 96, nLite: 40, out: [10, 18], spread: 3, lift: [3, 2], size: [0.25, 0.55] },
     orbit: { n: 54, nLite: 24, r: [7.6, 3.6], y: 2.4, size: [0.18, 0.35] },
-    target: [0, 0.9, 0], minDist: 1.6,
+    target: [0, -2.2, 0], minDist: 1.6,   // 16/10 — cible abaissée : la station remonte vers le haut de l'écran
     lights: (L, hv, P) => {
       L(0xff9a50, 6, 3.2, P(751, 330, 0));
       const bar = L(0xffa040, 3, 4.0, P(470, -230, 150));   // 16/10 — lueur du bar adoucie
@@ -67,9 +67,9 @@ const PROFILES = {
     dockShot: { t: [1060, 110, -130], p: [1440, 480, 100] }, dockMax: 9,
     tankerAt: { pos: [1050, 110, -40], rotZ: 0, scale: 2.5 },   // agrandi : à l'échelle, un tanker se perdrait contre 2,4 km de station
     // 16/10 — éclairage obscur : station dans la pénombre, éclairée de loin et pâlement ; lumières sans éblouir
-    night: { light: 0.2, glow: 0.4, tex: 0.6, halo: 0.4, bloom: [0.38, 0.4, 0.92], albedo: 0.5, env: 0.3, exposure: 0.8 },
+    night: { light: 0.12, glow: 0.6, tex: 1.3, halo: 0.45, bloom: [0.42, 0.4, 0.88], albedo: 0.38, env: 0.25, exposure: 0.8, hideCoreAtBar: true },
     // 16/10 — brume épaisse par endroits : bancs de brouillard posés dans la station (entre anneau, bras et noyau)
-    mist: { n: 40, nLite: 18, r: [3.0, 10.0], y: [-2.5, 4.0], size: [4.0, 6.0], op: [0.45, 0.35], col: [0x4a1c2c, 0x3c1630, 0x5a2434, 0x2e1428] },
+    mist: { n: 60, nLite: 26, r: [2.5, 11.0], y: [-3.0, 4.5], size: [4.5, 7.0], op: [0.6, 0.35], col: [0x4a1c2c, 0x3c1630, 0x5a2434, 0x2e1428] },
   },
   // Sanctuaire du Linceul des Cendres : bastion impérial sur astéroïde, dans un nuage bleuté (le Linceul)
   sanctuary: {
@@ -517,6 +517,8 @@ function mount(container, opts = {}) {
   };
   const BAR_AT = P(...PR.barAt);
   let view = VIEWS[opts.view] ? opts.view : 'port';
+  const coreObjs = [];   // 16/10 — le noyau s'efface en vue « bar » pour dégager la façade
+  const syncCore = () => { const hide = !!NT.hideCoreAtBar && view === 'bar'; for (const o of coreObjs) o.visible = !hide; };
   let shot = VIEWS[view]();
   const controls = new MapControls(camera, renderer.domElement);
   controls.screenSpacePanning = true;
@@ -640,6 +642,9 @@ function mount(container, opts = {}) {
         }
       }
     });
+    m.traverse(o => { if (o.isMesh && /^DC_core/.test(o.name + ' ' + (o.parent ? o.parent.name : '')) ) coreObjs.push(o); });
+    m.traverse(o => { if (o.isMesh && !coreObjs.includes(o) && o.parent && /DC_core/.test(o.parent.name)) coreObjs.push(o); });
+    syncCore();
     station.add(m);
     const L = (c, i, d, v) => glowLight(c, i, d, v.x, v.y, v.z);
     const hv = (v, s, c, p) => halo(v.x, v.y, v.z, s, c, p);
@@ -716,7 +721,7 @@ function mount(container, opts = {}) {
     get view() { return view; },
     setView(v) {
       if (!VIEWS[v] || v === view && !move) return;
-      view = v; shot = VIEWS[v](); applyLimits();
+      view = v; shot = VIEWS[v](); applyLimits(); syncCore();
       if (ready) startMove(shot, REDUCED ? 0.01 : 2.6, false);
       else { camera.position.copy(shot.pos); controls.target.copy(shot.target); camera.lookAt(shot.target); }
     },
@@ -726,7 +731,7 @@ function mount(container, opts = {}) {
     orbit(dx, dy) { if (!move && ready) { pend.x += dx; pend.y += dy; } },
     dolly(k) { if (!move && ready) pend.z += Math.log(k); },
     end() { clearTimeout(idleTimer); if (!REDUCED) idleTimer = setTimeout(() => { controls.autoRotate = true; }, 6000); },
-    replayIntro() { if (!ready || REDUCED) return; view = 'port'; shot = VIEWS.port(); applyLimits(); camera.position.copy(introFrom); controls.target.copy(shot.target); startMove(shot, 9.0, true); },
+    replayIntro() { if (!ready || REDUCED) return; view = 'port'; shot = VIEWS.port(); applyLimits(); syncCore(); camera.position.copy(introFrom); controls.target.copy(shot.target); startMove(shot, 9.0, true); },
     dispose() {
       alive = false; cancelAnimationFrame(raf); ro.disconnect(); controls.dispose(); clearTimeout(idleTimer);
       for (const sc of [scene, bgScene]) sc.traverse(o => {
