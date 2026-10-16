@@ -43564,7 +43564,7 @@ function onLeaveDockBack() {
 // En tête : la station en orbite lente (ou la façade du bar). Toucher → plein écran, on tourne et on zoome.
 // Première arrivée de la partie : l'approche s'ouvre d'elle-même en plein écran (le « woah »).
 var _crown = null;   // { el, handle, home, fs }
-var CROWN_URL = 'assets/3d/sb_dc01.glb?v=20261015-1000';
+var CROWN_URL = 'assets/3d/sb_dc01.glb?v=20261016-1715';
 function _crownCss() {
   if (document.getElementById('crown-css')) return;
   const st = document.createElement('style'); st.id = 'crown-css';
@@ -43686,7 +43686,7 @@ function _crownCss2() {
 }
 // PATCH_1510_SANCTUAIRE — chaque station : son modèle, ses textes, ses cadrages
 var STATION_UI = {
-  crown: { id: 'dock-37oe89', profile: 'crown', url: 'assets/3d/sb_dc01.glb?v=20261015-1000', kicker: 'PORT-FRANC', title: 'THE DRIFTING CROWN',
+  crown: { id: 'dock-37oe89', profile: 'crown', url: 'assets/3d/sb_dc01.glb?v=20261016-1715', kicker: 'PORT-FRANC', title: 'THE DRIFTING CROWN',
     sub: 'station pirate à la dérive', chips: { dock: 'Le dock', bar: 'Le bar', port: 'La station' }, crewAt: 'au bar', place: 'le bar', seen: 'crownSeen',
     intro: 'Une couronne de laiton à la dérive. Dix bras tendus vers le vide, des milliers de hublots ambrés : ton tanker vient d\'entrer au port franc.', enter: 'ENTRER AU PORT',
     hall: { t: 'Le bar de la Couronne', s: 'Sous l\'enseigne dorée, au bord de l\'anneau. Ceux qui sont à quai, les marchés, les rumeurs, les cartes au comptoir.', i: 'VOIR LE BAR ↑' } },
@@ -45870,7 +45870,7 @@ if (G.knownTargets && Array.isArray(G.tankerMissions)) {
 <!-- PATCH_1610_SKILLS — skills des bâtiments : apprendre, découvrir, effets -->
 <script src="assets/skills.js?v=20261016-1600"></script>
 <!-- PATCH_1510_CROWN — The Drifting Crown en 3D (assets/station3d.js, sur le moteur partagé window.SB3D) -->
-<script type="module" src="assets/station3d.js?v=20261015-2300"></script>
+<script type="module" src="assets/station3d.js?v=20261016-1715"></script>
 <!-- FORMATION3D — flotte déployée en orbite, vue de haut en formation (remplace la vue orbite) -->
 <script src="assets/formation3d.js?v=20261014-1440"></script>
 </body>
