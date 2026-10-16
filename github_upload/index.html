@@ -5822,9 +5822,9 @@ svg.map {
   <button onclick="cheatCrownDock(SANCT_DOCK_ID)">⚓ Tanker amarré au Sanctuaire (arrivée)</button>
   <button onclick="G.sanctSeen = 0; saveGame(); toast('La prochaine ouverture du dock du Sanctuaire rejoue l\'arrivée')">🎬 Revoir l'arrivée au Sanctuaire</button>
   <!-- PATCH_1610_NOIRE_CHEATS -->
-  <button onclick="cheatCrownRoute(false, NOIRE_DOCK_ID)">🗺 Révéler la route de la Série Noire</button>
-  <button onclick="cheatCrownDock(NOIRE_DOCK_ID)">⚓ Tanker amarré à la Série Noire (arrivée)</button>
-  <button onclick="G.noireSeen = 0; saveGame(); toast('La prochaine ouverture du dock de la Série Noire rejoue l\'arrivée')">🎬 Revoir l'arrivée à la Série Noire</button>
+  <button onclick="cheatCrownRoute(false, NOIRE_DOCK_ID)">🗺 Révéler la route d'Erebus</button>
+  <button onclick="cheatCrownDock(NOIRE_DOCK_ID)">⚓ Tanker amarré à Erebus (arrivée)</button>
+  <button onclick="G.noireSeen = 0; saveGame(); toast('La prochaine ouverture du dock d\'Erebus rejoue l\'arrivée')">🎬 Revoir l'arrivée à Erebus</button>
   <div class="cheat-divider"></div>
   <div class="cheat-label">Ressources</div>
   <button onclick="cheatRes('all', 10000)">+10k toutes ressources</button>
@@ -40332,10 +40332,10 @@ var SANCT_DOCK = {
   detail: 'Sous la verrière nord, la halle : pèlerins, marchands sous licence, officiers en permission. Ici on parle bas. Les bannières écoutent, et le registre impérial n\'oublie personne.',
 };
 CROWN_DOCK.station = 'crown';
-// PATCH_1610_NOIRE — la Station O'Neill Série Noire (Confédération impériale) : le lieu caché du secteur N, troisième station secrète
+// PATCH_1610_NOIRE — la Station Erebus, étrave noire impériale (station O'Neill série noire) : le lieu caché du secteur N, troisième station secrète
 var NOIRE_DOCK_ID = 'dock-uguzli';
 var NOIRE_DOCK = {
-  name: 'Station O\'Neill Série Noire', typeLabel: 'Station furtive impériale', sub: 'station orbitale O\'Neill · 5,6 km',
+  name: 'Station Erebus', typeLabel: 'Étrave noire impériale', sub: 'station orbitale O\'Neill · 5,6 km',
   accent: '#c3c8dc', station: 'noire',
   ambience: 'Elle n\'apparaît sur aucune carte et ne répond à aucun appel. Un cylindre noir de cinq kilomètres, deux anneaux d\'habitat, des rangées de feux rouges qui s\'allument quand on approche, comme si quelque chose ouvrait les yeux. La Confédération ne confirme pas son existence. Elle t\'a pourtant laissé t\'amarrer.',
   detail: 'Dans l\'anneau arrière, derrière les baies blindées, le pont d\'observation : équipages de frégates furtives, marchands sans pavillon, agents qui ne donnent jamais leur nom. Ici, chaque transaction est enregistrée, et rien n\'est jamais effacé.',
@@ -43798,9 +43798,9 @@ var STATION_UI = {
     sub: 'bastion impérial sur astéroïde', long: true, chips: { dock: 'Le dock', bar: 'La halle', port: 'Le bastion' }, crewAt: 'à la halle', place: 'la halle', seen: 'sanctSeen',
     intro: 'Un astéroïde cuirassé surgit du Linceul. Des tours aux aiguilles rouges, des baies qui s\'allument une à une : le Sanctuaire t\'a vu venir.', enter: 'ENTRER AU SANCTUAIRE',
     hall: { t: 'La halle du Sanctuaire', s: 'Sous la verrière nord, entre les bannières impériales. Ceux qui sont à quai, les marchés, ce qui se murmure entre pèlerins.', i: 'VOIR LA HALLE ↑' } },
-  noire: { id: 'dock-uguzli', profile: 'noire', url: 'assets/3d/sb_on01.glb?v=20261017-0000', kicker: 'CONFÉDÉRATION IMPÉRIALE', title: 'STATION O\'NEILL',
+  noire: { id: 'dock-uguzli', profile: 'noire', url: 'assets/3d/sb_on01.glb?v=20261017-0000', kicker: 'ÉTRAVE NOIRE IMPÉRIALE', title: 'STATION EREBUS',
     sub: 'série noire · station furtive', long: true, chips: { dock: 'Le dock', bar: 'Le pont', port: 'La station' }, crewAt: 'sur le pont', place: 'le pont', seen: 'noireSeen',
-    intro: 'Rien sur les radars. Puis des feux rouges, un à un, le long d\'un cylindre de cinq kilomètres : la Série Noire t\'attendait.', enter: 'MONTER À BORD',
+    intro: 'Rien sur les radars. Puis des feux rouges, un à un, le long d\'un cylindre de cinq kilomètres : Erebus t\'attendait.', enter: 'MONTER À BORD',
     hall: { t: 'Le pont d\'observation', s: 'Dans l\'anneau arrière, derrière les baies blindées. Ceux qui sont à quai, les marchés, ce qui ne se dit qu\'à voix basse.', i: 'VOIR LE PONT ↑' } },
 };
 // une station en 3D pour ce dock (objet dock ou identifiant) ?
