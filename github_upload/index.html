@@ -23705,7 +23705,10 @@ function handleProbeReturn(missionId) {
   } else {
     report = generateProbeReport(mission.probeName, mission.sector, mission.tier, mission.mode, mission.targetCoords);
   }
-  if (mission.tier === 'stealth' && report) _spyEnrichReport(report, mission.targetCoords);
+  if (mission.tier === 'stealth' && report) {   // PATCH_1610_SPY : un relevé d'espionnage, pas une prospection au hasard
+    report.targets = []; report.spyOnly = true;
+    _spyEnrichReport(report, mission.targetCoords);
+  }
 
   // Storage
   if (!Array.isArray(G.probeReports)) G.probeReports = [];
@@ -33896,34 +33899,74 @@ function _spyPrecision() {
   const lt = (typeof getLaboTier === 'function') ? getLaboTier() : 0;
   return lt >= 3 ? 3 : lt >= 2 ? 2 : 1;
 }
-async function _spyEnrichReport(report, address) {
-  const addr = String(address || '').toUpperCase();
+async function _spyEnrichReport(report, address, attempt) {
+  const coord = String(address || '').toUpperCase().split('/')[0];
+  // PATCH_1610_SPY — l'adresse exacte du registre pour ce monde (la coordonnée locale peut différer : numéro de place)
+  const known = typeof findPlanetByCoord === 'function' ? findPlanetByCoord(coord) : null;
+  const addr = (known && known.mpAddress) || coord;
   const prec = _spyPrecision();
-  report.spy = { address: addr, precision: prec, pending: true };
+  report.spy = Object.assign({}, report.spy || {}, { address: addr, coord, precision: prec, pending: true, error: false, found: undefined });
+  // sans session au registre, il ne répond rien : on attend la connexion (sonde rentrée pendant que le jeu était fermé)
+  for (let i = 0; i < 60 && !(window.SBMP && SBMP.ready && SBMP.ready()); i++) await new Promise(r => setTimeout(r, 3000));
+  if (!(window.SBMP && SBMP.ready && SBMP.ready())) {
+    report.spy = { address: addr, coord, precision: prec, found: false, error: true, offline: true };
+    if (typeof saveGame === 'function') saveGame();
+    return;
+  }
   try {
-    const w = (window.SBMP && typeof SBMP.worldCard === 'function') ? await SBMP.worldCard(addr) : null;
+    let w = typeof SBMP.worldCard === 'function' ? await SBMP.worldCard(addr) : null;
+    if (!w && addr !== coord) w = await SBMP.worldCard(coord);
+    // un commandant connu à cette adresse mais rien en retour : on réessaie une fois un peu plus tard
+    if (!w && known && known.isReal && !attempt) { await new Promise(r => setTimeout(r, 20000)); return _spyEnrichReport(report, address, 1); }
     if (w) {
       const fuzz = (v, pct) => Math.max(0, Math.round(v * (1 + (Math.random() * 2 - 1) * pct)));
       report.spy = {
-        address: addr, precision: prec, found: true, pseudo: w.pseudo, planet: w.planet_name,
+        address: addr, coord, precision: prec, found: true, pseudo: w.pseudo, planet: w.planet_name,
         level: prec >= 2 ? w.level_estimate : fuzz(w.level_estimate, 0.25),
         defense: prec >= 3 ? w.defense_estimate : fuzz(w.defense_estimate, prec >= 2 ? 0.15 : 0.35),
         shielded: !!w.shielded, lastSeen: prec >= 2 ? w.last_seen_days : null,
       };
-    } else report.spy = { address: addr, precision: prec, found: false };
-  } catch (e) { report.spy = { address: addr, precision: prec, found: false, error: true }; }
+    } else report.spy = { address: addr, coord, precision: prec, found: false, knownPseudo: known && known.isReal ? known.playerName : null };
+  } catch (e) { report.spy = { address: addr, coord, precision: prec, found: false, error: true }; }
   if (typeof saveGame === 'function') saveGame();
   if (typeof renderProspectRapports === 'function' && document.getElementById('prospect-rapports-list')) { try { renderProspectRapports(); } catch (e) {} }
 }
+// PATCH_1610_SPY — en tête du relevé : qui, où, et ce que ça donnerait contre ta meilleure flotte
+function _spyRetry(id) {
+  const r = (G.probeReports || []).find(x => x.id === id);
+  if (!r) return;
+  _spyEnrichReport(r, (r.spy && (r.spy.coord || r.spy.address)) || r.targetCoords);
+  if (typeof renderProspectRapports === 'function') { try { renderProspectRapports(); } catch (e) {} }
+}
+function _spySummaryHtml(s) {
+  const fleets = ((G.fleet && G.fleet.prepared) || []).filter(f => f && !f.ambush && !f.inMission);
+  let best = null, atk = 0;
+  for (const f of fleets) { const a = window.SBLines && SBLines.fleetAtk ? SBLines.fleetAtk(f) : 0; if (a > atk) { atk = a; best = f; } }
+  let verdict = '';
+  if (best && s.defense > 0) {
+    const k = atk / s.defense;
+    const [txt, col] = k >= 1.5 ? ['avantage net', '#7ed080'] : k >= 1 ? ['combat serré', '#ffc864'] : ['flotte trop faible', '#ff8a8a'];
+    verdict = `<div style="margin-top:8px;font-size:11px;color:var(--mut)">Contre <b style="color:var(--text)">${_escapeHtml(best.name || 'ta flotte')}</b> (${fmt(atk)} ATK) : <b style="color:${col}">${txt}</b></div>`;
+  } else if (!best) verdict = `<div style="margin-top:8px;font-size:11px;color:var(--mut)">Aucune flotte prête pour comparer.</div>`;
+  const acts = `<div style="display:flex;gap:6px;margin:10px 0 6px">
+      <button onclick="event.stopPropagation();openSystemOnMap('${_escapeHtml(s.coord || s.address)}')" style="flex:1;padding:8px;border-radius:7px;border:1px solid rgba(255,255,255,.14);background:transparent;color:var(--text);font:inherit;font-size:11px;cursor:pointer">Voir sur la carte</button>
+      ${typeof openEmbassy === 'function' ? `<button onclick="event.stopPropagation();openEmbassy('${_escapeHtml(s.address)}')" style="flex:1;padding:8px;border-radius:7px;border:1px solid rgba(255,255,255,.14);background:transparent;color:var(--text);font:inherit;font-size:11px;cursor:pointer">Ambassade</button>` : ''}
+    </div>`;
+  return `<div style="margin-bottom:8px"><div style="font-size:17px;font-weight:700;color:#ffb0a8">${_escapeHtml(s.pseudo || '—')}</div>
+    <div style="font-size:11px;color:var(--mut);margin-top:2px">${_escapeHtml(s.planet || 'Monde habité')} · ${_escapeHtml(s.address)}${s.shielded ? ' · <span style="color:#9fd8ff">bouclier débutant</span>' : ''}</div>${verdict}${acts}</div>`;
+}
+// au démarrage : les relevés restés en suspens (jeu fermé pendant le décodage) se relisent
+setTimeout(() => { for (const r of (typeof G !== 'undefined' && G.probeReports) || []) if (r && r.tier === 'stealth' && r.spy && r.spy.pending) _spyEnrichReport(r, r.spy.coord || r.spy.address || r.targetCoords); }, 4000);
 function _spyBlockHtml(r) {
   const s = r && r.spy;
   if (!s) return '';
   const row = (k, v) => `<div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid var(--border);font-size:11px"><span style="color:var(--mut)">${k}</span><span style="color:var(--text);font-family:'SF Mono',monospace">${v}</span></div>`;
   const precTxt = ['', '±35 %', '±15 %', 'exacte'][s.precision] || '';
   let body;
-  if (s.pending) body = `<div style="font-size:11px;color:var(--mut)">Décodage du relevé…</div>`;
-  else if (!s.found) body = `<div style="font-size:11px;color:var(--mut)">${s.error ? 'Liaison perdue avec la Furtive : relevé illisible.' : 'Aucun monde habité à cette adresse.'}</div>`;
-  else body = row('Commandant', _escapeHtml(s.pseudo || '—')) + row('Monde', _escapeHtml(s.planet || '—'))
+  const _retry = `<button onclick="event.stopPropagation();_spyRetry('${r.id}')" style="margin-top:10px;width:100%;padding:10px;border-radius:8px;border:1px solid rgba(255,138,138,.45);background:rgba(255,138,138,.08);color:#ff9a9a;font:inherit;font-size:11px;letter-spacing:.12em;text-transform:uppercase;cursor:pointer">Relancer le décodage</button>`;
+  if (s.pending) body = `<div style="font-size:11px;color:var(--mut)">Décodage du relevé… ${!(window.SBMP && SBMP.ready && SBMP.ready()) ? 'en attente de la liaison avec le registre.' : ''}</div>`;
+  else if (!s.found) body = `<div style="font-size:11px;color:var(--mut);line-height:1.55">${s.offline ? 'Pas de liaison avec le registre au retour de la Furtive : relevé non décodé.' : s.error ? 'Liaison perdue avec la Furtive : relevé illisible.' : s.knownPseudo ? `Le registre ne répond pas pour <b style="color:var(--text)">${_escapeHtml(s.knownPseudo)}</b> à cette adresse : son monde a peut-être changé de place.` : 'Aucun monde habité à cette adresse.'}</div>${_retry}`;
+  else body = _spySummaryHtml(s)
     + row('Niveau', '≈ ' + s.level) + row('Défense', '≈ ' + s.defense + ' <span style="color:var(--mut)">(' + precTxt + ')</span>')
     + row('Bouclier débutant', s.shielded ? 'actif' : 'non')
     + row('Dernière activité', s.lastSeen == null ? '<span style="color:var(--mut)">illisible</span>' : (s.lastSeen === 0 ? "aujourd'hui" : 'il y a ' + s.lastSeen + ' j'));
@@ -33966,7 +34009,7 @@ function renderProbeReportRow(r, isUnread) {
     if (r.universeKind === 'fixed' && n === 0) {
       typeLabel = `${tierLabel} — planète confirmée`;
     } else {
-      typeLabel = `${tierLabel} — ${n === 0 ? 'rien à signaler' : n + ' cible' + (n > 1 ? 's' : '') + ' détectée' + (n > 1 ? 's' : '')}`;
+      typeLabel = r.spyOnly || (r.tier === 'stealth' && r.spy && n === 0) ? `${tierLabel} — relevé d'espionnage${r.spy && r.spy.pseudo ? ' · ' + _escapeHtml(r.spy.pseudo) : ''}` : `${tierLabel} — ${n === 0 ? 'rien à signaler' : n + ' cible' + (n > 1 ? 's' : '') + ' détectée' + (n > 1 ? 's' : '')}`;
     }
     // Badge PLANÈTE (info diégétique gardée) — pas de badge MOUVANT
     if (r.universeKind === 'fixed') {
@@ -34420,6 +34463,8 @@ function renderProbeReportRow(r, isUnread) {
           `;
         }).join('')}
       `;
+    } else if (r.spy) {
+      fullBodyHtml = cartaBanner + signatureHeader;   // PATCH_1610_SPY : le relevé suffit
     } else {
       fullBodyHtml = cartaBanner + signatureHeader + `
         <div style="font-size:11px;color:var(--mut);line-height:1.7;font-style:italic;padding:10px 14px;background:var(--bg);border:1px solid var(--border);border-radius:4px">
