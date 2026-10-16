@@ -5620,6 +5620,9 @@ svg.map {
         Chaque catégorie te montre <strong>à quoi sert chaque pièce</strong> et <strong>comment elle s'enchaîne</strong> avec les autres.
         Lis-le comme un manuel : ce que ça fait, ce que ça débloque, ce qui le suit.
       </div>
+      <div style="font-size:12px;color:var(--txt);line-height:1.6;margin-bottom:8px">
+        <strong>Les skills</strong> : chaque niveau d'un bâtiment en rend un <strong>disponible</strong>. Tu l'<strong>apprends</strong> ici ou sur la fiche du bâtiment (un coût, puis une courte recherche, une à la fois). Le match-3 du Laboratoire et de la Centrale peut aussi t'en faire <strong>découvrir</strong> un.
+      </div>
       <div style="font-size:11px;color:var(--mut);line-height:1.6">
         <span style="color:#78c88c">●</span> Acquis : tu l'as déjà débloqué &nbsp;&nbsp;
         <span style="color:#e6f0ff">●</span> À découvrir : disponible quand tu seras prêt
@@ -5717,7 +5720,7 @@ svg.map {
     </div>
 
     <!-- Skills débloqués -->
-    <div class="section-label" id="bd-skills-label">Skills débloqués grâce à ce bâtiment</div>
+    <div class="section-label" id="bd-skills-label">Skills de ce bâtiment</div>
     <div class="dash-section-card" id="bd-skills">
       <!-- généré dynamiquement -->
     </div>
@@ -8112,8 +8115,9 @@ function renderTechTree() {
       acc[st] = (acc[st] || 0) + 1;
       return acc;
     }, {});
-    const builtCount = stats.built || 0;
-    const totalCount = cat.nodes.length;
+    const _skc = window.SBSkills ? SBSkills.familyCount(cat.catKey) : { total: 0, learned: 0 };   // PATCH_1610_SKILLS
+    const builtCount = (stats.built || 0) + _skc.learned;
+    const totalCount = cat.nodes.length + _skc.total;
     const progressPct = totalCount > 0 ? Math.round((builtCount / totalCount) * 100) : 0;
 
     // Mapping icône
@@ -8121,7 +8125,7 @@ function renderTechTree() {
     const iconName = iconMap[cat.icon] || cat.icon;
 
     return `
-      <div style="margin:0 16px 18px;padding:16px;background:${cat.bgGradient};border:1px solid ${cat.color}40;border-radius:12px">
+      <div id="tt-cat-${cat.catKey}" style="margin:0 16px 18px;padding:16px;background:${cat.bgGradient};border:1px solid ${cat.color}40;border-radius:12px;scroll-margin-top:70px">
         <div style="display:flex;align-items:center;gap:12px;margin-bottom:14px">
           <div style="width:42px;height:42px;border:1px solid ${cat.color}60;border-radius:10px;display:flex;align-items:center;justify-content:center;color:${cat.color};background:rgba(0,0,0,.25)">
             <span class="icon-static" data-icon="${iconName}" data-icon-size="22"></span>
@@ -8141,6 +8145,7 @@ function renderTechTree() {
         <div style="display:flex;flex-direction:column;gap:6px">
           ${nodesHtml}
         </div>
+        ${window.SBSkills ? SBSkills.familyHtml(cat.catKey, cat.color) : ''}
       </div>
     `;
   }).join('');
@@ -8149,8 +8154,9 @@ function renderTechTree() {
 
   // Mettre à jour la progression globale dans le header
   const allNodes = TECH_TREE.flatMap(cat => cat.nodes);
-  const totalAll = allNodes.length;
-  const totalBuilt = allNodes.filter(n => getTechNodeStatus(n) === 'built').length;
+  const _skAll = window.SBSkills ? SBSkills.SKILLS : [];
+  const totalAll = allNodes.length + _skAll.length;
+  const totalBuilt = allNodes.filter(n => getTechNodeStatus(n) === 'built').length + _skAll.filter(x => SBSkills.has(x.key)).length;
   const progressEl = document.getElementById('tech-tree-progress');
   if (progressEl) {
     progressEl.textContent = `${totalBuilt}/${totalAll} acquis`;
@@ -8163,7 +8169,7 @@ function renderTechTree() {
 
 // Helper : calcule la défense totale dynamiquement
 function totalDefense() {
-  let total = G.defense.capitalBase;
+  let total = G.defense.capitalBase, _soldierDef = 0;
   // Défense des unités au sol (= unités totales - unités embarquées sur flottes DÉPLOYÉES ou EN MISSION)
   // Doctrine Z4-ter : les soldats sur flotte préparée défendent encore (au sol),
   // ceux sur flotte déployée sont à bord et ne défendent plus le sol,
@@ -8174,6 +8180,7 @@ function totalDefense() {
     // PERTES DÉFENSE (13/10) : une unité endommagée est hors service jusqu'à sa réparation
     const groundUnits = Math.max(0, u.qty - (u.dmg || 0) - inDeployedFleets - inMissionFleets - soldiersCommittedElsewhere(key));
     total += groundUnits * DEFENSE_UNITS[key].defPerUnit;
+    _soldierDef += groundUnits * DEFENSE_UNITS[key].defPerUnit;   // PATCH_1610_SKILLS
   }
   // Défense passive des bâtiments (Caserne, Bunker)
   for (const p of G.planet.parcels) {
@@ -8188,7 +8195,7 @@ function totalDefense() {
   // Doctrine Z4-ter : bouclier orbital — les vaisseaux des flottes DÉPLOYÉES défendent
   // la planète. Ils ne sont pas au port (donc en assemblage) ni en mission, mais en orbite.
   total += getOrbitalDefenseFromFleets();
-  return total;
+  return window.SBSkills ? SBSkills.defense(total, _soldierDef) : total;   // PATCH_1610_SKILLS
 }
 
 // Helper : soldats d'un type embarqués sur des flottes DÉPLOYÉES (en orbite)
@@ -8607,6 +8614,7 @@ var EXTRA_SAVE_KEYS = [
   'mpDiplo',   // AMBASSADES_1210 — ambassades vues et dernière image des pactes
   'mpNeighbors',   // VOISINS_1310 — voisins déjà signalés
   'tuto',          // TUTO_1410 — premiers pas (étape, vu, terminé)
+  'skillsLearned', 'research', '_skillsSeen', '_skillsMigrated',   // PATCH_1610_SKILLS
   '_linesCrown', 'crownSeen', '_linesSanct', 'sanctSeen',   // PATCH_1510_CROWN — lieu du secteur M devenu la Couronne, première arrivée vue
 ];
 
@@ -11968,7 +11976,7 @@ function renderDashResGrid() {
           <span class="res-cell-dot" style="background:${t.color}"></span>
           <span>${t.label}</span>
         </div>
-        ${r.rate > 0 ? `<div class="res-cell-rate">+${Math.round(r.rate * 10) / 10}</div>` : ''}
+        ${r.rate > 0 ? `<div class="res-cell-rate">+${Math.round(r.rate * (window.SBSkills ? SBSkills.prodMult(k) : 1) * 10) / 10}</div>` : ''}
         <div class="res-cell-val" style="color:${t.color}">${fmt(r.v)}</div>
         <div class="res-cell-cap">/ ${fmt(RES_CAP)}</div>
         <div class="res-cell-bar"><div class="res-cell-fill" style="width:${pct}%;background:${t.color}"></div></div>
@@ -23133,7 +23141,7 @@ function launchProbe(tier, targetCoords, mode, force) {
 
   const now = Date.now();
   const durCfg = PROBE_DURATIONS_BY_TIER[tier] || PROBE_DURATIONS_BY_TIER.light;
-  const duration = durCfg.min + Math.random() * (durCfg.max - durCfg.min);
+  const duration = (durCfg.min + Math.random() * (durCfg.max - durCfg.min)) * (window.SBSkills ? SBSkills.durMult('probes') : 1);   // PATCH_1610_SKILLS
 
   // Coordonnées : si pas fournies, on génère aléatoirement
   const coords = targetCoords || generateProbeCoordinates();
@@ -28576,7 +28584,7 @@ function renderShipBuildList() {
 
     // Durée par tier (cf. SHIP_BUILD_DURATIONS — option B rythme moyen)
     const baseDuration = SHIP_BUILD_DURATIONS[tier] || SHIP_BUILD_DURATIONS[1];
-    const finalDuration = Math.max(1, Math.round(baseDuration / G.skills.productionSpeed));
+    const finalDuration = Math.max(1, Math.round(baseDuration / G.skills.productionSpeed * (window.SBSkills ? SBSkills.durMult('ships') : 1)));
 
     // Stats clés affichées
     const statsParts = [];
@@ -28636,7 +28644,7 @@ function buildShip(shipKey, qty) {
   }
   // Durée par vaisseau (cf. SHIP_BUILD_DURATIONS — option B rythme moyen)
   const baseDuration = SHIP_BUILD_DURATIONS[tier] || SHIP_BUILD_DURATIONS[1];
-  const finalDuration = Math.max(1, Math.round(baseDuration / G.skills.productionSpeed));
+  const finalDuration = Math.max(1, Math.round(baseDuration / G.skills.productionSpeed * (window.SBSkills ? SBSkills.durMult('ships') : 1)));
   // Ajouter à la queue Chantier
   QUEUES.shipyard.commands.push({
     unitKey: shipKey,    // 'tanker' | 'fregate' | 'cuirasse'
@@ -28725,7 +28733,7 @@ function buildProbeShip() {
   G.res.cristal.v -= cost.cristal;
 
   const baseDuration = 180; // ⚡ V0.5 : 3 min pour assembler la sonde Auris-1 (ancien : 15s proto)
-  const finalDuration = Math.max(1, Math.round(baseDuration / G.skills.productionSpeed));
+  const finalDuration = Math.max(1, Math.round(baseDuration / G.skills.productionSpeed * (window.SBSkills ? SBSkills.durMult('ships') : 1)));
 
   QUEUES.shipyard.commands.push({
     unitKey: 'probe',
@@ -29177,7 +29185,7 @@ function doBuild(key, idx) {
   const parcel = G.planet.parcels[idx];
   // CONSTRUCTION VISIBLE (10/10/2026, P0.3) : un bâtiment prend du temps, se voit se construire,
   // et finit même jeu fermé (date de fin absolue, détectée par simulateTo). Cf. GDD « Construction visible ».
-  const buildMs = (BUILD_TIME_MIN[key] || 0) * 60000;
+  const buildMs = Math.round((BUILD_TIME_MIN[key] || 0) * 60000 * (window.SBSkills ? SBSkills.durMult('build') : 1));   // PATCH_1610_SKILLS
   if (buildMs > 0 && !G.cheats?.instantBuild) {
     const now = Date.now();
     parcel.state = 'building';
@@ -30259,11 +30267,11 @@ function detonateBomb(idx, chainSession) {
         // ⚡ Phase 6 — Mode "explosions" : megahide cassé = skill débloqué
         // Pool de skills dépend du bâtiment (labo, centrale, ...)
         if (m.objective && m.objective.mode === 'explosions' && obs.type === 'megahide' && !m.megahideSkillUnlocked) {
-          const pool = m.objective.skillPool;
-          const picked = pool[Math.floor(Math.random() * pool.length)];
-          m.megahideSkillUnlocked = picked;
-          if (typeof toast === 'function') {
-            toast('🧠 Découverte : ' + picked.label);
+          const pool = window.SBSkills ? SBSkills.dropPool(G.planet.parcels[m.parcelIdx]) : [];   // PATCH_1610_SKILLS
+          const picked = pool.length ? pool[Math.floor(Math.random() * pool.length)] : null;
+          if (picked) {
+            m.megahideSkillUnlocked = picked;
+            if (typeof toast === 'function') toast('Découverte : ' + picked.label);
           }
         }
       } else {
@@ -31130,6 +31138,7 @@ function endM3(quit) {
     const baseAmount = Math.round(obj.rewardAmount * ratio);
     const bonusAmount = isFull ? Math.round(obj.rewardAmount * obj.fullBonus) : 0;
     sc[rewardKey] = (sc[rewardKey] || 0) + baseAmount + bonusAmount;
+    const _skB = window.SBSkills ? SBSkills.applyM3(sc) : [];   // PATCH_1610_SKILLS
     const skill = G.m3.megahideSkillUnlocked;
     const rewardTile = tileInfo(rewardKey);
 
@@ -31153,6 +31162,7 @@ function endM3(quit) {
     if (baseAmount + bonusAmount > 0) {
       rows.push(`<div class="result-row"><span class="k">+ ${rewardTile.label}</span><span class="v" style="color:${rewardTile.color}">+${baseAmount + bonusAmount}</span></div>`);
     }
+    for (const b of _skB) rows.push(`<div class="result-row"><span class="k" style="color:var(--mut)">Skill · ${b.by}</span><span class="v" style="color:${tileInfo(b.res).color}">+${b.extra}</span></div>`);
     if (skill) {
       rows.push(`<div class="result-row" style="border-top:1px solid var(--bord-soft);margin-top:6px;padding-top:8px">
         <span class="k" style="color:#a370ff">🧠 ${skill.label}</span>
@@ -31180,13 +31190,7 @@ function endM3(quit) {
           G.res[k].v = Math.min(G.res[k].max, G.res[k].v + Math.round(v));
         }
       }
-      if (skill) {
-        G.unlockedSkills = G.unlockedSkills || [];
-        if (!G.unlockedSkills.some(s => s.id === skill.id)) {
-          G.unlockedSkills.push(skill);
-          if (typeof toast === 'function') toast(`Skill ajouté : ${skill.label}`);
-        }
-      }
+      if (skill && window.SBSkills) SBSkills.grant(skill.id, 'match-3');   // PATCH_1610_SKILLS : effet réel
       // En mode explosions, le bâtiment existe déjà : on ne change PAS l'état parcelle
       G.selParcel = G.m3.parcelIdx;
       G.m3.animating = false;
@@ -31223,12 +31227,13 @@ function endM3(quit) {
     goalMet ? '◆ Objectif atteint' : (quit ? 'Session quittée' : 'Session terminée');
   document.getElementById('result-sub').textContent = subtitle;
 
+  const _skB2 = window.SBSkills ? SBSkills.applyM3(sc) : [];   // PATCH_1610_SKILLS : après le calcul de l'objectif
   const rows = Object.entries(sc)
     .filter(([, v]) => v >= 1)
     .map(([k, v]) => {
       const t = tileInfo(k);
       return `<div class="result-row"><span class="k">+ ${t.label}</span><span class="v" style="color:${t.color}">+${Math.round(v)}</span></div>`;
-    }).join('');
+    }).join('') + _skB2.map(b => `<div class="result-row"><span class="k" style="color:var(--mut)">dont skill · ${b.by}</span><span class="v" style="color:${tileInfo(b.res).color}">+${b.extra}</span></div>`).join('');
   document.getElementById('result-rows').innerHTML = rows ||
     '<div style="color:var(--mut);font-size:11px;text-align:center;font-style:italic">Aucune ressource extraite</div>';
 
@@ -31365,7 +31370,7 @@ function startBuildingUpgrade(parcelIdx) {
     buildingKey: parcel.building,
     fromTier: currentTier,
     toTier: nextTier,
-    totalDur: tierData.duration,
+    totalDur: Math.max(1, Math.round(tierData.duration * (window.SBSkills ? SBSkills.durMult('build') : 1))),   // PATCH_1610_SKILLS
     elapsed: 0,
   };
   toast(`Amélioration ${tierData.name} démarrée`);
@@ -31539,7 +31544,7 @@ function recruitUnit(unitKey, qty) {
   const queueKey = 'barracks';
 
   // Durée par unité ajustée selon skill productionSpeed
-  const unitDuration = Math.max(1, Math.round(unit.duration / G.skills.productionSpeed));
+  const unitDuration = Math.max(1, Math.round(unit.duration / G.skills.productionSpeed * (window.SBSkills ? SBSkills.durMult('troops') : 1)));
 
   const command = {
     unitKey,
@@ -31761,8 +31766,8 @@ function _simSegment(ms, at, out) {
   const hours = Math.max(0, ms) / 3600000;
   // dévastation (après un raid perdu) : production réduite, guérison naturelle −1 %/h
   const devMult = (window.SBAftermath && typeof SBAftermath.simSegment === 'function') ? SBAftermath.simSegment(hours) : 1;
-  for (const r of Object.values(G.res || {})) {
-    if (r.rate > 0 && r.v < r.max) r.v = Math.min(r.max, r.v + r.rate * hours * devMult);
+  for (const [rk, r] of Object.entries(G.res || {})) {   // PATCH_1610_SKILLS : bonus des skills
+    if (r.rate > 0 && r.v < r.max) r.v = Math.min(r.max, r.v + r.rate * hours * devMult * (window.SBSkills ? SBSkills.prodMult(rk) : 1));
   }
 
   // 2. Crédits (Comptoirs) et carburant (Raffineries) — taux horaires aussi
@@ -37118,7 +37123,7 @@ function renderDefenseScreen() {
       const lockReason = unit.locked ? unit.lockedReason : `${buildingLabel} requis`;
 
       const costStr = Object.entries(unit.cost).map(([res, q]) => `${q} ${res}`).join(' · ');
-      const adjustedDuration = Math.max(1, Math.round(unit.duration / G.skills.productionSpeed));
+      const adjustedDuration = Math.max(1, Math.round(unit.duration / G.skills.productionSpeed * (window.SBSkills ? SBSkills.durMult('troops') : 1)));
 
       recruitHtml += `
         <div class="unit-row ${isLocked ? 'locked' : ''}" onclick="openUnitDetail('${key}','defense')" style="cursor:pointer">
@@ -37319,8 +37324,11 @@ function renderBuildingDetail() {
   // Skills débloqués (preview — l'arbre tech complet sera la passe 2.6)
   const skillsEl = document.getElementById('bd-skills');
   const skillsLabel = document.getElementById('bd-skills-label');
-  const linkedSkills = getSkillsLinkedToBuilding(buildingKey);
-  if (linkedSkills.length === 0) {
+  const _skHtml = window.SBSkills ? SBSkills.buildingHtml(buildingKey) : '';   // PATCH_1610_SKILLS
+  if (_skHtml) { skillsLabel.style.display = ''; skillsEl.style.display = ''; skillsEl.innerHTML = _skHtml; }
+  const linkedSkills = _skHtml ? [] : getSkillsLinkedToBuilding(buildingKey);
+  if (_skHtml) {}
+  else if (linkedSkills.length === 0) {
     skillsLabel.style.display = 'none';
     skillsEl.style.display = 'none';
   } else {
@@ -38850,7 +38858,7 @@ function getCommerceCreditsRate() {
       if (tierData?.prod?.credits) rate += tierData.prod.credits * (parcel.damaged ? 0.5 : 1);
     }
   }
-  return rate;
+  return rate * (window.SBSkills ? SBSkills.prodMult('credits') : 1);   // PATCH_1610_SKILLS
 }
 
 // Compte les comptoirs construits (toutes parcelles confondues)
@@ -38889,7 +38897,7 @@ function getFuelProductionRate() {
       if (tierData?.prod?.fuel) rate += tierData.prod.fuel * (parcel.damaged ? 0.5 : 1);
     }
   }
-  return rate;
+  return rate * (window.SBSkills ? SBSkills.prodMult('fuel') : 1);   // PATCH_1610_SKILLS
 }
 
 // Plafond carburant : la raffinerie la plus avancée définit le cap.
@@ -45859,6 +45867,8 @@ if (G.knownTargets && Array.isArray(G.tankerMissions)) {
 <script type="module" src="assets/ship3d.js?v=20261014-1440"></script>
 <!-- PATCH_1510_MISSIONS — tout ce qui vole, fiche de mission des tankers -->
 <script src="assets/missions.js?v=20261015-2300"></script>
+<!-- PATCH_1610_SKILLS — skills des bâtiments : apprendre, découvrir, effets -->
+<script src="assets/skills.js?v=20261016-1600"></script>
 <!-- PATCH_1510_CROWN — The Drifting Crown en 3D (assets/station3d.js, sur le moteur partagé window.SB3D) -->
 <script type="module" src="assets/station3d.js?v=20261015-2300"></script>
 <!-- FORMATION3D — flotte déployée en orbite, vue de haut en formation (remplace la vue orbite) -->
