@@ -27027,7 +27027,7 @@ function renderReportsList() {
     const unreadDot = !r.read
       ? `<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--amber);margin-right:8px;box-shadow:0 0 6px var(--amber)"></span>`
       : '';
-    html += `
+    html += `<div class="sw-row" data-sk="fleet" data-sid="${r.id}"><button class="sw-del" aria-label="Supprimer"><span>${typeof icon === 'function' ? icon('trash', { size: 18 }) : ''}</span><i>Supprimer</i></button><div class="sw-in">
       <div class="fleet-prepared-row" onclick="openReportDetail('${r.id}')" style="${r.read ? '' : 'border-color:rgba(255,192,96,.35);background:linear-gradient(180deg,rgba(60,42,14,.4),rgba(35,25,10,.6))'}">
         <div class="fleet-prepared-icon" style="color:${r.read ? 'var(--mut)' : 'var(--amber)'};background:rgba(255,192,96,.05);border-color:rgba(255,192,96,.2);font-size:20px;display:flex;align-items:center;justify-content:center">${icon('satellite', {size:20})}</div>
         <div class="fleet-prepared-info">
@@ -27036,7 +27036,7 @@ function renderReportsList() {
           <div class="fleet-prepared-stats" style="margin-top:3px;font-family:'SF Mono',monospace">${time}</div>
         </div>
         <div class="fleet-prepared-arrow">→</div>
-      </div>
+      </div></div></div>
     `;
   }
   listEl.innerHTML = html;
@@ -33558,7 +33558,7 @@ function renderProspectRapports() {
   const recents = _kept.slice(0, RECENT_COUNT);
   const archives = _kept.slice(RECENT_COUNT).concat(_skipped);
 
-  const recentsHtml = recents.map(r => renderReportRow(r)).join('');
+  const recentsHtml = recents.map(r => swRow(r, renderReportRow(r))).join('');   // PATCH_1610_SWIPE_DELETE
 
   const archivesHtml = archives.length === 0 ? '' : `
     <div style="margin:14px 16px 4px">
@@ -33567,7 +33567,7 @@ function renderProspectRapports() {
         <span style="color:var(--cyan);font-family:'SF Mono',monospace">${_archivesUnfolded ? '▾' : '▸'}</span>
       </div>
     </div>
-    ${_archivesUnfolded ? `<div style="padding:0 0 8px">${archives.map(r => renderReportRow(r)).join('')}</div>` : ''}
+    ${_archivesUnfolded ? `<div style="padding:0 0 8px">${archives.map(r => swRow(r, renderReportRow(r))).join('')}</div>` : ''}
   `;
 
   list.innerHTML = _tabsHtml + (_rt.tab === 'sondes' ? prospectRuleHtml() : '') + `<div style="padding:0 0 8px">${recentsHtml}${archivesHtml}</div>`;
@@ -33635,6 +33635,92 @@ function _rapCss() {
    Chaque cible a un état, chaque état a UNE action suivante, toujours affichée,
    et quand elle est impossible on dit pourquoi (test « encore une action », North Star §49). */
 
+// PATCH_1610_SWIPE_DELETE — glisser vers la gauche : la corbeille (comme les notifications de l'iPhone)
+var SW_LISTS = { probe: 'probeReports', tanker: 'tankerReports', beacon: 'beaconReports', fleet: 'reports' };
+function swRow(entry, html) {
+  const id = entry && entry.report && entry.report.id;
+  if (!id || !SW_LISTS[entry.kind]) return html;   // fiche de planète : un lieu connu, pas un message
+  return `<div class="sw-row" data-sk="${entry.kind}" data-sid="${String(id).replace(/"/g, '')}"><button class="sw-del" aria-label="Supprimer"><span>${typeof icon === 'function' ? icon('trash', { size: 18 }) : ''}</span><i>Supprimer</i></button><div class="sw-in">${html}</div></div>`;
+}
+function swDelete(kind, id, rowEl) {
+  const key = SW_LISTS[kind]; const arr = key && G[key];
+  if (!Array.isArray(arr)) return;
+  const i = arr.findIndex(r => r && r.id === id);
+  if (i < 0) return;
+  const [removed] = arr.splice(i, 1);
+  if (typeof saveGame === 'function') saveGame();
+  const redraw = () => {
+    try { if (document.getElementById('prospect-rapports-list') && typeof renderProspectRapports === 'function') renderProspectRapports(); } catch (e) {}
+    try { if (typeof renderReportsList === 'function') renderReportsList(); } catch (e) {}
+    try { if (typeof updateProspectBadges === 'function') updateProspectBadges(); } catch (e) {}
+  };
+  if (rowEl) { rowEl.style.height = rowEl.offsetHeight + 'px'; requestAnimationFrame(() => { rowEl.classList.add('sw-gone'); }); setTimeout(redraw, 260); } else redraw();
+  toast('Rapport supprimé · <u>Annuler</u>', () => {
+    const a = G[key]; if (!Array.isArray(a) || a.some(r => r && r.id === id)) return;
+    a.splice(Math.min(i, a.length), 0, removed);
+    if (typeof saveGame === 'function') saveGame();
+    redraw();
+  });
+}
+(function swWire() {
+  if (window._swWired) return; window._swWired = true;
+  const st = document.createElement('style');
+  st.textContent = `
+    .sw-row{position:relative;overflow:hidden;touch-action:pan-y;transition:height .25s ease,opacity .25s ease,margin .25s ease}
+    .sw-row.sw-gone{height:0 !important;opacity:0;margin:0 !important}
+    .sw-in{position:relative;z-index:1;transition:transform .22s cubic-bezier(.2,.8,.2,1);will-change:transform;background:var(--bg,#05080d)}
+    .sw-row.sw-drag .sw-in{transition:none}
+    .sw-del{position:absolute;top:0;bottom:0;right:0;width:100%;display:flex;flex-direction:column;align-items:flex-end;justify-content:center;gap:3px;padding:0 26px 0 0;border:0;border-radius:10px;background:#c8392f;color:#fff;font:inherit;cursor:pointer;opacity:0;transition:opacity .15s}
+    .sw-row.sw-show .sw-del{opacity:1}
+    .sw-del span{display:flex;width:24px;justify-content:center}
+    .sw-del i{font-style:normal;font-size:9.5px;letter-spacing:.1em;text-transform:uppercase}`;
+  document.head.appendChild(st);
+  const OPEN = 88;
+  let cur = null;   // { row, x0, y0, dx, lock, open0 }
+  const setX = (row, x) => { row.querySelector('.sw-in').style.transform = x ? `translateX(${x}px)` : ''; row.classList.toggle('sw-show', x < -2); };
+  const closeAll = (except) => document.querySelectorAll('.sw-row.sw-open').forEach(r => { if (r !== except) { r.classList.remove('sw-open'); setX(r, 0); } });
+  document.addEventListener('pointerdown', (e) => {
+    const row = e.target.closest && e.target.closest('.sw-row');
+    if (!row) { closeAll(); return; }
+    if (e.target.closest('.sw-del')) return;
+    closeAll(row);
+    { // la corbeille épouse la carte du rapport (sans ses marges)
+      const ch = row.querySelector('.sw-in > *'), del = row.querySelector('.sw-del');
+      if (ch && del) { const R = row.getBoundingClientRect(), C = ch.getBoundingClientRect();
+        Object.assign(del.style, { top: (C.top - R.top) + 'px', bottom: (R.bottom - C.bottom) + 'px', left: (C.left - R.left) + 'px', right: (R.right - C.right) + 'px', width: 'auto', borderRadius: getComputedStyle(ch).borderRadius || '10px' }); }
+    }
+    cur = { row, x0: e.clientX, y0: e.clientY, dx: 0, lock: null, open0: row.classList.contains('sw-open') ? -OPEN : 0, id: e.pointerId };
+  }, true);
+  document.addEventListener('pointermove', (e) => {
+    if (!cur || e.pointerId !== cur.id) return;
+    const dx = e.clientX - cur.x0, dy = e.clientY - cur.y0;
+    if (!cur.lock) { if (Math.abs(dx) < 8 && Math.abs(dy) < 8) return; cur.lock = Math.abs(dx) > Math.abs(dy) * 1.2 ? 'x' : 'y'; if (cur.lock === 'x') cur.row.classList.add('sw-drag'); }
+    if (cur.lock !== 'x') return;
+    cur.dx = Math.min(0, cur.open0 + dx);
+    setX(cur.row, cur.dx);
+  }, true);
+  const end = (e) => {
+    if (!cur || (e && e.pointerId !== cur.id)) return;
+    const c = cur; cur = null;
+    c.row.classList.remove('sw-drag');
+    if (c.lock !== 'x') return;
+    c.row._swMoved = Date.now();
+    const w = c.row.offsetWidth || 360;
+    if (c.dx < -w * 0.55) { setX(c.row, -w); swDelete(c.row.dataset.sk, c.row.dataset.sid, c.row); return; }   // glissé loin : supprimé
+    if (c.dx < -OPEN / 2) { c.row.classList.add('sw-open'); setX(c.row, -OPEN); }
+    else { c.row.classList.remove('sw-open'); setX(c.row, 0); }
+  };
+  document.addEventListener('pointerup', end, true);
+  document.addEventListener('pointercancel', end, true);
+  // un glissé n'ouvre pas le rapport ; la corbeille supprime ; une ligne ouverte se referme au toucher
+  document.addEventListener('click', (e) => {
+    const row = e.target.closest && e.target.closest('.sw-row');
+    if (!row) return;
+    if (e.target.closest('.sw-del')) { e.stopPropagation(); e.preventDefault(); swDelete(row.dataset.sk, row.dataset.sid, row); return; }
+    if (row._swMoved && Date.now() - row._swMoved < 400) { e.stopPropagation(); e.preventDefault(); return; }
+    if (row.classList.contains('sw-open')) { e.stopPropagation(); e.preventDefault(); row.classList.remove('sw-open'); setX(row, 0); }
+  }, true);
+})();
 function prospectRuleHtml() {
   return `
     <div class="prospect-rule">
