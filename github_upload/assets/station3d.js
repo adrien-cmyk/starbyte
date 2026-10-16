@@ -56,7 +56,7 @@ const PROFILES = {
     target: [0, -2.2, 0], minDist: 1.6,   // 16/10 — cible abaissée : la station remonte vers le haut de l'écran
     lights: (L, hv, P) => {
       L(0xff9a50, 6, 3.2, P(751, 330, 0));
-      const bar = L(0xffa040, 3, 4.0, P(470, -230, 150));   // 16/10 — lueur du bar adoucie
+      const bar = L(0xffa040, 3.0, 3.0, P(470, -230, 150));   // 16/10 — lueur du bar adoucie
       L(0xffb070, 3, 3.0, P(-960, 0, 40));
       hv(P(0, 0, 653), 0.6, 0xfff2dc, 1.2);
       hv(P(0, -1160, 118), 0.9, 0xfff2dc, 0.7);
@@ -67,11 +67,11 @@ const PROFILES = {
     dockShot: { t: [1060, 110, -130], p: [1440, 480, 100] }, dockMax: 9,
     tankerAt: { pos: [1050, 110, -40], rotZ: 0, scale: 2.5 },   // agrandi : à l'échelle, un tanker se perdrait contre 2,4 km de station
     // 16/10 — éclairage obscur : station dans la pénombre, éclairée de loin et pâlement ; lumières sans éblouir
-    night: { light: 0.045, glow: 0.6, tex: 1.3, halo: 0.45, bloom: [0.5, 0.45, 0.85], albedo: 0.16, hull: 0.25, env: 0.1, exposure: 0.9, hideCoreAtBar: true },
+    night: { light: 0.045, glow: 0.6, tex: 1.3, halo: 0.45, bloom: [0.5, 0.45, 0.85], albedo: 0.09, hull: 0.12, env: 0.03, envScene: 0.06, exposure: 0.9, hideCoreAtBar: true },
     // 16/10 — la nuit : ce sont les feux qui éclairent, comme des lanternes sur le pont d'un bateau pirate (positions posées sur les ponts, repère Blender)
-    lamps: { url: 'assets/3d/sb_dc02_lamps.json?v=20261016-2130', light: [0xff8a34, 7.0, 3.2], lightsMax: 8, lightsLite: 4, post: 7, lantern: 1.7 },
+    lamps: { url: 'assets/3d/sb_dc02_lamps.json?v=20261016-2130', light: [0xff7a28, 5.0, 2.6], lightsMax: 8, lightsLite: 4, post: 7, lantern: 1.7 },
     // 16/10 — brume épaisse par endroits : bancs de brouillard posés dans la station (entre anneau, bras et noyau)
-    mist: { n: 60, nLite: 26, r: [2.5, 11.0], y: [-3.0, 4.5], size: [4.5, 7.0], op: [0.6, 0.35], col: [0x4a1c2c, 0x3c1630, 0x5a2434, 0x2e1428] },
+    mist: { n: 60, nLite: 26, r: [2.5, 11.0], y: [-3.0, 4.5], size: [4.5, 7.0], op: [0.6, 0.35], col: [0x26101a, 0x1e0c1c, 0x2c1220, 0x180c16] },
   },
   // Sanctuaire du Linceul des Cendres : bastion impérial sur astéroïde, dans un nuage bleuté (le Linceul)
   sanctuary: {
@@ -166,6 +166,8 @@ function mount(container, opts = {}) {
   const pmrem = new THREE.PMREMGenerator(renderer);
   const envTex = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
   scene.environment = envTex;
+  // 16/10 — avec scene.environment, three applique scene.environmentIntensity (pas envMapIntensity des matériaux) : la nuit, on l'éteint presque
+  if (NT.envScene !== undefined && 'environmentIntensity' in scene) scene.environmentIntensity = NT.envScene;
 
   const CAM_DIR = new THREE.Vector3(0.60, -0.34, 0.72).normalize();   // 3/4 dessous : la station écrase le cadre
   const SUN_DIR = new THREE.Vector3(...PR.sun).normalize();   // étoile voilée par la nébuleuse, derrière la tour
@@ -504,7 +506,7 @@ function mount(container, opts = {}) {
       const u = sp.userData;
       u.a += u.w * dt;
       sp.position.set(Math.cos(u.a) * u.r, u.y, Math.sin(u.a) * u.r);
-      sp.material.opacity = u.base * (u.mist ? sstep(0.8, 4, _cp.copy(sp.position).distanceTo(camera.position)) : sstep(3, 11, _cp.copy(sp.position).distanceTo(camera.position)));
+      sp.material.opacity = u.base * (u.mist ? sstep(2.0, 7, _cp.copy(sp.position).distanceTo(camera.position)) : sstep(3, 11, _cp.copy(sp.position).distanceTo(camera.position)));
     }
   }
 
@@ -642,7 +644,7 @@ function mount(container, opts = {}) {
       for (const mat of mats) {
         if (GLOSS[mat.name]) { mat.roughness = GLOSS[mat.name][0]; mat.metalness = GLOSS[mat.name][1]; mat.envMapIntensity = GLOSS_ENV * (NT.albedo ? 0.5 : 1);
           if (NT.hull && !mat.userData.nh) { mat.userData.nh = 1; mat.color.multiplyScalar(NT.hull); } }   // 16/10 — coques crème/grises assombries la nuit (fini l'effet plastique)
-        else if (mat.map) { mat.envMapIntensity = 0.22 * NT.env; mat.metalness = Math.min(mat.metalness, 0.3); mat.roughness = Math.max(mat.roughness, 0.9); if (NT.albedo) { mat.roughness = 1.0; mat.metalness = Math.max(mat.metalness, 0.45); }   /* acier sombre, rugosité de la patine conservée */ if (!mat.userData.nt) { mat.userData.nt = 1; if (mat.emissiveMap) mat.emissiveIntensity *= NT.tex; if (NT.albedo) mat.color.multiplyScalar(NT.albedo); } }   // 16/10 — pièces texturées (noyau de la Couronne) : reflets retenus comme le reste
+        else if (mat.map) { mat.envMapIntensity = 0.22 * NT.env; mat.metalness = Math.min(mat.metalness, 0.3); mat.roughness = Math.max(mat.roughness, 0.9); if (NT.albedo) { mat.roughness = 1.0; mat.metalness = Math.min(mat.metalness, 0.15); }   /* matière qui boit la lumière : presque noire, sans reflet */ if (!mat.userData.nt) { mat.userData.nt = 1; if (mat.emissiveMap) mat.emissiveIntensity *= NT.tex; if (NT.albedo) mat.color.multiplyScalar(NT.albedo); } }   // 16/10 — pièces texturées (noyau de la Couronne) : reflets retenus comme le reste
         if (PR.rockLift && mat.name.startsWith('M_SC_ROCK') && !mat.userData.lift) { mat.userData.lift = 1; mat.color.multiplyScalar(PR.rockLift); }
         if (/_GLASS$/.test(mat.name)) { mat.envMapIntensity = 0.6; mat.color.setRGB(...PR.glass); }
         if (!GLOW[mat.name] && !mat.map && mat.emissive && mat.emissiveIntensity > 0 && !mat.userData.ng) { mat.userData.ng = 1; mat.emissiveIntensity *= NT.glow; }   // néons, enseigne, salon VIP : sans éblouir
