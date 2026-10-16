@@ -56,7 +56,8 @@ const PROFILES = {
     target: [0, -2.2, 0], minDist: 1.6,   // 16/10 — cible abaissée : la station remonte vers le haut de l'écran
     lights: (L, hv, P) => {
       L(0xff9a50, 6, 3.2, P(751, 330, 0));
-      const bar = L(0xffa040, 3.0, 3.0, P(470, -230, 150));   // 16/10 — lueur du bar adoucie
+      const bar = L(0xffb060, 5.5, 3.6, P(470, -230, 150));
+      L(0xffb878, 3.0, 2.4, P(395, -245, 110));   // 16/10 — lueur pâle devant la devanture   // 16/10 — lueur du bar adoucie
       L(0xffb070, 3, 3.0, P(-960, 0, 40));
       hv(P(0, 0, 653), 0.6, 0xfff2dc, 1.2);
       hv(P(0, -1160, 118), 0.9, 0xfff2dc, 0.7);
@@ -67,9 +68,9 @@ const PROFILES = {
     dockShot: { t: [1060, 110, -130], p: [1440, 480, 100] }, dockMax: 9,
     tankerAt: { pos: [1050, 110, -40], rotZ: 0, scale: 2.5 },   // agrandi : à l'échelle, un tanker se perdrait contre 2,4 km de station
     // 16/10 — éclairage obscur : station dans la pénombre, éclairée de loin et pâlement ; lumières sans éblouir
-    night: { light: 0.045, glow: 0.6, tex: 1.3, halo: 0.45, bloom: [0.5, 0.45, 0.85], albedo: 0.09, hull: 0.12, env: 0.03, envScene: 0.06, exposure: 0.9, hideCoreAtBar: true },
+    night: { light: 0.085, glow: 0.6, tex: 1.3, halo: 0.45, bloom: [0.5, 0.45, 0.85], albedo: 0.12, hull: 0.14, env: 0.03, envScene: 0.06, exposure: 0.9, hideCoreAtBar: true },
     // 16/10 — la nuit : ce sont les feux qui éclairent, comme des lanternes sur le pont d'un bateau pirate (positions posées sur les ponts, repère Blender)
-    lamps: { url: 'assets/3d/sb_dc02_lamps.json?v=20261016-2130', light: [0xff7a28, 5.0, 2.6], lightsMax: 8, lightsLite: 4, post: 7, lantern: 1.7 },
+    lamps: { url: 'assets/3d/sb_dc02_lamps.json?v=20261016-2130', light: [0xffa860, 8.0, 3.4], lightsMax: 11, lightsLite: 5, post: 7, lantern: 1.7 },
     // 16/10 — brume épaisse par endroits : bancs de brouillard posés dans la station (entre anneau, bras et noyau)
     mist: { n: 60, nLite: 26, r: [2.5, 11.0], y: [-3.0, 4.5], size: [4.5, 7.0], op: [0.6, 0.35], col: [0x26101a, 0x1e0c1c, 0x2c1220, 0x180c16] },
   },
