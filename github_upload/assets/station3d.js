@@ -63,11 +63,11 @@ const PROFILES = {
       hv(P(470, -210, 220), 0.9, 0xffb048, 0);    // couronne du bar
       return bar;
     },
-    barShot: { t: [500, -215, 100], p: [408, 33, 140] }, barAt: [500, -220, 160], barMax: 6,   // 16/10 — caméra collée au noyau, façade vue à 45°
+    barShot: { t: [500, -215, 100], p: [247, -325, 140] }, barAt: [500, -220, 160], barMax: 6,   // 16/10 — caméra collée au noyau, façade vue à 45° par la droite
     dockShot: { t: [1060, 110, -130], p: [1440, 480, 100] }, dockMax: 9,
     tankerAt: { pos: [1050, 110, -40], rotZ: 0, scale: 2.5 },   // agrandi : à l'échelle, un tanker se perdrait contre 2,4 km de station
     // 16/10 — éclairage obscur : station dans la pénombre, éclairée de loin et pâlement ; lumières sans éblouir
-    night: { light: 0.045, glow: 0.6, tex: 1.3, halo: 0.45, bloom: [0.5, 0.45, 0.85], albedo: 0.26, hull: 0.4, env: 0.12, exposure: 0.9, hideCoreAtBar: true },
+    night: { light: 0.045, glow: 0.6, tex: 1.3, halo: 0.45, bloom: [0.5, 0.45, 0.85], albedo: 0.16, hull: 0.25, env: 0.1, exposure: 0.9, hideCoreAtBar: true },
     // 16/10 — la nuit : ce sont les feux qui éclairent, comme des lanternes sur le pont d'un bateau pirate (positions posées sur les ponts, repère Blender)
     lamps: { url: 'assets/3d/sb_dc02_lamps.json?v=20261016-2130', light: [0xff8a34, 7.0, 3.2], lightsMax: 8, lightsLite: 4, post: 7, lantern: 1.7 },
     // 16/10 — brume épaisse par endroits : bancs de brouillard posés dans la station (entre anneau, bras et noyau)
