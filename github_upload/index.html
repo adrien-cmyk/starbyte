@@ -10924,6 +10924,7 @@ function _mpRenderInterceptSheet() {
 async function mpRobConvoy(reportId) {
   const r = (G.beaconReports || []).find(x => x.id === reportId);
   if (!r || !r.mp || _mpAmbushBusy.has('rob:' + reportId)) return;
+  if (Date.now() > (r.expiresAt || 0)) { toast('Fenêtre fermée : le convoi est passé'); _mpInterceptSheetRefresh(); return; }
   if (!_mpOnline()) { toast('Registre hors ligne : réessaie dans un instant'); return; }
   _mpAmbushBusy.add('rob:' + reportId);
   try {
@@ -10940,6 +10941,7 @@ async function mpRobConvoy(reportId) {
 async function mpSpyConvoy(reportId) {
   const r = (G.beaconReports || []).find(x => x.id === reportId);
   if (!r || !r.mp || r.mp.spied || _mpAmbushBusy.has('spy:' + reportId)) return;
+  if (Date.now() > (r.expiresAt || 0)) { toast('Fenêtre fermée : le convoi est passé'); _mpInterceptSheetRefresh(); return; }
   if (!_mpOnline()) { toast('Registre hors ligne : réessaie dans un instant'); return; }
   _mpAmbushBusy.add('spy:' + reportId);
   try {
@@ -23846,8 +23848,13 @@ function getDeployedBeacons() {
 function purgeExpiredBeaconDetections() {
   if (!Array.isArray(G.beaconReports)) { G.beaconReports = []; return; }
   const now = Date.now();
-  G.beaconReports = G.beaconReports.filter(d => d.expiresAt > now);
+  // PATCH_1710_BEACON_HISTORY — on garde l'historique (24 h, 30 derniers) ; seule la fenêtre d'interception se ferme
+  G.beaconReports = G.beaconReports
+    .filter(d => now - (d.createdAt || d.expiresAt || 0) < BEACON_HISTORY_MS)
+    .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))
+    .slice(0, BEACON_HISTORY_MAX);
 }
+var BEACON_HISTORY_MS = 24 * 3600 * 1000, BEACON_HISTORY_MAX = 30;
 
 // Tick principal : génère les détections passives pour chaque balise active
 function tickActiveBeacons() {
@@ -33602,12 +33609,26 @@ function _rapTabs(all) {
     html += `<div class="rap-subs">${subs.map(o => `<button class="rap-sub${o.k === sub ? ' on' : ''}" style="--c:${o.c}" onclick="setRapSub('${o.k}')">${o.l}${o.items.length ? ` <em>${o.items.length}</em>` : ''}${unread(o.items) ? '<i></i>' : ''}</button>`).join('')}</div>`;
     list = (subs.find(o => o.k === sub) || { items: [] }).items;
   } else {
+    const mis = [{ k: 'tankers', l: 'Tankers', c: '#ffc864', items: missions.filter(x => x.kind === 'tanker') },
+                 { k: 'balises', l: 'Balises', c: '#a370ff', items: missions.filter(x => x.kind === 'beacon') }];
+    let mk = G._rapMis;
+    if (!mis.some(o => o.k === mk && o.items.length)) mk = (mis.find(o => o.items.some(x => x.unread)) || mis.find(o => o.items.length) || mis[0]).k;
+    if (G._rapMis && mis.some(o => o.k === G._rapMis)) mk = G._rapMis;
+    html += `<div class="rap-subs">${mis.map(o => `<button class="rap-sub${o.k === mk ? ' on' : ''}" style="--c:${o.c}" onclick="setRapMis('${o.k}')">${o.l}${o.items.length ? ` <em>${o.items.length}</em>` : ''}${unread(o.items) ? '<i></i>' : ''}</button>`).join('')}</div>`;
+    const cur = mis.find(o => o.k === mk);
+    if (mk === 'balises') {
+      const live = cur.items.filter(x => (x.report.expiresAt || 0) > Date.now()).length;
+      html += `<div style="margin:-4px 18px 10px;font-size:10px;color:var(--mut);line-height:1.5">${live ? `<span style="color:#a370ff">${live} fenêtre${live > 1 ? 's' : ''} d'interception ouverte${live > 1 ? 's' : ''}</span> · ` : ''}historique des passages : 24 h, 30 derniers</div>`;
+      list = cur.items;
+      return { html: _rapCss() + html, list, tab };   // PATCH_1710_BEACON_HISTORY
+    }
+    list = cur.items;
     if ((G.reports || []).length) html += `<div class="rap-link" onclick="goto('reports')"><span>Rapports de flotte, de pillage et d'ambassade${fleetUnread ? ` · <b>${fleetUnread} non lu${fleetUnread > 1 ? 's' : ''}</b>` : ''}</span><i>→</i></div>`;
-    list = missions;
   }
   return { html: _rapCss() + html, list, tab };
 }
 function setRapTab(t) { G._rapTab = t; _archivesUnfolded = false; renderProspectRapports(); }
+function setRapMis(k) { G._rapMis = k; _archivesUnfolded = false; renderProspectRapports(); }
 function setRapSub(k) { G._rapSub = k; _archivesUnfolded = false; renderProspectRapports(); }
 function _rapCss() {
   if (document.getElementById('rap-css')) return '';
@@ -34734,7 +34755,7 @@ function renderBeaconReportRow(r, isUnread) {
     <div style="font-size:10px;color:var(--mut);margin-top:3px">
       Confiance <span style="color:${confColor}">${t.confidence}%</span>
       ${windowExpired
-        ? '<span style="opacity:.5;margin:0 4px">·</span><span style="color:var(--mut);font-style:italic">fenêtre expirée</span>'
+        ? '<span style="opacity:.5;margin:0 4px">·</span><span style="color:var(--mut);font-style:italic">fenêtre fermée</span>'
         : `<span style="opacity:.5;margin:0 4px">·</span><span style="color:${accent}">fenêtre ${remainingMin} min</span>`
       }
     </div>
