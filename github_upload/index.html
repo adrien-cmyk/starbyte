@@ -6346,7 +6346,18 @@ const BUILDING_TIERS = {
     2: { name:'Raffinerie cryogénique',  prod:{fuel:32},  cost:{metal:2500, energie:1500},               duration:2880,  desc:'Hydrogène liquéfié, isotopes stables',   prodLbl:'carburant +32/h · cap +5k', fuelCap:5000 },
     3: { name:'Complexe de fusion-fuel', prod:{fuel:128}, cost:{metal:12500,energie:7500, cristal:500},  duration:10080, desc:'Réacteur de propulsion à plasma',        prodLbl:'carburant +128/h · cap +20k', fuelCap:20000 },
   },
+  // PATCH_1910_CAPITAL — le Centre de commandement s'améliore comme un bâtiment : ça prend du temps et ça se voit sur la planète
+  capital: {
+    1: { name:'Centre de commandement', cost:{},                                       duration:0,     desc:'Hub stratégique' },
+    2: { name:'Hub stratégique',         cost:{metal:2500, energie:800},                 duration:2880,  desc:'Logistique et production II' },
+    3: { name:'Hub d\'empire',          cost:{metal:12000, energie:4000, cristal:1500}, duration:10080, desc:'Vaisseau colonial' },
+  },
 };
+const CAPITAL_META = { name:'Centre de commandement', icon:'⊕', color:'var(--cyan)' };
+function capitalParcelIdx() { return ((G.planet && G.planet.parcels) || []).findIndex(q => q && q.state === 'capital'); }
+function syncCapitalParcelTier() {   // anciennes parties : le tier du centre se voit aussi sur la carte
+  try { const i = capitalParcelIdx(); if (i >= 0 && G.skills) { const p = G.planet.parcels[i]; const t = G.skills.capitalLevel || 1; if ((p.lvl || 1) !== t) p.lvl = t; } } catch (e) {}
+}
 
 const TIER_MAX = 3;
 
@@ -8761,6 +8772,7 @@ function loadGame() {
     }
 
     refreshParcelProdLabels();
+    syncCapitalParcelTier();   // PATCH_1910_CAPITAL
     // AUDIT_1110 — l'adresse fait foi (déménagement vers la zone de test)
     if (G.planet) { G.planet.address = MY_ADDRESS; G.planet.coordString = MY_COORD_STRING; }
 
@@ -31612,6 +31624,19 @@ function completeBuildingUpgrade() {
     return;
   }
   const newTier = up.toTier;
+  if (up.buildingKey === 'capital') {   // PATCH_1910_CAPITAL
+    G.skills.capitalLevel = Math.max(G.skills.capitalLevel || 1, newTier);
+    G.defense.capitalBase = 200 * G.skills.capitalLevel;
+    parcel.lvl = G.skills.capitalLevel;
+    QUEUES.capital.upgrade = null;
+    toast(`⊕ ${BUILDING_TIERS.capital[newTier].name} opérationnel : Tier ${newTier}`);
+    try { if (typeof saveGame === 'function') saveGame(); } catch (e) {}
+    if (typeof renderDashboard === 'function') renderDashboard();
+    if (typeof renderPlanetMap === 'function') renderPlanetMap();
+    const cs = document.getElementById('scr-capital');
+    if (cs && !cs.classList.contains('hidden')) renderCapitalScreen();
+    return;
+  }
   const tierData = BUILDING_TIERS[up.buildingKey]?.[newTier];
   if (!tierData) {
     QUEUES.capital.upgrade = null;
@@ -38445,7 +38470,7 @@ function setCapitalTab(tab) {
 
 function renderCapitalScreen() {
   document.getElementById('capital-tier').textContent = G.skills.capitalLevel;
-  document.getElementById('capital-tier-sub').textContent = `Tier ${G.skills.capitalLevel} — Hub stratégique`;
+  document.getElementById('capital-tier-sub').textContent = `Tier ${G.skills.capitalLevel} — ${(BUILDING_TIERS.capital[G.skills.capitalLevel] || {}).name || 'Hub stratégique'}`;
   setCapitalTab(capitalTab);
   // S'assurer que le ticker tourne (au cas où une amélioration serait active)
   if (typeof startQueueTicker === 'function') startQueueTicker();
@@ -38486,7 +38511,7 @@ function renderCapitalTabContent() {
     if (up) {
       const upgradeParcel = G.planet.parcels[up.parcelIdx];
       const tierData = BUILDING_TIERS[up.buildingKey]?.[up.toTier];
-      const buildingMeta = BUILDINGS[up.buildingKey];
+      const buildingMeta = BUILDINGS[up.buildingKey] || (up.buildingKey === 'capital' ? CAPITAL_META : null);
       if (upgradeParcel && tierData && buildingMeta) {
         const pct = Math.min(100, Math.floor((up.elapsed / up.totalDur) * 100));
         const remaining = Math.max(0, up.totalDur - up.elapsed);
@@ -38540,6 +38565,9 @@ function renderCapitalTabContent() {
     const cost = CAPITAL_UPGRADE_COSTS[lvl - 1];
     const costStr = Object.entries(cost).map(([res, q]) => `${q} ${res}`).join(' · ');
     const canAfford = Object.entries(cost).every(([res, q]) => G.res[res] && G.res[res].v >= q);
+    const busy = !!QUEUES.capital.upgrade;
+    const capDur = Math.round(((BUILDING_TIERS.capital[lvl + 1] || {}).duration || 0) * (window.SBSkills ? SBSkills.durMult('build') : 1));
+    const capDurLbl = capDur >= 3600 ? `${Math.floor(capDur / 3600)} h ${String(Math.round((capDur % 3600) / 60)).padStart(2, '0')}` : `${Math.round(capDur / 60)} min`;
 
     el.innerHTML = `
       ${buildingUpgradeHtml}
@@ -38548,11 +38576,12 @@ function renderCapitalTabContent() {
         <div class="dash-stat-row"><span class="lbl">Niveau actuel</span><span class="val">Tier ${lvl}</span></div>
         <div class="dash-stat-row"><span class="lbl">Niveau visé</span><span class="val ok">Tier ${lvl + 1}</span></div>
         <div class="dash-stat-row" style="border-top:1px solid var(--line);padding-top:8px;margin-top:6px"><span class="lbl">Coût</span><span class="val" style="color:var(--amber)">${costStr}</span></div>
+        <div class="dash-stat-row"><span class="lbl">Durée</span><span class="val">${capDurLbl}</span></div>
       </div>
 
       <div style="padding:14px 16px 8px">
-        <button class="btn-primary ${canAfford ? '' : 'disabled'}" style="width:100%;padding:14px" onclick="upgradeCapital()">
-          ${canAfford ? `Améliorer vers Tier ${lvl + 1}` : 'Ressources insuffisantes'}
+        <button class="btn-primary ${canAfford && !busy ? '' : 'disabled'}" style="width:100%;padding:14px" onclick="upgradeCapital()">
+          ${busy ? (QUEUES.capital.upgrade.buildingKey === 'capital' ? 'Chantier du Centre en cours' : 'Un autre chantier est en cours') : canAfford ? `Améliorer vers Tier ${lvl + 1}` : 'Ressources insuffisantes'}
         </button>
       </div>
 
@@ -38560,8 +38589,8 @@ function renderCapitalTabContent() {
       <div class="info" style="margin: 0 16px;">
         <div class="sub" style="margin-top:0;line-height:1.6">
           ${lvl === 1
-            ? '· Skills "Logistique parallèle II" et "Production accélérée II" deviennent achetables<br>· Capacité d\'amélioration jusqu\'au Tier 3'
-            : '· Skill "Vaisseau Colonial" devient achetable<br>· Tier final · Hub d\'empire'
+            ? '· Skills "Logistique parallèle II" et "Production accélérée II" deviennent achetables<br>· Défense de la capitale +200<br>· Le Centre se renforce sur la planète<br>· Capacité d\'amélioration jusqu\'au Tier 3'
+            : '· Skill "Vaisseau Colonial" devient achetable<br>· Défense de la capitale +200<br>· Le Centre se renforce sur la planète<br>· Tier final · Hub d\'empire'
           }
         </div>
       </div>
@@ -38633,11 +38662,17 @@ function upgradeCapital() {
       return;
     }
   }
+  if (QUEUES.capital.upgrade) { toast('Une amélioration est déjà en cours'); return; }
+  if (window.SBAftermath && SBAftermath.upgradeBlocked()) { toast('Planète dévastée : lance les secours avant d\'améliorer'); return; }
+  const tierData = BUILDING_TIERS.capital[lvl + 1];
   for (const [res, q] of Object.entries(cost)) G.res[res].v -= q;
-  G.skills.capitalLevel++;
-  // Bonus passif augmenté
-  G.defense.capitalBase = 200 * G.skills.capitalLevel;
-  toast(`⊕ Centre de Commandement → Tier ${G.skills.capitalLevel}`);
+  QUEUES.capital.upgrade = {
+    parcelIdx: capitalParcelIdx(), buildingKey: 'capital', fromTier: lvl, toTier: lvl + 1,
+    totalDur: Math.max(1, Math.round(tierData.duration * (window.SBSkills ? SBSkills.durMult('build') : 1))), elapsed: 0,
+  };
+  toast(`Chantier lancé : ${tierData.name}`);
+  if (typeof startQueueTicker === 'function') startQueueTicker();
+  try { if (typeof saveGame === 'function') saveGame(); } catch (e) {}
   renderCapitalScreen();
 }
 
