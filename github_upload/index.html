@@ -8677,6 +8677,7 @@ var EXTRA_SAVE_KEYS = [
   'mpNeighbors',   // VOISINS_1310 — voisins déjà signalés
   'tuto',          // TUTO_1410 — premiers pas (étape, vu, terminé)
   'skillsLearned', 'research', '_skillsSeen', '_skillsMigrated',   // PATCH_1610_SKILLS
+  'worlds', 'activeWorld',   // PATCH_2010_WORLDS — colonies (planètes inactives) et planète affichée
   '_linesCrown', 'crownSeen', '_linesSanct', 'sanctSeen', '_linesNoire', 'noireSeen', '_linesRefuge', '_linesRefuge2', 'refugeSeen', '_brest1',   // PATCH_1510_CROWN — lieu du secteur M devenu la Couronne, première arrivée vue
 ];
 
@@ -8793,7 +8794,8 @@ function loadGame() {
     try { sbMigrateBrest(); } catch (e) { console.warn('[brest]', e); }   // PATCH_1910_BREST
     setTimeout(() => { try { sbMigrateBrest(); } catch (e) {} }, 3000);
     // AUDIT_1110 — l'adresse fait foi (déménagement vers la zone de test)
-    if (G.planet) { G.planet.address = MY_ADDRESS; G.planet.coordString = MY_COORD_STRING; }
+    if (G.planet && (!G.activeWorld || G.activeWorld === 'home')) { G.planet.address = MY_ADDRESS; G.planet.coordString = MY_COORD_STRING; }   // PATCH_2010_WORLDS : seulement la capitale
+    if (typeof sbWorldsInit === 'function') sbWorldsInit();
 
     // OFFLINE — reprendre la simulation là où la sauvegarde l'a laissée
     G._simAt = snapshot.simAt || snapshot.savedAt || Date.now();
@@ -8964,7 +8966,8 @@ function mpMyAddressString() {
 }
 
 // Ce que les autres peuvent savoir de mon monde (publié à chaque sauvegarde cloud)
-function mpWorldSnapshot() {
+function mpWorldSnapshot() { return (typeof sbWithWorld === 'function') ? sbWithWorld('home', _mpWorldSnapshotHome) : _mpWorldSnapshotHome(); }   // PATCH_2010_WORLDS : le monde publié est la capitale
+function _mpWorldSnapshotHome() {
   const parcels = (G.planet && G.planet.parcels) || [];
   const built = parcels.filter(p => p && p.building && (p.state === 'built' || p.state === 'damaged'));
   const level = 1 + built.reduce((s, p) => s + (p.lvl || 1), 0);
@@ -9444,7 +9447,8 @@ function _defLossLines(L) {
 // ─── Côté défenseur : un raid m'a frappé pendant mon absence ───
 var _MP_BUILDING_LABEL = (k) => (typeof BUILDINGS !== 'undefined' && BUILDINGS[k] && BUILDINGS[k].name) || k;
 
-function mpApplyRaidAgainstMe(raid) {
+function mpApplyRaidAgainstMe(raid) { return (typeof sbWithWorld === 'function') ? sbWithWorld('home', () => _mpApplyRaidAgainstHome(raid)) : _mpApplyRaidAgainstHome(raid); }   // PATCH_2010_WORLDS
+function _mpApplyRaidAgainstHome(raid) {
   if (!raid || !raid.id) return false;
   if ((G.reports || []).some(r => r.mpRaidId === raid.id)) return true;   // déjà intégré
   const res = raid.result || {};
@@ -31552,6 +31556,104 @@ const QUEUES = {
   capital:  { upgrade: null }, // { parcelIdx, buildingKey, fromTier, toTier, totalDur, elapsed }
 };
 
+/* ═══════════ PATCH_2010_WORLDS — plusieurs planètes dans une même partie (colonisation, étape 1) ═══════════
+   Le stock (G.res, crédits, carburant), la flotte, les skills de l'empire, les sondes et le carnet restent communs.
+   Ce qui appartient à une planète vit dans G pour la planète ACTIVE (le reste du code lit G.planet, G.defense…
+   sans rien savoir) et dans G.worlds[i].data pour les autres. sbWithWorld(id, fn) bascule le temps d'un calcul. */
+var SB_WORLD_KEYS = ['planet', 'defense', 'antenna', 'aftermath', 'selParcel'];
+function sbWorldsInit() {
+  if (!Array.isArray(G.worlds) || !G.worlds.length) {
+    G.worlds = [{ id: 'home', kind: 'capital', name: (G.planet && G.planet.name) || 'KERATH-VII', coord: (typeof MY_COORD_STRING !== 'undefined' ? MY_COORD_STRING : ''), foundedAt: null, data: null }];
+  }
+  if (!G.activeWorld || !sbWorld(G.activeWorld)) G.activeWorld = 'home';
+}
+function sbWorld(id) { return (Array.isArray(G.worlds) ? G.worlds : []).find(w => w && w.id === id) || null; }
+function sbActiveWorld() { return sbWorld(G.activeWorld || 'home'); }
+function sbIsHome() { return !G.activeWorld || G.activeWorld === 'home'; }
+function _sbPack() {
+  const d = {};
+  for (const k of SB_WORLD_KEYS) d[k] = G[k];
+  if (d.planet && d.planet.families instanceof Set) d.planet.families = Array.from(d.planet.families);   // JSON : pas de Set
+  d.capitalLevel = (G.skills && G.skills.capitalLevel) || 1;
+  d.queues = { capital: QUEUES.capital || { upgrade: null }, barracks: QUEUES.barracks || { commands: [] } };
+  return d;
+}
+function _sbUnpack(d) {
+  for (const k of SB_WORLD_KEYS) G[k] = d[k];
+  if (G.planet && Array.isArray(G.planet.families)) G.planet.families = new Set(G.planet.families);
+  if (G.selParcel == null) G.selParcel = 12;
+  if (G.skills) G.skills.capitalLevel = d.capitalLevel || 1;
+  const q = d.queues || {};
+  QUEUES.capital = q.capital || { upgrade: null };
+  QUEUES.barracks = q.barracks || { commands: [] };
+}
+function _sbSwap(id) {
+  if (!id || id === G.activeWorld) return;
+  const cur = sbActiveWorld(), nxt = sbWorld(id);
+  if (!cur || !nxt || !nxt.data) return;
+  cur.data = _sbPack();
+  const d = nxt.data; nxt.data = null;
+  _sbUnpack(d);
+  G.activeWorld = id;
+}
+// Exécute fn sur la planète id (sans rien afficher), puis revient à la planète active.
+function sbWithWorld(id, fn) {
+  if (!Array.isArray(G.worlds) || !id || id === (G.activeWorld || 'home') || !sbWorld(id)) return fn();
+  const prev = G.activeWorld || 'home';
+  const wasSwapping = G._sbSwapping;
+  G._sbSwapping = true;
+  _sbSwap(id);
+  try { return fn(); }
+  finally { _sbSwap(prev); G._sbSwapping = wasSwapping; }
+}
+// Toutes les parcelles de l'empire (production commune : crédits, carburant)
+function sbAllParcels() {
+  const out = ((G.planet && G.planet.parcels) || []).slice();
+  for (const w of (G.worlds || [])) if (w && w.data && w.data.planet && Array.isArray(w.data.planet.parcels)) out.push(...w.data.planet.parcels);
+  return out;
+}
+// Les autres planètes avancent aussi : chantiers, amélioration de bâtiment, caserne.
+function sbTickOtherWorlds(at, secs, out) {
+  if (!Array.isArray(G.worlds) || G.worlds.length < 2) return;
+  for (const w of G.worlds) {
+    if (!w || w.id === G.activeWorld || !w.data) continue;
+    sbWithWorld(w.id, () => {
+      const b = tickConstructions(at);
+      if (b && b.length) out.builds.push(...b.map(n => n + ' (' + (w.name || 'colonie') + ')'));
+      if (secs > 0) _advanceQueues(secs, out, true);
+    });
+  }
+}
+// Changer de planète affichée
+function sbSwitchWorld(id) {
+  sbWorldsInit();
+  if (id === G.activeWorld || !sbWorld(id)) return false;
+  _sbSwap(id);
+  if (window.Planet3D && Planet3D.ready) { try { Planet3D._sig = ''; Planet3D.sync(true); } catch (e) {} }
+  try { if (typeof renderPlanetMap === 'function') renderPlanetMap(); } catch (e) {}
+  try { if (typeof refreshCurrentScreen === 'function') refreshCurrentScreen(); } catch (e) {}
+  try { if (typeof saveGame === 'function') saveGame(); } catch (e) {}
+  return true;
+}
+// Fonder une colonie (utilisé par l'arrivée du vaisseau colonial ; cheat de test en attendant)
+function sbFoundColony(opts) {
+  sbWorldsInit();
+  opts = opts || {};
+  const n = G.worlds.filter(w => w.kind === 'colony').length + 1;
+  const name = String(opts.name || ('COLONIE-' + n)).toUpperCase().slice(0, 24);
+  const planet = {
+    name, address: opts.address || null, coordString: opts.coord || '', type: 3, level: 0, age: (G.planet && G.planet.age) || "L'Éveil",
+    parcels: Array.from({ length: 25 }, (_, i) => makeInitialParcel(i)), families: ['Capitale'],
+  };
+  const defense = { capitalBase: 200, units: { garde: { qty: 0, dmg: 0 }, lourd: { qty: 0, dmg: 0 }, tourelle: { qty: 0, dmg: 0 }, tourelle_lourde: { qty: 0, dmg: 0 } } };
+  const w = { id: 'col-' + Date.now().toString(36), kind: 'colony', name, coord: opts.coord || '', foundedAt: Date.now(),
+    data: { planet, defense, antenna: null, aftermath: undefined, selParcel: 12, capitalLevel: 1, queues: { capital: { upgrade: null }, barracks: { commands: [] } } } };
+  G.worlds.push(w);
+  try { if (typeof saveGame === 'function') saveGame(); } catch (e) {}
+  return w;
+}
+function cheatFoundColony(name) { const w = sbFoundColony({ name: name || 'Test colonie' }); sbSwitchWorld(w.id); return w.id; }
+
 /**
  * Lance une amélioration de bâtiment via le Centre de Commandement.
  * Une seule amélioration à la fois (sauf skill Logistique parallèle débloqué).
@@ -32052,6 +32154,7 @@ function _simSegment(ms, at, out) {
   const secs = Math.floor(G._simSecBuf);
   G._simSecBuf -= secs;
   if (secs > 0 && typeof QUEUES !== 'undefined') _advanceQueues(secs, out);
+  if (typeof sbTickOtherWorlds === 'function') sbTickOtherWorlds(at, secs, out);   // PATCH_2010_WORLDS
 }
 
 function _announceCommandDone(cmd) {
@@ -32067,8 +32170,8 @@ function _announceCommandDone(cmd) {
   if (cmd.totalQty > 1 && unitName) toast(`${cmd.totalQty}× ${unitName} prêts`);
 }
 
-function _advanceQueues(secs, out) {
-  for (const type of ['barracks', 'shipyard', 'prospect']) {
+function _advanceQueues(secs, out, localOnly) {   // PATCH_2010_WORLDS : localOnly = files propres à une planète (caserne, amélioration)
+  for (const type of (localOnly ? ['barracks'] : ['barracks', 'shipyard', 'prospect'])) {
     const queue = QUEUES[type];
     if (!queue || !Array.isArray(queue.commands) || queue.commands.length === 0) continue;
     const slots = type === 'barracks' ? (G.skills?.barracksSlots || 1) : 1;
@@ -39268,7 +39371,7 @@ function _initDiagPanel() {
 function getCommerceCreditsRate() {
   if (!G.planet?.parcels) return 0;
   let rate = 0;
-  for (const parcel of G.planet.parcels) {
+  for (const parcel of (typeof sbAllParcels === 'function' ? sbAllParcels() : G.planet.parcels)) {
     if (parcel?.building === 'comptoir' && parcel.state === 'built') {
       const tier = parcel.lvl || 1;
       const tierData = BUILDING_TIERS.comptoir?.[tier];
@@ -39281,7 +39384,7 @@ function getCommerceCreditsRate() {
 // Compte les comptoirs construits (toutes parcelles confondues)
 function countComptoirs() {
   if (!G.planet?.parcels) return 0;
-  return G.planet.parcels.filter(p => p?.building === 'comptoir' && p.state === 'built').length;
+  return (typeof sbAllParcels === 'function' ? sbAllParcels() : G.planet.parcels).filter(p => p?.building === 'comptoir' && p.state === 'built').length;
 }
 
 // Tick de production passive CG — appelé toutes les 10s par la passive loop
@@ -39306,7 +39409,7 @@ function tickCommerceProduction() {
 function getFuelProductionRate() {
   if (!G.planet?.parcels) return 0;
   let rate = 0;
-  for (const parcel of G.planet.parcels) {
+  for (const parcel of (typeof sbAllParcels === 'function' ? sbAllParcels() : G.planet.parcels)) {
     if (parcel?.building === 'raffinerie' && parcel.state === 'built') {
       // Note : le tier d'un bâtiment est stocké dans parcel.lvl (pas parcel.tier)
       const tier = parcel.lvl || parcel.tier || 1;
@@ -39323,7 +39426,7 @@ function getFuelProductionRate() {
 function getFuelCap() {
   if (!G.planet?.parcels) return 1000;
   let maxCap = 1000;
-  for (const parcel of G.planet.parcels) {
+  for (const parcel of (typeof sbAllParcels === 'function' ? sbAllParcels() : G.planet.parcels)) {
     if (parcel?.building === 'raffinerie' && parcel.state === 'built') {
       const tier = parcel.lvl || parcel.tier || 1;
       const tierData = BUILDING_TIERS.raffinerie?.[tier];
@@ -46311,7 +46414,7 @@ if (G.knownTargets && Array.isArray(G.tankerMissions)) {
 
 </script>
 <!-- PLANET3D — carte 3D + boucle antenne (source : sb-build/src/planet3d.js) -->
-<script type="module" src="assets/planet3d.js?v=20261019-2220"></script>
+<script type="module" src="assets/planet3d.js?v=20261020-0120"></script>
 <!-- PERF_1310 — mesure des performances chez les joueurs + qualité 3D automatique (assets/perf.js) -->
 <script src="assets/perf.js?v=20261014-1540"></script>
 <!-- PATCH_1410_LIGNES — lignes PNJ à horaire sur les routes cachées (assets/lines.js) -->
