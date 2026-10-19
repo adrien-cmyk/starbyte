@@ -10690,7 +10690,8 @@ async function mpIngestPiracy(d, meId) {
         }
         if (typeof SBMap !== 'undefined' && SBMap.render) { try { SBMap.render(); } catch (e) {} }
       }
-      toast(`📡 ${s.system} : ${s.pseudo ? 'convoi de ' + s.pseudo : 'convoi sous pavillon impérial'}${r.mp.next ? ' · cap sur ' + r.mp.next : ''} · fenêtre ${Math.max(1, Math.ceil((end - Date.now()) / 60000))} min`);
+      { const txt = `📡 ${s.system} : ${s.pseudo ? 'convoi de ' + s.pseudo : 'convoi sous pavillon impérial'}${r.mp.next ? ' · cap sur ' + r.mp.next : ''} · fenêtre ${Math.max(1, Math.ceil((end - Date.now()) / 60000))} min`;
+        if (window.SBLines && SBLines.beaconToast) SBLines.beaconToast(s.system, txt, s.cargo_hint === 'lourde' || !!s.spied, () => markBeaconReportRead(id)); else toast(txt); }   // PATCH_1910_ALERTES
     } else if (r.mp) { r.expiresAt = end; r.mp.spied = !!s.spied; }
   }
   // b. mes flottes en embuscade : pertes et cale de butin tenues par le registre
@@ -46221,7 +46222,7 @@ if (G.knownTargets && Array.isArray(G.tankerMissions)) {
 <!-- PERF_1310 — mesure des performances chez les joueurs + qualité 3D automatique (assets/perf.js) -->
 <script src="assets/perf.js?v=20261014-1540"></script>
 <!-- PATCH_1410_LIGNES — lignes PNJ à horaire sur les routes cachées (assets/lines.js) -->
-<script src="assets/lines.js?v=20261017-0000"></script>
+<script src="assets/lines.js?v=20261019-1600"></script>
 <!-- CLOUD — sauvegarde Supabase (source : sb-build/src/cloud.js) -->
 <script type="module" src="assets/cloud.js?v=20261014-1440"></script>
 <!-- MATCH3 — Match-3 V2 (assets/match3.js, source src/match3.js + src/m3core.js) : remplace startM3 -->

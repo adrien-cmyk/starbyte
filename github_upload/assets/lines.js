@@ -38,10 +38,11 @@
   const SANCT_DOCK_ID = 'dock-otqflf';
   const NOIRE_DOCK_ID = 'dock-uguzli';
   const STATION_PORTS = {
-    [CROWN_DOCK_ID]: { kinds: CROWN_KINDS, route: 'La Saigne de la Couronne', mood: 'grasse', flag: '_linesCrown' },
+    // 19/10 (Adrien) : une seule ligne par station (keep) — le Linceul garde ses deux lignes pour l'instant
+    [CROWN_DOCK_ID]: { kinds: CROWN_KINDS, route: 'La Saigne de la Couronne', mood: 'grasse', flag: '_linesCrown', keep: [0] },
     [SANCT_DOCK_ID]: { kinds: ['pilgrim_stop', 'imperial_convoy'], route: 'La Vieille Voie du Linceul', mood: 'imperiale', flag: '_linesSanct' },
     // 16/10 : la Station O'Neill Série Noire, station furtive de la Confédération, est le lieu du secteur N ; ses lignes : convois armés et convois impériaux
-    [NOIRE_DOCK_ID]: { kinds: ['derelict_carrier', 'imperial_convoy'], route: 'La Voie Noire', mood: 'noire', flag: '_linesNoire' },
+    [NOIRE_DOCK_ID]: { kinds: ['derelict_carrier', 'imperial_convoy'], route: 'La Voie Noire', mood: 'noire', flag: '_linesNoire', keep: [0] },
   };
 
   /* ── hachage déterministe (mêmes résultats sur tous les appareils) ── */
@@ -52,7 +53,7 @@
   let _net = null;
   function network() {
     if (_net) return _net;
-    const lines = [], bySys = {}, ports = {};
+    const lines = [], bySys = {}, ports = {}, retired = {};
     const hintsP = (typeof HINT_PREFIXES !== 'undefined') ? HINT_PREFIXES : [];
     const hintsB = (typeof HINT_BODIES !== 'undefined') ? HINT_BODIES : [];
     // 14/10 (Adrien) : 3 lieux cachés au début, pas 40 — un par secteur de la saison (M, N, O),
@@ -87,18 +88,20 @@
         }
         const kind = STATION_PORTS[dock.id] ? KINDS[STATION_PORTS[dock.id].kinds[j]] : (KINDS[dock.type] || KINDS.hidden_freeport);
         const line = {
-          id: dock.id + '-' + j, dockId: dock.id, port, chain, kind,
+          id: dock.id + '-' + j, dockId: dock.id, port, chain, kind, j,
           period: (80 + Math.floor(r() * 70)) * 60000,      // un départ toutes les 80 à 150 min
           travel: (40 + Math.floor(r() * 30)) * 60000,      // 40 à 70 min de bout en bout
           offset: Math.floor(r() * 150) * 60000,
           sector: sec,
         };
+        const keep = STATION_PORTS[dock.id] && STATION_PORTS[dock.id].keep;
+        if (keep && !keep.includes(j)) { retired[line.id] = line; continue; }   // ligne fermée (19/10) : gardée pour la conversion
         lines.push(line); ports[port].lines.push(line.id);
         chain.forEach((s, i) => { (bySys[s] = bySys[s] || []).push({ line, i }); });
         (bySys[port] = bySys[port] || []).push({ line, i: n, isPort: true });
       }
     }
-    _net = { lines, bySys, ports, byId: Object.fromEntries(lines.map(l => [l.id, l])) };
+    _net = { lines, bySys, ports, retired, byId: Object.fromEntries(lines.map(l => [l.id, l])) };
     return _net;
   }
 
@@ -146,13 +149,34 @@
     if (!G.hiddenPorts || typeof G.hiddenPorts !== 'object') G.hiddenPorts = {};         // port sys → { dockId, name, type, at }
     if (!Array.isArray(G.spottedLegs)) G.spottedLegs = [];
     // 14/10 : passage de 40 lieux à 3 — on oublie ce qui appartenait aux lignes qui n'existent plus
-    if (G._linesNet !== 3) {
+    if (G._linesNet === 3) {   // 19/10 : une ligne par station — ce qui était connu de la ligne fermée passe sur la ligne gardée
+      const n = network();
+      for (const old of Object.values(n.retired)) {
+        const known = new Set(G.spottedLegs.filter(l => l.npc && l.lineId === old.id).flatMap(l => [l.from, l.to]));
+        for (const [k, e] of Object.entries(G.trafficEchoes)) if (e.lineId === old.id) known.add(k);
+        let depth = 0;
+        for (let i = old.chain.length - 1; i >= 0; i--) { if (known.has(old.chain[i])) depth = old.chain.length - i; else if (depth) break; }
+        if (!depth && known.size) depth = 1;
+        const keep = n.byId[n.ports[old.port].lines[0]];
+        if (!depth || !keep) continue;
+        const ch = keep.chain, start = Math.max(0, ch.length - depth);
+        if (!G.mapSeen) G.mapSeen = {};
+        for (let i = start; i < ch.length; i++) {
+          const to = i < ch.length - 1 ? ch[i + 1] : keep.port;
+          if (!G.spottedLegs.some(l => l.npc && l.lineId === keep.id && l.from === ch[i] && l.to === to))
+            G.spottedLegs.unshift({ id: `cv19-${keep.id}-${i}`, lineId: keep.id, from: ch[i], to, pseudo: keep.kind.label, at: Date.now(), npc: true, cargo: 'moyen' });
+          G.mapSeen[ch[i]] = G.mapSeen[ch[i]] || Date.now();
+        }
+      }
+      G._linesNet = 2;   // repasse par le nettoyage ci-dessous
+    }
+    if (G._linesNet !== 3 && G._linesNet !== 4) {
       const n = network();
       for (const k of Object.keys(G.hiddenPorts)) if (!n.ports[k]) delete G.hiddenPorts[k];
       for (const [k, e] of Object.entries(G.trafficEchoes)) if (!n.byId[e.lineId]) delete G.trafficEchoes[k];
       for (const k of Object.keys(G.lineObs)) if (!n.byId[k]) delete G.lineObs[k];
       G.spottedLegs = G.spottedLegs.filter(l => !l.npc || n.byId[l.lineId]);
-      G._linesNet = 3;
+      G._linesNet = 4;
     }
     migrateCrown();
     if (!G._linesRoutes) { G._linesRoutes = 1; for (const k of Object.keys(G.hiddenPorts)) { try { ensureRoute(k); } catch (e) {} } }
@@ -199,6 +223,17 @@
       if (typeof updateProspectRapportsBadge === 'function') { try { updateProspectRapportsBadge(); } catch (e) {} }
     }
   }
+  // 19/10 (Adrien) — une bulle par balise et par heure : les autres passages vont aux rapports (interception intacte) ;
+  // un convoi lourd ou une route espionnée passe toujours.
+  const _bt = {};
+  function beaconToast(sys, text, urgent, onTap) {
+    if (typeof toast !== 'function') return;
+    const now = Date.now(), e = _bt[sys] = _bt[sys] || { at: 0, n: 0 };
+    if (!urgent && now - e.at < 3600e3) { e.n++; return; }
+    const more = e.n ? ` · +${e.n} autre${e.n > 1 ? 's' : ''} passage${e.n > 1 ? 's' : ''} dans tes rapports` : '';
+    e.at = now; e.n = 0;
+    toast(text + more, onTap || (() => { if (typeof openProspectRapports === 'function') { G._rapTab = 'missions'; G._rapMis = 'balises'; openProspectRapports(); } }));
+  }
   function record(b, sys, s, now) {
     const { line, i, isPort, t, k, dir } = s;
     const cv = convoyOf(line, k, dir);
@@ -232,7 +267,7 @@
           line: { id: line.id, dir, cap, label: cv.label, escort: cv.escort, ships: cv.ships, nth: ob.n, k, t, i, cargo: cv.cargo, port: !!isPort },
         });
         b.detectionCount = (b.detectionCount || 0) + 1;
-        if (typeof toast === 'function') toast(`📡 ${sys} : ${cv.label.toLowerCase()} · ${cv.ships} vaisseaux${cap ? ' · cap sur ' + cap : ''}`);
+        beaconToast(sys, `📡 ${sys} : ${cv.label.toLowerCase()} · ${cv.ships} vaisseaux${cap ? ' · cap sur ' + cap : ''}`, cv.cargo === 'lourd');
       }
     }
   }
@@ -1284,7 +1319,7 @@
   setInterval(() => { try { tickEcho(Date.now()); } catch (e) { console.warn('[lignes] écho', e); } }, 20000);
 
   window.SBLines = {
-    network, passages, capOf, convoyOf, tickBeacons, tickEcho, infoFor, knownSystems, discoverPort,
+    beaconToast, network, passages, capOf, convoyOf, tickBeacons, tickEcho, infoFor, knownSystems, discoverPort,
     activateCard, ensureRoute, knownChain, balisage, balisageChain, routesBalisedBy, noteUser,
     openedRoutes, openedTo, scoutInFlight, scoutLaunch, scoutArrived, forgetOpened, giveRoute, pollGifts,
     dockMarketHtml, sellHere, withdrawOffer, buyOffer, learnRoute, noteRobbery, tickMarket, fetchOffers, sellableRoutes,
