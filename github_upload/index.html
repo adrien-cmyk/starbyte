@@ -9447,7 +9447,11 @@ function _defLossLines(L) {
 // ─── Côté défenseur : un raid m'a frappé pendant mon absence ───
 var _MP_BUILDING_LABEL = (k) => (typeof BUILDINGS !== 'undefined' && BUILDINGS[k] && BUILDINGS[k].name) || k;
 
-function mpApplyRaidAgainstMe(raid) { return (typeof sbWithWorld === 'function') ? sbWithWorld('home', () => _mpApplyRaidAgainstHome(raid)) : _mpApplyRaidAgainstHome(raid); }   // PATCH_2010_WORLDS
+function mpApplyRaidAgainstMe(raid) {   // PATCH_2010_WORLDS : le raid frappe la planète visée (capitale ou colonie)
+  if (typeof sbWithWorld !== 'function') return _mpApplyRaidAgainstHome(raid);
+  const col = (G.worlds || []).find(w => w.kind === 'colony' && raid && w.coord && w.coord === raid.defender_address);
+  return sbWithWorld(col ? col.id : 'home', () => _mpApplyRaidAgainstHome(raid));
+}
 function _mpApplyRaidAgainstHome(raid) {
   if (!raid || !raid.id) return false;
   if ((G.reports || []).some(r => r.mpRaidId === raid.id)) return true;   // déjà intégré
@@ -28962,10 +28966,31 @@ function sbColonyTick() {
   const due = G.colonyMissions.filter(m => m.arriveAt <= now);
   if (!due.length) return;
   for (const m of due) {
-    G.colonyMissions = G.colonyMissions.filter(x => x !== m);
+    if (m._claiming) continue;
     const p = sbFindPlanet(m.coord);
-    if (p && p.playerName && !p.myColony) { G.fleet.colonial = (G.fleet.colonial || 0) + 1; toast(`◈ ${m.name} est déjà occupée : l'Arche attend au chantier`); continue; }
+    if (p && p.playerName && !p.myColony) { G.colonyMissions = G.colonyMissions.filter(x => x !== m); G.fleet.colonial = (G.fleet.colonial || 0) + 1; toast(`◈ ${m.name} est déjà occupée : l'Arche attend au chantier`); continue; }
+    // multijoueur : l'adresse est réservée sur le serveur avant de poser l'Arche
+    if (window._sbRpc && !m._claimed) {
+      m._claiming = true;
+      window._sbRpc('mp_colony_claim', { p_address: m.coord, p_name: m.name }).then(({ error }) => {
+        m._claiming = false;
+        if (error && /address_taken/.test(error.message || '')) {
+          G.colonyMissions = G.colonyMissions.filter(x => x !== m);
+          G.fleet.colonial = (G.fleet.colonial || 0) + 1;
+          if (p) p.playerName = p.playerName || 'Commandant inconnu';
+          toast(`◈ ${m.name} vient d'être prise par un autre commandant : l'Arche attend au chantier`);
+          try { saveGame(); } catch (e) {}
+          return;
+        }
+        m._claimed = !error;   // hors ligne ou autre erreur : on pose quand même, la colonie sera réservée à la prochaine publication
+        if (error) m._pending = true;
+        sbColonyTick();
+      });
+      continue;
+    }
+    G.colonyMissions = G.colonyMissions.filter(x => x !== m);
     const w = sbFoundColony({ name: m.name, coord: m.coord });
+    w.mpClaimed = !!m._claimed;
     if (p) { p.myColony = w.id; p.playerName = (G.profile && (G.profile.pseudo || G.profile.name)) || 'Ta colonie'; p.type = 'habitable'; }
     sbColonyFounded(w);
   }
@@ -29017,6 +29042,25 @@ function sbOpenWorldPicker() {
   });
   setInterval(() => { try { document.body.classList.toggle('sb-multi', Array.isArray(G.worlds) && G.worlds.length > 1); } catch (e) {} }, 1000);
 })();
+
+// PATCH_2010_COLONIE (multijoueur, v18) — chaque colonie publie sa défense et ses bâtiments à côté de la capitale
+async function sbPublishColonies(client) {
+  if (!client) return;
+  window._sbRpc = (fn, args) => client.rpc(fn, args);
+  for (const w of (G.worlds || [])) {
+    if (!w || w.kind !== 'colony' || !w.coord) continue;
+    try {
+      if (!w.mpClaimed) {
+        const { error } = await client.rpc('mp_colony_claim', { p_address: w.coord, p_name: w.name });
+        if (error) { console.warn('[colonie] réservation', w.coord, error.message); if (!/address_taken/.test(error.message || '')) continue; continue; }
+        w.mpClaimed = true;
+      }
+      const snap = sbWithWorld(w.id, () => _mpWorldSnapshotHome());
+      const { error } = await client.rpc('mp_colony_publish', { p_address: w.coord, p_name: w.name, p_level: snap.level, p_defense: snap.defense, p_buildings: snap.buildings });
+      if (error) console.warn('[colonie] publication', w.coord, error.message);
+    } catch (e) { console.warn('[colonie] publication', e); }
+  }
+}
 
 // Construit un vaisseau militaire (Tanker / Frégate / Cuirassé)
 function buildShip(shipKey, qty) {
@@ -46620,7 +46664,7 @@ if (G.knownTargets && Array.isArray(G.tankerMissions)) {
 <!-- PATCH_1410_LIGNES — lignes PNJ à horaire sur les routes cachées (assets/lines.js) -->
 <script src="assets/lines.js?v=20261020-0150"></script>
 <!-- CLOUD — sauvegarde Supabase (source : sb-build/src/cloud.js) -->
-<script type="module" src="assets/cloud.js?v=20261014-1440"></script>
+<script type="module" src="assets/cloud.js?v=20261020-0215"></script>
 <!-- MATCH3 — Match-3 V2 (assets/match3.js, source src/match3.js + src/m3core.js) : remplace startM3 -->
 <script type="module" src="assets/match3.js?v=20261019-2140"></script>
 <!-- HOME V2 — « monde d'abord » : planète plein écran, ressources en ligne, Flotte / Défense / Prospection (assets/home.js) -->
