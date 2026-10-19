@@ -11071,6 +11071,131 @@ var SB_GEAR_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" st
   setTimeout(swap, 300);
 })();
 
+// ═══ CLOCHE_1910 — Centre de notifications : rapports + événements multijoueur ═══
+// Retour testeur 19/10 : une cloche qui liste tout, à l'accueil (COMMANDEMENT) et discrète à côté des Réglages.
+var SB_BELL_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg>';
+function sbNotifItems() {
+  const out = [];
+  const esc = (s) => String(s == null ? '' : s).replace(/[<>&"]/g, '');
+  const MP = { defense: 'RAID', flag: 'PAVILLON', diplo: 'DIPLOMATIE', piracy: 'PIRATERIE' };
+  (G.reports || []).forEach(r => out.push({ src: 'rep', id: r.id, t: r.returnedAt || r.startedAt || 0, unread: !r.read,
+    tag: MP[r.kind] || 'FLOTTE', color: (r.doctrine && r.doctrine.color) || '#5fa8e8',
+    title: esc(r.fleetName) + (r.targetName ? ' · ' + esc(r.targetName) : ''), sub: esc(r.intent && r.intent.label) }));
+  (G.probeReports || []).forEach(r => { const cfg = (typeof PROBE_TIER_CONFIG !== 'undefined' && PROBE_TIER_CONFIG[r.tier]) || null;
+    out.push({ src: 'probe', id: r.id, t: r.createdAt || 0, unread: !r.read, tag: 'SONDE' + (cfg ? ' ' + cfg.label.toUpperCase() : ''),
+      color: (cfg && cfg.accent) || '#5fffe8', title: esc(r.targetLabel || r.systemCoord || 'Rapport de sonde'), sub: r.silent ? 'Silence radio' : '' }); });
+  (G.tankerReports || []).forEach(r => out.push({ src: 'tanker', id: r.id, t: r.createdAt || 0, unread: !r.read, tag: r.isLost ? 'TANKER PERDU' : 'TANKER',
+    color: '#ffc864', title: esc(r.tankerName || 'Tanker') + (r.targetLabel ? ' · ' + esc(r.targetLabel) : ''), sub: '' }));
+  (G.beaconReports || []).forEach(r => { const t = r.target || {};
+    out.push({ src: 'beacon', id: r.id, t: r.createdAt || 0, unread: !r.read, tag: r.mp ? 'CONVOI JOUEUR' : 'BALISE', color: '#a370ff',
+      title: esc(t.name || 'Contact') + (r.systemCoord ? ' · ' + esc(r.systemCoord) : ''), sub: '' }); });
+  out.sort((a, b) => (b.t || 0) - (a.t || 0));
+  return out.slice(0, 60);
+}
+function sbNotifUnread() {
+  const n = (a) => (a || []).filter(r => !r.read).length;
+  return n(G.reports) + n(G.probeReports) + n(G.tankerReports) + n(G.beaconReports);
+}
+function sbNotifRefresh() {
+  const n = sbNotifUnread();
+  document.querySelectorAll('.sb-bell').forEach(b => {
+    let d = b.querySelector('.sb-bell-n');
+    if (!n) { if (d) d.remove(); return; }
+    if (!d) { d = document.createElement('span'); d.className = 'sb-bell-n'; b.appendChild(d); }
+    d.textContent = n > 99 ? '99+' : n;
+  });
+}
+function sbNotifClose() { const o = document.getElementById('sb-notif'); if (o) o.remove(); }
+function sbNotifOpen() {
+  sbNotifClose();
+  const items = sbNotifItems();
+  const ago = (t) => (t && typeof formatReportTimestamp === 'function') ? formatReportTimestamp(t) : '';
+  const o = document.createElement('div');
+  o.id = 'sb-notif';
+  o.innerHTML = `<div class="sbn-bg" onclick="sbNotifClose()"></div><div class="sbn-sheet">
+    <div class="sbn-head"><div class="sbn-title">NOTIFICATIONS</div>
+      ${sbNotifUnread() ? '<button class="sbn-all" onclick="sbNotifReadAll()">Tout marquer comme lu</button>' : ''}
+      <button class="sbn-x" onclick="sbNotifClose()" aria-label="Fermer">×</button></div>
+    <div class="sbn-list">${items.length ? items.map(x => `<div class="sbn-it${x.unread ? ' u' : ''}" onclick="sbNotifGo('${x.src}','${String(x.id).replace(/'/g, '')}')">
+      <span class="sbn-dot" style="background:${x.unread ? x.color : 'transparent'}"></span>
+      <div class="sbn-b"><div class="sbn-tag" style="color:${x.color}">${x.tag}<span>${ago(x.t)}</span></div>
+      <div class="sbn-t">${x.title}</div>${x.sub ? `<div class="sbn-s">${x.sub}</div>` : ''}</div></div>`).join('')
+      : '<div class="sbn-empty">Aucun rapport pour l’instant.</div>'}</div></div>`;
+  document.body.appendChild(o);
+}
+function sbNotifReadAll() {
+  [G.reports, G.probeReports, G.tankerReports, G.beaconReports].forEach(a => (a || []).forEach(r => { r.read = true; }));
+  try { if (typeof saveGame === 'function') saveGame(); } catch (e) {}
+  if (typeof updateProspectRapportsBadge === 'function') updateProspectRapportsBadge();
+  sbNotifRefresh(); sbNotifOpen();
+}
+function sbNotifGo(src, id) {
+  sbNotifClose();
+  if (src === 'rep') { openReportDetail(id); }
+  else if (src === 'probe') {
+    const r = (G.probeReports || []).find(x => x.id === id);
+    G._rapTab = 'sondes'; if (r && typeof _rapSubOf === 'function') G._rapSub = _rapSubOf({ kind: 'probe', report: r });
+    G._expandedProbeReport = id; markProbeReportAsRead(id); openProspectRapports();
+  } else if (src === 'tanker') {
+    G._rapTab = 'missions'; G._rapMis = 'tankers'; G._expandedTankerReport = id; markTankerReportAsRead(id); openProspectRapports();
+  } else if (src === 'beacon') {
+    const r = (G.beaconReports || []).find(x => x.id === id);
+    G._rapTab = 'missions'; G._rapMis = 'balises';
+    if (r && (r.mp || r.line)) markBeaconReportRead(id); else { markBeaconReportRead(id); openProspectRapports(); }
+  }
+  try { if (typeof saveGame === 'function') saveGame(); } catch (e) {}
+  setTimeout(sbNotifRefresh, 50);
+}
+(function () {
+  try {
+    const st = document.createElement('style');
+    st.textContent = `.sb-bell { width:38px; height:38px; padding:8px; color:#e6f0ff; background:rgba(95,168,232,.14); border:1px solid rgba(95,168,232,.45);
+        border-radius:50%; position:relative; cursor:pointer; flex:0 0 auto; -webkit-tap-highlight-color:transparent; }
+      .sb-bell svg { width:100%; height:100%; display:block; }
+      .sb-bell-n { position:absolute; top:-4px; right:-5px; min-width:17px; height:17px; padding:0 4px; border-radius:9px; background:#ff4f40; color:#fff;
+        font:700 10px/17px -apple-system,system-ui,sans-serif; text-align:center; box-shadow:0 0 0 2px #05080c; }
+      .w-gear + .sb-bell, .sb-bell + .w-gear { margin-left:6px; }
+      #scr-dashboard > .sb-bell { position:absolute; z-index:20; top:calc(var(--sai) + 11px); right:62px; }
+      #scr-dashboard header.head { padding-top:calc(var(--sai) + 62px); }
+      #sb-notif { position:fixed; inset:0; z-index:9000; }
+      #sb-notif .sbn-bg { position:absolute; inset:0; background:rgba(2,4,8,.6); }
+      #sb-notif .sbn-sheet { position:absolute; left:0; right:0; bottom:0; max-height:78vh; display:flex; flex-direction:column; background:#0a1018;
+        border-top:1px solid rgba(95,168,232,.35); border-radius:16px 16px 0 0; padding-bottom:var(--sab, 0px); }
+      #sb-notif .sbn-head { display:flex; align-items:center; gap:10px; padding:16px 16px 10px; border-bottom:1px solid rgba(255,255,255,.06); }
+      #sb-notif .sbn-title { flex:1; font-weight:800; letter-spacing:.14em; font-size:13px; color:#e6f0ff; }
+      #sb-notif .sbn-all { background:none; border:1px solid rgba(95,168,232,.45); color:#9cc8f0; border-radius:14px; padding:5px 10px; font-size:11px; }
+      #sb-notif .sbn-x { background:none; border:0; color:#9aa6b4; font-size:24px; line-height:1; padding:0 4px; }
+      #sb-notif .sbn-list { overflow-y:auto; -webkit-overflow-scrolling:touch; padding:4px 0 12px; }
+      #sb-notif .sbn-it { display:flex; gap:10px; padding:11px 16px; border-bottom:1px solid rgba(255,255,255,.04); cursor:pointer; }
+      #sb-notif .sbn-it:active { background:rgba(95,168,232,.08); }
+      #sb-notif .sbn-dot { width:8px; height:8px; border-radius:50%; margin-top:5px; flex:0 0 8px; }
+      #sb-notif .sbn-b { flex:1; min-width:0; }
+      #sb-notif .sbn-tag { font-size:10px; letter-spacing:.14em; font-weight:700; display:flex; justify-content:space-between; gap:8px; }
+      #sb-notif .sbn-tag span { color:#6f7c8c; letter-spacing:.04em; font-weight:500; }
+      #sb-notif .sbn-t { font-size:13px; color:#c9d4e0; margin-top:3px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+      #sb-notif .sbn-it.u .sbn-t { color:#fff; font-weight:600; }
+      #sb-notif .sbn-s { font-size:11px; color:#7d8a99; margin-top:2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+      #sb-notif .sbn-empty { padding:30px 16px; text-align:center; color:#7d8a99; font-size:12px; }`;
+    document.head.appendChild(st);
+  } catch (e) {}
+  const mk = () => { const b = document.createElement('button'); b.className = 'sb-bell'; b.type = 'button'; b.setAttribute('aria-label', 'Notifications');
+    b.innerHTML = SB_BELL_SVG; b.addEventListener('click', (e) => { e.stopPropagation(); sbNotifOpen(); }); return b; };
+  const place = () => {
+    try {
+      const g = document.querySelector('.w-gear');
+      if (g && g.parentNode && !g.parentNode.querySelector('.sb-bell')) g.parentNode.insertBefore(mk(), g);
+      const d = document.getElementById('scr-dashboard');
+      if (d && !d.querySelector(':scope > .sb-bell')) d.appendChild(mk());
+      const x = d && d.querySelector('.w-screen-x'), bb = d && d.querySelector(':scope > .sb-bell');
+      if (x && bb && x.offsetHeight) { const xr = x.getBoundingClientRect(), dr = d.getBoundingClientRect();
+        bb.style.top = (xr.top - dr.top + (xr.height - 38) / 2) + 'px'; bb.style.right = (dr.right - xr.left + 8) + 'px'; }
+      sbNotifRefresh();
+    } catch (e) {}
+  };
+  setInterval(place, 2000);
+  setTimeout(place, 300);
+})();
+
 function renderDefenseReportDetail(r) {
   const d = r.defense || {};
   document.getElementById('report-detail-title').textContent = (d.won ? 'RAID REPOUSSÉ' : 'RAID SUBI');
