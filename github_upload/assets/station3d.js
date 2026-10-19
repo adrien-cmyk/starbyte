@@ -252,12 +252,16 @@ function mount(container, opts = {}) {
   const { THREE, GLTFLoader, MapControls, RoomEnvironment, EffectComposer, RenderPass, UnrealBloomPass, OutputPass } = window.SB3D;
   const REDUCED = matchMedia('(prefers-reduced-motion: reduce)').matches;
   const LITE = !!(window.SBPerf && window.SBPerf.level >= 2);
+  // 20/10 — iPhone : la station plantait l'onglet (mémoire) en s'ajoutant à la planète et à la carte.
+  // Budget mobile : résolution plafonnée, fond et ombres plus légers. Le rendu passe par le composer :
+  // l'antialiasing du canvas ne servait à rien et coûtait un tampon multi-échantillonné plein écran.
+  const MOBILE = matchMedia('(pointer: coarse)').matches || /iPhone|iPad|iPod|Android/.test(navigator.userAgent);
   const W = () => Math.max(1, container.clientWidth), H = () => Math.max(1, container.clientHeight);
   let alive = true, raf = 0;
 
   /* ── moteur ── */
-  const renderer = new THREE.WebGLRenderer({ antialias: !LITE, powerPreference: 'high-performance' });
-  renderer.setPixelRatio(Math.min(devicePixelRatio, LITE ? 1 : 2));
+  const renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: 'high-performance' });
+  renderer.setPixelRatio(Math.min(devicePixelRatio, LITE ? 1 : MOBILE ? 1.5 : 2));
   renderer.setSize(W(), H());
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   renderer.toneMappingExposure = NT.exposure;
@@ -372,7 +376,7 @@ function mount(container, opts = {}) {
       skyScene.add(m);
     }
   }
-  const skyRT = new THREE.WebGLCubeRenderTarget(LITE ? 384 : 768, { type: THREE.HalfFloatType, generateMipmaps: false });
+  const skyRT = new THREE.WebGLCubeRenderTarget(LITE ? 384 : MOBILE ? 512 : 768, { type: THREE.HalfFloatType, generateMipmaps: false });
   new THREE.CubeCamera(1, 3000, skyRT).update(renderer, skyScene);
   bgScene.background = skyRT.texture;
   skyScene.traverse(o => { if (o.material) o.material.dispose(); if (o.geometry) o.geometry.dispose(); });
@@ -411,7 +415,7 @@ function mount(container, opts = {}) {
   const key = new THREE.DirectionalLight(PR.key[0], PR.key[1] * NT.light);
   key.position.copy(SUN_DIR).multiplyScalar(PR.key[2]);
   key.castShadow = !LITE;
-  key.shadow.mapSize.set(2048, 2048);
+  key.shadow.mapSize.set(MOBILE ? 1024 : 2048, MOBILE ? 1024 : 2048);
   Object.assign(key.shadow.camera, { left: -PR.key[3], right: PR.key[3], top: PR.key[3], bottom: -PR.key[3], near: 1, far: PR.key[4] });
   key.shadow.bias = -0.0005; key.shadow.normalBias = 0.02;
   key.target = station;

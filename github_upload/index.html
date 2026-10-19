@@ -11942,6 +11942,7 @@ function prospectLocked() {
 
 function goto(scr, opts) {
   if (scr !== 'dock' && typeof crownUnmount === 'function') crownUnmount();   // PATCH_1510_CROWN
+  if (typeof st3dSleep === 'function') st3dSleep();   // PATCH_2010_STATION_MEMOIRE : filet de sécurité
   if (typeof crownSpaceClose === 'function') crownSpaceClose();   // PATCH_1510_CROWN_SCENE
   setTimeout(() => { const el = document.getElementById('scr-' + scr); const sc = el && el.querySelector('.screen-scroll'); if (sc) updateHeroScrim(sc); }, 60);
   opts = opts || {};
@@ -44335,6 +44336,7 @@ function crownDockHero(dock) {
   scr.classList.add('cr-scene'); if (first) scr.classList.add('cr-first');
   const fit = () => { if (_crown && _crown.space) _crown.space.style.height = Math.max(160, scroll.clientHeight - 170) + 'px'; };   // PATCH_1510_HERO_SCROLL
   _crown = { el, space, grip, scr, scroll, handle: null, state: want, first, fit, U };
+  st3dSleep();
   fit(); scroll.scrollTop = 0;
   window.addEventListener('resize', fit);
   const load = el.querySelector('.cr-load i');
@@ -44391,6 +44393,7 @@ function crownUnmount() {
   _crown.el.remove(); if (_crown.space) _crown.space.remove(); if (_crown.grip) _crown.grip.remove();
   if (_crown.scr) { _crown.scr.classList.remove('cr-scene', 'cr-first', 'cr-open', 'cr-faded'); _crown.scr.style.removeProperty('--hs'); }
   _crown = null;
+  st3dSleep();
   const banner = document.getElementById('dock-banner'); if (banner) banner.style.display = '';
 }
 // le bar : l'en-tête de la section des commandants à quai ; il envoie la caméra sur la façade
@@ -44400,6 +44403,24 @@ function crownBarHeader(dock) {
 }
 // PATCH_1510_CROWN_SCENE — la vue spatiale : la station en plein écran, une fiche refermable par-dessus
 var _crownSpace = null;
+var _st3dAsleep = false;   // PATCH_2010_STATION_MEMOIRE
+function _st3dEngines() {
+  const out = [];
+  try { if (window.Planet3D && Planet3D.ready && Planet3D.renderer) out.push(Planet3D); } catch (e) {}
+  try { const E = window.SBMap && SBMap._e; if (E && E.ready && E.renderer) out.push(E); } catch (e) {}
+  return out;
+}
+function st3dSleep() {
+  const want = !!(_crownSpace || (_crown && _crown.el && _crown.el.isConnected));   // une station est à l'écran
+  if (want === _st3dAsleep) return;
+  _st3dAsleep = want;
+  for (const e of _st3dEngines()) {
+    try {
+      if (want) { e.renderer.setSize(1, 1, false); if (e.composer) e.composer.setSize(1, 1); if (e.bloom && e.bloom.setSize) e.bloom.setSize(1, 1); }
+      else if (typeof e._resize === 'function') e._resize();
+    } catch (err) { console.warn('[station] veille 3D', err); }
+  }
+}
 function crownSpaceOpen(id) {
   if (_crownSpace || !window.WebGLRenderingContext) return;
   id = id || CROWN_DOCK_ID;
@@ -44430,6 +44451,7 @@ function crownSpaceOpen(id) {
   const cfit = () => { csp.style.height = Math.max(200, csc.clientHeight - 210) + 'px'; };
   cfit(); window.addEventListener('resize', cfit);
   _crownSpace = { el, handle: null, cfit };
+  st3dSleep();
   if (window.SBHero) {
     SBHero.gestures(csp, () => (_crownSpace && _crownSpace.el === el ? _crownSpace.handle : null), () => SBHero.scrollTo(csc, 0));
     SBHero.fade(csc, csp, el);
@@ -44463,6 +44485,7 @@ function crownSpaceClose() {
   try { if (_crownSpace.handle) _crownSpace.handle.dispose(); } catch (e) {}
   if (_crownSpace.cfit) window.removeEventListener('resize', _crownSpace.cfit);
   _crownSpace.el.remove(); _crownSpace = null;
+  st3dSleep();
 }
 // anciens appels (carte, cheats) : on passe par l'entrée
 function crownOpenViewer() { crownEnter(); }
@@ -46439,7 +46462,7 @@ if (G.knownTargets && Array.isArray(G.tankerMissions)) {
 <!-- PATCH_1610_SKILLS — skills des bâtiments : apprendre, découvrir, effets -->
 <script src="assets/skills.js?v=20261019-2140"></script>
 <!-- PATCH_1510_CROWN — The Drifting Crown en 3D (assets/station3d.js, sur le moteur partagé window.SB3D) -->
-<script type="module" src="assets/station3d.js?v=20261019-2010"></script>
+<script type="module" src="assets/station3d.js?v=20261020-0120"></script>
 <!-- FORMATION3D — flotte déployée en orbite, vue de haut en formation (remplace la vue orbite) -->
 <script src="assets/formation3d.js?v=20261014-1440"></script>
 </body>
