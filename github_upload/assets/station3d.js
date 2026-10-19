@@ -1,4 +1,4 @@
-/* Starbyte — Station3D : les stations en 3D — The Drifting Crown (port franc pirate), le Sanctuaire du Linceul des Cendres (bastion impérial), la Station Erebus et le Refuge d'Erebus, option profile: 'crown' | 'sanctuary' | 'noire' | 'refuge'.
+/* Starbyte — Station3D : les stations en 3D — The Drifting Crown (port franc pirate), le Sanctuaire du Linceul des Cendres (bastion impérial), la Station Erebus et le Refuge de Brest, option profile: 'crown' | 'sanctuary' | 'noire' | 'refuge'.
    Source : vitrine validée par Adrien (artifact « The Drifting Crown », 14 oct. 2026), portée sur le moteur partagé
    du jeu (window.SB3D) : mêmes matériaux (lookdev procédural sans UV), même ciel (nébuleuse, géante gazeuse, soleil),
    même trafic (navettes sur les axes, ronde autour de l'anneau, transporteurs au loin). Sans GTAO (mobile).
@@ -179,7 +179,7 @@ const PROFILES = {
     night: { light: 0.08, glow: 0.4, tex: 1, halo: 0.35, bloom: [0.4, 0.4, 0.88], hull: 0.35, env: 0.03, envScene: 0.05, exposure: 0.9 },
     lamps: { url: 'assets/3d/sb_on01_lights.json?v=20261017-0000', light: [0xc4ccf4, 26.0, 7.0], lift: 0, lightsMax: 14, lightsLite: 6 },
   },
-  // 19/10 — le Refuge d'Erebus (planche « MAMMOTH — Orbital Station ») : un mammouth d'ivoire de 3 km dans un champ de glace,
+  // 19/10 — le Refuge de Brest (planche « MAMMOTH — Orbital Station ») : un mammouth d'ivoire de 3 km dans un champ de glace,
   // vitrine validée par Adrien (« hyper cool ») ; ivoire mat assombri (vieil os), soleil froid derrière la bête, nappes de lumière chaude rasante
   refuge: {
     S: 0.005, near: 0.03, half: [10.5, 10.0], minFit: 16, bg: 0x020408, haze: 0x1c2e40, fog: [6, 26],
@@ -614,7 +614,7 @@ function mount(container, opts = {}) {
       cloudGroup.add(sp);
     }
   }
-  // 19/10 — champ glaciaire (Refuge d'Erebus) : icosaèdres déformés instanciés, givre pâle ; gros blocs au loin, poussière fine devant
+  // 19/10 — champ glaciaire (Refuge de Brest) : icosaèdres déformés instanciés, givre pâle ; gros blocs au loin, poussière fine devant
   let iceMesh = null;
   const ICE = [];
   if (PR.ice) {

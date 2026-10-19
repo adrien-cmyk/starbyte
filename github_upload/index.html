@@ -5826,8 +5826,8 @@ svg.map {
   <button onclick="cheatCrownDock(NOIRE_DOCK_ID)">⚓ Tanker amarré à Erebus (arrivée)</button>
   <button onclick="G.noireSeen = 0; saveGame(); toast('La prochaine ouverture du dock d\'Erebus rejoue l\'arrivée')">🎬 Revoir l'arrivée à Erebus</button>
   <!-- PATCH_1910_REFUGE_CHEATS -->
-  <button onclick="cheatCrownRoute(false, REFUGE_DOCK_ID)">🗺 Révéler la route du Refuge d'Erebus</button>
-  <button onclick="cheatCrownDock(REFUGE_DOCK_ID)">⚓ Tanker amarré au Refuge d'Erebus (arrivée)</button>
+  <button onclick="cheatCrownRoute(false, REFUGE_DOCK_ID)">🗺 Révéler la route du Refuge de Brest</button>
+  <button onclick="cheatCrownDock(REFUGE_DOCK_ID)">⚓ Tanker amarré au Refuge de Brest (arrivée)</button>
   <button onclick="G.refugeSeen = 0; saveGame(); toast('La prochaine ouverture du dock du Refuge rejoue l\'arrivée')">🎬 Revoir l'arrivée au Refuge</button>
   <div class="cheat-divider"></div>
   <div class="cheat-label">Ressources</div>
@@ -8664,7 +8664,7 @@ var EXTRA_SAVE_KEYS = [
   'mpNeighbors',   // VOISINS_1310 — voisins déjà signalés
   'tuto',          // TUTO_1410 — premiers pas (étape, vu, terminé)
   'skillsLearned', 'research', '_skillsSeen', '_skillsMigrated',   // PATCH_1610_SKILLS
-  '_linesCrown', 'crownSeen', '_linesSanct', 'sanctSeen', '_linesNoire', 'noireSeen', '_linesRefuge', 'refugeSeen',   // PATCH_1510_CROWN — lieu du secteur M devenu la Couronne, première arrivée vue
+  '_linesCrown', 'crownSeen', '_linesSanct', 'sanctSeen', '_linesNoire', 'noireSeen', '_linesRefuge', '_linesRefuge2', 'refugeSeen', '_brest1',   // PATCH_1510_CROWN — lieu du secteur M devenu la Couronne, première arrivée vue
 ];
 
 // Sauvegarde G complet dans localStorage. Appelé fréquemment, doit être rapide.
@@ -8777,6 +8777,8 @@ function loadGame() {
 
     refreshParcelProdLabels();
     syncCapitalParcelTier();   // PATCH_1910_CAPITAL
+    try { sbMigrateBrest(); } catch (e) { console.warn('[brest]', e); }   // PATCH_1910_BREST
+    setTimeout(() => { try { sbMigrateBrest(); } catch (e) {} }, 3000);
     // AUDIT_1110 — l'adresse fait foi (déménagement vers la zone de test)
     if (G.planet) { G.planet.address = MY_ADDRESS; G.planet.coordString = MY_COORD_STRING; }
 
@@ -40611,14 +40613,37 @@ var NOIRE_DOCK = {
   ambience: 'Elle n\'apparaît sur aucune carte et ne répond à aucun appel. Un cylindre noir de cinq kilomètres, deux anneaux d\'habitat, des rangées de feux rouges qui s\'allument quand on approche, comme si quelque chose ouvrait les yeux. La Confédération ne confirme pas son existence. Elle t\'a pourtant laissé t\'amarrer.',
   detail: 'Dans l\'anneau arrière, derrière les baies blindées, le pont d\'observation : équipages de frégates furtives, marchands sans pavillon, agents qui ne donnent jamais leur nom. Ici, chaque transaction est enregistrée, et rien n\'est jamais effacé.',
 };
-// PATCH_1910_REFUGE — le Refuge d'Erebus, station-mammouth dans un champ de glace : quatrième lieu caché, second du secteur N (l'ancien « Sanctuaire d'Erebus », A-N-8096)
+// PATCH_1910_REFUGE — le Refuge de Brest (19/10, Adrien : c'est lui, le « Refuge de Brest » des pistes d'exploration), station-mammouth dans un champ de glace : quatrième lieu caché, second du secteur N (l'ancien « Sanctuaire d'Erebus », A-N-8096)
 var REFUGE_DOCK_ID = 'dock-wc15ki';
 var REFUGE_DOCK = {
-  name: 'Refuge d\'Erebus', typeLabel: 'Refuge des glaces', sub: 'station-mammouth · 3 km de défense à défense',
+  name: 'Refuge de Brest', type: 'hidden_freeport', typeLabel: 'Refuge des glaces', sub: 'station-mammouth · 3 km de défense à défense',
   accent: '#ffb46a', station: 'refuge',
   ambience: 'Au milieu d\'un champ de glace, une bête d\'ivoire de trois kilomètres : un crâne cuirassé, deux défenses qui se referment sur le vide, des oreilles maillées comme des voiles. Ses yeux sont deux baies ambrées qui ne s\'éteignent jamais. Personne ne sait qui l\'a bâtie. On sait seulement qu\'elle accueille tout le monde.',
   detail: 'Sous le ventre de la bête pend la ville suspendue : des tours renversées, des passerelles, des lanternes qui tremblent dans le froid. Pèlerins, mineurs de glace, réfugiés sans pavillon. Ici on ne demande pas d\'où tu viens, seulement si tu as de quoi te réchauffer.',
 };
+// PATCH_1910_BREST — le « Refuge de Brest » des pistes d'exploration (dock sans position depuis mai) EST la station-mammouth :
+// une piste qui le révèle donne ses vraies coordonnées ; les anciennes découvertes et les routes qui y menaient sont rattachées à la station
+function sbBrestPortSys() {
+  try { const p = Object.values(SBLines.network().ports).find(x => x.dockId === REFUGE_DOCK_ID); return p ? p.sys : null; } catch (e) { return null; }
+}
+function sbBrestFromLead(d) {
+  d.id = REFUGE_DOCK_ID; _crownDock(d);
+  const sys = sbBrestPortSys();
+  if (sys && window.SBLines && SBLines.discoverPort) { try { SBLines.discoverPort(sys, Date.now()); } catch (e) {} }
+  return d;
+}
+function sbMigrateBrest() {
+  if (G._brest1) return;
+  if (!window.SBLines || !SBLines.network) return;      // lignes pas encore chargées : on réessaiera au prochain chargement
+  G._brest1 = 1;
+  const isBrest = (d) => d && /refuge de brest/i.test(d.name || '') && d.id !== REFUGE_DOCK_ID;
+  let found = false;
+  for (const d of G.discoveredDocks || []) if (isBrest(d)) { d.id = REFUGE_DOCK_ID; _crownDock(d); found = true; }
+  for (const [k, d] of Object.entries(G.universeDocks || {})) if (isBrest(d)) { delete G.universeDocks[k]; found = true; }
+  const fix = (o) => { if (o && isBrest(o.dock)) { o.dock = _crownDock(Object.assign({}, o.dock, { id: REFUGE_DOCK_ID })); if ('dockId' in o) o.dockId = REFUGE_DOCK_ID; found = true; } };
+  (G.routes || []).forEach(fix); (G.tankerMissions || []).forEach(fix);
+  if (found) { const sys = sbBrestPortSys(); if (sys) { try { SBLines.discoverPort(sys, Date.now()); } catch (e) {} } }
+}
 var STATION_DOCKS = { [CROWN_DOCK_ID]: CROWN_DOCK, [SANCT_DOCK_ID]: SANCT_DOCK, [NOIRE_DOCK_ID]: NOIRE_DOCK, [REFUGE_DOCK_ID]: REFUGE_DOCK };
 function _crownDock(d) { return (d && STATION_DOCKS[d.id]) ? Object.assign(d, STATION_DOCKS[d.id]) : d; }
 
@@ -42178,6 +42203,7 @@ function completeExplorationReturn(missionId) {
       detail: 'Découvert par tes explorations. N\'apparaît pas sur les cartes officielles.',
       discovered: true,
     };
+    if (newDockName === 'Le Refuge de Brest') sbBrestFromLead(newDock);   // PATCH_1910_BREST
     G.discoveredDocks.push(newDock);
     if (window.SBMP && window.SBMP.ready()) window.SBMP.reportEvent('rare_discovery', 'un dock secret');   // RUMORS_1110
     result = {
@@ -44082,9 +44108,9 @@ var STATION_UI = {
     intro: 'Rien sur les radars. Puis des feux rouges, un à un, le long d\'un cylindre de cinq kilomètres : Erebus t\'attendait.', enter: 'MONTER À BORD',
     hall: { t: 'Le pont d\'observation', s: 'Dans l\'anneau arrière, derrière les baies blindées. Ceux qui sont à quai, les marchés, ce qui ne se dit qu\'à voix basse.', i: 'VOIR LE PONT ↑' } },
   // PATCH_1910_REFUGE
-  refuge: { id: 'dock-wc15ki', profile: 'refuge', url: 'assets/3d/sb_er01.glb?v=20261019-2000', kicker: 'REFUGE DES GLACES', title: 'REFUGE D\'EREBUS',
+  refuge: { id: 'dock-wc15ki', profile: 'refuge', url: 'assets/3d/sb_er01.glb?v=20261019-2000', kicker: 'REFUGE DES GLACES', title: 'REFUGE DE BREST',
     sub: 'station-mammouth · champ de glace', long: true, chips: { dock: 'Le dock', bar: 'La ville', port: 'Le Refuge' }, crewAt: 'dans la ville suspendue', place: 'la ville suspendue', seen: 'refugeSeen',
-    intro: 'Des éclats de glace, puis deux défenses immenses qui sortent du brouillard. Les yeux de la bête s\'allument : le Refuge d\'Erebus t\'a vu venir.', enter: 'ENTRER AU REFUGE',
+    intro: 'Des éclats de glace, puis deux défenses immenses qui sortent du brouillard. Les yeux de la bête s\'allument : le Refuge de Brest t\'a vu venir.', enter: 'ENTRER AU REFUGE',
     hall: { t: 'La ville suspendue', s: 'Sous le ventre de la bête, entre les tours renversées et les lanternes. Ceux qui sont à quai, les marchés, ce qui se raconte autour du feu.', i: 'VOIR LA VILLE ↑' } },
 };
 // une station en 3D pour ce dock (objet dock ou identifiant) ?
@@ -46241,7 +46267,7 @@ if (G.knownTargets && Array.isArray(G.tankerMissions)) {
 <!-- PERF_1310 — mesure des performances chez les joueurs + qualité 3D automatique (assets/perf.js) -->
 <script src="assets/perf.js?v=20261014-1540"></script>
 <!-- PATCH_1410_LIGNES — lignes PNJ à horaire sur les routes cachées (assets/lines.js) -->
-<script src="assets/lines.js?v=20261019-2000"></script>
+<script src="assets/lines.js?v=20261019-2010"></script>
 <!-- CLOUD — sauvegarde Supabase (source : sb-build/src/cloud.js) -->
 <script type="module" src="assets/cloud.js?v=20261014-1440"></script>
 <!-- MATCH3 — Match-3 V2 (assets/match3.js, source src/match3.js + src/m3core.js) : remplace startM3 -->
@@ -46262,7 +46288,7 @@ if (G.knownTargets && Array.isArray(G.tankerMissions)) {
 <!-- PATCH_1610_SKILLS — skills des bâtiments : apprendre, découvrir, effets -->
 <script src="assets/skills.js?v=20261019-1910"></script>
 <!-- PATCH_1510_CROWN — The Drifting Crown en 3D (assets/station3d.js, sur le moteur partagé window.SB3D) -->
-<script type="module" src="assets/station3d.js?v=20261019-2000"></script>
+<script type="module" src="assets/station3d.js?v=20261019-2010"></script>
 <!-- FORMATION3D — flotte déployée en orbite, vue de haut en formation (remplace la vue orbite) -->
 <script src="assets/formation3d.js?v=20261014-1440"></script>
 </body>
