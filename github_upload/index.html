@@ -29183,7 +29183,9 @@ function renderInfoCard(i) {
     primaryHandler = `tryProbeFromMap(${i})`;
     ghostLabel = null;
   } else if (stKey === 'depleted') {
-    primaryHandler = `toast('Skill de recyclage requis')`;
+    const _rh = window.SBSkills && SBSkills.rehabBtn ? SBSkills.rehabBtn(i) : null;   // PATCH_1910_REHAB
+    if (_rh) { primaryLabel = _rh.label; primaryHandler = _rh.handler; subOverride = _rh.sub; }
+    else primaryHandler = `toast('Skill de recyclage requis')`;
     ghostLabel = null;
   } else if (stKey === 'building') {
     const left = Math.max(0, (p.buildEndsAt || 0) - Date.now());
@@ -46241,7 +46243,7 @@ if (G.knownTargets && Array.isArray(G.tankerMissions)) {
 <!-- PATCH_1510_MISSIONS — tout ce qui vole, fiche de mission des tankers -->
 <script src="assets/missions.js?v=20261015-2300"></script>
 <!-- PATCH_1610_SKILLS — skills des bâtiments : apprendre, découvrir, effets -->
-<script src="assets/skills.js?v=20261016-1800"></script>
+<script src="assets/skills.js?v=20261019-1910"></script>
 <!-- PATCH_1510_CROWN — The Drifting Crown en 3D (assets/station3d.js, sur le moteur partagé window.SB3D) -->
 <script type="module" src="assets/station3d.js?v=20261017-0000"></script>
 <!-- FORMATION3D — flotte déployée en orbite, vue de haut en formation (remplace la vue orbite) -->

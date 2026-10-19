@@ -18,6 +18,7 @@
     // Extraction — Mine
     { key: 'forage',      b: 'mine',       tier: 1, name: 'Forage profond',        icon: 'pickaxe',   effect: '+25 % de métal gagné au match-3', fx: { m3: { metal: 0.25 } } },
     { key: 'strates',     b: 'mine',       tier: 2, name: 'Strates profondes',     icon: 'pickaxe',   effect: '+15 % de production passive de métal', fx: { prod: { metal: 0.15 } } },
+    { key: 'rehab',       b: 'mine',       tier: 2, name: 'Réhabilitation des sols', icon: 'pickaxe', effect: 'Une parcelle épuisée peut redevenir vierge (300 métal · 20 min de chantier)', fx: {} },
     { key: 'nano',        b: 'mine',       tier: 3, name: 'Nano-extraction',       icon: 'pickaxe',   effect: '+25 % de production passive de métal (cumulé avec Strates : +40 %)', req: 'strates', fx: { prod: { metal: 0.25 } } },
     // Énergie — Centrale
     { key: 'cellules',    b: 'centrale',   tier: 1, name: 'Cellules solaires',     icon: 'zap',       effect: '+15 % de production passive d\'énergie', fx: { prod: { energie: 0.15 } } },
@@ -154,7 +155,59 @@
       if (typeof saveGame === 'function') saveGame();
     }
   }
-  setInterval(() => { try { tick(); } catch (e) {} }, 2000);
+  /* ── Réhabilitation des sols : une parcelle épuisée redevient une plaine vierge ── */
+  const REHAB_COST = { metal: 300 }, REHAB_MIN = 20;
+  const rehabMs = () => Math.round(REHAB_MIN * 60000 * durMult('build'));
+  function rehabBtn(i) {
+    const p = G.planet && G.planet.parcels[i]; if (!p) return null;
+    if (p.rehabEndsAt) {
+      const left = Math.max(0, p.rehabEndsAt - Date.now());
+      const lbl = typeof formatTankerDuration === 'function' ? formatTankerDuration(left) : fmtDur(Math.ceil(left / 60000));
+      return { label: `Fin dans ${lbl}`, handler: `toast('Réhabilitation en cours : le sol sera vierge dans ${lbl}')`, sub: 'Réhabilitation en cours. Le sol redeviendra une plaine vierge.' };
+    }
+    if (!has('rehab')) return { label: 'Réhabiliter', handler: `SBSkills.rehab(${i})`, sub: 'Sol épuisé. Apprends <b>Réhabilitation des sols</b> (Mine niveau 2) pour le rendre vierge.' };
+    return { label: 'Réhabiliter', handler: `SBSkills.rehab(${i})`, sub: `Rendre le sol vierge : ${costLine(REHAB_COST)} · ${fmtDur(Math.round(rehabMs() / 60000))} de chantier. Le compteur de passages repart à zéro.` };
+  }
+  function rehab(i) {
+    const p = G.planet && G.planet.parcels[i];
+    const say = (t) => { if (typeof toast === 'function') toast(t); };
+    if (!p || p.state !== 'depleted' || p.rehabEndsAt) return;
+    if (!has('rehab')) {
+      const st = stateOf(BY.rehab);
+      say(st === 'tier' ? 'Réhabilitation des sols : il faut une Mine niveau 2' : 'Apprends Réhabilitation des sols sur la fiche de ta Mine');
+      return openTree('extraction');
+    }
+    if (!canPay(REHAB_COST)) return say(`Ressources insuffisantes : ${costLine(REHAB_COST)}`);
+    const go = () => {
+      if (p.rehabEndsAt || !canPay(REHAB_COST)) return;
+      for (const [k, v] of Object.entries(REHAB_COST)) G.res[k].v -= v;
+      const now = Date.now();
+      p.rehabStartedAt = now; p.rehabEndsAt = now + rehabMs();
+      p.sub = 'Réhabilitation en cours.';
+      say(`Réhabilitation lancée · ${fmtDur(Math.round(rehabMs() / 60000))}`);
+      if (typeof saveGame === 'function') saveGame();
+      try { if (typeof renderPlanetMap === 'function') renderPlanetMap(); if (typeof renderInfoCard === 'function') renderInfoCard(i); } catch (e) {}
+    };
+    if (typeof LAUNCH_SEQUENCES !== 'undefined' && !LAUNCH_SEQUENCES.rehab) LAUNCH_SEQUENCES.rehab = { title: 'Réhabilitation des sols', level: 2, steps: ['Sondage des strates mortes', 'Injection de sédiments', 'Stabilisation du sous-sol', 'Chantier ouvert'] };
+    if (typeof playLaunchSequence === 'function') playLaunchSequence('rehab', go); else go();
+  }
+  function tickRehab() {
+    const g = G_(); if (!g || !g.planet || !Array.isArray(g.planet.parcels)) return;
+    const now = Date.now(); let done = 0;
+    g.planet.parcels.forEach((p, i) => {
+      if (!p || !p.rehabEndsAt || now < p.rehabEndsAt) return;
+      delete p.rehabStartedAt; delete p.rehabEndsAt;
+      Object.assign(p, { state: 'rocky', building: null, n: 'Plaine rocheuse', sub: 'Sol réhabilité. Disponible pour terraformation.', lvl: null, prod: null, remineCount: 0, successCount: 0 });
+      p.rehabbed = (p.rehabbed || 0) + 1;
+      done++;
+      try { if (typeof renderPlanetMap === 'function') renderPlanetMap(); if (g.selParcel === i && typeof renderInfoCard === 'function') renderInfoCard(i); } catch (e) {}
+    });
+    if (done) {
+      if (typeof toast === 'function') toast(done > 1 ? `${done} parcelles réhabilitées : sols vierges` : 'Parcelle réhabilitée : le sol est vierge');
+      if (typeof saveGame === 'function') saveGame();
+    }
+  }
+  setInterval(() => { try { tick(); tickRehab(); } catch (e) {} }, 2000);
   function refresh() {
     try {
       const cur = typeof getCurrentScreen === 'function' ? getCurrentScreen() : null;
@@ -236,5 +289,5 @@
     }, 120);
   }
 
-  window.SBSkills = { SKILLS, has, stateOf, prodMult, m3Mult, durMult, defense, applyM3, learn, grant, dropPool, buildingHtml, familyHtml, familyCount, openTree, buildingTier, tick };
+  window.SBSkills = { SKILLS, has, stateOf, prodMult, m3Mult, durMult, defense, applyM3, learn, grant, dropPool, buildingHtml, familyHtml, familyCount, openTree, buildingTier, tick, rehab, rehabBtn, tickRehab };
 })();
