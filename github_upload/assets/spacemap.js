@@ -261,16 +261,18 @@
     }
     const ends = new Set(routeChains.flatMap(ch => [ch[0], ch[ch.length - 1]]));
     const mids = new Set(routeChains.flatMap(ch => ch.slice(1, -1)).filter(k => !ends.has(k) && k !== home));
-    for (const k of keys) {
-      if (mids.has(k)) continue;
+    // 19/10 (Adrien : « ma route a changé de forme ») — les routes se posent AVANT les autres systèmes :
+    // un système qui entre sur la carte (convoi d'un autre commandant relevé par mes balises…) ne déloge plus leurs jalons.
+    const placeSys = (k) => {
       const { cands, k: p } = primarySlot(k);
       let placed = null;
       for (let j = 0; j < cands.length && !placed; j++) { const c = cands[(p + j) % cands.length]; if (!occ.has(c.idx)) placed = c; }
       if (!placed) placed = freeAround(CELLS[0], 2, BOARD, occ, k)[0];
-      if (!placed) continue;
+      if (!placed) return;
       occ.set(placed.idx, { kind: 'system', key: k });
       cell['sys:' + k] = placed.idx;
-    }
+    };
+    for (const k of keys) if (ends.has(k) && !mids.has(k)) placeSys(k);
     // une route = une ligne régulière sur la grille : si ses deux bouts sont trop proches pour ses jalons, l'arrivée
     // s'écarte dans la même direction ; les jalons se posent ensuite à intervalles réguliers sur le plus court chemin.
     const nearestFree = (x, z, minRing) => { let best = null, bd = Infinity;
@@ -299,6 +301,7 @@
         cell['sys:' + k] = c.idx;
       }
     }
+    for (const k of keys) if (!mids.has(k) && cell['sys:' + k] === undefined) placeSys(k);
     for (const k of mids) if (cell['sys:' + k] === undefined && systems[k]) {   // jalon d'une route dont un bout manque
       const c = freeAround(CELLS[0], 2, BOARD, occ, k)[0]; if (c) { occ.set(c.idx, { kind: 'system', key: k }); cell['sys:' + k] = c.idx; }
     }
@@ -2389,6 +2392,7 @@
     render, sweep, panelFor, tag, beacon, recallBeacon: recallBeaconFromMap, showFlight,
     openRoute, selectRoute, showRoute, routeAvoid, routeUnavoid, routeColor, routeRename, routeDelete, sendOnRoute, postOnRoute, postHere, scout, sendOnOpened, giveOpened, forgetOpened, fleetOnRoute,
     planFor(destKey) { try { return planFrom(_state || collect(), destKey); } catch (e) { return null; } },
+    _layout() { return collect(); },   // diagnostic (tests)
     select(kind, key) {
       if (_fallback) return;
       const sel = { kind, key };
