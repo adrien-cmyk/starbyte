@@ -37,12 +37,18 @@
   // ses lignes : des pèlerins et des convois impériaux (lourds, bien escortés)
   const SANCT_DOCK_ID = 'dock-otqflf';
   const NOIRE_DOCK_ID = 'dock-uguzli';
+  // 19/10 (Adrien) : le Refuge d'Erebus, la station-mammouth, prend la place de l'ancien « Sanctuaire d'Erebus » (A-N-8096) ;
+  // quatrième lieu caché, second du secteur N, ajouté après les trois autres : leurs lignes et leurs positions ne bougent pas
+  const REFUGE_DOCK_ID = 'dock-wc15ki';
+  const EXTRA_PLACES = [REFUGE_DOCK_ID];
   const STATION_PORTS = {
     // 19/10 (Adrien) : une seule ligne par station (keep) — le Linceul garde ses deux lignes pour l'instant
     [CROWN_DOCK_ID]: { kinds: CROWN_KINDS, route: 'La Saigne de la Couronne', mood: 'grasse', flag: '_linesCrown', keep: [0] },
     [SANCT_DOCK_ID]: { kinds: ['pilgrim_stop', 'imperial_convoy'], route: 'La Vieille Voie du Linceul', mood: 'imperiale', flag: '_linesSanct' },
     // 16/10 : la Station O'Neill Série Noire, station furtive de la Confédération, est le lieu du secteur N ; ses lignes : convois armés et convois impériaux
     [NOIRE_DOCK_ID]: { kinds: ['derelict_carrier', 'imperial_convoy'], route: 'La Voie Noire', mood: 'noire', flag: '_linesNoire', keep: [0] },
+    // 19/10 : le Refuge d'Erebus, halte des pèlerins dans le champ de glace ; une seule ligne, celle des pèlerins
+    [REFUGE_DOCK_ID]: { kinds: ['pilgrim_stop', 'hidden_freeport'], route: 'La Piste des Glaces', mood: 'morte', flag: '_linesRefuge', keep: [0] },
   };
 
   /* ── hachage déterministe (mêmes résultats sur tous les appareils) ── */
@@ -73,6 +79,7 @@
       const c = all.filter(x => x.port.split('-')[1] === sec).sort((x, y) => h32('lieu:' + x.dock.id) - h32('lieu:' + y.dock.id))[0];
       if (c) picked.push(c);
     }
+    for (const id of EXTRA_PLACES) { const c = all.find(x => x.dock.id === id); if (c && !picked.includes(c)) picked.push(c); }   // 19/10 : lieux en plus, après les trois premiers
     for (const { dock, hint, port } of picked) {
       const [cl, sec, num] = port.split('-');
       ports[port] = { sys: port, dockId: dock.id, name: dock.name, type: dock.type, typeLabel: dock.typeLabel || dock.sub || '', hint, lines: [] };
@@ -1325,7 +1332,7 @@
     dockMarketHtml, sellHere, withdrawOffer, buyOffer, learnRoute, noteRobbery, tickMarket, fetchOffers, sellableRoutes,
     ORDER_MODES, ordersOf, ordersLabel, chooseOrders, setOrders, pushOrders, pushNpc, holdCap, holdUsed, holdAll, fleetAtk, odds, oddsLabel,
     robNpc, tailNpc, tickAmbushes, capLegs, salesOn, soldChain, routesOf, reportSheet, npcReportCan, npcReportAction, ambushTravel, ambushAt, pollSpied, autoPlayers,
-    WINDOW_MS, EPOCH, CROWN_DOCK_ID, SANCT_DOCK_ID, NOIRE_DOCK_ID, STATION_PORTS,
+    WINDOW_MS, EPOCH, CROWN_DOCK_ID, SANCT_DOCK_ID, NOIRE_DOCK_ID, REFUGE_DOCK_ID, STATION_PORTS,
     _reset() { _net = null; },
   };
 })();

@@ -1,4 +1,4 @@
-/* Starbyte — Station3D : les stations en 3D — The Drifting Crown (port franc pirate) et le Sanctuaire du Linceul des Cendres (bastion impérial), option profile: 'crown' | 'sanctuary'.
+/* Starbyte — Station3D : les stations en 3D — The Drifting Crown (port franc pirate), le Sanctuaire du Linceul des Cendres (bastion impérial), la Station Erebus et le Refuge d'Erebus, option profile: 'crown' | 'sanctuary' | 'noire' | 'refuge'.
    Source : vitrine validée par Adrien (artifact « The Drifting Crown », 14 oct. 2026), portée sur le moteur partagé
    du jeu (window.SB3D) : mêmes matériaux (lookdev procédural sans UV), même ciel (nébuleuse, géante gazeuse, soleil),
    même trafic (navettes sur les axes, ronde autour de l'anneau, transporteurs au loin). Sans GTAO (mobile).
@@ -178,6 +178,70 @@ const PROFILES = {
     tankerAt: { pos: [630, -760, 0], rotZ: 90, scale: 5 },
     night: { light: 0.08, glow: 0.4, tex: 1, halo: 0.35, bloom: [0.4, 0.4, 0.88], hull: 0.35, env: 0.03, envScene: 0.05, exposure: 0.9 },
     lamps: { url: 'assets/3d/sb_on01_lights.json?v=20261017-0000', light: [0xc4ccf4, 26.0, 7.0], lift: 0, lightsMax: 14, lightsLite: 6 },
+  },
+  // 19/10 — le Refuge d'Erebus (planche « MAMMOTH — Orbital Station ») : un mammouth d'ivoire de 3 km dans un champ de glace,
+  // vitrine validée par Adrien (« hyper cool ») ; ivoire mat assombri (vieil os), soleil froid derrière la bête, nappes de lumière chaude rasante
+  refuge: {
+    S: 0.005, near: 0.03, half: [10.5, 10.0], minFit: 16, bg: 0x020408, haze: 0x1c2e40, fog: [6, 26],
+    sun: [-0.45, 0.62, -0.64], core: [-0.40, 0.45, -0.80], camDir: [0.42, -0.24, 0.88], introDir: [0.95, -0.62, 0.10],
+    GLOSS: {
+      M_ER_IVORY: [0.86, 0.0], M_ER_IVORY2: [0.88, 0.0], M_ER_BONE: [0.84, 0.0], M_ER_STEEL: [0.62, 0.45], M_ER_GUNMETAL: [0.62, 0.55],
+      M_ER_DARK: [0.85, 0.15], M_ER_BRONZE: [0.55, 0.6], M_ER_MESH: [0.40, 0.35],
+    },
+    GLOW: { M_ER_EYE: 2.6, M_ER_AMBER: 1.8, M_ER_WIN: 1.6, M_ER_BEACON: 3.0 },
+    GLOW_COLOR: { M_ER_EYE: 0xff8a24, M_ER_AMBER: 0xff9a3a, M_ER_WIN: 0xffa850, M_ER_BEACON: 0xffe0b0 },
+    LOOK: {
+      M_ER_IVORY:    { cell: [10.0, 6.0], seam: .20, depth: .14, tint: .10, rough: .10, grime: .40, wear: .30 },
+      M_ER_IVORY2:   { cell: [10.0, 6.0], seam: .20, depth: .16, tint: .12, rough: .12, grime: .44, wear: .30 },
+      M_ER_BONE:     { cell: [8.0, 5.0], seam: .18, depth: .12, tint: .10, rough: .10, grime: .36, wear: .35 },
+      M_ER_STEEL:    { cell: [6.0, 4.0], seam: .14, depth: .12, tint: .08, rough: .10, grime: .26, wear: .45 },
+      M_ER_GUNMETAL: { cell: [8.0, 5.0], seam: .16, depth: .35, tint: .08, rough: .12, grime: .22, wear: .45 },
+      M_ER_DARK:     { cell: [16.0, 9.0], seam: .20, depth: .14, tint: .14, rough: .14, grime: .14, wear: .20 },
+    },
+    // ivoire assombri (vieil os, pas plastique) ; panneaux maillés des oreilles : bleu nuit, visibles des deux côtés
+    fix: (mat) => {
+      if (mat.userData.er) return; mat.userData.er = 1;
+      if (/^M_ER_(IVORY2?|BONE)$/.test(mat.name)) mat.color.multiplyScalar(0.62);
+      if (mat.name === 'M_ER_MESH') { mat.side = 2; mat.envMapIntensity = 0.7; mat.color.setRGB(.035, .07, .12); }
+    },
+    glass: [.02, .03, .045], rockLift: null, nav: (n) => n === 'M_ER_BEACON', beacon: '', navPulse: [1.5, 2.5, 1.1],
+    breathe: { M_ER_EYE: [2.3, 0.5, 0.55] },   // les yeux respirent lentement
+    cloud: { dust: [0x070c12, 0x0a1219, 0x0c141c], gas: [0x2a3e52, 0x34495e, 0x24384a, 0x3e5468], glow: [0x8fb4d4, 0xb4d2ea, 0xa0bcd6],
+             nearSize: [12, 16], farSize: [38, 44], nearR: [19, 20], farR: [50, 45], nearY: [-12, 14], farY: [-30, 40], w: 0.010 },
+    sky: { a: '.16, .24, .34', b: '.22, .32, .42', c: '.30, .36, .44', base: '.008, .014, .022', fil: '.66, .80, .96', glow: '.62, .74, .88' },
+    sunStops: [
+      [34,  [[0, 'rgba(255,255,255,1)'], [.35, 'rgba(236,244,255,1)'], [.5, 'rgba(190,215,240,.6)'], [1, 'rgba(150,185,220,0)']], .9, 1],
+      [300, [[0, 'rgba(220,232,255,.85)'], [.12, 'rgba(150,185,255,.40)'], [.4, 'rgba(60,110,200,.10)'], [1, 'rgba(30,60,120,0)']], .85, 1],
+      [1000, [[0, 'rgba(180,210,235,.24)'], [.3, 'rgba(80,120,160,.08)'], [1, 'rgba(30,50,80,0)']], .8, 1],
+      [760, [[0, 'rgba(210,225,255,.7)'], [.25, 'rgba(120,160,230,.22)'], [1, 'rgba(60,90,160,0)']], .4, 0.03],
+    ],
+    key: [0xdce8f5, 2.3, 40, 17, 90], fill: [0x8fb0cc, 0.45], rim: [0xa8c4e0, 0.5], hemi: [0x22344a, 0x0a1018],
+    // baies d'amarrage : module de trompe, flancs, ville suspendue, façade arrière
+    tips: [[0, -1200, -1545], [-560, -905, -1545], [560, -905, -1545], [0, 1300, -200], [-300, 650, -1000], [300, 650, -1000],
+      [-900, 300, -600], [900, 300, -600], [0, 1250, 400]].map(t => t.concat([0])),
+    lane: { n: 64, nLite: 28, out: [10, 18], spread: 3.5, lift: [3, 2], size: [0.14, 0.34] },
+    orbit: { n: 22, nLite: 10, r: [12, 6], y: 8, size: [0.10, 0.22] },
+    target: [0, -1.0, -0.4], minDist: 2.2,
+    lights: (L, hv, P) => {   // nappes de lumière chaude rasante : elles révèlent la structure sans éblouir
+      L(0xff9a40, 2.4, 3.2, P(380, -900, 60));      // les yeux éclairent le front et la trompe
+      L(0xff9a40, 2.4, 3.2, P(-380, -900, 60));
+      L(0xffa850, 1.1, 3.0, P(0, -1350, -1500));    // baie du module de trompe
+      L(0xffa850, 1.6, 3.4, P(0, 1500, 200));       // façade arrière
+      L(0xff9a40, 1.4, 2.6, P(1000, -1100, -650));  // flasques des défenses
+      L(0xff9a40, 1.4, 2.6, P(-1000, -1100, -650));
+      hv(P(380, -560, 110), 0.55, 0xff9030, 0.35);
+      hv(P(-380, -560, 110), 0.55, 0xff9030, 0.35);
+      return L(0xffa850, 1.8, 3.4, P(0, 650, -1150));   // la ville suspendue sous le ventre
+    },
+    // « la ville suspendue » : sous le ventre de la bête, les modules et les stalactites habitées
+    barShot: { t: [0, 650, -1150], p: [1150, -250, -1900] }, barAt: [0, 650, -1150], barMax: 14,
+    // « le dock » : la baie du module de trompe, ton tanker à quai sous la trompe
+    dockShot: { t: [0, -1380, -1540], p: [1250, -2350, -1150] }, dockMax: 12,
+    tankerAt: { pos: [0, -1470, -1560], rotZ: 90, scale: 8 },
+    // champ glaciaire : éclats de glace qui dérivent, quelques gros blocs au loin pour l'échelle
+    ice: { n: 520, nLite: 200, big: 36, color: 0x9fb8cc, emissive: 0x1a2a38 },
+    // sans l'occlusion ambiante de la vitrine (trop lourde sur mobile) : un peu moins de lumière d'ambiance pour garder l'ivoire sombre
+    night: { light: 0.85, hull: 0.78, envScene: 0.55 },
   },
 };
 
@@ -550,6 +614,34 @@ function mount(container, opts = {}) {
       cloudGroup.add(sp);
     }
   }
+  // 19/10 — champ glaciaire (Refuge d'Erebus) : icosaèdres déformés instanciés, givre pâle ; gros blocs au loin, poussière fine devant
+  let iceMesh = null;
+  const ICE = [];
+  if (PR.ice) {
+    const IC = PR.ice, n = LITE ? IC.nLite : IC.n;
+    const g = new THREE.IcosahedronGeometry(1, 0), pa = g.attributes.position;
+    for (let i = 0; i < pa.count; i++) { const k = 0.7 + rand() * 0.6; pa.setXYZ(i, pa.getX(i) * k, pa.getY(i) * k * 0.8, pa.getZ(i) * k * 1.3); }
+    g.computeVertexNormals();
+    iceMesh = new THREE.InstancedMesh(g, new THREE.MeshStandardMaterial({ color: IC.color, emissive: IC.emissive, roughness: 0.34, metalness: 0.0, envMapIntensity: 1.0, flatShading: true }), n);
+    iceMesh.frustumCulled = false;
+    for (let i = 0; i < n; i++) {
+      const big = i < IC.big, a = rand() * Math.PI * 2, r = big ? 30 + rand() * 40 : 11 + rand() * 30;
+      ICE.push({ p: new THREE.Vector3(Math.cos(a) * r, (rand() - .5) * (big ? 30 : 22), Math.sin(a) * r),
+        s: big ? 0.6 + rand() * 1.6 : 0.03 + Math.pow(rand(), 3) * 0.35,
+        q: new THREE.Quaternion().setFromEuler(new THREE.Euler(rand() * 6, rand() * 6, rand() * 6)),
+        w: new THREE.Vector3(rand() - .5, rand() - .5, rand() - .5).normalize(), sp: (rand() - .5) * 0.15, dr: 0.02 + rand() * 0.04 });
+    }
+    scene.add(iceMesh);
+  }
+  const _iq = new THREE.Quaternion(), _im = new THREE.Matrix4(), _is = new THREE.Vector3();
+  function updateIce(t, dt) {
+    ICE.forEach((o, i) => {
+      o.p.x += o.dr * dt * 0.6; if (o.p.x > 60) o.p.x -= 120;   // dérive lente du champ
+      _iq.setFromAxisAngle(o.w, t * o.sp).multiply(o.q); _is.setScalar(o.s);
+      _im.compose(o.p, _iq, _is); iceMesh.setMatrixAt(i, _im);
+    });
+    iceMesh.instanceMatrix.needsUpdate = true;
+  }
   const _cp = new THREE.Vector3();
   function updateClouds(dt) {
     for (const sp of cloudGroup.children) {
@@ -658,7 +750,7 @@ function mount(container, opts = {}) {
   ro.observe(container);
 
   /* ── chargement ── */
-  const navMats = [], beaconMats = [];
+  const navMats = [], beaconMats = [], breatheMats = [];
   let barLight = null;
   let ready = false;
   const loader = new GLTFLoader();
@@ -698,6 +790,7 @@ function mount(container, opts = {}) {
         else if (mat.map) { mat.envMapIntensity = 0.22 * NT.env; mat.metalness = Math.min(mat.metalness, 0.3); mat.roughness = Math.max(mat.roughness, 0.9); if (NT.albedo) { mat.roughness = 1.0; mat.metalness = Math.min(mat.metalness, 0.15); }   /* matière qui boit la lumière : presque noire, sans reflet */ if (!mat.userData.nt) { mat.userData.nt = 1; if (mat.emissiveMap) mat.emissiveIntensity *= NT.tex; if (NT.albedo) mat.color.multiplyScalar(NT.albedo); } }   // 16/10 — pièces texturées (noyau de la Couronne) : reflets retenus comme le reste
         if (PR.rockLift && mat.name.startsWith('M_SC_ROCK') && !mat.userData.lift) { mat.userData.lift = 1; mat.color.multiplyScalar(PR.rockLift); }
         if (/_GLASS$/.test(mat.name)) { mat.envMapIntensity = 0.6; mat.color.setRGB(...PR.glass); }
+        if (PR.fix) PR.fix(mat);   // 19/10 — retouches propres à une station (ivoire assombri du Refuge…)
         if (!GLOW[mat.name] && !mat.map && mat.emissive && mat.emissiveIntensity > 0 && !mat.userData.ng) { mat.userData.ng = 1; mat.emissiveIntensity *= NT.glow; }   // néons, enseigne, salon VIP : sans éblouir
         const look = LOOK[mat.name];
         if (look && !mat.userData.dc) { mat.userData.dc = 1; premium(mat, look); }
@@ -707,6 +800,7 @@ function mount(container, opts = {}) {
           mat.roughness = .6; mat.metalness = 0; mat.side = THREE.DoubleSide; mat.fog = true;
           if (PR.nav(mat.name) && !navMats.includes(mat)) navMats.push(mat);
           if (mat.name === PR.beacon && !beaconMats.includes(mat)) beaconMats.push(mat);
+          if (PR.breathe && PR.breathe[mat.name] && !breatheMats.includes(mat)) breatheMats.push(mat);
         }
       }
     });
@@ -813,6 +907,8 @@ function mount(container, opts = {}) {
     updateClouds(dt);
     for (const m of navMats) m.emissiveIntensity = NT.glow * (PR.navPulse[0] + PR.navPulse[1] * Math.pow(0.5 + 0.5 * Math.sin(t * PR.navPulse[2] + (m.name.endsWith('GREEN') ? 1.6 : 0)), 3));
     for (const m of beaconMats) m.emissiveIntensity = NT.glow * (4 + 6 * Math.pow(0.5 + 0.5 * Math.sin(t * 1.3), 4));
+    for (const m of breatheMats) { const b = PR.breathe[m.name]; m.emissiveIntensity = NT.glow * (b[0] + b[1] * Math.sin(t * b[2])); }
+    if (iceMesh) updateIce(t, dt);
     for (const h of halos) {
       const k = h.userData.pulse ? 0.55 + 0.45 * Math.pow(0.5 + 0.5 * Math.sin(t * h.userData.pulse + h.userData.ph), 3) : 0.8 + 0.2 * Math.sin(t * 3 + h.userData.ph);
       h.scale.setScalar(h.userData.size * (0.7 + 0.5 * k)); h.material.opacity = (0.35 + 0.6 * k) * NT.halo;

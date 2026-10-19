@@ -5825,6 +5825,10 @@ svg.map {
   <button onclick="cheatCrownRoute(false, NOIRE_DOCK_ID)">🗺 Révéler la route d'Erebus</button>
   <button onclick="cheatCrownDock(NOIRE_DOCK_ID)">⚓ Tanker amarré à Erebus (arrivée)</button>
   <button onclick="G.noireSeen = 0; saveGame(); toast('La prochaine ouverture du dock d\'Erebus rejoue l\'arrivée')">🎬 Revoir l'arrivée à Erebus</button>
+  <!-- PATCH_1910_REFUGE_CHEATS -->
+  <button onclick="cheatCrownRoute(false, REFUGE_DOCK_ID)">🗺 Révéler la route du Refuge d'Erebus</button>
+  <button onclick="cheatCrownDock(REFUGE_DOCK_ID)">⚓ Tanker amarré au Refuge d'Erebus (arrivée)</button>
+  <button onclick="G.refugeSeen = 0; saveGame(); toast('La prochaine ouverture du dock du Refuge rejoue l\'arrivée')">🎬 Revoir l'arrivée au Refuge</button>
   <div class="cheat-divider"></div>
   <div class="cheat-label">Ressources</div>
   <button onclick="cheatRes('all', 10000)">+10k toutes ressources</button>
@@ -8660,7 +8664,7 @@ var EXTRA_SAVE_KEYS = [
   'mpNeighbors',   // VOISINS_1310 — voisins déjà signalés
   'tuto',          // TUTO_1410 — premiers pas (étape, vu, terminé)
   'skillsLearned', 'research', '_skillsSeen', '_skillsMigrated',   // PATCH_1610_SKILLS
-  '_linesCrown', 'crownSeen', '_linesSanct', 'sanctSeen', '_linesNoire', 'noireSeen',   // PATCH_1510_CROWN — lieu du secteur M devenu la Couronne, première arrivée vue
+  '_linesCrown', 'crownSeen', '_linesSanct', 'sanctSeen', '_linesNoire', 'noireSeen', '_linesRefuge', 'refugeSeen',   // PATCH_1510_CROWN — lieu du secteur M devenu la Couronne, première arrivée vue
 ];
 
 // Sauvegarde G complet dans localStorage. Appelé fréquemment, doit être rapide.
@@ -28362,7 +28366,7 @@ function cheatCrownDock(id) {
   const m = launchTankerOnRoute(route.id, 't1', { metal: 0, energie: 0, cristal: 0 });
   if (!m) { toast('Le tanker n\'a pas pu partir'); return; }
   m.arrivalAt = Date.now() - 1000;
-  if (id === SANCT_DOCK_ID) G.sanctSeen = 0; else if (id === NOIRE_DOCK_ID) G.noireSeen = 0; else G.crownSeen = 0;
+  if (id === SANCT_DOCK_ID) G.sanctSeen = 0; else if (id === NOIRE_DOCK_ID) G.noireSeen = 0; else if (id === REFUGE_DOCK_ID) G.refugeSeen = 0; else G.crownSeen = 0;
   if (typeof tickTankerMissions === 'function') tickTankerMissions();
   if (typeof saveGame === 'function') saveGame();
   if (m.status === 'docked') { toggleCheatPanel(); openDockFromFleet(m.id); }
@@ -40607,7 +40611,15 @@ var NOIRE_DOCK = {
   ambience: 'Elle n\'apparaît sur aucune carte et ne répond à aucun appel. Un cylindre noir de cinq kilomètres, deux anneaux d\'habitat, des rangées de feux rouges qui s\'allument quand on approche, comme si quelque chose ouvrait les yeux. La Confédération ne confirme pas son existence. Elle t\'a pourtant laissé t\'amarrer.',
   detail: 'Dans l\'anneau arrière, derrière les baies blindées, le pont d\'observation : équipages de frégates furtives, marchands sans pavillon, agents qui ne donnent jamais leur nom. Ici, chaque transaction est enregistrée, et rien n\'est jamais effacé.',
 };
-var STATION_DOCKS = { [CROWN_DOCK_ID]: CROWN_DOCK, [SANCT_DOCK_ID]: SANCT_DOCK, [NOIRE_DOCK_ID]: NOIRE_DOCK };
+// PATCH_1910_REFUGE — le Refuge d'Erebus, station-mammouth dans un champ de glace : quatrième lieu caché, second du secteur N (l'ancien « Sanctuaire d'Erebus », A-N-8096)
+var REFUGE_DOCK_ID = 'dock-wc15ki';
+var REFUGE_DOCK = {
+  name: 'Refuge d\'Erebus', typeLabel: 'Refuge des glaces', sub: 'station-mammouth · 3 km de défense à défense',
+  accent: '#ffb46a', station: 'refuge',
+  ambience: 'Au milieu d\'un champ de glace, une bête d\'ivoire de trois kilomètres : un crâne cuirassé, deux défenses qui se referment sur le vide, des oreilles maillées comme des voiles. Ses yeux sont deux baies ambrées qui ne s\'éteignent jamais. Personne ne sait qui l\'a bâtie. On sait seulement qu\'elle accueille tout le monde.',
+  detail: 'Sous le ventre de la bête pend la ville suspendue : des tours renversées, des passerelles, des lanternes qui tremblent dans le froid. Pèlerins, mineurs de glace, réfugiés sans pavillon. Ici on ne demande pas d\'où tu viens, seulement si tu as de quoi te réchauffer.',
+};
+var STATION_DOCKS = { [CROWN_DOCK_ID]: CROWN_DOCK, [SANCT_DOCK_ID]: SANCT_DOCK, [NOIRE_DOCK_ID]: NOIRE_DOCK, [REFUGE_DOCK_ID]: REFUGE_DOCK };
 function _crownDock(d) { return (d && STATION_DOCKS[d.id]) ? Object.assign(d, STATION_DOCKS[d.id]) : d; }
 
 // ─── Registre des docks de l'univers (canon 18/05) ───
@@ -44069,6 +44081,11 @@ var STATION_UI = {
     sub: 'série noire · station furtive', long: true, chips: { dock: 'Le dock', bar: 'Le pont', port: 'La station' }, crewAt: 'sur le pont', place: 'le pont', seen: 'noireSeen',
     intro: 'Rien sur les radars. Puis des feux rouges, un à un, le long d\'un cylindre de cinq kilomètres : Erebus t\'attendait.', enter: 'MONTER À BORD',
     hall: { t: 'Le pont d\'observation', s: 'Dans l\'anneau arrière, derrière les baies blindées. Ceux qui sont à quai, les marchés, ce qui ne se dit qu\'à voix basse.', i: 'VOIR LE PONT ↑' } },
+  // PATCH_1910_REFUGE
+  refuge: { id: 'dock-wc15ki', profile: 'refuge', url: 'assets/3d/sb_er01.glb?v=20261019-2000', kicker: 'REFUGE DES GLACES', title: 'REFUGE D\'EREBUS',
+    sub: 'station-mammouth · champ de glace', long: true, chips: { dock: 'Le dock', bar: 'La ville', port: 'Le Refuge' }, crewAt: 'dans la ville suspendue', place: 'la ville suspendue', seen: 'refugeSeen',
+    intro: 'Des éclats de glace, puis deux défenses immenses qui sortent du brouillard. Les yeux de la bête s\'allument : le Refuge d\'Erebus t\'a vu venir.', enter: 'ENTRER AU REFUGE',
+    hall: { t: 'La ville suspendue', s: 'Sous le ventre de la bête, entre les tours renversées et les lanternes. Ceux qui sont à quai, les marchés, ce qui se raconte autour du feu.', i: 'VOIR LA VILLE ↑' } },
 };
 // une station en 3D pour ce dock (objet dock ou identifiant) ?
 function stationUI(d) {
@@ -46224,7 +46241,7 @@ if (G.knownTargets && Array.isArray(G.tankerMissions)) {
 <!-- PERF_1310 — mesure des performances chez les joueurs + qualité 3D automatique (assets/perf.js) -->
 <script src="assets/perf.js?v=20261014-1540"></script>
 <!-- PATCH_1410_LIGNES — lignes PNJ à horaire sur les routes cachées (assets/lines.js) -->
-<script src="assets/lines.js?v=20261019-1600"></script>
+<script src="assets/lines.js?v=20261019-2000"></script>
 <!-- CLOUD — sauvegarde Supabase (source : sb-build/src/cloud.js) -->
 <script type="module" src="assets/cloud.js?v=20261014-1440"></script>
 <!-- MATCH3 — Match-3 V2 (assets/match3.js, source src/match3.js + src/m3core.js) : remplace startM3 -->
@@ -46245,7 +46262,7 @@ if (G.knownTargets && Array.isArray(G.tankerMissions)) {
 <!-- PATCH_1610_SKILLS — skills des bâtiments : apprendre, découvrir, effets -->
 <script src="assets/skills.js?v=20261019-1910"></script>
 <!-- PATCH_1510_CROWN — The Drifting Crown en 3D (assets/station3d.js, sur le moteur partagé window.SB3D) -->
-<script type="module" src="assets/station3d.js?v=20261017-0000"></script>
+<script type="module" src="assets/station3d.js?v=20261019-2000"></script>
 <!-- FORMATION3D — flotte déployée en orbite, vue de haut en formation (remplace la vue orbite) -->
 <script src="assets/formation3d.js?v=20261014-1440"></script>
 </body>
