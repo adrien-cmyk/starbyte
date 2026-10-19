@@ -63,8 +63,8 @@ const PROFIL_AK01 = {
   nozzles: [{ x: -100 * 0.5, y: 300 * 0.5, r: 24 }, { x: 0, y: 300 * 0.5, r: 24 }, { x: 92 * 0.5, y: 300 * 0.5, r: 24 }], nozzleStretchY: 3.2,
   bubbleK: 3.3, bubbleFlat: 0.42, bowZ: 6.4, wakeZ: -24.0, minDist: 5.0,
   engineColor: [1.0, 0.66, 0.32], plume: [0xff5a1a, 0xff8a2a, 0xffc070, 0xfff2d8, 0xffc890, 0xffa060],
-  gloss: { M_AK_HULL: [0.34, 0.0], M_AK_HULL2: [0.36, 0.0], M_AK_ORANGE: [0.28, 0.3], M_AK_GUNMETAL: [0.26, 0.85], M_AK_DARK: [0.30, 0.55], M_AK_STEEL: [0.28, 0.9] }, glossEnv: 0.9,
-  mats: { M_AK_HULL: { dim: 0.8 }, M_AK_HULL2: { dim: 0.8 }, M_AK_GLASS: { opacity: 0.14, rough: 0.05, metal: 0.0, env: 0.6 }, M_AK_WATER: { rough: 0.04, metal: 0.35, env: 1.6 }, M_AK_GLOW_MOTEUR: { engine: true } },
+  gloss: { M_AK_HULL: [0.62, 0.0], M_AK_HULL2: [0.64, 0.0], M_AK_ORANGE: [0.5, 0.2], M_AK_GUNMETAL: [0.45, 0.7], M_AK_DARK: [0.5, 0.45], M_AK_STEEL: [0.45, 0.7] }, glossEnv: 0.4,   // (Adrien 20/10) moins de brillance : la coque crème éblouissait
+  mats: { M_AK_HULL: { dim: 0.58, env: 0.25 }, M_AK_HULL2: { dim: 0.58, env: 0.25 }, M_AK_GLASS: { opacity: 0.14, rough: 0.05, metal: 0.0, env: 0.6 }, M_AK_WATER: { rough: 0.04, metal: 0.35, env: 1.6 }, M_AK_GLOW_MOTEUR: { engine: true } },
   hull: [[0,10,120,120],[61,30,250,300],[300,30,265,450],[552,30,300,600],[800,30,265,450],[1044,30,250,300],[1150,60,240,330],[1600,40,280,420],[3000,0,330,520],[6000,-60,380,620]],
 };
 
