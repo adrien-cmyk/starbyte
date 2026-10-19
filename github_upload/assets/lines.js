@@ -1251,17 +1251,46 @@
   function antennaOn() {
     try { const a = (window.SBAntenna && typeof SBAntenna.data === 'function') ? SBAntenna.data() : G.antenna; return !!(a && a.built && !a.building); } catch (e) { return false; }
   }
+  // PATCH_2010_COLONIE — chaque antenne construite (capitale et colonies) écoute autour de SA planète
+  function antennaHomes() {
+    const out = [];
+    try {
+      const on = (a) => !!(a && a.built && !a.building);
+      const ws = Array.isArray(G.worlds) ? G.worlds : [];
+      if (ws.length < 2) { if (antennaOn()) { const h = myHome(); if (h) out.push(h); } return out; }
+      for (const w of ws) {
+        const active = w.id === (G.activeWorld || 'home');
+        const a = active ? G.antenna : (w.data && w.data.antenna);
+        if (!on(a)) continue;
+        const h = w.id === 'home' ? myHome() : sysOf(w.coord);
+        if (h && !out.includes(h)) out.push(h);
+      }
+    } catch (e) {}
+    return out;
+  }
+  function antennaName(home) {
+    try {
+      if (home === myHome()) return null;
+      const w = (G.worlds || []).find(x => x.id !== 'home' && sysOf(x.coord) === home);
+      return w ? w.name : null;
+    } catch (e) { return null; }
+  }
   function tickEcho(now) {
-    if (typeof G === 'undefined' || !G || !antennaOn()) return;
+    if (typeof G === 'undefined' || !G) return;
+    const homes = antennaHomes();
+    if (!homes.length) return;
     state();
     const echoes = Object.entries(G.trafficEchoes).filter(([, e]) => !e.fromCard);   // les pistes des cartes ne comptent pas
+    // une antenne neuve (colonie) capte tout de suite son premier écho
+    const fresh = homes.find(h => !echoes.some(([, e]) => (e.home || myHome()) === h));
     const last = echoes.reduce((m, [, e]) => Math.max(m, e.at || 0), 0);
-    if (echoes.length && now - last < ECHO_EVERY_MS) return;
+    if (!fresh && echoes.length && now - last < ECHO_EVERY_MS) return;
     // pas d'écho de plus tant que deux échos attendent une balise
     const beaconSys = new Set((G.probesPool || []).filter(p => p.tier === 'beacon' && p.state === 'deployed').map(p => sysOf(p.deployedSystem)));
     const waiting = echoes.filter(([s]) => !beaconSys.has(s)).length;
-    if (waiting >= 2) return;
-    const home = myHome(); if (!home) return;
+    if (!fresh && waiting >= 2) return;
+    // à tour de rôle entre les antennes
+    const home = fresh || homes[echoes.length % homes.length]; if (!home) return;
     const sec = home.split('-')[1];
     const lines = network().lines;
     const mine = lines.filter(l => l.sector === sec);
@@ -1274,11 +1303,11 @@
     const l = list[h32(home + ':echo:' + echoes.length) % list.length];
     const idx = h32(home + ':' + l.id) % Math.min(3, l.chain.length);
     const sys = l.chain[idx];
-    G.trafficEchoes[sys] = { lineId: l.id, at: now };
+    G.trafficEchoes[sys] = { lineId: l.id, at: now, home };
     if (!G.mapSeen) G.mapSeen = {};
     G.mapSeen[sys] = now;
     if (typeof saveGame === 'function') saveGame();
-    if (typeof toast === 'function') toast(`📡 Ton antenne capte un trafic régulier vers ${sys} · pose une balise pour voir qui passe`, () => { if (typeof openSystemOnMap === 'function') openSystemOnMap(sys); });
+    if (typeof toast === 'function') toast(`📡 ${antennaName(home) ? 'L\'antenne de ' + antennaName(home) : 'Ton antenne'} capte un trafic régulier vers ${sys} · pose une balise pour voir qui passe`, () => { if (typeof openSystemOnMap === 'function') openSystemOnMap(sys); });
     if (window.SBMap && SBMap.render) { try { SBMap.render(); } catch (e) {} }
   }
 
