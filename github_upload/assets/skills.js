@@ -50,7 +50,7 @@
   const COST = { 1: { metal: 1500, energie: 400, cristal: 300 }, 2: { metal: 4000, energie: 1500, cristal: 1000 }, 3: { metal: 12000, energie: 4000, cristal: 3000 } };
   const DUR_MIN = { 1: 180, 2: 360, 3: 720 };
   // skills du Centre de commandement : même règle (une recherche à la fois, 3 h minimum)
-  const CAP_DUR_MIN = { 'extra-slot-1': 180, 'speed-1': 180, 'extra-slot-2': 360, 'speed-2': 360, colonial: 720 };
+  const CAP_DUR_MIN = { 'extra-slot-1': 180, 'speed-1': 180, 'extra-slot-2': 360, 'speed-2': 360, colonial: 180 };   // PATCH_2010_COLONIE : saison de test, 3 h
   const capSkill = (k) => (typeof CAPITAL_SKILLS !== 'undefined' ? CAPITAL_SKILLS.find(x => x.key === k) : null);
   const plans = () => { const g = G_(); if (g && (!g.skillPlans || typeof g.skillPlans !== 'object')) g.skillPlans = {}; return g ? g.skillPlans : {}; };
   // anciennes découvertes du match-3 (jamais appliquées) → les skills équivalents
@@ -146,7 +146,6 @@
   function learnCapital(key) {
     const sk = capSkill(key); if (!sk || sk.isApplied()) return;
     const say = (t) => { if (typeof toast === 'function') toast(t); };
-    if (key === 'colonial') return say('Le Vaisseau colonial arrivera avec la colonisation : rien à rechercher pour l\'instant');
     if (G.research) return say(`Une recherche est déjà en cours : ${researchName()}`);
     if ((G.skills.capitalLevel || 1) < sk.requires.capitalLevel) return say(`Centre de commandement niveau ${sk.requires.capitalLevel} requis`);
     if (sk.requires.prereq && !(capSkill(sk.requires.prereq) || { isApplied: () => false }).isApplied()) return say(`Apprends d'abord ${capSkill(sk.requires.prereq).name}`);

@@ -56,6 +56,18 @@ const PROFIL_PA01 = {
   hull: [[0,0,10,10],[1,0,10,10]],
 };
 
+
+// Arche coloniale AK-01 (2,4 km × 2,1 km, glTF en m, proue +Z ; vitrine « Arche coloniale » du 19/10) : V = 0,5, bout des rampes avant (+1 105 m) recalé sur z = 600
+const PROFIL_AK01 = {
+  V: 0.5, bowGltf: 1105, axisY: 1.6, engineY: 300 * 0.5 * 0.01, engineZ: (600 - (1105 + 1012) * 0.5) * 0.01 - 0.4, nozzleZ: 600 - (1105 + 1012) * 0.5, targetY: 1.7,
+  nozzles: [{ x: -100 * 0.5, y: 300 * 0.5, r: 24 }, { x: 0, y: 300 * 0.5, r: 24 }, { x: 92 * 0.5, y: 300 * 0.5, r: 24 }], nozzleStretchY: 3.2,
+  bubbleK: 3.3, bubbleFlat: 0.42, bowZ: 6.4, wakeZ: -24.0, minDist: 5.0,
+  engineColor: [1.0, 0.66, 0.32], plume: [0xff5a1a, 0xff8a2a, 0xffc070, 0xfff2d8, 0xffc890, 0xffa060],
+  gloss: { M_AK_HULL: [0.34, 0.0], M_AK_HULL2: [0.36, 0.0], M_AK_ORANGE: [0.28, 0.3], M_AK_GUNMETAL: [0.26, 0.85], M_AK_DARK: [0.30, 0.55], M_AK_STEEL: [0.28, 0.9] }, glossEnv: 0.9,
+  mats: { M_AK_HULL: { dim: 0.8 }, M_AK_HULL2: { dim: 0.8 }, M_AK_GLASS: { opacity: 0.14, rough: 0.05, metal: 0.0, env: 0.6 }, M_AK_WATER: { rough: 0.04, metal: 0.35, env: 1.6 }, M_AK_GLOW_MOTEUR: { engine: true } },
+  hull: [[0,10,120,120],[61,30,250,300],[300,30,265,450],[552,30,300,600],[800,30,265,450],[1044,30,250,300],[1150,60,240,330],[1600,40,280,420],[3000,0,330,520],[6000,-60,380,620]],
+};
+
 function mount(container, opts = {}) {
 const { THREE, GLTFLoader, OrbitControls, RoomEnvironment, EffectComposer, RenderPass, UnrealBloomPass, OutputPass } = libs();
 /* ================================================================== réglages */
@@ -277,6 +289,12 @@ ship.add(engineLight);
    joints en creux (bump par dérivées), variation de teinte/roughness par panneau, patine basse fréquence,
    micro-usure sur les arêtes vives. Aucun UV ni texture : tout est procédural, donc léger sur mobile. */
 const LOOK = {
+  M_AK_HULL:     { cell: [11.0, 7.0], seam: .16, depth: .06, tint: .07, rough: .10, grime: .70, wear: .30, plaques: 1 },   // Arche : patine en plaques (gros vaisseau)
+  M_AK_HULL2:    { cell: [11.0, 7.0], seam: .16, depth: .06, tint: .08, rough: .10, grime: .76, wear: .30, plaques: 1 },
+  M_AK_ORANGE:   { cell: [9.0, 6.0],  seam: .16, depth: .10, tint: .08, rough: .10, grime: .40, wear: .40, plaques: 1 },
+  M_AK_GUNMETAL: { cell: [7.0, 5.0],  seam: .15, depth: .40, tint: .08, rough: .14, grime: .26, wear: .40, plaques: 1 },
+  M_AK_DARK:     { cell: [14.0, 8.0], seam: .20, depth: .12, tint: .14, rough: .18, grime: .20, wear: .25, plaques: 1 },
+  M_AK_STEEL:    { cell: [6.0, 4.0],  seam: .14, depth: .20, tint: .08, rough: .14, grime: .24, wear: .45, plaques: 1 },
   M_KV_ARMOR_WHITE:  { cell: [9.0, 6.0], seam: .16, depth: .0, tint: .05, rough: .10, grime: .34, wear: .00 },
   M_KV_ARMOR_RED:    { cell: [8.0, 5.0], seam: .16, depth: .12, tint: .07, rough: .10, grime: .32, wear: .30 },
   M_KV_GUNMETAL:     { cell: [6.0, 4.0], seam: .15, depth: .40, tint: .08, rough: .14, grime: .24, wear: .40 },
@@ -352,6 +370,7 @@ function premium(mat, p) {
           vec3 grad = sign(det) * (dhx * r1 + dhy * r2);
           normal = normalize(abs(det) * normal - grad);
         }`);
+    if (p.plaques) sh.fragmentShader = sh.fragmentShader.replace('uLook2.x * (grime * 1.7 + low * .9) + .55 * smoothstep(.15, .65, streak) + .7 * soot + .35 * leak + .12, 0.0, .9)', 'uLook2.x * (smoothstep(.32, .78, grime) * 1.5 + low * .6) + .5 * smoothstep(.2, .7, streak) + .7 * soot + .35 * leak + .05, 0.0, .88)');
   };
   mat.customProgramCacheKey = () => 'kv-premium-' + mat.name;
 }
@@ -391,6 +410,7 @@ const glowTex = (() => {
 for (const nz of NOZZLES) {
   const g = new THREE.Group();
   g.position.set(nz.x * S, nz.y * S, NOZZLE_Z * S);
+  if (P.nozzleStretchY) g.scale.y = P.nozzleStretchY;   // fentes hautes (Arche) : panaches aplatis
   const R = nz.r * S;
   for (const [len, rIn, rOut, color, alpha, flick, layer] of [
     [R * 40, R * .86, R * .20, PL[0], .16, 1.0, 1.0],   // halo externe, long et diffus
@@ -436,8 +456,8 @@ scene.add(sunGroup);
    Le cuirassé fend un milieu ionisé comme une étrave fend l'eau : une enveloppe paraboloïde part
    devant la proue, épouse la coque et s'ouvre derrière la poupe en sillage. Rendu additif en
    fresnel (lumineux sur les bords, transparent de face), filets de plasma qui défilent vers l'arrière. */
-const BOW_Z = 7.25, WAKE_Z = -19.0, AXIS_Y = P.axisY;
-const bubbleR = (d) => 1.18 * Math.pow(Math.max(d, 0.0001), 0.47);          // rayon selon la distance à l'étrave
+const BOW_Z = P.bowZ || 7.25, WAKE_Z = P.wakeZ || -19.0, AXIS_Y = P.axisY;
+const bubbleR = (d) => (P.bubbleK || 1.18) * Math.pow(Math.max(d, 0.0001), 0.47);          // rayon selon la distance à l'étrave
 function bubbleGeo(scale, segU = 120, segA = 72) {
   const pos = [], uv = [], idx = [];
   for (let i = 0; i <= segU; i++) {
@@ -445,7 +465,7 @@ function bubbleGeo(scale, segU = 120, segA = 72) {
     const r = bubbleR(d) * scale, z = BOW_Z - d;
     for (let j = 0; j <= segA; j++) {
       const a = j / segA * Math.PI * 2;
-      pos.push(Math.cos(a) * r, AXIS_Y + Math.sin(a) * r * 0.78, z);
+      pos.push(Math.cos(a) * r, AXIS_Y + Math.sin(a) * r * (P.bubbleFlat || 0.78), z);
       uv.push(j / segA, u);
     }
   }
@@ -615,6 +635,16 @@ function prepMats(root, engineColor, engineInt) {
       if (tn && !mat.userData.tinted) { mat.userData.tinted = 1; mat.color.multiply(new THREE.Color(...tn)); }
       const look = LOOK[mat.name];
       if (look && !mat.userData.kv) { mat.userData.kv = 1; premium(mat, look); }
+      const mo = P.mats && P.mats[mat.name];   // réglages propres au modèle (verrières, eau, coque atténuée)
+      if (mo && !mat.userData.mo) {
+        mat.userData.mo = 1;
+        if (mo.dim) mat.color.multiplyScalar(mo.dim);
+        if (mo.opacity != null) { mat.transparent = true; mat.opacity = mo.opacity; mat.depthWrite = false; }
+        if (mo.rough != null) mat.roughness = mo.rough;
+        if (mo.metal != null) mat.metalness = mo.metal;
+        if (mo.env != null) mat.envMapIntensity = mo.env;
+      }
+      if (mo && mo.engine) { mat.emissive.copy(engineColor); mat.emissiveIntensity = engineInt; mat.color.copy(engineColor); }
       if (mat.name === 'M_KV_GLOW_MOTEUR') { mat.emissive.copy(engineColor); mat.emissiveIntensity = engineInt; mat.color.copy(engineColor); }
       else if (mat.name === 'M_KV_GLOW_ORANGE') { mat.emissiveIntensity = 2.2; }
       else if (mat.name === 'M_KV_GLOW_BLUE') { if (P.ground) { mat.emissive = new THREE.Color(0x48c8ff); mat.emissiveIntensity = 1.3; } else mat.emissiveIntensity = 1.8; }
@@ -685,7 +715,7 @@ controls.target.copy(TARGET);
 controls.enableDamping = true; controls.dampingFactor = 0.08;
 controls.enablePan = false;
 controls.rotateSpeed = 0.55; controls.zoomSpeed = 0.9;
-controls.minDistance = 3.0;
+controls.minDistance = P.minDist || 3.0;
 controls.maxDistance = fitDistance() * 1.6;
 controls.minPolarAngle = Math.PI * 0.10;
 controls.maxPolarAngle = Math.PI * (P.ground ? 0.52 : 0.86);
@@ -811,7 +841,7 @@ function whenReady(cb) {
   if (window.SB3D) return cb();
   const t = setInterval(() => { if (window.SB3D) { clearInterval(t); cb(); } }, 100);
 }
-window.Ship3D = { profiles: { kv01: PROFIL_KV01, sr01: PROFIL_SR01, tk07: PROFIL_TK07, os01: PROFIL_OS01, pa01: PROFIL_PA01 }, mount: (c, o) => { let h = null, dead = false; whenReady(() => { if (!dead) h = mount(c, o); });
+window.Ship3D = { profiles: { kv01: PROFIL_KV01, sr01: PROFIL_SR01, tk07: PROFIL_TK07, ak01: PROFIL_AK01, os01: PROFIL_OS01, pa01: PROFIL_PA01 }, mount: (c, o) => { let h = null, dead = false; whenReady(() => { if (!dead) h = mount(c, o); });
   return {
     pick(x, y) { return h ? h.pick(x, y) : null; }, begin() { if (h) h.begin(); }, orbit(dx, dy) { if (h) h.orbit(dx, dy); }, dolly(k) { if (h) h.dolly(k); }, end() { if (h) h.end(); },
     dispose() { dead = true; if (h) h.dispose(); },

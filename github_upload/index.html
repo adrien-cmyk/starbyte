@@ -6367,7 +6367,7 @@ const BUILDING_TIERS = {
   capital: {
     1: { name:'Centre de commandement', cost:{},                                       duration:0,     desc:'Hub stratégique' },
     2: { name:'Hub stratégique',         cost:{metal:2500, energie:800},                 duration:2880,  desc:'Logistique et production II' },
-    3: { name:'Hub d\'empire',          cost:{metal:12000, energie:4000, cristal:1500}, duration:10080, desc:'Vaisseau colonial' },
+    3: { name:'Hub d\'empire',          cost:{metal:12000, energie:4000, cristal:1500}, duration:1440,  desc:'Vaisseau colonial' },   // PATCH_2010_COLONIE : saison de test 24 h (normal : 10080)
   },
 };
 const CAPITAL_META = { name:'Centre de commandement', icon:'⊕', color:'var(--cyan)' };
@@ -7807,10 +7807,10 @@ const SHIP_UNITS = {
   },
   colonial: {
     key: 'colonial',
-    name: 'Vaisseau Colonial',
+    name: 'Arche coloniale',
     icon: '◈',
     role: 'special',
-    desc: 'Permet de coloniser une 2e planète.',
+    desc: 'Emporte une colonie entière vers une planète habitable libre.',
   },
 };
 
@@ -28843,7 +28843,83 @@ function renderShipBuildList() {
         <button class="unit-action ${canAfford ? '' : 'disabled'}" onclick="event.stopPropagation();buildShip('${shipKey}', 5)" style="margin-left:6px">+5</button>
       </div>
     `;
-  }).join('');
+  }).join('') + colonialBuildRowHtml(tier);   // PATCH_2010_COLONIE
+}
+
+/* ═══════════ PATCH_2010_COLONIE — l'Arche coloniale au chantier orbital ═══════════ */
+const COLONIAL_COST = { metal: 20000, energie: 8000, cristal: 3000 };
+const COLONIAL_FUEL = 2000;
+const COLONIAL_DURATION = 6 * 3600;   // saison de test : 6 h
+function colonialDuration() { return Math.max(1, Math.round(COLONIAL_DURATION / (G.skills.productionSpeed || 1) * (window.SBSkills ? SBSkills.durMult('ships') : 1))); }
+function colonialBlocker(tier) {
+  if (!G.skills.colonialShipUnlocked) return 'Skill « Vaisseau colonial » requis (Centre niveau 3)';
+  if ((tier || 0) < 2) return 'Chantier orbital niveau 2 requis';
+  return null;
+}
+function colonialBuildRowHtml(tier) {
+  const block = colonialBlocker(tier);
+  const meta = SHIP_UNITS.colonial;
+  const canAfford = Object.entries(COLONIAL_COST).every(([r, q]) => G.res[r] && G.res[r].v >= q) && (G.fuel || 0) >= COLONIAL_FUEL;
+  const inQueue = QUEUES.shipyard.commands.some(c => c.unitKey === 'colonial');
+  const ready = G.fleet.colonial || 0;
+  const costStr = Object.entries(COLONIAL_COST).map(([r, q]) => `${fmt(q)} ${r}`).join(' · ') + ` · ${fmt(COLONIAL_FUEL)} carburant`;
+  const ok = !block && canAfford;
+  return `
+      <div class="unit-row ${ok ? '' : 'locked'}" onclick="openUnitDetail('colonial','ship')" style="cursor:pointer;border-color:rgba(255,170,90,.35)">
+        <div class="unit-icon" style="color:#ffb066">${PNG_ILLUSTRATIONS.colonial ? `<img src="${PNG_ILLUSTRATIONS.colonial}" alt="${meta.name}" onerror="pngFallback(this, 'colonial')">` : meta.icon}</div>
+        <div class="unit-info">
+          <div class="unit-name">${meta.name}${inQueue ? ' · En cale' : ''}${ready ? ` · <span style="color:#ffb066">${ready} prête${ready > 1 ? 's' : ''}</span>` : ''}</div>
+          <div class="unit-stats" style="color:${block ? 'var(--mut)' : '#ffb066'}">${block || 'Fonde une colonie sur une planète habitable libre'}</div>
+          <div class="unit-stats" style="margin-top:2px;font-size:9px">${costStr} · ${formatTime(colonialDuration())}</div>
+        </div>
+        <button class="unit-action ${ok ? '' : 'disabled'}" onclick="event.stopPropagation();buildColonialShip()">+1</button>
+      </div>`;
+}
+function buildColonialShip() {
+  const block = colonialBlocker(getShipyardTier());
+  if (block) { toast(block); return; }
+  for (const [r, q] of Object.entries(COLONIAL_COST)) if (!G.res[r] || G.res[r].v < q) { toast(`Manque ${fmt(q - (G.res[r]?.v || 0))} ${r}`); return; }
+  if ((G.fuel || 0) < COLONIAL_FUEL) { toast(`Manque ${fmt(COLONIAL_FUEL - (G.fuel || 0))} carburant`); return; }
+  for (const [r, q] of Object.entries(COLONIAL_COST)) G.res[r].v -= q;
+  G.fuel -= COLONIAL_FUEL;
+  QUEUES.shipyard.commands.push({ unitKey: 'colonial', shipTier: 1, totalQty: 1, completed: 0, currentElapsed: 0, unitDuration: colonialDuration(), cost: Object.assign({ fuel: COLONIAL_FUEL }, COLONIAL_COST), addedAt: Date.now() });
+  toast('◈ Arche coloniale en assemblage');
+  renderShipyard();
+  startQueueTicker();
+  try { saveGame(); } catch (e) {}
+}
+function renderColonialDetail() {
+  const meta = SHIP_UNITS.colonial;
+  const ready = G.fleet.colonial || 0;
+  const q = QUEUES.shipyard.commands.find(c => c.unitKey === 'colonial');
+  document.getElementById('ud-title').textContent = meta.name.toUpperCase();
+  document.getElementById('ud-banner').style.borderColor = 'rgba(255,170,90,.3)';
+  if (!mountUnitShip3D('colonial', ready)) unmountUnitShip3D();
+  const udIcon = document.getElementById('ud-icon');
+  udIcon.innerHTML = PNG_ILLUSTRATIONS.colonial ? `<img class="illu-png" src="${PNG_ILLUSTRATIONS.colonial}" alt="${meta.name}" onerror="pngFallback(this, 'colonial')">` : meta.icon;
+  udIcon.style.color = '#ffb066';
+  document.getElementById('ud-name').textContent = meta.name;
+  document.getElementById('ud-sub').textContent = 'Vaisseau-colonie · 2,4 km · six serres';
+  document.getElementById('ud-meta').innerHTML = `<span style="color:#ffb066">${ready} prête${ready > 1 ? 's' : ''}</span>${q ? ' <span class="dot"></span> une en cale' : ''}`;
+  const block = colonialBlocker(getShipyardTier());
+  const row = (l, v, c) => `<div class="dash-stat-row"><span class="lbl">${l}</span><span class="val"${c ? ` style="color:${c}"` : ''}>${v}</span></div>`;
+  document.getElementById('ud-composition').innerHTML =
+    row('Coût', Object.entries(COLONIAL_COST).map(([r, v]) => `${fmt(v)} ${r}`).join(' · ')) +
+    row('Carburant', fmt(COLONIAL_FUEL), 'var(--amber)') +
+    row('Assemblage', formatTime(colonialDuration())) +
+    row('Conditions', block || 'remplies', block ? 'var(--red)' : 'var(--green)');
+  document.getElementById('ud-costs').innerHTML =
+    row('À l\'arrivée', 'le vaisseau devient la colonie') +
+    row('Nouvelle planète', 'Centre neuf · antenne à bâtir · parcelles vierges');
+  document.querySelectorAll('#scr-unit-detail .section-label').forEach((el, i) => {
+    if (i === 0) el.textContent = 'Construction';
+    if (i === 1) el.textContent = 'Fondation';
+  });
+  document.getElementById('ud-desc-text').textContent = "L'Arche emporte une colonie entière : six serres, leurs lacs, leurs forêts et leurs colons. Elle ne revient jamais. Posée sur une planète habitable libre, elle devient un nouveau Centre de commandement, et sa nouvelle antenne voit ce que la capitale ne voyait pas.";
+  const actionsEl = document.getElementById('ud-actions');
+  actionsEl.innerHTML = (!q && !block)
+    ? `<button class="btn-primary" style="width:100%;padding:14px;margin-bottom:8px;border-color:rgba(255,170,90,.45);background:rgba(255,170,90,.08);color:#ffb066" onclick="buildColonialShip();renderUnitDetailScreen()">Assembler une Arche</button><button class="btn-ghost" style="width:100%;padding:14px" onclick="goBack()">Retour</button>`
+    : `<button class="btn-ghost" style="width:100%;padding:14px" onclick="goBack()">Retour</button>`;
 }
 
 // Construit un vaisseau militaire (Tanker / Frégate / Cuirassé)
@@ -32353,6 +32429,10 @@ function completeUnitProduction(type, cmd) {
       G.probe.state = 'ready';
       renderShipyard();
       toast('Sonde Auris-1 prête. Centre de prospection accessible.');
+    } else if (cmd.unitKey === 'colonial') {   // PATCH_2010_COLONIE
+      G.fleet.colonial = (G.fleet.colonial || 0) + 1;
+      toast('◈ Arche coloniale prête : choisis une planète habitable libre à coloniser');
+      if (!document.getElementById('scr-shipyard').classList.contains('hidden')) renderShipyard();
     } else if (G.fleet.stationed[cmd.unitKey]) {
       // Vaisseau militaire (tanker / fregate / cuirasse) — passe 3.1
       const shipKey = cmd.unitKey;
@@ -38201,6 +38281,7 @@ const UNIT_SHIP3D_MODELS = {
   cuirasse: { url: 'assets/3d/sb_kv01.glb?v=20261014-1440', code: 'KV-01 Kerath' },
   fregate:  { url: 'assets/3d/sb_sr01.glb?v=20261014-1440', code: 'SR-01 Sentinelle', profile: 'sr01' },
   tanker:   { url: 'assets/3d/sb_tk07.glb?v=20261014-1440', code: 'TK-07 Tanker', profile: 'tk07' },
+  colonial: { url: 'assets/3d/sb_ak01.glb?v=20261020', code: 'AK-01 Arche coloniale', profile: 'ak01' },   // PATCH_2010_COLONIE (7,8 Mo : chargé sur la fiche seulement)
 };
 let unitShip3D = null;   // { key, handle }
 function mountUnitShip3D(key, inService) {
@@ -38446,6 +38527,7 @@ function unmountUnitShip3D(keepClasses) {
 
 // ─── Fiche détail d'un vaisseau militaire (Tanker / Frégate / Cuirassé) ───
 function renderShipUnitDetail(key) {
+  if (key === 'colonial') return renderColonialDetail();   // PATCH_2010_COLONIE
   if (!key || !SHIP_UNITS[key] || !G.fleet.stationed[key]) {
     goto('fleet');
     return;
@@ -38761,7 +38843,7 @@ function renderSkillRow(skill) {
   const canAfford = Object.entries(skill.cost).every(([res, q]) => G.res[res] && G.res[res].v >= q);
   const _rs = window.SBSkills && SBSkills.capitalState ? SBSkills.capitalState(skill.key) : null;   // PATCH_1910_SKILLS_LONGS
   const _busy = !!G.research && !_rs;
-  const buyable = !applied && lvlOk && prereqOk && canAfford && !_rs && !_busy && skill.key !== 'colonial';
+  const buyable = !applied && lvlOk && prereqOk && canAfford && !_rs && !_busy;   // PATCH_2010_COLONIE : le skill s'apprend
   const costStr = Object.entries(skill.cost).map(([r, q]) => `${q} ${r}`).join(' · ') + (window.SBSkills && SBSkills.capDur ? ' · ' + SBSkills.capDur(skill.key) : '');
 
   let lockReason = '';
@@ -38773,7 +38855,6 @@ function renderSkillRow(skill) {
   }
   else if (!canAfford) lockReason = 'Ressources insuffisantes';
   if (!applied && _rs) lockReason = `En recherche · ${_rs.left} restantes`;
-  if (!applied && skill.key === 'colonial') lockReason = 'Arrive avec la colonisation';   // PATCH_1910_SKILLS_APPLY
   else if (!applied && _busy && lvlOk && prereqOk) lockReason = `Une recherche est en cours : ${SBSkills.researchName()}`;
 
   return `
@@ -46456,11 +46537,11 @@ if (G.knownTargets && Array.isArray(G.tankerMissions)) {
 <script src="assets/aftermath.js?v=20261014-1440"></script>
 <script src="assets/fete_caserne.js?v=20261014-1440"></script>
 <script src="assets/radio.js?v=20261014-1440"></script>
-<script type="module" src="assets/ship3d.js?v=20261014-1440"></script>
+<script type="module" src="assets/ship3d.js?v=20261020-0200"></script>
 <!-- PATCH_1510_MISSIONS — tout ce qui vole, fiche de mission des tankers -->
 <script src="assets/missions.js?v=20261015-2300"></script>
 <!-- PATCH_1610_SKILLS — skills des bâtiments : apprendre, découvrir, effets -->
-<script src="assets/skills.js?v=20261019-2140"></script>
+<script src="assets/skills.js?v=20261020-0200"></script>
 <!-- PATCH_1510_CROWN — The Drifting Crown en 3D (assets/station3d.js, sur le moteur partagé window.SB3D) -->
 <script type="module" src="assets/station3d.js?v=20261020-0120"></script>
 <!-- FORMATION3D — flotte déployée en orbite, vue de haut en formation (remplace la vue orbite) -->
