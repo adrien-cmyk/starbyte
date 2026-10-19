@@ -87,7 +87,13 @@
   const sumFx = (sec, k) => SKILLS.reduce((a, s) => a + (has(s.key) && s.fx[sec] && s.fx[sec][k] ? s.fx[sec][k] : 0), 0);
   function prodMult(res) { return 1 + sumFx('prod', res) + (['metal', 'energie', 'cristal', 'biomass'].includes(res) ? sumFx('prod', 'all') : 0); }
   function m3Mult(res) { return 1 + sumFx('m3', res); }
-  function durMult(kind) { return SKILLS.reduce((a, s) => a * (has(s.key) && s.fx.dur && s.fx.dur[kind] ? 1 - s.fx.dur[kind] : 1), 1); }
+  function durMult(kind) {
+    const m = SKILLS.reduce((a, s) => a * (has(s.key) && s.fx.dur && s.fx.dur[kind] ? 1 - s.fx.dur[kind] : 1), 1);
+    // 19/10 : « Production accélérée » (Centre de commandement) promet −15 % / −30 % sur le temps de construction :
+    // il ne touchait que vaisseaux et soldats, il s'applique aussi aux chantiers et améliorations de bâtiments
+    const g = G_(), ps = g && g.skills && g.skills.productionSpeed > 1 ? g.skills.productionSpeed : 1;
+    return kind === 'build' ? m / ps : m;
+  }
   function defense(total, soldierPart) {
     const extraSoldiers = (soldierPart || 0) * sumFx('def', 'soldiers');
     return Math.round((total + extraSoldiers + sumFx('def', 'flat')) * (1 + sumFx('def', 'pct')));
@@ -140,6 +146,7 @@
   function learnCapital(key) {
     const sk = capSkill(key); if (!sk || sk.isApplied()) return;
     const say = (t) => { if (typeof toast === 'function') toast(t); };
+    if (key === 'colonial') return say('Le Vaisseau colonial arrivera avec la colonisation : rien à rechercher pour l\'instant');
     if (G.research) return say(`Une recherche est déjà en cours : ${researchName()}`);
     if ((G.skills.capitalLevel || 1) < sk.requires.capitalLevel) return say(`Centre de commandement niveau ${sk.requires.capitalLevel} requis`);
     if (sk.requires.prereq && !(capSkill(sk.requires.prereq) || { isApplied: () => false }).isApplied()) return say(`Apprends d'abord ${capSkill(sk.requires.prereq).name}`);
@@ -167,6 +174,14 @@
     if (typeof saveGame === 'function') saveGame();
     refresh();
     return true;
+  }
+  // match-3 V2 (Laboratoire, Centrale) : la veine profonde peut livrer le plan d'un skill disponible du bâtiment
+  function m3Discover(parcelIdx, tier) {
+    const p = G.planet && G.planet.parcels[parcelIdx];
+    if (!p || p.state !== 'built' || !['labo', 'centrale'].includes(p.building) || (tier || 0) < 3) return null;
+    const pool = dropPool(p); if (!pool.length || Math.random() > 0.35) return null;
+    const pick = pool[Math.floor(Math.random() * pool.length)];
+    return discover(pick.id) ? pick.label : null;
   }
   function grant(key, via) {
     const s = BY[key]; if (!s || has(key)) return false;
@@ -317,7 +332,7 @@
     css();
     const list = SKILLS.filter(s => s.b === b);
     if (!list.length) return '';
-    const m3 = (b === 'labo' || b === 'centrale') ? ' Le match-3 de ce bâtiment peut aussi t\'en faire <b>découvrir le plan</b> : sa recherche est alors sans frais (mais elle prend son temps).' : '';
+    const m3 = (b === 'labo' || b === 'centrale') ? ' La veine profonde (palier III) au match-3 de ce bâtiment peut aussi t\'en faire <b>découvrir le plan</b> : sa recherche est alors sans frais (mais elle prend son temps).' : '';
     return `<div class="sk-how">Chaque niveau du bâtiment rend un skill <b>disponible</b>. Tu l'<b>apprends</b> ici : un coût, puis une recherche de 3 h ou plus (même jeu fermé). Une recherche à la fois.${m3}</div>`
       + list.map(s => rowHtml(s, { here: true })).join('')
       + `<div style="margin-top:12px;text-align:center"><button onclick="SBSkills.openTree('${FAMILY[b] || ''}')" style="background:transparent;border:none;color:var(--cyan);font-size:11px;letter-spacing:.16em;text-transform:uppercase;cursor:pointer;padding:6px">Voir l'arbre complet →</button></div>`;
@@ -341,5 +356,5 @@
     }, 120);
   }
 
-  window.SBSkills = { SKILLS, has, stateOf, prodMult, m3Mult, durMult, defense, applyM3, learn, grant, dropPool, buildingHtml, familyHtml, familyCount, openTree, buildingTier, tick, discover, learnCapital, capitalState, capDur, researchName, COST, DUR_MIN, rehab, rehabBtn, tickRehab };
+  window.SBSkills = { SKILLS, has, stateOf, prodMult, m3Mult, durMult, defense, applyM3, learn, grant, dropPool, buildingHtml, familyHtml, familyCount, openTree, buildingTier, tick, discover, m3Discover, learnCapital, capitalState, capDur, researchName, COST, DUR_MIN, rehab, rehabBtn, tickRehab };
 })();

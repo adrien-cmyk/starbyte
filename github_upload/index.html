@@ -38615,7 +38615,7 @@ function renderSkillRow(skill) {
   const canAfford = Object.entries(skill.cost).every(([res, q]) => G.res[res] && G.res[res].v >= q);
   const _rs = window.SBSkills && SBSkills.capitalState ? SBSkills.capitalState(skill.key) : null;   // PATCH_1910_SKILLS_LONGS
   const _busy = !!G.research && !_rs;
-  const buyable = !applied && lvlOk && prereqOk && canAfford && !_rs && !_busy;
+  const buyable = !applied && lvlOk && prereqOk && canAfford && !_rs && !_busy && skill.key !== 'colonial';
   const costStr = Object.entries(skill.cost).map(([r, q]) => `${q} ${r}`).join(' · ') + (window.SBSkills && SBSkills.capDur ? ' · ' + SBSkills.capDur(skill.key) : '');
 
   let lockReason = '';
@@ -38627,6 +38627,7 @@ function renderSkillRow(skill) {
   }
   else if (!canAfford) lockReason = 'Ressources insuffisantes';
   if (!applied && _rs) lockReason = `En recherche · ${_rs.left} restantes`;
+  if (!applied && skill.key === 'colonial') lockReason = 'Arrive avec la colonisation';   // PATCH_1910_SKILLS_APPLY
   else if (!applied && _busy && lvlOk && prereqOk) lockReason = `Une recherche est en cours : ${SBSkills.researchName()}`;
 
   return `
@@ -46276,7 +46277,7 @@ if (G.knownTargets && Array.isArray(G.tankerMissions)) {
 <!-- CLOUD — sauvegarde Supabase (source : sb-build/src/cloud.js) -->
 <script type="module" src="assets/cloud.js?v=20261014-1440"></script>
 <!-- MATCH3 — Match-3 V2 (assets/match3.js, source src/match3.js + src/m3core.js) : remplace startM3 -->
-<script type="module" src="assets/match3.js?v=20261014-1440"></script>
+<script type="module" src="assets/match3.js?v=20261019-2140"></script>
 <!-- HOME V2 — « monde d'abord » : planète plein écran, ressources en ligne, Flotte / Défense / Prospection (assets/home.js) -->
 <script type="module" src="assets/home.js?v=20261016-1800"></script>
 <!-- SPACE MAP v0 — carte du Centre de prospection (assets/spacemap.js, source src/spacemap.js) -->
@@ -46291,7 +46292,7 @@ if (G.knownTargets && Array.isArray(G.tankerMissions)) {
 <!-- PATCH_1510_MISSIONS — tout ce qui vole, fiche de mission des tankers -->
 <script src="assets/missions.js?v=20261015-2300"></script>
 <!-- PATCH_1610_SKILLS — skills des bâtiments : apprendre, découvrir, effets -->
-<script src="assets/skills.js?v=20261019-2110"></script>
+<script src="assets/skills.js?v=20261019-2140"></script>
 <!-- PATCH_1510_CROWN — The Drifting Crown en 3D (assets/station3d.js, sur le moteur partagé window.SB3D) -->
 <script type="module" src="assets/station3d.js?v=20261019-2010"></script>
 <!-- FORMATION3D — flotte déployée en orbite, vue de haut en formation (remplace la vue orbite) -->
