@@ -8677,7 +8677,7 @@ var EXTRA_SAVE_KEYS = [
   'mpNeighbors',   // VOISINS_1310 — voisins déjà signalés
   'tuto',          // TUTO_1410 — premiers pas (étape, vu, terminé)
   'skillsLearned', 'research', '_skillsSeen', '_skillsMigrated',   // PATCH_1610_SKILLS
-  'worlds', 'activeWorld',   // PATCH_2010_WORLDS — colonies (planètes inactives) et planète affichée
+  'worlds', 'activeWorld', 'colonyMissions',   // PATCH_2010_WORLDS — colonies (planètes inactives) et planète affichée
   '_linesCrown', 'crownSeen', '_linesSanct', 'sanctSeen', '_linesNoire', 'noireSeen', '_linesRefuge', '_linesRefuge2', 'refugeSeen', '_brest1',   // PATCH_1510_CROWN — lieu du secteur M devenu la Couronne, première arrivée vue
 ];
 
@@ -28922,6 +28922,102 @@ function renderColonialDetail() {
     : `<button class="btn-ghost" style="width:100%;padding:14px" onclick="goBack()">Retour</button>`;
 }
 
+/* ═══════════ PATCH_2010_COLONIE — le voyage de l'Arche et la fondation (étape 3) + sélecteur de planète (étape 4) ═══════════ */
+function sbFindPlanet(coord) {
+  const sysKey = String(coord || '').split('-').slice(0, 3).join('-');
+  const sys = (G.knownSystems || {})[sysKey];
+  return sys && Array.isArray(sys.planets) ? sys.planets.find(p => p.coord === coord) || null : null;
+}
+// Voyage : 45 min dans le même secteur (+ un peu selon l'écart de système), +2 h par secteur d'écart ; plafonné à 12 h
+function colonyTravelMs(coord) {
+  const [, sec, sys] = String(coord || '').split('-');
+  const dSec = (sec && MY_ADDRESS.sector) ? Math.abs(sec.charCodeAt(0) - MY_ADDRESS.sector.charCodeAt(0)) : 0;
+  const dSys = Math.abs((parseInt(sys, 10) || 0) - (parseInt(MY_ADDRESS.system, 10) || 0));
+  const min = 45 + dSec * 120 + Math.min(60, Math.round(dSys / 150));
+  return Math.min(12 * 60, min) * 60000;
+}
+async function sbColonizeAsk(coord) {
+  const p = sbFindPlanet(coord);
+  if (!p) { toast('Planète inconnue : sonde-la d\'abord'); return; }
+  if ((G.colonyMissions || []).some(m => m.coord === coord)) { toast('Une Arche est déjà en route vers cette planète'); return; }
+  if (!(G.fleet.colonial > 0)) {
+    toast(G.skills.colonialShipUnlocked ? 'Assemble une Arche coloniale au chantier orbital' : 'Il faut une Arche coloniale : Centre niveau 3, skill « Vaisseau colonial », puis le chantier orbital');
+    return;
+  }
+  const name = String(p.customName || p.name || coord).toUpperCase();
+  const ms = colonyTravelMs(coord);
+  const ok = await sbConfirmWarning('Coloniser ' + name,
+    `L'Arche coloniale part vers <strong>${name}</strong> (${coord}).<br><br>Voyage : <strong>${formatTankerDuration(ms)}</strong>. Elle ne reviendra pas : à l'arrivée, elle devient ta nouvelle colonie, avec son Centre de commandement et une antenne à bâtir.`, 'Lancer l\'Arche');
+  if (!ok) return;
+  G.fleet.colonial -= 1;
+  if (!Array.isArray(G.colonyMissions)) G.colonyMissions = [];
+  G.colonyMissions.push({ id: 'ark-' + Date.now().toString(36), coord, name, departAt: Date.now(), arriveAt: Date.now() + ms });
+  toast(`◈ L'Arche quitte l'orbite · arrivée dans ${formatTankerDuration(ms)}`);
+  try { saveGame(); } catch (e) {}
+  try { if (typeof refreshCurrentScreen === 'function') refreshCurrentScreen(); } catch (e) {}
+}
+function sbColonyTick() {
+  if (typeof G === 'undefined' || !Array.isArray(G.colonyMissions) || !G.colonyMissions.length) return;
+  const now = Date.now();
+  const due = G.colonyMissions.filter(m => m.arriveAt <= now);
+  if (!due.length) return;
+  for (const m of due) {
+    G.colonyMissions = G.colonyMissions.filter(x => x !== m);
+    const p = sbFindPlanet(m.coord);
+    if (p && p.playerName && !p.myColony) { G.fleet.colonial = (G.fleet.colonial || 0) + 1; toast(`◈ ${m.name} est déjà occupée : l'Arche attend au chantier`); continue; }
+    const w = sbFoundColony({ name: m.name, coord: m.coord });
+    if (p) { p.myColony = w.id; p.playerName = (G.profile && (G.profile.pseudo || G.profile.name)) || 'Ta colonie'; p.type = 'habitable'; }
+    sbColonyFounded(w);
+  }
+  try { saveGame(); } catch (e) {}
+}
+setInterval(() => { try { sbColonyTick(); } catch (e) { console.warn('[colonie]', e); } }, 5000);
+async function sbColonyFounded(w) {
+  if (typeof sbNotifPush === 'function') { try { sbNotifPush({ title: 'Colonie fondée', text: `${w.name} : l'Arche s'est posée.` }); } catch (e) {} }
+  const go = await sbConfirmWarning('◈ ' + w.name + ' est fondée',
+    `L'Arche s'est posée sur <strong>${w.name}</strong> (${w.coord}). Elle est devenue le Centre de commandement d'une nouvelle colonie.<br><br>Tout est à bâtir : les parcelles se gagnent au match-3, et la nouvelle antenne verra ce que la capitale ne voyait pas.<br><br>Le stock reste commun à tout l'empire. Change de planète en touchant son nom en haut de l'écran.`, 'Voir la colonie');
+  if (go) { sbSwitchWorld(w.id); try { goto('planet'); } catch (e) {} }
+}
+// Sélecteur : toucher le nom de la planète en haut de l'écran
+function sbOpenWorldPicker() {
+  sbWorldsInit();
+  if (G.worlds.length < 2) return;
+  let el = document.getElementById('sb-worlds');
+  if (el) el.remove();
+  el = document.createElement('div');
+  el.id = 'sb-worlds';
+  const esc = (x) => String(x == null ? '' : x).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  el.innerHTML = `<div class="sbw-card"><div class="sbw-h">Tes planètes</div>${G.worlds.map(w => `
+    <button class="sbw-row${w.id === G.activeWorld ? ' on' : ''}" onclick="document.getElementById('sb-worlds').remove();sbSwitchWorld('${w.id}')">
+      <b>${esc(w.id === 'home' ? ((w.id === G.activeWorld ? G.planet.name : w.name) || 'Capitale') : w.name)}</b>
+      <span>${w.kind === 'capital' ? 'Capitale' : 'Colonie'}${w.coord ? ' · ' + esc(w.coord) : ''}</span>
+    </button>`).join('')}${(G.colonyMissions || []).map(m => `<div class="sbw-row off"><b>${esc(m.name)}</b><span>Arche en route · ${formatTankerDuration(Math.max(0, m.arriveAt - Date.now()))}</span></div>`).join('')}
+    <button class="sbw-x" onclick="document.getElementById('sb-worlds').remove()">Fermer</button></div>`;
+  el.addEventListener('click', (e) => { if (e.target === el) el.remove(); });
+  document.body.appendChild(el);
+}
+(function () {
+  const st = document.createElement('style');
+  st.textContent = `
+    body.sb-multi #w-planet { pointer-events: auto; cursor: pointer; }
+    body.sb-multi #w-planet::after { content: ' ▾'; color: #ffb066; }
+    #sb-worlds { position: fixed; inset: 0; z-index: 9500; background: rgba(2,6,12,.6); display: flex; align-items: center; justify-content: center; padding: 16px; backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px); }
+    #sb-worlds .sbw-card { width: 100%; max-width: 360px; background: rgba(10,18,28,.96); border: 1px solid rgba(95,255,232,.25); border-radius: 14px; padding: 14px; }
+    #sb-worlds .sbw-h { font: 600 11px/1 ui-monospace, monospace; letter-spacing: .16em; text-transform: uppercase; color: #5fffe8; margin: 2px 2px 12px; }
+    #sb-worlds .sbw-row { display: block; width: 100%; text-align: left; background: rgba(255,255,255,.03); border: 1px solid rgba(255,255,255,.08); border-radius: 10px; padding: 11px 12px; margin-bottom: 8px; color: #dfe8ea; }
+    #sb-worlds .sbw-row b { display: block; font-size: 14px; letter-spacing: .04em; }
+    #sb-worlds .sbw-row span { font-size: 11px; color: #8aa0a6; }
+    #sb-worlds .sbw-row.on { border-color: rgba(255,176,102,.6); background: rgba(255,176,102,.08); }
+    #sb-worlds .sbw-row.off { opacity: .6; }
+    #sb-worlds .sbw-x { width: 100%; padding: 11px; margin-top: 4px; background: none; border: 1px solid rgba(255,255,255,.12); border-radius: 10px; color: #8aa0a6; }`;
+  document.head.appendChild(st);
+  document.addEventListener('click', (e) => {
+    const t = e.target && e.target.closest && e.target.closest('#w-planet');
+    if (t && Array.isArray(G.worlds) && G.worlds.length > 1) sbOpenWorldPicker();
+  });
+  setInterval(() => { try { document.body.classList.toggle('sb-multi', Array.isArray(G.worlds) && G.worlds.length > 1); } catch (e) {} }, 1000);
+})();
+
 // Construit un vaisseau militaire (Tanker / Frégate / Cuirassé)
 function buildShip(shipKey, qty) {
   qty = qty || 1;
@@ -37362,7 +37458,7 @@ function renderPlanetDetailScreen() {
         <button class="btn-primary" style="width:100%;padding:14px;margin-bottom:8px;border-color:rgba(255,200,100,.4);background:rgba(255,200,100,.06);color:#ffc864" onclick="openTankerCompose('${p.coord}')">Envoyer un tanker</button>
       ` : ''}
       ${messageBtn}
-      ${isFreeHabitable ? `<button class="btn-ghost" style="width:100%;padding:14px;margin-bottom:8px" onclick="toast('Vaisseau colonial requis')">Coloniser</button>` : ''}
+      ${isFreeHabitable ? `<button class="btn-ghost" style="width:100%;padding:14px;margin-bottom:8px" onclick="sbColonizeAsk('${p.coord}')">${(G.colonyMissions || []).some(m => m.coord === p.coord) ? 'Arche en route' : 'Coloniser'}</button>` : ''}
     `;
   }
 }
@@ -46539,7 +46635,7 @@ if (G.knownTargets && Array.isArray(G.tankerMissions)) {
 <script src="assets/radio.js?v=20261014-1440"></script>
 <script type="module" src="assets/ship3d.js?v=20261020-0200"></script>
 <!-- PATCH_1510_MISSIONS — tout ce qui vole, fiche de mission des tankers -->
-<script src="assets/missions.js?v=20261015-2300"></script>
+<script src="assets/missions.js?v=20261020-0230"></script>
 <!-- PATCH_1610_SKILLS — skills des bâtiments : apprendre, découvrir, effets -->
 <script src="assets/skills.js?v=20261020-0200"></script>
 <!-- PATCH_1510_CROWN — The Drifting Crown en 3D (assets/station3d.js, sur le moteur partagé window.SB3D) -->

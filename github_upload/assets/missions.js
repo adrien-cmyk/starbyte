@@ -68,7 +68,7 @@
     const fleets = ((G.fleet && G.fleet.prepared) || []).filter(f => (f.status || 'prepared') === 'in_mission');
     return { probes, tankers, fleets };
   }
-  function count() { const l = list(); return l.probes.length + l.tankers.length + l.fleets.length; }
+  function count() { const l = list(); return l.probes.length + l.tankers.length + l.fleets.length + ((typeof G !== 'undefined' && Array.isArray(G.colonyMissions)) ? G.colonyMissions.length : 0); }
 
   /* ── la feuille « Missions » ── */
   function row(o) {
@@ -85,6 +85,12 @@
     const l = list(), now = Date.now();
     const H = (t, n) => `<div class="sbm-h">${t}${n ? ' · ' + n : ''}</div>`;
     let html = '';
+    // PATCH_2010_COLONIE — Arches coloniales en route
+    const arks = (typeof G !== 'undefined' && Array.isArray(G.colonyMissions)) ? G.colonyMissions : [];
+    if (arks.length) {
+      html += H('Arches coloniales', arks.length);
+      for (const a of arks) html += row({ kind: 'Arche', name: a.name, color: '#ffb066', dest: `→ <span class="mono">${esc(a.coord)}</span>`, state: dur(a.arriveAt - now), t0: a.departAt, t1: a.arriveAt, onclick: "toast('L\\'Arche est en route : elle fondera la colonie à l\\'arrivée')" });
+    }
     // tankers d'abord : ce sont eux qu'on suit le plus
     html += H('Tankers', l.tankers.length);
     if (!l.tankers.length) html += `<div class="sbm-empty">Aucun tanker en mission. Envoie-en un depuis une route (carte ou Commerce).</div>`;
