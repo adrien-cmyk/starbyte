@@ -1,7 +1,7 @@
 /* ═══════════════════════════════════════════════════════════════════════════
    STARBYTE — Skills des bâtiments (16/10/2026, retour joueur : « pas clair comment les obtenir »)
    Décisions d'Adrien (16/10) :
-   · le TIER du bâtiment rend le skill « Disponible » ; on l'APPREND (coût + courte recherche), depuis la fiche du
+   · le TIER du bâtiment rend le skill « Disponible » ; on l'APPREND (coût + recherche de 3 h minimum), depuis la fiche du
      bâtiment ou depuis l'arbre technologique ;
    · le match-3 du Labo et de la Centrale peut en faire DÉCOUVRIR un gratuitement (bloc scellé cassé) ;
    · l'arbre technologique devient VIVANT : chaque famille montre ses skills, leur état et le bouton Apprendre.
@@ -46,8 +46,13 @@
   const THE = { mine: 'ta mine', centrale: 'ta centrale', labo: 'ton laboratoire', caserne: 'ta caserne', shipyard: 'ton chantier orbital', turret: 'ton bunker', comptoir: 'ton comptoir', raffinerie: 'ta raffinerie' };
   const FAMILY = { mine: 'extraction', centrale: 'energie', labo: 'recherche', caserne: 'militaire', shipyard: 'militaire', turret: 'defense', comptoir: 'commerce', raffinerie: 'commerce' };
   // apprendre : coût et durée de la recherche selon le tier du skill
-  const COST = { 1: { metal: 300, cristal: 120 }, 2: { metal: 1500, energie: 500, cristal: 400 }, 3: { metal: 6000, energie: 2000, cristal: 1500 } };
-  const DUR_MIN = { 1: 10, 2: 30, 3: 120 };
+  // 19/10 (Adrien) : un skill, quel qu'il soit, demande au moins 3 h de recherche, et il coûte cher
+  const COST = { 1: { metal: 1500, energie: 400, cristal: 300 }, 2: { metal: 4000, energie: 1500, cristal: 1000 }, 3: { metal: 12000, energie: 4000, cristal: 3000 } };
+  const DUR_MIN = { 1: 180, 2: 360, 3: 720 };
+  // skills du Centre de commandement : même règle (une recherche à la fois, 3 h minimum)
+  const CAP_DUR_MIN = { 'extra-slot-1': 180, 'speed-1': 180, 'extra-slot-2': 360, 'speed-2': 360, colonial: 720 };
+  const capSkill = (k) => (typeof CAPITAL_SKILLS !== 'undefined' ? CAPITAL_SKILLS.find(x => x.key === k) : null);
+  const plans = () => { const g = G_(); if (g && (!g.skillPlans || typeof g.skillPlans !== 'object')) g.skillPlans = {}; return g ? g.skillPlans : {}; };
   // anciennes découvertes du match-3 (jamais appliquées) → les skills équivalents
   const LEGACY = { cristallographie: 'cristallo', analyse_terrain: 'analyse', synthese_matrices: 'synthese', cellules_solaires: 'cellules', supraconducteurs: 'supra', fission_controlee: 'fission' };
 
@@ -114,15 +119,54 @@
     if (st === 'learned') return say(`${s.name} : déjà acquis`);
     if (st === 'tier') return say(`${s.name} : ${BUILD_NAME[s.b]} niveau ${s.tier} requis`);
     if (st === 'req') return say(`${s.name} : apprends d'abord ${BY[s.req].name}`);
-    if (G.research) return say(`Une recherche est déjà en cours : ${(BY[G.research.key] || {}).name || ''}`);
+    if (G.research) return say(`Une recherche est déjà en cours : ${researchName()}`);
+    const free = !!plans()[key];
     const c = COST[s.tier];
-    if (!canPay(c)) return say(`Ressources insuffisantes : ${costLine(c)}`);
-    for (const [k, v] of Object.entries(c)) G.res[k].v -= v;
+    if (!free && !canPay(c)) return say(`Ressources insuffisantes : ${costLine(c)}`);
+    if (!free) for (const [k, v] of Object.entries(c)) G.res[k].v -= v;
+    delete plans()[key];
     const now = Date.now();
     G.research = { key, startedAt: now, endsAt: now + DUR_MIN[s.tier] * 60000 };
-    say(`Recherche lancée : ${s.name} · ${fmtDur(DUR_MIN[s.tier])}`);
+    say(`Recherche lancée : ${s.name} · ${fmtDur(DUR_MIN[s.tier])}${free ? ' · plan découvert, sans frais' : ''}`);
     if (typeof saveGame === 'function') saveGame();
     refresh();
+  }
+  function researchName() {
+    const r = G.research; if (!r) return '';
+    if (String(r.key).startsWith('cap:')) return (capSkill(r.key.slice(4)) || {}).name || '';
+    return (BY[r.key] || {}).name || '';
+  }
+  // Centre de commandement : apprendre = payer puis rechercher (au moins 3 h)
+  function learnCapital(key) {
+    const sk = capSkill(key); if (!sk || sk.isApplied()) return;
+    const say = (t) => { if (typeof toast === 'function') toast(t); };
+    if (G.research) return say(`Une recherche est déjà en cours : ${researchName()}`);
+    if ((G.skills.capitalLevel || 1) < sk.requires.capitalLevel) return say(`Centre de commandement niveau ${sk.requires.capitalLevel} requis`);
+    if (sk.requires.prereq && !(capSkill(sk.requires.prereq) || { isApplied: () => false }).isApplied()) return say(`Apprends d'abord ${capSkill(sk.requires.prereq).name}`);
+    if (!canPay(sk.cost)) return say(`Ressources insuffisantes : ${costLine(sk.cost)}`);
+    for (const [k, v] of Object.entries(sk.cost)) G.res[k].v -= v;
+    const now = Date.now(), min = CAP_DUR_MIN[key] || 180;
+    G.research = { key: 'cap:' + key, startedAt: now, endsAt: now + min * 60000 };
+    say(`Recherche lancée : ${sk.name} · ${fmtDur(min)}`);
+    if (typeof saveGame === 'function') saveGame();
+    try { if (typeof renderCapitalTabContent === 'function') renderCapitalTabContent(); } catch (e) {}
+  }
+  function capitalState(key) {
+    const r = G_() && G_().research;
+    if (!r || r.key !== 'cap:' + key) return null;
+    const now = Date.now();
+    return { pct: Math.min(100, Math.round((now - r.startedAt) / Math.max(1, r.endsAt - r.startedAt) * 100)), left: fmtDur(Math.max(1, Math.round((r.endsAt - now) / 60000))) };
+  }
+  const capDur = (key) => fmtDur(CAP_DUR_MIN[key] || 180);
+  // match-3 : un bloc scellé cassé livre le PLAN d'un skill (recherche sans frais, mais il faut quand même le temps)
+  function discover(key) {
+    const s = BY[key]; if (!s || has(key) || plans()[key] || (G.research && G.research.key === key)) return false;
+    plans()[key] = Date.now();
+    if (!G.research) learn(key);
+    else if (typeof toast === 'function') toast(`Plan découvert : ${s.name} · sa recherche sera sans frais (${fmtDur(DUR_MIN[s.tier])}) dès que la recherche en cours sera finie`);
+    if (typeof saveGame === 'function') saveGame();
+    refresh();
+    return true;
   }
   function grant(key, via) {
     const s = BY[key]; if (!s || has(key)) return false;
@@ -138,13 +182,21 @@
   // le match-3 d'un bâtiment peut faire découvrir un de ses skills disponibles (bloc scellé cassé)
   function dropPool(parcel) {
     if (!parcel || !parcel.building) return [];
-    return SKILLS.filter(s => s.b === parcel.building && stateOf(s) === 'available').map(s => ({ id: s.key, label: s.name, desc: s.effect }));
+    return SKILLS.filter(s => s.b === parcel.building && stateOf(s) === 'available' && !plans()[s.key]).map(s => ({ id: s.key, label: s.name, desc: s.effect }));
   }
 
   /* ── horloge : fin de recherche, nouveaux skills disponibles ── */
   function tick() {
     const g = G_(); if (!g || !g.res) return;
-    if (g.research && Date.now() >= g.research.endsAt) grant(g.research.key, 'recherche');
+    if (g.research && Date.now() >= g.research.endsAt) {
+      const k = String(g.research.key);
+      if (k.startsWith('cap:')) {
+        const sk = capSkill(k.slice(4)); g.research = null;
+        if (sk && !sk.isApplied()) { sk.apply(); if (typeof toast === 'function') toast(`Skill acquis : ${sk.name} · ${sk.desc}`); }
+        if (typeof saveGame === 'function') saveGame();
+        try { if (typeof renderCapitalTabContent === 'function' && document.querySelector('.skill-row')) renderCapitalTabContent(); } catch (e) {}
+      } else if (!grant(k, 'recherche') && g.research && g.research.key === k) g.research = null;
+    }
     // prévenir une fois quand un skill devient disponible (le joueur doit savoir qu'il peut l'apprendre)
     if (!g._skillsSeen || typeof g._skillsSeen !== 'object') g._skillsSeen = {};
     const fresh = SKILLS.filter(s => stateOf(s) === 'available' && !g._skillsSeen[s.key]);
@@ -252,8 +304,8 @@
       const left = Math.max(1, Math.round((r.endsAt - now) / 60000));
       extra = `<div class="sk-bar"><b style="width:${pct}%"></b></div><div class="sk-why">Recherche en cours · ${fmtDur(left)} restante${left > 1 ? 's' : ''}</div>`;
     } else if (st === 'available') {
-      const c = COST[s.tier], busy = !!G.research, ok = !busy && canPay(c);
-      extra = `<button class="sk-learn${ok ? '' : ' off'}" onclick="event.stopPropagation();SBSkills.learn('${s.key}')">Apprendre<span>${busy ? 'une recherche est en cours' : costLine(c) + ' · ' + fmtDur(DUR_MIN[s.tier])}</span></button>`;
+      const c = COST[s.tier], busy = !!G.research, free = !!plans()[s.key], ok = !busy && (free || canPay(c));
+      extra = `<button class="sk-learn${ok ? '' : ' off'}" onclick="event.stopPropagation();SBSkills.learn('${s.key}')">Apprendre<span>${busy ? 'une recherche est en cours : ' + esc(researchName()) : (free ? 'plan découvert au match-3 · sans frais' : costLine(c)) + ' · ' + fmtDur(DUR_MIN[s.tier])}</span></button>`;
     } else if (st === 'learned') {
       const via = learned()[s.key] && learned()[s.key].via;
       if (via === 'match-3') extra = `<div class="sk-why">Découvert au match-3.</div>`;
@@ -265,8 +317,8 @@
     css();
     const list = SKILLS.filter(s => s.b === b);
     if (!list.length) return '';
-    const m3 = (b === 'labo' || b === 'centrale') ? ' Le match-3 de ce bâtiment peut aussi t\'en faire <b>découvrir</b> un gratuitement.' : '';
-    return `<div class="sk-how">Chaque niveau du bâtiment rend un skill <b>disponible</b>. Tu l'<b>apprends</b> ici : un coût, puis une courte recherche. Une recherche à la fois.${m3}</div>`
+    const m3 = (b === 'labo' || b === 'centrale') ? ' Le match-3 de ce bâtiment peut aussi t\'en faire <b>découvrir le plan</b> : sa recherche est alors sans frais (mais elle prend son temps).' : '';
+    return `<div class="sk-how">Chaque niveau du bâtiment rend un skill <b>disponible</b>. Tu l'<b>apprends</b> ici : un coût, puis une recherche de 3 h ou plus (même jeu fermé). Une recherche à la fois.${m3}</div>`
       + list.map(s => rowHtml(s, { here: true })).join('')
       + `<div style="margin-top:12px;text-align:center"><button onclick="SBSkills.openTree('${FAMILY[b] || ''}')" style="background:transparent;border:none;color:var(--cyan);font-size:11px;letter-spacing:.16em;text-transform:uppercase;cursor:pointer;padding:6px">Voir l'arbre complet →</button></div>`;
   }
@@ -289,5 +341,5 @@
     }, 120);
   }
 
-  window.SBSkills = { SKILLS, has, stateOf, prodMult, m3Mult, durMult, defense, applyM3, learn, grant, dropPool, buildingHtml, familyHtml, familyCount, openTree, buildingTier, tick, rehab, rehabBtn, tickRehab };
+  window.SBSkills = { SKILLS, has, stateOf, prodMult, m3Mult, durMult, defense, applyM3, learn, grant, dropPool, buildingHtml, familyHtml, familyCount, openTree, buildingTier, tick, discover, learnCapital, capitalState, capDur, researchName, COST, DUR_MIN, rehab, rehabBtn, tickRehab };
 })();

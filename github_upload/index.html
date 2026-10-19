@@ -5621,7 +5621,7 @@ svg.map {
         Lis-le comme un manuel : ce que ça fait, ce que ça débloque, ce qui le suit.
       </div>
       <div style="font-size:12px;color:var(--txt);line-height:1.6;margin-bottom:8px">
-        <strong>Les skills</strong> : chaque niveau d'un bâtiment en rend un <strong>disponible</strong>. Tu l'<strong>apprends</strong> ici ou sur la fiche du bâtiment (un coût, puis une courte recherche, une à la fois). Le match-3 du Laboratoire et de la Centrale peut aussi t'en faire <strong>découvrir</strong> un.
+        <strong>Les skills</strong> : chaque niveau d'un bâtiment en rend un <strong>disponible</strong>. Tu l'<strong>apprends</strong> ici ou sur la fiche du bâtiment (un coût, puis une recherche de 3 h ou plus, une à la fois). Le match-3 du Laboratoire et de la Centrale peut aussi t'en faire <strong>découvrir le plan</strong> : la recherche est alors sans frais.
       </div>
       <div style="font-size:11px;color:var(--mut);line-height:1.6">
         <span style="color:#78c88c">●</span> Acquis : tu l'as déjà débloqué &nbsp;&nbsp;
@@ -7879,7 +7879,7 @@ const CAPITAL_SKILLS = [
     key: 'extra-slot-1',
     name: 'Logistique parallèle I',
     desc: '+1 cale active simultanée (total : 2 cales)',
-    cost: { metal: 2000, cristal: 500 },
+    cost: { metal: 3000, energie: 800, cristal: 800 },
     requires: { capitalLevel: 1 },
     apply: () => { G.skills.barracksSlots = 2; },
     isApplied: () => G.skills.barracksSlots >= 2,
@@ -7888,7 +7888,7 @@ const CAPITAL_SKILLS = [
     key: 'extra-slot-2',
     name: 'Logistique parallèle II',
     desc: '+1 cale active (total : 3 cales)',
-    cost: { metal: 8000, cristal: 2000 },
+    cost: { metal: 10000, energie: 2500, cristal: 3000 },
     requires: { capitalLevel: 2, prereq: 'extra-slot-1' },
     apply: () => { G.skills.barracksSlots = 3; },
     isApplied: () => G.skills.barracksSlots >= 3,
@@ -7897,7 +7897,7 @@ const CAPITAL_SKILLS = [
     key: 'speed-1',
     name: 'Production accélérée I',
     desc: '−15% sur le temps de construction',
-    cost: { cristal: 800 },
+    cost: { metal: 2000, energie: 600, cristal: 1200 },
     requires: { capitalLevel: 1 },
     apply: () => { G.skills.productionSpeed = 1.15; },
     isApplied: () => G.skills.productionSpeed >= 1.15,
@@ -7906,7 +7906,7 @@ const CAPITAL_SKILLS = [
     key: 'speed-2',
     name: 'Production accélérée II',
     desc: '−30% sur le temps (cumulé)',
-    cost: { cristal: 3000, energie: 800 },
+    cost: { metal: 6000, energie: 2000, cristal: 4000 },
     requires: { capitalLevel: 2, prereq: 'speed-1' },
     apply: () => { G.skills.productionSpeed = 1.43; },
     isApplied: () => G.skills.productionSpeed >= 1.43,
@@ -30169,7 +30169,7 @@ function renderM3Bars() {
     const isFull = explosions >= target;
     const skill = G.m3.megahideSkillUnlocked;
     const skillStatus = skill
-      ? `<span style="color:#5fffa8">🧠 ${skill.label} découvert</span>`
+      ? `<span style="color:#5fffa8">🧠 plan découvert : ${skill.label}</span>`
       : `<span style="color:var(--mut)">skill caché dans la matrice quantique</span>`;
     const colorMain = isFull ? obj.accentFull : obj.accent;
     // Update du HUD objectif (en haut) avec le texte de l'objectif actif
@@ -31341,7 +31341,7 @@ function endM3(quit) {
     } else {
       sub = `${explosions} explosions sur ${target} · +${baseAmount} ${rewardTile.label.toLowerCase()}.`;
     }
-    if (skill) sub += ` Découverte : ${skill.label}.`;
+    if (skill) sub += ` Plan découvert : ${skill.label} (recherche sans frais).`;
 
     document.getElementById('result-title').textContent =
       isFull ? `◆ ${obj.label.charAt(0).toUpperCase() + obj.label.slice(1)} maximum` : (quit ? 'Session quittée' : 'Session terminée');
@@ -31380,7 +31380,7 @@ function endM3(quit) {
           G.res[k].v = Math.min(G.res[k].max, G.res[k].v + Math.round(v));
         }
       }
-      if (skill && window.SBSkills) SBSkills.grant(skill.id, 'match-3');   // PATCH_1610_SKILLS : effet réel
+      if (skill && window.SBSkills) SBSkills.discover(skill.id);   // PATCH_1910_SKILLS_LONGS : le plan, pas le skill (la recherche prend son temps)
       // En mode explosions, le bâtiment existe déjà : on ne change PAS l'état parcelle
       G.selParcel = G.m3.parcelIdx;
       G.m3.animating = false;
@@ -38613,8 +38613,10 @@ function renderSkillRow(skill) {
   const lvlOk = G.skills.capitalLevel >= lvlReq;
   const prereqOk = !skill.requires.prereq || CAPITAL_SKILLS.find(s => s.key === skill.requires.prereq)?.isApplied();
   const canAfford = Object.entries(skill.cost).every(([res, q]) => G.res[res] && G.res[res].v >= q);
-  const buyable = !applied && lvlOk && prereqOk && canAfford;
-  const costStr = Object.entries(skill.cost).map(([r, q]) => `${q} ${r}`).join(' · ');
+  const _rs = window.SBSkills && SBSkills.capitalState ? SBSkills.capitalState(skill.key) : null;   // PATCH_1910_SKILLS_LONGS
+  const _busy = !!G.research && !_rs;
+  const buyable = !applied && lvlOk && prereqOk && canAfford && !_rs && !_busy;
+  const costStr = Object.entries(skill.cost).map(([r, q]) => `${q} ${r}`).join(' · ') + (window.SBSkills && SBSkills.capDur ? ' · ' + SBSkills.capDur(skill.key) : '');
 
   let lockReason = '';
   if (applied) lockReason = 'Acquis';
@@ -38624,6 +38626,8 @@ function renderSkillRow(skill) {
     lockReason = `${prereq?.name} requis`;
   }
   else if (!canAfford) lockReason = 'Ressources insuffisantes';
+  if (!applied && _rs) lockReason = `En recherche · ${_rs.left} restantes`;
+  else if (!applied && _busy && lvlOk && prereqOk) lockReason = `Une recherche est en cours : ${SBSkills.researchName()}`;
 
   return `
     <div class="skill-row ${applied ? 'applied' : ''} ${!buyable && !applied ? 'disabled' : ''}">
@@ -38633,7 +38637,7 @@ function renderSkillRow(skill) {
         <div class="skill-cost">${applied ? '<span style="color:var(--green)">' + lockReason + '</span>' : (lockReason ? '<span style="color:var(--mut)">' + lockReason + '</span>' : '<span style="color:var(--amber)">' + costStr + '</span>')}</div>
       </div>
       ${buyable
-        ? `<button class="skill-buy" onclick="buySkill('${skill.key}')">Acheter</button>`
+        ? `<button class="skill-buy" onclick="buySkill('${skill.key}')">Apprendre</button>`
         : ''
       }
     </div>
@@ -38641,6 +38645,7 @@ function renderSkillRow(skill) {
 }
 
 function buySkill(skillKey) {
+  if (window.SBSkills && SBSkills.learnCapital) return SBSkills.learnCapital(skillKey);   // PATCH_1910_SKILLS_LONGS
   const skill = CAPITAL_SKILLS.find(s => s.key === skillKey);
   if (!skill) return;
   if (skill.isApplied()) return;
@@ -46286,7 +46291,7 @@ if (G.knownTargets && Array.isArray(G.tankerMissions)) {
 <!-- PATCH_1510_MISSIONS — tout ce qui vole, fiche de mission des tankers -->
 <script src="assets/missions.js?v=20261015-2300"></script>
 <!-- PATCH_1610_SKILLS — skills des bâtiments : apprendre, découvrir, effets -->
-<script src="assets/skills.js?v=20261019-1910"></script>
+<script src="assets/skills.js?v=20261019-2110"></script>
 <!-- PATCH_1510_CROWN — The Drifting Crown en 3D (assets/station3d.js, sur le moteur partagé window.SB3D) -->
 <script type="module" src="assets/station3d.js?v=20261019-2010"></script>
 <!-- FORMATION3D — flotte déployée en orbite, vue de haut en formation (remplace la vue orbite) -->
