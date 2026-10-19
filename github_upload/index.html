@@ -7706,7 +7706,36 @@ const DEFENSE_UNITS = {
     requires: 'turret', // Construite depuis l'écran défense
     desc: 'Défense automatisée fixe. Cible les sondes et raids.',
   },
+  // PATCH_1910_TOURELLE_LOURDE — promise par le Bunker fortifié (niveau 2) mais jamais recrutable (retour testeur 18/10)
+  tourelle_lourde: {
+    key: 'tourelle_lourde',
+    name: 'Tourelle lourde',
+    icon: '◉',
+    color: 'var(--red)',
+    defPerUnit: 1400,
+    atkPerUnit: 0,
+    transportable: false,
+    cost: { metal: 600, energie: 150, cristal: 40 },
+    repairCost: { metal: 180, energie: 45 },
+    scrapReturn: { metal: 180 },
+    duration: 480,
+    requires: 'turret',
+    minLevel: 2,          // Bunker fortifié
+    lockedReason: 'Bunker fortifié (niveau 2) requis',
+    desc: 'Canon lourd sous tourelle blindée. Brise les raids massifs et tient l\'orbite basse. Fixe au sol.',
+  },
 };
+// niveau du bâtiment le plus avancé de ce type (0 = aucun)
+function bestBuildingLevel(key) {
+  let lv = 0;
+  for (const p of (G.planet && G.planet.parcels) || []) if (p.state === 'built' && p.building === key) lv = Math.max(lv, p.lvl || 1);
+  return lv;
+}
+// sauvegardes d'avant la tourelle lourde : la ligne d'unité manque
+function ensureDefenseUnits() {
+  if (!G.defense || !G.defense.units) return;
+  for (const k of Object.keys(DEFENSE_UNITS)) if (!G.defense.units[k]) G.defense.units[k] = { qty: 0, dmg: 0 };
+}
 
 /* ═══════════════════════════════════════════════════════════════
    VAISSEAUX (data placeholder — UI/mécanique en passe 3.0)
@@ -8341,6 +8370,7 @@ const G = {
       garde:    { qty: 0, dmg: 0 },  // dmg = unités endommagées récupérables
       lourd:    { qty: 0, dmg: 0 },
       tourelle: { qty: 0, dmg: 0 },  // tourelle légère
+      tourelle_lourde: { qty: 0, dmg: 0 },  // PATCH_1910 — Bunker fortifié
     },
   },
 
@@ -31535,7 +31565,9 @@ function recruitUnit(unitKey, qty) {
       toast(`${buildingName} requis pour recruter ${unit.name}`);
       return;
     }
+    if (unit.minLevel && bestBuildingLevel(unit.requires) < unit.minLevel) { toast(unit.lockedReason || 'Niveau de bâtiment insuffisant'); return; }
   }
+  ensureDefenseUnits();
 
   // Vérification du coût pour LA TOTALITÉ de la commande (à payer d'avance)
   const totalCost = {};
@@ -32002,6 +32034,7 @@ function repairInterruptedAntenna() {
 function completeUnitProduction(type, cmd) {
   if (type === 'barracks') {
     const unitKey = cmd.unitKey;
+    ensureDefenseUnits();
     if (G.defense.units[unitKey]) {
       G.defense.units[unitKey].qty++;
     }
@@ -33598,6 +33631,7 @@ function _rapTabs(all) {
   const subs = RAP_SUBS.map(([k, l, c]) => ({ k, l, c, items: sondes.filter(x => _rapSubOf(x) === k) })).filter(o => o.items.length || o.k !== 'other');
   let sub = G._rapSub;
   if (!subs.some(o => o.k === sub && o.items.length)) sub = (subs.find(o => o.items.some(x => x.unread)) || subs.find(o => o.items.length) || subs[0]).k;
+  G._rapSub = sub;   // PATCH_1910 — on reste sur l'onglet affiché : lire le dernier non-lu ne doit pas sauter vers un autre onglet
   const badge = (n) => n ? `<i class="rap-n">${n}</i>` : '';
   const fleetUnread = (G.reports || []).filter(r => !r.read).length;
   let html = `<div class="rap-tabs">
@@ -33614,6 +33648,7 @@ function _rapTabs(all) {
     let mk = G._rapMis;
     if (!mis.some(o => o.k === mk && o.items.length)) mk = (mis.find(o => o.items.some(x => x.unread)) || mis.find(o => o.items.length) || mis[0]).k;
     if (G._rapMis && mis.some(o => o.k === G._rapMis)) mk = G._rapMis;
+    G._rapMis = mk;   // PATCH_1910 — idem
     html += `<div class="rap-subs">${mis.map(o => `<button class="rap-sub${o.k === mk ? ' on' : ''}" style="--c:${o.c}" onclick="setRapMis('${o.k}')">${o.l}${o.items.length ? ` <em>${o.items.length}</em>` : ''}${unread(o.items) ? '<i></i>' : ''}</button>`).join('')}</div>`;
     const cur = mis.find(o => o.k === mk);
     if (mk === 'balises') {
@@ -37147,6 +37182,7 @@ let selectedUnitDetailKey = null;
 let selectedUnitDetailKind = 'defense'; // 'defense' | 'ship'
 
 function renderDefenseScreen() {
+  ensureDefenseUnits();
   const status = defenseStatus();
   const total = totalDefense();
   const totalUnits = Object.values(G.defense.units).reduce((s, u) => s + u.qty, 0);
@@ -37274,9 +37310,10 @@ function renderDefenseScreen() {
       // Vérifier si débloqué
       const buildingNeeded = unit.requires;
       const hasBuilding = G.planet.parcels.some(p => p.building === buildingNeeded);
-      const isLocked = unit.locked || !hasBuilding;
+      const lowLevel = hasBuilding && unit.minLevel && bestBuildingLevel(buildingNeeded) < unit.minLevel;
+      const isLocked = unit.locked || !hasBuilding || lowLevel;
       const buildingLabel = buildingNeeded === 'caserne' ? 'Caserne' : 'Bunker';
-      const lockReason = unit.locked ? unit.lockedReason : `${buildingLabel} requis`;
+      const lockReason = unit.locked ? unit.lockedReason : lowLevel || (!hasBuilding && unit.minLevel) ? unit.lockedReason : `${buildingLabel} requis`;
 
       const costStr = Object.entries(unit.cost).map(([res, q]) => `${q} ${res}`).join(' · ');
       const adjustedDuration = Math.max(1, Math.round(unit.duration / G.skills.productionSpeed * (window.SBSkills ? SBSkills.durMult('troops') : 1)));
@@ -37788,6 +37825,7 @@ function renderDefenseUnitDetail(key) {
     return;
   }
   const unit = DEFENSE_UNITS[key];
+  ensureDefenseUnits();
   const stat = G.defense.units[key];
 
   document.getElementById('ud-title').textContent = unit.name.toUpperCase();
