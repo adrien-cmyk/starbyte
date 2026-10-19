@@ -880,6 +880,9 @@ button.back:active {
   margin-top: 6px;
   padding: 0 14px;
 }
+.mapwrap.p3d-wait svg.map { visibility: hidden; }
+.mapwrap.p3d-wait::after { content: "Approche de la planète…"; position: absolute; top: 46%; left: 0; right: 0; text-align: center; font: 600 11px/1 ui-monospace, monospace; letter-spacing: .18em; text-transform: uppercase; color: rgba(95,255,232,.55); animation: pulse 1.6s ease-in-out infinite; pointer-events: none; }
+.mapwrap.has3d::after { display: none; }
 svg.map {
   display: block;
   width: 100%;
@@ -4642,11 +4645,21 @@ svg.map {
   </header>
 
   <div class="screen-scroll">
-    <div class="mapwrap">
+    <div class="mapwrap p3d-wait">
       <!-- PLANET3D — carte 3D (assets/planet3d.js) ; la carte SVG reste le fallback sans WebGL -->
       <div class="planet3d" id="planet3d"></div>
       <svg class="map" id="hexmap" aria-label="Surface planétaire en hexagones"></svg>
     </div>
+    <script>
+    /* PATCH_1910_NO2D — au démarrage on n'affiche plus les tuiles 2D en attendant la 3D :
+       elles ne réapparaissent que si la 3D est impossible (pas de WebGL, échec, ou toujours pas prête après 25 s) */
+    (function(){
+      var w=document.currentScript.previousElementSibling;
+      function show2d(){ if(!(window.Planet3D&&window.Planet3D.ready)) w.classList.remove('p3d-wait'); }
+      try{ var c=document.createElement('canvas'); if(!(c.getContext('webgl2')||c.getContext('webgl'))) show2d(); }catch(e){ show2d(); }
+      setTimeout(show2d, 25000);
+    })();
+    </script>
 
     <div class="info" id="planet-info"></div>
 
@@ -46269,7 +46282,7 @@ if (G.knownTargets && Array.isArray(G.tankerMissions)) {
 
 </script>
 <!-- PLANET3D — carte 3D + boucle antenne (source : sb-build/src/planet3d.js) -->
-<script type="module" src="assets/planet3d.js?v=20261019-2135"></script>
+<script type="module" src="assets/planet3d.js?v=20261019-2220"></script>
 <!-- PERF_1310 — mesure des performances chez les joueurs + qualité 3D automatique (assets/perf.js) -->
 <script src="assets/perf.js?v=20261014-1540"></script>
 <!-- PATCH_1410_LIGNES — lignes PNJ à horaire sur les routes cachées (assets/lines.js) -->
