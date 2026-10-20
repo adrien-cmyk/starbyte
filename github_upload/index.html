@@ -8681,6 +8681,7 @@ function _deserializeSets(obj) {
 // AUDIT_1110 — état de progression hors du cœur historique de la sauvegarde
 // (fonction-constante en var : lue par saveGame/loadGame, déclarée avant tout appel)
 var EXTRA_SAVE_KEYS = [
+  'shipBuildTier',   // PATCH_2010_VAISSEAUX_T1 — tier choisi au chantier orbital
   'worldPillage', 'emptyRaidHeat',   // PATCH_2010_PILLAGE_VIDE — mondes vidés, fatigue des pillages
   'aftermath',   // APRÈS L'ATTAQUE (13/10) : indice de dévastation, fête, rapport en attente
   'openLeads', 'rumorJournal', 'purchasedIntel', 'visitedDocks', 'encounteredPavillons',
@@ -28920,6 +28921,25 @@ const SHIP_BUILD_DURATIONS = {
   3: 2 * 60 * 60,    // T3 : 2h      = 7200s
 };
 
+
+// PATCH_2010_VAISSEAUX_T1 — choix du tier de construction (T1 toujours disponible, jusqu'au tier du chantier)
+function shipBuildTier() {
+  const yard = getShipyardTier();
+  if (!yard) return 0;
+  const want = G.shipBuildTier || yard;
+  return Math.max(1, Math.min(yard, want));
+}
+function setShipBuildTier(t) { G.shipBuildTier = t; if (typeof saveGame === 'function') saveGame(); renderShipBuildList(); }
+function shipTierPillsHtml(yard, bt) {
+  if (yard < 2) return '';
+  const pill = (t) => {
+    const on = t === bt, ok = t <= yard;
+    return `<button ${ok ? `onclick="setShipBuildTier(${t})"` : 'disabled'} style="flex:1;padding:9px 0;border-radius:999px;border:1px solid ${on ? 'rgba(255,200,100,.7)' : 'rgba(255,255,255,.12)'};background:${on ? 'rgba(255,200,100,.12)' : 'transparent'};color:${on ? '#ffc864' : 'var(--mut)'};font:inherit;font-size:11px;letter-spacing:.14em;${ok ? 'cursor:pointer' : 'opacity:.35'}">TIER ${t}</button>`;
+  };
+  return `<div style="display:flex;gap:6px;margin:0 0 10px">${[1, 2, 3].map(pill).join('')}</div>
+    <div style="font-size:10px;color:var(--mut);margin:-4px 2px 10px;font-style:italic">Ton chantier construit jusqu'au tier ${yard}. Les tiers inférieurs restent moins chers et plus rapides.</div>`;
+}
+
 // Affiche la liste des vaisseaux militaires constructibles
 function renderShipBuildList() {
   const list = document.getElementById('ship-build-list');
@@ -28932,11 +28952,13 @@ function renderShipBuildList() {
     return;
   }
 
+  // PATCH_2010_VAISSEAUX_T1 (retour joueur 20/10) : un chantier amélioré garde l'accès aux tiers inférieurs
+  const bt = shipBuildTier();
   // Pour chaque type de vaisseau militaire, afficher la fiche de construction
   const types = ['tanker', 'fregate', 'cuirasse'];
-  list.innerHTML = types.map(shipKey => {
+  list.innerHTML = shipTierPillsHtml(tier, bt) + types.map(shipKey => {
     const meta = SHIP_UNITS[shipKey];
-    const tierData = SHIP_TIERS[shipKey]?.[tier];
+    const tierData = SHIP_TIERS[shipKey]?.[bt];
     if (!meta || !tierData) return '';
 
     const costEntries = Object.entries(tierData.cost);
@@ -28944,7 +28966,7 @@ function renderShipBuildList() {
     const costStr = costEntries.map(([res, q]) => `${fmt(q)} ${res}`).join(' · ');
 
     // Durée par tier (cf. SHIP_BUILD_DURATIONS — option B rythme moyen)
-    const baseDuration = SHIP_BUILD_DURATIONS[tier] || SHIP_BUILD_DURATIONS[1];
+    const baseDuration = SHIP_BUILD_DURATIONS[bt] || SHIP_BUILD_DURATIONS[1];
     const finalDuration = Math.max(1, Math.round(baseDuration / G.skills.productionSpeed * (window.SBSkills ? SBSkills.durMult('ships') : 1)));
 
     // Stats clés affichées
@@ -29356,7 +29378,7 @@ setInterval(() => {
 // Construit un vaisseau militaire (Tanker / Frégate / Cuirassé)
 function buildShip(shipKey, qty) {
   qty = qty || 1;
-  const tier = getShipyardTier();
+  const tier = shipBuildTier();   // PATCH_2010_VAISSEAUX_T1 : le tier choisi, pas forcément celui du chantier
   if (tier === 0) {
     toast('Chantier orbital requis');
     return;
