@@ -5862,6 +5862,7 @@ svg.map {
   <div class="cheat-divider"></div>
   <div class="cheat-label">Capital</div>
   <button onclick="cheatCapital()">Capital Tier 3 + skills</button>
+  <button onclick="cheatAllTier3()">🏗 Tous les bâtiments au tier 3</button>
 
   <div class="cheat-divider"></div>
   <div class="cheat-label">Flotte (passe 3.1)</div>
@@ -46175,6 +46176,35 @@ function cheatPunisher() {
   G.fleet.prepared.push(sbTagWorld(fleet));
   toast('Punisher 1 préparée');
   refreshCurrentScreen();
+}
+
+/* PATCH_2010_CHEAT_T3 : chaque bâtiment construit de la planète active passe au tier 3
+   (en rejouant les paliers d'amélioration : prod, capacité des silos, noms), Centre compris */
+function cheatAllTier3() {
+  const saved = QUEUES.capital.upgrade, _toast = window.toast;
+  let n = 0;
+  window.toast = () => {};
+  try {
+    G.planet.parcels.forEach((p, i) => {
+      if (!p) return;
+      const isCap = p.state === 'capital' || p.building === 'capital';
+      if (!isCap && (p.state !== 'built' || !p.building)) return;
+      const key = isCap ? 'capital' : p.building;
+      let lv = isCap ? (G.skills.capitalLevel || 1) : (p.lvl || 1);
+      while (lv < TIER_MAX && BUILDING_TIERS[key] && BUILDING_TIERS[key][lv + 1]) {
+        QUEUES.capital.upgrade = { parcelIdx: i, buildingKey: key, fromTier: lv, toTier: lv + 1, totalDur: 1, elapsed: 1 };
+        completeBuildingUpgrade();
+        lv++; n++;
+      }
+    });
+  } finally {
+    window.toast = _toast;
+    QUEUES.capital.upgrade = saved;
+  }
+  try { saveGame(); } catch (e) {}
+  try { window.Planet3D && Planet3D._needAll && Planet3D._needAll(); window.Planet3D && Planet3D.sync && Planet3D.sync(true); } catch (e) {}
+  refreshCurrentScreen();
+  toast(n ? `🏗 ${n} amélioration${n > 1 ? 's' : ''} : tout est au tier 3` : 'Tout est déjà au tier 3');
 }
 
 function cheatCapital() {
