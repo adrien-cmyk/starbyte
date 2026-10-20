@@ -625,7 +625,7 @@
       toast(`« ${mine.name} » en vente au comptoir de ${dockName} · ${price} CG`);
     } catch (e) {
       // refus net du comptoir : caution rendue ; réponse perdue : on vérifiera au registre (l'offre a peut-être été posée)
-      if (definite(e) || !_v15) { G.myRouteOffers = G.myRouteOffers.filter(o => o !== mine); G.credits = credits() + caution; }
+      if (definite(e) || _v15 === false) { G.myRouteOffers = G.myRouteOffers.filter(o => o !== mine); G.credits = credits() + caution; }
       toast(/offer_quota/.test(String(e.message)) ? '3 cartes en vente au plus' : definite(e) ? 'Le comptoir refuse cette carte' : 'Le comptoir ne répond pas : on vérifie au registre');
     }
     save();
@@ -657,7 +657,7 @@
     let res;
     try { res = await _mpRpc('mp_route_buy', { p_offer: id }); }
     catch (e) {
-      if (definite(e) || !_v15) { G.credits = credits() + row.price; toast(/offer_gone/.test(String(e.message)) ? 'Quelqu\'un l\'a achetée avant toi' : 'Le comptoir ne répond pas, réessaie'); }
+      if (definite(e) || _v15 === false) { G.credits = credits() + row.price; toast(/offer_gone/.test(String(e.message)) ? 'Quelqu\'un l\'a achetée avant toi' : 'Le comptoir ne répond pas, réessaie'); }
       else { (G.pendingRouteBuys = G.pendingRouteBuys || []).push({ id, price: row.price, at: Date.now() }); toast('Le comptoir ne répond pas : on vérifie au registre si la carte est à toi'); }
       save(); fetchOffers(dockId, true); return;
     }
@@ -779,8 +779,14 @@
           for (const b of pendB.slice()) {
             const row = mine.find(x => x.role === 'buyer' && x.id === b.id);
             if (row) learnRoute({ id: row.id, seller: row.seller_pseudo, route: row.route, sold_at: row.sold_at });
-            else if (Date.now() - b.at > 60000) { G.credits = credits() + b.price; toast(`Achat non conclu · ${b.price} CG rendus`); }
-            else continue;
+            else {
+              // PATCH_2010_AUDIT — on redemande l'achat : le registre le redonne à son acheteur (carte de plus de 14 jours comprise)
+              let res = null, refused = false;
+              try { res = await _mpRpc('mp_route_buy', { p_offer: b.id }); } catch (e) { refused = definite(e); }
+              if (res && res.route) learnRoute(res);
+              else if (refused || Date.now() - b.at > 24 * 3600000) { G.credits = credits() + b.price; toast(`Achat non conclu · ${b.price} CG rendus`); }
+              else continue;
+            }
             G.pendingRouteBuys = (G.pendingRouteBuys || []).filter(x => x !== b);
           }
         }

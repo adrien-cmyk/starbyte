@@ -31,7 +31,7 @@ Deno.serve(async (req) => {
   const { data: who, error: authErr } = await admin.auth.getUser(jwt);
   if (authErr || !who?.user) return json({ error: 'not_signed_in' }, 401);
 
-  // Raids restés bloqués (fonction interrompue) : remis dans la file.
+  // Raids restés bloqués (fonction interrompue) : remis dans la file (abandonnés après 5 essais, v20).
   await admin.rpc('mp_requeue_stuck_raids');
 
   const { data: due, error: claimErr } = await admin.rpc('mp_claim_due_raids', { p_limit: 20 });
@@ -40,11 +40,14 @@ Deno.serve(async (req) => {
   const done: unknown[] = [];
   for (const raid of due || []) {
     try {
-      const { data: dw0 } = await admin.from('worlds').select('*').eq('user_id', raid.defender_id).maybeSingle();
+      // v20 (audit) : une erreur de lecture laisse le raid « resolving » (il sera repris), au lieu de l'annuler pour de bon
+      const { data: dw0, error: e0 } = await admin.from('worlds').select('*').eq('user_id', raid.defender_id).maybeSingle();
+      if (e0) throw e0;
       // v18 (20/10) — raid sur une colonie : défense et bâtiments de la colonie, stock commun de l'empire
       let dw = dw0;
       if (dw0 && raid.defender_address && raid.defender_address !== dw0.address) {
-        const { data: col } = await admin.from('colonies').select('*').eq('address', raid.defender_address).eq('user_id', raid.defender_id).maybeSingle();
+        const { data: col, error: e1 } = await admin.from('colonies').select('*').eq('address', raid.defender_address).eq('user_id', raid.defender_id).maybeSingle();
+        if (e1) throw e1;
         dw = col ? { ...dw0, address: col.address, planet_name: col.name, level: col.level, defense: col.defense, buildings: col.buildings, shield_until: col.shield_until } : null;
       }
       const result = dw

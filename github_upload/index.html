@@ -8703,6 +8703,7 @@ var EXTRA_SAVE_KEYS = [
   'mpNeighbors',   // VOISINS_1310 — voisins déjà signalés
   'tuto',          // TUTO_1410 — premiers pas (étape, vu, terminé)
   'skillsLearned', 'research', '_skillsSeen', '_skillsMigrated',   // PATCH_1610_SKILLS
+  'mpRaidsApplied', 'mpRaidsReturned', 'mpPostsToClose',   // PATCH_2010_AUDIT — raids déjà intégrés (indépendant des rapports, qu'on peut supprimer)
   'worlds', 'activeWorld', 'colonyMissions', 'fleetTransfers',   // PATCH_2010_WORLDS — colonies (planètes inactives) et planète affichée
   '_linesCrown', 'crownSeen', '_linesSanct', 'sanctSeen', '_linesNoire', 'noireSeen', '_linesRefuge', '_linesRefuge2', 'refugeSeen', '_brest1',   // PATCH_1510_CROWN — lieu du secteur M devenu la Couronne, première arrivée vue
 ];
@@ -9031,7 +9032,10 @@ function mpRenderIncoming(list) {
   }
   const r = _mpIncoming.slice().sort((a, b) => Date.parse(a.arrives_at) - Date.parse(b.arrives_at))[0];
   const min = Math.max(1, Math.ceil((Date.parse(r.arrives_at) - Date.now()) / 60000));
-  el.innerHTML = `⚠ Flotte hostile · <strong>${r.attacker_pseudo}</strong> · impact dans ${min} min${_mpIncoming.length > 1 ? ` · +${_mpIncoming.length - 1}` : ''}`;
+  // PATCH_2010_AUDIT — quelle planète est visée (capitale ou colonie)
+  const _w = (G.worlds || []).find(w => w && w.kind === 'colony' && w.coord && w.coord === r.defender_address);
+  const _on = _w ? ` → ${_w.name || 'colonie'}` : ((G.worlds || []).some(w => w && w.kind === 'colony') ? ' → capitale' : '');
+  el.innerHTML = `⚠ Flotte hostile · <strong>${r.attacker_pseudo}</strong>${_on} · impact dans ${min} min${_mpIncoming.length > 1 ? ` · +${_mpIncoming.length - 1}` : ''}`;
 }
 setInterval(() => { try { mpRenderIncoming(); } catch (e) {} }, 30000);
 
@@ -9274,7 +9278,7 @@ function _mpFleetPayload(fleet) {
 }
 
 var MP_RAID_ERRORS = {
-  target_shielded: 'Ce commandant est sous bouclier protecteur',
+  target_shielded: 'Cette planète est sous bouclier protecteur (colonie fondée il y a moins de 72 h, ou raid récent)',
   target_too_weak: 'Ce monde est trop faible pour toi : aucune gloire à le piller',
   raid_already_enroute: 'Une de tes flottes est déjà en route vers ce monde',
   target_self: 'C\'est ton propre monde',
@@ -9318,6 +9322,33 @@ async function mpLaunchRaid(fleet, target) {
   toast(`${fleet.name} en route vers ${target.name} · arrivée ${new Date(fleet.mpArrivesAt).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}`);
   startMissionTimerLoop();
   goto('fleet');
+}
+
+// PATCH_2010_AUDIT — raids sortants sans flotte locale (réponse du lancement perdue, sauvegarde revenue en arrière) :
+// la flotte du même nom en orbite repart avec le raid, pour qu'elle en subisse les pertes et en rapporte le butin.
+function mpAdoptOrphanRaids(rows) {
+  if (_mpLaunching || window._sbResetting || !Array.isArray(rows) || !G.fleet || !Array.isArray(G.fleet.prepared)) return;
+  let changed = false;
+  for (const r of rows) {
+    if (!r || !r.id || G.fleet.prepared.some(f => f.mpRaidId === r.id)) continue;
+    if (Array.isArray(G.mpRaidsReturned) && G.mpRaidsReturned.includes(r.id)) continue;
+    const _ow = (G.worlds || []).find(w => w && w.kind === 'colony' && w.coord && w.coord === r.attacker_address);
+    const wid = _ow ? _ow.id : 'home';   // planète d'où le raid est parti
+    const ofW = x => (x.world || 'home') === wid && (x.status || 'prepared') === 'deployed';
+    const f = G.fleet.prepared.find(x => ofW(x) && x.name === r.fleet_name) || G.fleet.prepared.find(ofW);
+    if (!f) continue;
+    f.status = 'in_mission';
+    f.missionTargetId = 'mp:' + r.defender_address;
+    f.missionStartedAt = Date.parse(r.departed_at) || Date.now();
+    f.mpArrivesAt = Date.parse(r.arrives_at) || Date.now();
+    f.missionEndsAt = Date.parse(r.returns_at) || Date.now();
+    f.missionFuelSpent = 0;
+    f.mpRaidId = r.id;
+    f.mpTarget = { name: r.defender_pseudo || r.defender_address, pseudo: r.defender_pseudo || '', address: r.defender_address, profile: 'Joueur' };
+    changed = true;
+    toast(`${f.name} est en raid vers ${r.defender_pseudo || r.defender_address}`);
+  }
+  if (changed) { if (typeof saveGame === 'function') saveGame(); if (typeof startMissionTimerLoop === 'function') startMissionTimerLoop(); if (typeof refreshCurrentScreen === 'function') refreshCurrentScreen(); }
 }
 
 function _mpClearMission(fleet) {
@@ -9397,6 +9428,8 @@ function _mpFinishRaid(fleet, raid) {
     mpRaidId: raid.id, mpDamagedBuilding: res.damaged_building || null,
   });
   _mpClearMission(fleet);
+  if (!Array.isArray(G.mpRaidsReturned)) G.mpRaidsReturned = [];   // PATCH_2010_AUDIT — retour déjà intégré (même si raidSeen échoue)
+  G.mpRaidsReturned.push(raid.id); if (G.mpRaidsReturned.length > 200) G.mpRaidsReturned.splice(0, G.mpRaidsReturned.length - 200);
   if (window.SBMP) window.SBMP.raidSeen(raid.id);
   if (raid.status === 'aborted' || !combat) { toast(`${fleet.name} rentre : la cible a quitté le registre`); return; }
   const labels = { crushing_victory: '⭐ Victoire écrasante', victory: 'Victoire', pyrrhic: 'Victoire à la Pyrrhus', defeat: 'Défaite', massacre: 'Massacre' };
@@ -9426,6 +9459,19 @@ function _defHitUnits(keys, pct, out) {
     u.qty = Math.max(0, u.qty - destroyed);
     u.dmg = Math.min(u.qty, (u.dmg || 0) + damaged);
     out.units[key] = { destroyed, damaged };
+    // PATCH_2010_AUDIT — les flottes préparées au sol perdent les soldats tués ou blessés (sinon ils repartaient en raid)
+    try {
+      const free = Math.max(0, u.qty - (u.dmg || 0) - away);
+      const preps = ((G.fleet && G.fleet.prepared) || []).filter(f => (f.status || 'prepared') === 'prepared' && _sbMine(f) && f.soldiers && f.soldiers[key] > 0);
+      const total = preps.reduce((t, f) => t + f.soldiers[key], 0);
+      if (total > free) {
+        let left = free;
+        preps.forEach((f, i) => {
+          const keep = i === preps.length - 1 ? left : Math.min(left, Math.floor(f.soldiers[key] * free / total));
+          f.soldiers[key] = keep; left -= keep;
+        });
+      }
+    } catch (e) {}
   }
 }
 function _defHitOrbitalFleets(pct, out) {
@@ -9436,7 +9482,8 @@ function _defHitOrbitalFleets(pct, out) {
       const n = countShipsByType(fleet.composition, type), hit = Math.round(n * pct);
       if (!hit) continue;
       const destroyed = Math.round(hit * DEF_LOSS.DESTROYED_SHARE);
-      distributeShipLosses(fleet.composition[type], destroyed);
+      const { lost } = distributeShipLosses(fleet.composition[type], destroyed);
+      for (const tk of ['t1', 't2', 't3']) if (lost[tk]) loseShips(type, tk, lost[tk]);   // PATCH_2010_AUDIT — détruits = retirés du hangar
       syncFleetIntegrity(fleet);
       let left = hit - destroyed, damaged = 0;
       for (const tk of ['t3', 't2', 't1']) for (let i = 0; i < fleet.integrity[type][tk].length && left > 0; i++, left--, damaged++)
@@ -9474,9 +9521,25 @@ function _defLossLines(L) {
 var _MP_BUILDING_LABEL = (k) => (typeof BUILDINGS !== 'undefined' && BUILDINGS[k] && BUILDINGS[k].name) || k;
 
 function mpApplyRaidAgainstMe(raid) {   // PATCH_2010_WORLDS : le raid frappe la planète visée (capitale ou colonie)
-  if (typeof sbWithWorld !== 'function') return _mpApplyRaidAgainstHome(raid);
-  const col = (G.worlds || []).find(w => w.kind === 'colony' && raid && w.coord && w.coord === raid.defender_address);
-  return sbWithWorld(col ? col.id : 'home', () => _mpApplyRaidAgainstHome(raid));
+  // PATCH_2010_AUDIT — pas d'intégration pendant une restauration cloud (la partie va être rechargée : le raid serait marqué vu sans être sauvegardé)
+  if (window._sbResetting || (window.SBCloud && (SBCloud._conflict || SBCloud._switching))) return false;
+  if (!raid || !raid.id) return false;
+  if (Array.isArray(G.mpRaidsApplied) && G.mpRaidsApplied.includes(raid.id)) return true;
+  let ok;
+  if (typeof sbWithWorld !== 'function') ok = _mpApplyRaidAgainstHome(raid);
+  else {
+    const col = (G.worlds || []).find(w => w.kind === 'colony' && raid && w.coord && w.coord === raid.defender_address);
+    ok = sbWithWorld(col ? col.id : 'home', () => _mpApplyRaidAgainstHome(raid));
+  }
+  if (ok) {
+    if (!Array.isArray(G.mpRaidsApplied)) G.mpRaidsApplied = [];
+    if (!G.mpRaidsApplied.includes(raid.id)) { G.mpRaidsApplied.push(raid.id); if (G.mpRaidsApplied.length > 200) G.mpRaidsApplied.splice(0, G.mpRaidsApplied.length - 200); }
+    if (typeof saveGame === 'function' && saveGame() === false) return false;   // non sauvegardé : on ne marque pas le raid vu
+    // rendu APRÈS le retour sur la planète affichée (sinon la colonie restait à l'écran)
+    try { if (window.SBAftermath && SBAftermath.refresh) SBAftermath.refresh(); } catch (e) {}
+    if (typeof refreshCurrentScreen === 'function') refreshCurrentScreen();
+  }
+  return ok;
 }
 function _mpApplyRaidAgainstHome(raid) {
   if (!raid || !raid.id) return false;
@@ -9500,7 +9563,7 @@ function _mpApplyRaidAgainstHome(raid) {
   G.reports.unshift({
     id: 'rpt-def-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6),
     kind: 'defense', mpRaidId: raid.id,
-    fleetName: 'Raid de ' + (raid.attacker_pseudo || 'commandant inconnu'), targetName: (mpWorldSnapshot().planet_name || 'ta colonie'),
+    fleetName: 'Raid de ' + (raid.attacker_pseudo || 'commandant inconnu'), targetName: ((G.planet && G.planet.name) || mpWorldSnapshot().planet_name || 'ta colonie'), worldId: G.activeWorld || 'home',
     intent: { label: won ? 'Raid subi · défense enfoncée' : 'Raid repoussé', icon: '' },
     doctrine: { color: won ? 'var(--red)' : 'var(--green)' },
     startedAt: Date.parse(raid.departed_at) || null, returnedAt: Date.parse(raid.resolved_at) || Date.now(), read: false,
@@ -9522,8 +9585,6 @@ function _mpApplyRaidAgainstHome(raid) {
   toast(won
     ? `⚠ Raid de ${raid.attacker_pseudo} : ${lootTxt || 'rien'} pillé${damagedName ? ' · ' + damagedName + ' abîmé' : ''}`
     : `Raid de ${raid.attacker_pseudo} repoussé`);
-  if (typeof saveGame === 'function') saveGame();
-  if (typeof refreshCurrentScreen === 'function') refreshCurrentScreen();
   return true;
 }
 
@@ -10434,6 +10495,8 @@ async function mpConvoyRegister(m, leg) {
   if (m.mpConvoy[leg] && m.mpConvoy[leg] !== 'pending') return;
   const c = _mpConvoyLeg(m, leg);
   if (!c || !c.to || !c.arriveAt || c.arriveAt - Date.now() < 60000) { delete m.mpConvoy[leg]; return; }   // trop tard pour être vu
+  // PATCH_2010_AUDIT — un convoi parti d'une colonie est inscrit depuis la colonie (v20)
+  if (m.world && m.world !== 'home') { const w = (G.worlds || []).find(x => x && x.id === m.world); if (w && /^[A-Z]-[A-Z]-\d{4}-\d{1,2}$/.test(w.coord || '')) c.origin = w.coord; }
   m.mpConvoy[leg] = 'pending';
   const key = m.id + ':' + leg;
   if (_mpConvoyBusy.has(key) || !_mpOnline()) return;
@@ -10515,7 +10578,10 @@ async function recallRoutePost(missionId) {
   const now = Date.now(), back = Math.max(60000, (m.arrivalAt - m.departedAt) || 300000);
   const elapsed = m.status === 'in_transit' ? Math.max(0, now - m.departedAt) : back;   // demi-tour : le chemin déjà fait
   m.status = 'returning'; m.returnDepartedAt = now; m.returnArrivalAt = now + Math.min(back, elapsed || back);
-  if (m.mpPostId && _mpOnline()) { try { await _mpRpc('mp_post_close', { p_mission: m.id }); } catch (e) {} }
+  // PATCH_2010_AUDIT — fermeture rejouée par mpPostSync si hors ligne ou en échec (sinon le poste restait ouvert au registre)
+  let _closed = false;
+  if (_mpOnline()) { try { await _mpRpc('mp_post_close', { p_mission: m.id }); _closed = true; } catch (e) {} }
+  if (!_closed) { if (!Array.isArray(G.mpPostsToClose)) G.mpPostsToClose = []; if (!G.mpPostsToClose.includes(m.id)) G.mpPostsToClose.push(m.id); }
   m.mpPostId = null;
   if (typeof saveGame === 'function') saveGame();
   toast(`${m.tankerName} rentre du poste de ${m.targetCoords}`);
@@ -10525,6 +10591,9 @@ async function recallRoutePost(missionId) {
 // inscription des postes au registre (rejouée tant qu'elle n'a pas réussi : hors ligne au moment de l'arrivée)
 async function mpPostSync() {
   if (!_mpOnline()) return;
+  for (const id of (Array.isArray(G.mpPostsToClose) ? G.mpPostsToClose.slice() : [])) {   // PATCH_2010_AUDIT
+    try { await _mpRpc('mp_post_close', { p_mission: id }); G.mpPostsToClose = G.mpPostsToClose.filter(x => x !== id); } catch (e) {}
+  }
   for (const m of (G.tankerMissions || []).filter(x => x.kind === 'route_post' && x.status === 'posted' && !x.mpPostId)) {
     try {
       m.mpPostId = await _mpRpc('mp_post_open', { p_mission: m.id, p_system: m.targetCoords, p_tanker: m.tankerName, p_route: m.ownRouteName || null });
@@ -10955,7 +11024,7 @@ async function mpAmbushRecall(fleetId) {
     try {
       // par identifiant, ou par flotte si l'inscription a eu lieu sans que la réponse arrive
       const res = a.mpAmbushId ? await window.SBMP.ambushLeave(a.mpAmbushId) : await window.SBMP.ambushLeaveFleet(f.id);
-      if (res) { _mpSyncFleetLosses(f, res.composition); a.hold = res.hold || {}; }
+      if (res) { _mpSyncFleetLosses(f, res.composition); const _h = res.hold || {}; if (_mpCargoSum(_h) > 0 || _mpCargoSum(a.hold || {}) === 0) a.hold = _h; }   // PATCH_2010_AUDIT — une réponse rejouée vide n'efface pas la cale
     } catch (e) { toast(_mpPirErr(e)); _mpAmbushBusy.delete(fleetId); return; }
     _mpAmbushBusy.delete(fleetId);
     if (!f.ambush || f.ambush.phase !== 'posted') return;
@@ -11475,9 +11544,11 @@ async function mpProposeDeal(presenceId, presetKey) {
     _mpLedgerSet(d.id, { escrow: offer });
     toast(`Proposition envoyée à ${d.to_pseudo}`);
   } catch (e) {
+    const m = String((e && e.message) || e);
+    // PATCH_2010_AUDIT — réponse perdue (réseau) : le marché existe peut-être ; le séquestre reste en attente (rattaché à la relève, rendu au bout de 24 h)
+    if (/fetch|network|load failed|timeout|abort|connexion/i.test(m)) { saveGame(); toast('Réponse perdue : la proposition sera vérifiée à la prochaine relève'); return; }
     delete G.mpDeals[pendingKey];
     _mpPay(offer, +1, true);
-    const m = String((e && e.message) || e);
     toast(/already_dealt/.test(m) ? 'Un seul marché par convoi et par séjour'
       : /convoy_gone/.test(m) ? 'Ce convoi a quitté le dock'
       : /not_docked/.test(m) ? 'Ton séjour est terminé'
@@ -13433,7 +13504,8 @@ function getCarnetTargets() {
   const seen = new Set();
   for (const sys of Object.values(G.knownSystems || {})) {
     for (const p of (sys.planets || [])) {
-      if (!p || p.isMine || !p.coord || seen.has(p.coord)) continue;
+      if (!p || p.isMine || p.myColony || !p.coord || seen.has(p.coord)) continue;
+      if (Array.isArray(G.worlds) && G.worlds.some(w => w && w.coord === p.coord)) continue;   // PATCH_2010_AUDIT — pas de raid sur ses propres colonies
       seen.add(p.coord);
       out.push(_carnetTargetFromPlanet(p));
     }
@@ -26635,7 +26707,7 @@ function handleTankerDropoffArrival(mission) {
   const isEmptyVigil = totalCargo === 0 && mission.postArrival === 'orbit_relay';
 
   if (!Array.isArray(G.garrisons)) G.garrisons = [];
-  let garrison = G.garrisons.find(g => g.planetCoord === mission.destinationPlanetCoord);
+  let garrison = G.garrisons.find(g => g.planetCoord === mission.destinationPlanetCoord && (g.world || 'home') === (mission.world || 'home'));   // PATCH_2010_AUDIT — une garnison par planète d'origine
 
   if (garrison) {
     // ─── FUSION dans garnison existante ───
@@ -26684,6 +26756,7 @@ function handleTankerDropoffArrival(mission) {
       lastKnownResources: JSON.parse(JSON.stringify(mission.cargo.resources)),
       lastKnownTimestamp: now,
     };
+    if (mission.world) garrison.world = mission.world;   // PATCH_2010_AUDIT
     G.garrisons.push(sbTagWorld(garrison));
   }
   // Sinon (isEmptyVigil + pas de garnison) : veille pure, pas de garnison créée — comportement initial
@@ -29113,25 +29186,33 @@ function sbColonyTick() {
   const due = G.colonyMissions.filter(m => m.arriveAt <= now);
   if (!due.length) return;
   for (const m of due) {
-    if (m._claiming) continue;
+    // PATCH_2010_AUDIT — réservation en cours : en mémoire seulement (un _claiming sauvegardé bloquait l'Arche pour toujours)
+    if (m._claiming) delete m._claiming;
+    if (m._claimingAt && now - m._claimingAt < 30000) continue;
     const p = sbFindPlanet(m.coord);
     if (p && p.playerName && !p.myColony) { G.colonyMissions = G.colonyMissions.filter(x => x !== m); G.fleet.colonial = (G.fleet.colonial || 0) + 1; toast(`◈ ${m.name} est déjà occupée : l'Arche attend au chantier`); continue; }
     // multijoueur : l'adresse est réservée sur le serveur avant de poser l'Arche
-    if (window._sbRpc && !m._claimed) {
-      m._claiming = true;
-      window._sbRpc('mp_colony_claim', { p_address: m.coord, p_name: m.name }).then(({ error }) => {
-        m._claiming = false;
-        if (error && /address_taken/.test(error.message || '')) {
+    // connecté mais registre pas encore joint (démarrage) : on attend jusqu'à 2 min avant de poser sans réservation
+    if (!window._sbRpc && !m._claimed && window.SBCloud && SBCloud.user && now - Math.max(m.arriveAt, _sbColonyLoadAt) < 120000) continue;
+    if (window._sbRpc && !m._claimed && !m._pending) {
+      m._claimingAt = now;
+      Promise.resolve(window._sbRpc('mp_colony_claim', { p_address: m.coord, p_name: m.name })).catch(e => ({ error: { message: String(e && e.message || e) } })).then(({ error }) => {
+        m._claimingAt = 0;
+        if (error && /address_taken|colony_rate|too_many_colonies|address_invalid/.test(error.message || '')) {   // PATCH_2010_AUDIT — refus net : l'Arche revient
+          const _msg = error.message || '';
           G.colonyMissions = G.colonyMissions.filter(x => x !== m);
           G.fleet.colonial = (G.fleet.colonial || 0) + 1;
-          if (p) p.playerName = p.playerName || 'Commandant inconnu';
-          toast(`◈ ${m.name} vient d'être prise par un autre commandant : l'Arche attend au chantier`);
+          if (/address_taken/.test(_msg) && p) p.playerName = p.playerName || 'Commandant inconnu';
+          toast(/colony_rate/.test(_msg) ? `◈ Trois colonies fondées en 24 h : l'Arche attend au chantier, réessaie demain`
+            : /too_many_colonies/.test(_msg) ? `◈ Nombre maximum de colonies atteint : l'Arche attend au chantier`
+            : /address_invalid/.test(_msg) ? `◈ Adresse inconnue du registre : l'Arche attend au chantier`
+            : `◈ ${m.name} vient d'être prise par un autre commandant : l'Arche attend au chantier`);
           try { saveGame(); } catch (e) {}
           return;
         }
         m._claimed = !error;   // hors ligne ou autre erreur : on pose quand même, la colonie sera réservée à la prochaine publication
-        if (error) m._pending = true;
-        sbColonyTick();
+        if (error) m._pending = true;   // (une seule tentative : plus de boucle d'appels)
+        setTimeout(sbColonyTick, 0);
       });
       continue;
     }
@@ -29143,6 +29224,7 @@ function sbColonyTick() {
   }
   try { saveGame(); } catch (e) {}
 }
+var _sbColonyLoadAt = Date.now();
 setInterval(() => { try { sbColonyTick(); } catch (e) { console.warn('[colonie]', e); } }, 5000);
 async function sbColonyFounded(w) {
   if (typeof sbNotifPush === 'function') { try { sbNotifPush({ title: 'Colonie fondée', text: `${w.name} : l'Arche s'est posée.` }); } catch (e) {} }
@@ -29195,11 +29277,16 @@ async function sbPublishColonies(client) {
   if (!client) return;
   window._sbRpc = (fn, args) => client.rpc(fn, args);
   for (const w of (G.worlds || [])) {
-    if (!w || w.kind !== 'colony' || !w.coord) continue;
+    if (!w || w.kind !== 'colony' || !w.coord || w.mpLost) continue;
     try {
       if (!w.mpClaimed) {
         const { error } = await client.rpc('mp_colony_claim', { p_address: w.coord, p_name: w.name });
-        if (error) { console.warn('[colonie] réservation', w.coord, error.message); if (!/address_taken/.test(error.message || '')) continue; continue; }
+        if (error) {
+          console.warn('[colonie] réservation', w.coord, error.message);
+          // PATCH_2010_AUDIT — adresse prise par un autre commandant pendant une fondation hors ligne : on le dit une fois, on n'insiste plus
+          if (/address_taken/.test(error.message || '') && !w.mpLost) { w.mpLost = true; toast(`◈ ${w.name} n'a pas pu être inscrite au registre : un autre commandant s'y est installé. Elle reste à toi, mais invisible des autres joueurs.`); try { saveGame(); } catch (e) {} }
+          continue;
+        }
         w.mpClaimed = true;
       }
       const snap = sbWithWorld(w.id, () => _mpWorldSnapshotHome());
@@ -32459,6 +32546,7 @@ function cancelCommand(queueKey, idx) {
   for (const [res, q] of Object.entries(totalCost)) {
     const refund = Math.floor(q * remaining / Math.max(1, cmd.totalQty) * 0.8);
     if (G.res[res]) G.res[res].v = Math.min(Math.max(G.res[res].max, G.res[res].v), G.res[res].v + refund);
+    else if (res === 'fuel') G.fuel = Math.min(typeof getFuelCap === 'function' ? Math.max(getFuelCap(), G.fuel || 0) : Infinity, (G.fuel || 0) + refund);   // PATCH_2010_AUDIT — le carburant de l'Arche est rendu aussi
   }
   QUEUES[queueKey].commands.splice(idx, 1);
   toast(`Commande annulée — ${remaining} unités · 80% remboursé`);
@@ -32640,6 +32728,15 @@ function simulateTo(now) {
     const endAt = start + Math.max(0, (upg.totalDur || 0) - (upg.elapsed || 0)) * 1000 + 1000;
     if (endAt > start && endAt < now) cuts.push(endAt);
   }
+  // PATCH_2010_AUDIT — les chantiers et améliorations des autres planètes découpent aussi l'absence
+  for (const w of (Array.isArray(G.worlds) ? G.worlds : [])) {
+    if (!w || !w.data || w.id === (G.activeWorld || 'home')) continue;
+    for (const p of (w.data.planet && w.data.planet.parcels) || []) {
+      if (p && p.state === 'building' && p.buildEndsAt > start && p.buildEndsAt < now) cuts.push(p.buildEndsAt);
+    }
+    const wu = w.data.queues && w.data.queues.capital && w.data.queues.capital.upgrade;
+    if (wu) { const endAt = start + Math.max(0, (wu.totalDur || 0) - (wu.elapsed || 0)) * 1000 + 1000; if (endAt > start && endAt < now) cuts.push(endAt); }
+  }
   cuts.sort((a, b) => a - b);
   let t0 = start;
   for (const c of cuts) { _simSegment(c - t0, c, out); t0 = c; }
@@ -32651,9 +32748,32 @@ function _simSegment(ms, at, out) {
   // 1. Ressources — taux HORAIRES (décision d'Adrien 10/10 : « +40/h » veut dire 40 par heure)
   const hours = Math.max(0, ms) / 3600000;
   // dévastation (après un raid perdu) : production réduite, guérison naturelle −1 %/h
-  const devMult = (window.SBAftermath && typeof SBAftermath.simSegment === 'function') ? SBAftermath.simSegment(hours) : 1;
+  // PATCH_2010_AUDIT — plusieurs planètes : chacune guérit de sa propre dévastation, qui ne freine que sa propre production
+  let devMult = 1, devCut = null;
+  if (window.SBAftermath && typeof SBAftermath.simSegment === 'function') {
+    if (typeof sbWithWorld === 'function' && Array.isArray(G.worlds) && G.worlds.length > 1) {
+      devCut = {};
+      for (const w of G.worlds) {
+        if (!w || !w.id) continue;
+        try {
+          const cut = sbWithWorld(w.id, () => {
+            const mult = SBAftermath.simSegment(hours);
+            if (!(mult < 1)) return null;
+            const o = {};
+            for (const p of (G.planet && G.planet.parcels) || []) {
+              if (!p || p.state !== 'built' || !p.building) continue;
+              for (const [k, v] of Object.entries(_mpTierProd(p))) o[k] = (o[k] || 0) + v * (p.damaged ? 0.5 : 1) * (1 - mult);
+            }
+            return o;
+          });
+          if (cut) for (const [k, v] of Object.entries(cut)) devCut[k] = (devCut[k] || 0) + v;
+        } catch (e) {}
+      }
+    } else devMult = SBAftermath.simSegment(hours);
+  }
   for (const [rk, r] of Object.entries(G.res || {})) {   // PATCH_1610_SKILLS : bonus des skills
-    if (r.rate > 0 && r.v < r.max) r.v = Math.min(r.max, r.v + r.rate * hours * devMult * (window.SBSkills ? SBSkills.prodMult(rk) : 1));
+    const rate = devCut ? Math.max(0, r.rate - (devCut[rk] || 0)) : r.rate * devMult;
+    if (rate > 0 && r.v < r.max) r.v = Math.min(r.max, r.v + rate * hours * (window.SBSkills ? SBSkills.prodMult(rk) : 1));
   }
 
   // 2. Crédits (Comptoirs) et carburant (Raffineries) — taux horaires aussi
