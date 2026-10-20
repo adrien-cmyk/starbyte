@@ -8681,6 +8681,7 @@ function _deserializeSets(obj) {
 // AUDIT_1110 — état de progression hors du cœur historique de la sauvegarde
 // (fonction-constante en var : lue par saveGame/loadGame, déclarée avant tout appel)
 var EXTRA_SAVE_KEYS = [
+  'worldPillage', 'emptyRaidHeat',   // PATCH_2010_PILLAGE_VIDE — mondes vidés, fatigue des pillages
   'aftermath',   // APRÈS L'ATTAQUE (13/10) : indice de dévastation, fête, rapport en attente
   'openLeads', 'rumorJournal', 'purchasedIntel', 'visitedDocks', 'encounteredPavillons',
   'discoveredDocks', 'wantedTargets', 'navigationData', 'ambientReports', 'marketSeason',
@@ -13324,9 +13325,105 @@ function _carnetTargetFromPlanet(p) {
     kind: p.type || 'habitable',
     defense: 0,
     garrison: 0,
-    resources: t.resources,
+    resources: (() => { const f = pvStock(p.coord); return { metal: Math.round(t.resources.metal * f), energie: Math.round(t.resources.energie * f), cristal: Math.round(t.resources.cristal * f) }; })(),   // PATCH_2010_PILLAGE_VIDE
   });
 }
+
+/* ═══════════ PATCH_2010_PILLAGE_VIDE — piller un monde vide (retour joueur 20/10, décision d'Adrien) ═══════════
+   On ne l'interdit pas, mais on ne peut pas le « farmer » :
+   1. le monde s'épuise : après un pillage, son stock tombe à 10 % et se reconstitue en 5 jours ;
+   2. la fatigue est GLOBALE (tous mondes vides confondus) : le premier pillage paie ; dès le deuxième, peu importe le monde,
+      le butin chute (×0,3 puis ×0,12) et les incidents deviennent probables (25 % → 60 % → 90 %) — la fatigue retombe d'un cran par 24 h ;
+   3. un incident coûte toujours des vaisseaux (et des soldats) : désertion par amour, explorateurs disparus, tempête, météorites. */
+var PV_KINDS = new Set(['dead', 'lunar', 'gas', 'habitable']);
+var PV_REGEN_MS = 5 * 24 * 3600e3, PV_DECAY_MS = 24 * 3600e3;
+function pvIsEmpty(t) { return !!(t && t.carnet && !t.isBot && !t.mp && t.kind !== 'player' && PV_KINDS.has(t.kind)); }
+function pvStock(coord) {
+  const w = G.worldPillage && G.worldPillage[coord];
+  if (!w) return 1;
+  return Math.min(1, w.f0 + (1 - w.f0) * Math.max(0, Date.now() - w.at) / PV_REGEN_MS);
+}
+function pvHeat() {
+  const h = G.emptyRaidHeat;
+  if (!h) return 0;
+  return Math.max(0, h.h - Math.max(0, Date.now() - h.at) / PV_DECAY_MS);
+}
+function pvTargetNote(t) {
+  if (!pvIsEmpty(t)) return '';
+  const st = pvStock(t.coord), h = pvHeat(), parts = [];
+  if (st < 0.97) parts.push(`stock ${Math.round(st * 100)} % (se reconstitue)`);
+  parts.push(h >= 1 ? '<span style="color:#ff8a6a">équipages fatigués : butin réduit, incidents probables</span>' : 'monde vide : un incident reste possible');
+  return `<div style="font-size:9px;color:var(--mut);margin-top:3px;font-style:italic">${parts.join(' · ')}</div>`;
+}
+var PV_INCIDENTS = {
+  habitable: { title: 'Ils ont trouvé l\'amour', ship: 'tanker',
+    text: (n, s) => (s ? `${s} soldat${s > 1 ? 's ont' : ' a'} refusé de remonter à bord : une communauté libre les a accueillis, et ils ont choisi de rester. ` : 'Une partie des équipages a choisi de rester parmi les colons libres de ce monde. ')
+      + `${n} vaisseau${n > 1 ? 'x sont restés' : ' est resté'} au sol avec eux. Personne n'a répondu aux appels.` },
+  dead: { title: 'Les explorateurs ne sont pas revenus', ship: 'fregate',
+    text: (n, s) => (s ? `${s} soldat${s > 1 ? 's ont' : ' a'} voulu explorer les ruines. Leur signal s'est éteint au bout de quarante minutes. ` : 'Une équipe est descendue explorer les ruines. Son signal s\'est éteint au bout de quarante minutes. ')
+      + `${n} vaisseau${n > 1 ? 'x envoyés' : ' envoyé'} à leur recherche ${n > 1 ? 'ont été perdus' : 'a été perdu'} dans une tempête de poussière.` },
+  gas: { title: 'Tempête dans la haute atmosphère', ship: null,
+    text: (n) => `Un front de vents à neuf cents kilomètres-heure a surpris la flotte pendant le pompage. ${n} vaisseau${n > 1 ? 'x n\'ont' : ' n\'a'} pas pu remonter.` },
+  lunar: { title: 'Pluie de micrométéorites', ship: null,
+    text: (n) => `Un essaim de micrométéorites a criblé la zone de chargement. ${n} vaisseau${n > 1 ? 'x ont été perdus' : ' a été perdu'} avant le décollage.` },
+};
+function pvApply(fleet, target, c) {
+  const h = pvHeat(), now = Date.now();
+  const info = { heat: Math.round(h * 10) / 10, lootMult: 1, stock: pvStock(target.coord), incident: null };
+  // 1. butin : la fatigue le fait chuter dès le deuxième pillage, quel que soit le monde
+  if (c.phases.phase3 && c.phases.phase3.executed) {
+    const m = h < 1 ? 1 : (h < 2 ? 0.3 : 0.12);
+    info.lootMult = m;
+    if (m < 1) {
+      for (const k of ['metal', 'energie', 'cristal']) c.loot[k] = Math.floor((c.loot[k] || 0) * m);
+      c.phases.phase3.loot = { ...c.loot };
+      c.phases.phase3.cargoUsed = Math.floor((c.phases.phase3.cargoUsed || 0) * m);
+    }
+    if (!G.worldPillage) G.worldPillage = {};
+    G.worldPillage[target.coord] = { at: now, f0: 0.1 };   // le monde est vidé
+  }
+  // 2. incident : toujours des vaisseaux perdus
+  const pc = h < 1 ? 0.25 : (h < 2 ? 0.6 : 0.9);
+  if (Math.random() < pc) {
+    const def = PV_INCIDENTS[target.kind] || PV_INCIDENTS.habitable;
+    const L = c.finalLosses.ships, avail = [];
+    for (const type of ['tanker', 'fregate', 'cuirasse']) for (const tier of ['t1', 't2', 't3']) {
+      const left = (fleet.composition[type]?.[tier] || 0) - (L[type]?.[tier] || 0) - (c.finalLosses.shipsRecovered?.[type]?.[tier] || 0) * 0;
+      for (let i = 0; i < left; i++) avail.push([type, tier]);
+    }
+    if (avail.length) {
+      const want = Math.max(1, Math.min(avail.length - (avail.length > 1 ? 1 : 0) || 1, Math.round(avail.length * (0.06 + 0.08 * Math.min(h, 3)) + Math.random())));
+      // le type « logique » d'abord (les déserteurs partent avec un tanker, les secours sont des frégates)
+      avail.sort((a, b) => (b[0] === def.ship) - (a[0] === def.ship) || Math.random() - 0.5);
+      let n = 0;
+      for (const [type, tier] of avail.slice(0, want)) { L[type][tier] = (L[type][tier] || 0) + 1; n++; }
+      // soldats : restés par amour, ou disparus en explorant
+      let sl = 0;
+      if (target.kind === 'habitable' || target.kind === 'dead') {
+        const pct = target.kind === 'habitable' ? 0.2 + Math.random() * 0.3 : 0.1 + Math.random() * 0.2;
+        for (const k of ['garde', 'lourd']) {
+          const left = Math.max(0, (fleet.soldiers?.[k] || 0) - (c.finalLosses.soldiers[k] || 0));
+          const d = Math.floor(left * pct); c.finalLosses.soldiers[k] = (c.finalLosses.soldiers[k] || 0) + d; sl += d;
+        }
+      }
+      info.incident = { title: def.title, text: def.text(n, sl), ships: n, soldiers: sl };
+      if (c.outcome === 'crushing_victory') c.outcome = 'victory';
+    }
+  }
+  G.emptyRaidHeat = { h: h + 1, at: now };
+  c.emptyWorld = info;
+}
+function pvReportHtml(e) {
+  if (!e) return '';
+  const fat = e.lootMult < 1 ? `<div style="font-size:11px;color:#ff9a7a;line-height:1.6;margin-top:6px">Les équipages enchaînent les pillages de mondes vides : butin ×${String(e.lootMult).replace('.', ',')}, et ils prennent des risques. La fatigue retombe d'un cran par jour.</div>` : '';
+  const inc = e.incident ? `<div style="color:#ff8a6a;font-size:10px;letter-spacing:.18em;margin:8px 0 6px">═══ INCIDENT — ${e.incident.title.toUpperCase()} ═══</div>
+      <div style="font-style:italic;color:#e6f0ff;font-size:12px;line-height:1.8">${e.incident.text}</div>
+      <div style="font-size:11px;color:var(--mut);margin-top:6px">Perdus : ${e.incident.ships} vaisseau${e.incident.ships > 1 ? 'x' : ''}${e.incident.soldiers ? ` · ${e.incident.soldiers} soldat${e.incident.soldiers > 1 ? 's' : ''}` : ''}</div>` : '';
+  if (!fat && !inc) return '';
+  return `<div style="margin-top:14px;padding-top:10px;border-top:1px dashed rgba(255,138,106,.25)">${inc}${fat}
+    <div style="font-size:10px;color:var(--mut);margin-top:6px;font-style:italic">Ce monde est vidé : son stock se reconstitue en 5 jours.</div></div>`;
+}
+
 function getCarnetTargets() {
   const out = [];
   const seen = new Set();
@@ -14743,6 +14840,7 @@ function _fleetTargetRowHtml(fleet, target) {
           <div class="fleet-prepared-stats" style="margin-top:3px">
             ${statsLine}
           </div>
+          ${typeof pvTargetNote === 'function' ? pvTargetNote(target) : ''}
         </div>
         <div class="fleet-prepared-arrow">→</div>
       </div>
@@ -27182,6 +27280,7 @@ function returnMission(fleet) {
   const heroesBefore = JSON.parse(JSON.stringify(fleet.heroes || {}));
 
   // Application du résultat sur l'état du jeu
+  if (combatResult && pvIsEmpty(target)) { try { pvApply(fleet, target, combatResult); } catch (e) { console.warn('[pillage vide]', e); } }   // PATCH_2010_PILLAGE_VIDE
   if (combatResult) {
     applyCombatResult(fleet, combatResult, target);
     if (target && target.botCoord && combatResult.phases?.phase3?.executed) botRecordRaid(target.botCoord, combatResult.loot);
@@ -27475,6 +27574,7 @@ function _renderCombatPhases(r) {
     `;
   }
 
+  if (c.emptyWorld) html += pvReportHtml(c.emptyWorld);   // PATCH_2010_PILLAGE_VIDE
   // ─── BILAN PERTES (vaisseaux + héros morts) ───
   const ships = c.finalLosses.ships;
   const sRec = c.finalLosses.shipsRecovered;
