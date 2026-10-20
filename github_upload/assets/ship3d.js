@@ -82,8 +82,9 @@ const NOZZLE_Z = P.nozzleZ;
 /* ================================================================== moteur de rendu */
 const stage = container;
 const W = () => Math.max(1, container.clientWidth), H = () => Math.max(1, container.clientHeight);
-const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
-renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+const MOBILE = (matchMedia('(pointer: coarse)').matches || /iPhone|iPad|iPod|Android/.test(navigator.userAgent));   // PATCH_2010_FLUIDITE : rendu via composer → l'antialiasing du canvas ne servait à rien ; téléphone : résolution 1,5
+const renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: 'high-performance' });
+renderer.setPixelRatio(Math.min(devicePixelRatio, MOBILE ? 1.5 : 2));
 renderer.setSize(W(), H());
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.0;
@@ -268,7 +269,7 @@ const SUN_DIR = new THREE.Vector3(-0.42, 0.03, 0.91).normalize();
 const key = new THREE.DirectionalLight(0xfff0dc, 3.4);
 key.position.copy(SUN_DIR).multiplyScalar(14);
 key.castShadow = true;
-key.shadow.mapSize.set(2048, 2048);
+key.shadow.mapSize.set(MOBILE ? 1024 : 2048, MOBILE ? 1024 : 2048);
 Object.assign(key.shadow.camera, { left: -8, right: 8, top: 8, bottom: -8, near: 1, far: 40 });
 key.shadow.bias = -0.0004; key.shadow.normalBias = 0.015;
 key.target = ship;
@@ -754,7 +755,7 @@ const clock = new THREE.Clock();
 const SPEED = P.dustSpeed != null ? P.dustSpeed : 9;
 let frames = 0, perfT = 0, perfChecked = false;
 function frame() {
-  if (container.offsetParent === null) { clock.getDelta(); if (alive) raf = requestAnimationFrame(frame); return; }   // fiche masquée : pause
+  if (container.offsetParent === null || container.closest('.screen.hidden') || document.hidden) { clock.getDelta(); if (alive) raf = requestAnimationFrame(frame); return; }   // fiche masquée (écran caché en opacité 0, onglet en arrière-plan) : pause — PATCH_2010_FLUIDITE
   const dt = Math.min(clock.getDelta(), 0.05), t = clock.elapsedTime;
   const amp = REDUCED ? 0.25 : 1;
   if (P.ground) {                                  // bâtiment au sol : immobile, la tête balaie le ciel

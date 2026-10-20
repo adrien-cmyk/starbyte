@@ -191,10 +191,11 @@
     const mission = opts.mode === 'mission';
     const PT = { value: 0 };   // horloge des shaders de plasma
     const W = () => Math.max(1, container.clientWidth), H = () => Math.max(1, container.clientHeight);
-    const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
+    const MOBILE = (matchMedia('(pointer: coarse)').matches || /iPhone|iPad|iPod|Android/.test(navigator.userAgent));   // PATCH_2010_FLUIDITE
+    const renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: 'high-performance' });
     // opts.lite : fond décoratif (écran d'accueil) — résolution réduite, effets allégés
     const LITE = !!opts.lite;
-    renderer.setPixelRatio(Math.min(devicePixelRatio || 1, LITE ? 1.25 : 2)); renderer.setSize(W(), H());
+    renderer.setPixelRatio(Math.min(devicePixelRatio || 1, LITE ? 1.25 : (MOBILE ? 1.5 : 2))); renderer.setSize(W(), H());
     renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.toneMappingExposure = 0.95;
     if (THREE.SRGBColorSpace) renderer.outputColorSpace = THREE.SRGBColorSpace;
     renderer.domElement.className = 'u3d-canvas';
@@ -624,7 +625,7 @@
     const flagL = list.length ? DIM[list[flagI].type][1] : 100;
     const frame = (now) => {
       if (!alive) return;
-      if (container.offsetParent === null) { last = now; raf = requestAnimationFrame(frame); return; }   // fiche masquée : pause
+      if (container.offsetParent === null || container.closest('.screen.hidden') || document.hidden) { last = now; raf = requestAnimationFrame(frame); return; }   // fiche masquée : pause — PATCH_2010_FLUIDITE
       const dt = Math.min(0.05, (now - last) / 1000); last = now;
       const t = (now - t0) / 1000;
       const intro = REVEAL ? 1 - Math.pow(1 - Math.min(1, t / REVEAL), 3) : 1;

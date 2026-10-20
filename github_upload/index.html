@@ -12043,6 +12043,7 @@ function prospectLocked() {
 
 function goto(scr, opts) {
   if (scr !== 'dock' && typeof crownUnmount === 'function') crownUnmount();   // PATCH_1510_CROWN
+  if (scr !== 'welcome' && typeof unmountWelcomeHero === 'function') unmountWelcomeHero();   // PATCH_2010_FLUIDITE
   if (typeof st3dSleep === 'function') st3dSleep();   // PATCH_2010_STATION_MEMOIRE : filet de sécurité
   if (typeof crownSpaceClose === 'function') crownSpaceClose();   // PATCH_1510_CROWN_SCENE
   setTimeout(() => { const el = document.getElementById('scr-' + scr); const sc = el && el.querySelector('.screen-scroll'); if (sc) updateHeroScrim(sc); }, 60);
@@ -47260,11 +47261,13 @@ if (G.knownTargets && Array.isArray(G.tankerMissions)) {
 
 </script>
 <!-- PLANET3D — carte 3D + boucle antenne (source : sb-build/src/planet3d.js) -->
-<script type="module" src="assets/planet3d.js?v=20261020-1920"></script>
+<script type="module" src="assets/planet3d.js?v=20261020-2230"></script>
 <!-- PATCH_2010_CIEL — la planète suit l\'heure réelle : nuit bleue / jour d\'aube chaude -->
 <script src="assets/sky.js?v=20261020-1800"></script>
 <!-- PATCH_2010_TERRAIN — planète-jardin continue : sol, eau, forêt et rails jointifs (assets/terrain.js ; variante désert archivée : terrain_desert.js, non chargée) -->
 <script src="assets/terrain.js?v=20261020-1745"></script>
+<!-- PATCH_2010_FLUIDITE — ombres à la demande, 30 images/s au repos sur téléphone -->
+<script src="assets/fluid.js?v=20261020-2230"></script>
 <!-- PERF_1310 — mesure des performances chez les joueurs + qualité 3D automatique (assets/perf.js) -->
 <script src="assets/perf.js?v=20261014-1540"></script>
 <!-- PATCH_1410_LIGNES — lignes PNJ à horaire sur les routes cachées (assets/lines.js) -->
@@ -47283,7 +47286,7 @@ if (G.knownTargets && Array.isArray(G.tankerMissions)) {
 <script src="assets/aftermath.js?v=20261014-1440"></script>
 <script src="assets/fete_caserne.js?v=20261014-1440"></script>
 <script src="assets/radio.js?v=20261014-1440"></script>
-<script type="module" src="assets/ship3d.js?v=20261020-0135"></script>
+<script type="module" src="assets/ship3d.js?v=20261020-2230"></script>
 <!-- PATCH_1510_MISSIONS — tout ce qui vole, fiche de mission des tankers -->
 <script src="assets/missions.js?v=20261020-1130"></script>
 <!-- PATCH_1610_SKILLS — skills des bâtiments : apprendre, découvrir, effets -->
@@ -47291,6 +47294,6 @@ if (G.knownTargets && Array.isArray(G.tankerMissions)) {
 <!-- PATCH_1510_CROWN — The Drifting Crown en 3D (assets/station3d.js, sur le moteur partagé window.SB3D) -->
 <script type="module" src="assets/station3d.js?v=20261020-0120"></script>
 <!-- FORMATION3D — flotte déployée en orbite, vue de haut en formation (remplace la vue orbite) -->
-<script src="assets/formation3d.js?v=20261020-1340"></script>
+<script src="assets/formation3d.js?v=20261020-2230"></script>
 </body>
 </html>
