@@ -1,7 +1,7 @@
 // PATCH_2010_CIEL — la planète suit l'heure réelle : nuit bleue (actuelle) ↔ jour d'aube chaude
 (function () {
   const NIGHT = { bg: 0x0b1622, sky: 0x4d6f99, ground: 0x0b120b, hemi: 1.1, key: 0xa9c4ff, keyI: 2.4, pos: [150, 240, 170], exp: 1.05, env: 0.6, bloom: 0.45, fogN: 520, fogF: 1250 };
-  const DAY   = { bg: 0xc4a898, sky: 0xf4e6dc, ground: 0x4f5a42, hemi: 2.1, key: 0xffd4a6, keyI: 4.2, pos: [240, 175, 80], exp: 1.34, env: 1.0, bloom: 0.24, fogN: 620, fogF: 1700 };
+  const DAY   = { bg: 0xb9b0a4, sky: 0xf4e6dc, ground: 0x4f5a42, hemi: 2.0, key: 0xffd8ae, keyI: 4.0, pos: [240, 175, 80], exp: 1.28, env: 1.0, bloom: 0.24, fogN: 620, fogF: 1700 };
   const smooth = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
   // 0 = nuit, 1 = jour. Lever 5 h 30 → 8 h, coucher 18 h 30 → 21 h (heure locale du joueur)
   function dayK(d) {
