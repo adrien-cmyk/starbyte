@@ -7744,8 +7744,8 @@ const DEFENSE_UNITS = {
     defPerUnit: 400,
     atkPerUnit: 0,       // tourelle = défense pure, pas offensive
     transportable: false, // fixe au sol, pas embarquable
-    cost: { metal: 200, energie: 40 },
-    repairCost: { metal: 60, energie: 10 },
+    cost: { metal: 160, energie: 30 },   // PATCH_2010_RENTABILITE (avant 200 + 40 : moins rentable qu'un garde)
+    repairCost: { metal: 50, energie: 10 },
     scrapReturn: { metal: 60 },
     duration: 180, // ⚡ V0.5 : 3 min par tourelle (rythme moyen, ancien : 12s proto)
     requires: 'turret', // Construite depuis l'écran défense
@@ -7760,8 +7760,8 @@ const DEFENSE_UNITS = {
     defPerUnit: 1400,
     atkPerUnit: 0,
     transportable: false,
-    cost: { metal: 600, energie: 150, cristal: 40 },
-    repairCost: { metal: 180, energie: 45 },
+    cost: { metal: 380, energie: 80, cristal: 36 },   // PATCH_2010_RENTABILITE (avant 600 + 150 + 40c : pas plus rentable qu'une tourelle)
+    repairCost: { metal: 115, energie: 25 },
     scrapReturn: { metal: 180 },
     duration: 480,
     requires: 'turret',
@@ -7832,21 +7832,23 @@ const SHIP_UNITS = {
 };
 
 // Tiers des vaisseaux (data placeholder pour passe 3)
+// PATCH_2010_RENTABILITE (20/10) : chaque tier rapporte ~25 % de plus par ressource (métal + énergie + 2×cristal)
+// et par minute de chantier ; capacités inchangées. Avant : T2 = 5× le prix pour 3× les stats (aucun intérêt).
 const SHIP_TIERS = {
   tanker: {
     1: { name:'Tanker T1',  cost:{metal:400},                 atk:50,   def:200,  cargo:5000,   transportCap:50  },
-    2: { name:'Tanker T2',  cost:{metal:2000, energie:500},   atk:120,  def:500,  cargo:25000,  transportCap:100 },
-    3: { name:'Tanker T3',  cost:{metal:10000,energie:2500,cristal:500}, atk:280, def:1200, cargo:100000, transportCap:200 },
+    2: { name:'Tanker T2',  cost:{metal:1300, energie:300},   atk:120,  def:500,  cargo:25000,  transportCap:100 },
+    3: { name:'Tanker T3',  cost:{metal:4000, energie:830, cristal:150}, atk:280, def:1200, cargo:100000, transportCap:200 },
   },
   fregate: {
     1: { name:'Frégate T1', cost:{metal:600},                 atk:300,  def:200,  cargo:0 },
-    2: { name:'Frégate T2', cost:{metal:3000, energie:750},   atk:900,  def:600,  cargo:0 },
-    3: { name:'Frégate T3', cost:{metal:15000,energie:3750,cristal:750}, atk:2700, def:1800, cargo:0 },
+    2: { name:'Frégate T2', cost:{metal:1200, energie:240},   atk:900,  def:600,  cargo:0 },
+    3: { name:'Frégate T3', cost:{metal:2600, energie:560, cristal:150}, atk:2700, def:1800, cargo:0 },
   },
   cuirasse: {
     1: { name:'Cuirassé T1',cost:{metal:2500, energie:600},   atk:1500, def:1500, cargo:0 },
-    2: { name:'Cuirassé T2',cost:{metal:12500,energie:3000,cristal:600}, atk:4500, def:4500, cargo:0 },
-    3: { name:'Cuirassé T3',cost:{metal:62500,energie:15000,cristal:3000}, atk:13500, def:13500, cargo:0 },
+    2: { name:'Cuirassé T2',cost:{metal:5800, energie:1300, cristal:200}, atk:4500, def:4500, cargo:0 },
+    3: { name:'Cuirassé T3',cost:{metal:13500,energie:3300, cristal:600}, atk:13500, def:13500, cargo:0 },
   },
   // probe & colonial n'ont pas de tiers (cas particuliers — passe 3.0)
 };
@@ -28917,9 +28919,9 @@ function renderShipyard() {
 // Décision Adrien : passer à T1=10min, T2=30min, T3=2h pour un vrai rythme de gestion.
 // Le skill G.skills.productionSpeed est appliqué par-dessus (divise la durée).
 const SHIP_BUILD_DURATIONS = {
-  1: 10 * 60,        // T1 : 10 min  = 600s
-  2: 30 * 60,        // T2 : 30 min  = 1800s
-  3: 2 * 60 * 60,    // T3 : 2h      = 7200s
+  1: 10 * 60,        // T1 : 10 min
+  2: 24 * 60,        // T2 : 24 min (PATCH_2010_RENTABILITE : 3× les stats pour 2,4× le temps)
+  3: 60 * 60,        // T3 : 1 h    (9× les stats d'un T1 pour 6× le temps)
 };
 
 
