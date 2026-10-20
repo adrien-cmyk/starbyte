@@ -14,36 +14,69 @@
     tanker:   { url: 'assets/3d/sb_tk07_lod.glb?v=20261012-0100', scale: 2.0,  glow: [[-2.5, 2.55, -15], [2.5, 2.55, -15]], glowSize: 5, color: 0xffb070, ring: 40 },
   };
   // échelles d'affichage : le cuirassé fait 1 200 m, la frégate 68 m, le tanker 28,6 m — on comprime l'écart pour que tout se lise
-  const MAX = { cuirasse: 3, fregate: 12, tanker: 6 };
+  // ARMADA (20/10) : jusqu'à 12 cuirassés, 60 frégates et 24 tankers modélisés ; au-delà, l'armada lointaine (une lueur par vaisseau)
+  const MAX = { cuirasse: 12, fregate: 60, tanker: 24 };
+  // gabarits mesurés sur les modèles LOD, à l'échelle d'affichage (largeur, longueur)
+  const DIM = { cuirasse: [57, 290], fregate: [25, 93], tanker: [22, 57] };
   const GLOSS = { M_TK_ARMOR_JAUNE: [0.40, 0.08], M_KV_ARMOR_WHITE: [0.38, 0.0], M_KV_ARMOR_RED: [0.28, 0.3], M_KV_GUNMETAL: [0.26, 0.85],
                   M_KV_STRUCT_BLACK: [0.30, 0.55], M_TK_GRAPHITE: [0.30, 0.6], M_SR_VERRIERE: [0.06, 0.4] };
   const cache = {};
 
-  // liste des vaisseaux affichés, par type puis par tier (les plus hauts tiers d'abord)
+  // liste des vaisseaux affichés, par type puis par tier (les plus hauts tiers d'abord), + le reste de la flotte (armada lointaine)
   // hp : intégrité de coque (0–100) lue dans fleet.integrity[type]['tN'][i] (triée du plus sain au plus abîmé)
   function roster(fleet) {
     const out = [], comp = fleet && fleet.composition, integ = (fleet && fleet.integrity) || {};
+    const overflow = { cuirasse: 0, fregate: 0, tanker: 0 };
+    let total = 0;
     for (const type of ['cuirasse', 'fregate', 'tanker']) {
       const c = (comp && comp[type]) || {};
       let k = 0;
-      for (const tier of [3, 2, 1]) for (let i = 0; i < (c['t' + tier] || 0) && k < MAX[type]; i++, k++) {
-        const arr = integ[type] && integ[type]['t' + tier];
-        const hp = arr && typeof arr[i] === 'number' ? Math.max(0, Math.min(100, arr[i])) : 100;
-        out.push({ type, tier, hp });
+      for (const tier of [3, 2, 1]) {
+        const n = Math.max(0, c['t' + tier] || 0); total += n;
+        for (let i = 0; i < n; i++) {
+          if (k >= MAX[type]) { overflow[type]++; continue; }
+          const arr = integ[type] && integ[type]['t' + tier];
+          const hp = arr && typeof arr[i] === 'number' ? Math.max(0, Math.min(100, arr[i])) : 100;
+          out.push({ type, tier, hp }); k++;
+        }
       }
     }
+    out.overflow = overflow; out.total = total;
     return out;
   }
-  // formation (mètres, cap vers −Z) : cuirassés en ligne au centre, frégates en V devant, tankers en colonne derrière
+  // formation de bataille (cap vers −Z), espacements tirés des gabarits — aucun chevauchement quel que soit l'effectif :
+  // cuirassés en ligne de bataille au centre (rangs de 6, le 2e décalé en quinconce),
+  // frégates en escadrilles de 6 en chevron (avant-garde puis flancs), tankers en convoi derrière
   function place(list) {
     const by = { cuirasse: [], fregate: [], tanker: [] };
     list.forEach(s => by[s.type].push(s));
-    const nc = by.cuirasse.length;
-    by.cuirasse.forEach((s, i) => { s.x = (i - (nc - 1) / 2) * 340; s.z = 0; });
-    const apex = nc ? -330 : -60;
-    by.fregate.forEach((s, i) => { const jj = Math.ceil(i / 2), side = i === 0 ? 0 : (i % 2 ? -1 : 1); s.x = side * jj * 120; s.z = apex + jj * 95; });
-    const rear = nc ? 300 : (by.fregate.length ? 200 : 0);
-    by.tanker.forEach((s, i) => { s.x = (i % 2 ? 1 : -1) * 60; s.z = rear + Math.floor(i / 2) * 105; });
+    const [cw, cl] = DIM.cuirasse, [fw, fl] = DIM.fregate, [tw, tl] = DIM.tanker;
+    const nc = by.cuirasse.length, perRank = 6, sx = cw * 2.7;
+    const ranks = Math.ceil(nc / perRank);
+    by.cuirasse.forEach((s, i) => {
+      const r = Math.floor(i / perRank), inRank = Math.min(perRank, nc - r * perRank), j = i - r * perRank;
+      s.x = (j - (inRank - 1) / 2) * sx + (r % 2 ? sx / 2 : 0); s.z = r * cl * 1.18; s.sq = r; s.wave = j;
+    });
+    const lineHalf = nc ? (Math.min(perRank, nc) - 1) / 2 * sx + sx / 2 + cw / 2 : 0;
+    // escadrille en chevron : chef, deux paires en ailes, un serre-file
+    const CHEV = [[0, 0], [-1, 1], [1, 1], [-2, 2], [2, 2], [0, 2]], dx = fw * 1.9, dz = fl * 0.82;
+    const sqW = 4 * dx + fw, sqGap = 70;
+    const X = (gx) => gx === 0 ? 0 : Math.sign(gx) * (lineHalf + sqW / 2 + sqGap + (Math.abs(gx) - 1) * (sqW + sqGap));
+    const front = nc ? -cl / 2 : 0;
+    const Z = (row) => row === 0 ? front + 40 : front - 60 - row * (2 * dz + fl + 120);
+    let SLOTS = [[0, 1], [-1, 0], [1, 0], [-1, 1], [1, 1], [-2, 0], [2, 0], [0, 2], [-2, 1], [2, 1], [-1, 2], [1, 2]];
+    if (!nc) SLOTS = [[0, 0]].concat(SLOTS.filter(([gx, r]) => !(gx === 0 && r === 1)));   // sans cuirassé : l'avant-garde prend le centre
+    by.fregate.forEach((s, i) => {
+      const q = Math.floor(i / 6), m = i % 6, [gx, row] = SLOTS[Math.min(q, SLOTS.length - 1)];
+      const [cx, cz] = CHEV[m];
+      s.x = X(gx) + cx * dx; s.z = Z(row) + cz * dz; s.sq = q + 1; s.wave = gx * 3 + cx;
+    });
+    // convoi de tankers : colonnes de 2 (4 au-delà de 12), derrière la ligne de bataille
+    const nt = by.tanker.length, cols = nt > 12 ? 4 : 2, rear = nc ? (ranks - 1) * cl * 1.18 + cl / 2 + tl + 60 : (by.fregate.length ? 2 * dz + fl + 120 : 0);
+    by.tanker.forEach((s, i) => {
+      const c = i % cols, r = Math.floor(i / cols);
+      s.x = (c - (cols - 1) / 2) * tw * 3.2; s.z = rear + r * tl * 1.7; s.sq = 20 + r; s.wave = c;
+    });
     return list;
   }
 
@@ -169,7 +202,7 @@
     const scene = new THREE.Scene();
     const pm = new THREE.PMREMGenerator(renderer);
     scene.environment = pm.fromScene(new RoomEnvironment(), 0.04).texture;
-    const camera = new THREE.PerspectiveCamera(40, W() / H(), 5, 40000);
+    const camera = new THREE.PerspectiveCamera(40, W() / H(), 5, 70000);
     const shiftY = opts.shiftY || 0;
     const applyView = () => { camera.aspect = W() / H(); if (shiftY) camera.setViewOffset(W(), H(), 0, H() * shiftY, W(), H()); camera.updateProjectionMatrix(); };
     applyView();
@@ -328,71 +361,176 @@
     const loader = new GLTFLoader();
     const get = (url) => cache[url] || (cache[url] = new Promise((ok, ko) => loader.load(url, ok, undefined, ko)));
     let alive = true;
-    Promise.all(list.map(async (s, i) => {
+    // ARMADA (20/10) : chaque pièce de chaque modèle est dessinée en une passe pour toute la flotte (InstancedMesh) ;
+    // un porteur (Object3D) par vaisseau garde sa position animée et accroche plasma, panaches et fumées
+    const inst = [];                                                   // { im, local, idx }
+    const typeIdx = { cuirasse: [], fregate: [], tanker: [] };
+    list.forEach((s, i) => typeIdx[s.type].push(i));
+    list.forEach((s, i) => {
       const M = MODELS[s.type];
-      const gltf = await get(M.url);
-      if (!alive) return;
-      const g = gltf.scene.clone(true);
-      const hp = s.hp, dmg = 1 - hp / 100;
-      g.traverse(o => {
-        if (!o.isMesh) return;
-        o.material = o.material.clone();
-        const m = o.material, gl = GLOSS[m.name];
-        if (gl) { m.roughness = Math.min(0.9, gl[0] + dmg * 0.35); m.metalness = gl[1]; m.envMapIntensity = 0.9 - dmg * 0.4; }
-        if (m.name === 'M_KV_GLOW_MOTEUR') { m.emissive = new THREE.Color(M.color); m.emissiveIntensity = 4 * (0.35 + 0.65 * hp / 100); }
-        else if (dmg > 0 && m.color && !(m.emissiveIntensity > 0 && m.emissive && m.emissive.getHex())) m.color.multiplyScalar(1 - dmg * 0.55);   // coque noircie
-        o.userData.idx = i;
-      });
-      g.scale.setScalar(M.scale);
-      for (const [x, y, z] of M.glow) {
-        const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex, color: M.color, blending: THREE.AdditiveBlending, depthWrite: false, transparent: true }));
-        sp.position.set(x, y, z); sp.scale.setScalar(M.glowSize / M.scale); g.add(sp);
+      const holder = new THREE.Group();
+      const gs = new THREE.Group(); gs.scale.setScalar(M.scale); holder.add(gs);   // repère du modèle (tuyères, panaches)
+      holder.position.set(s.x, 0, s.z); holder.rotation.y = Math.PI;      // cap vers −Z
+      holder.userData = { ph: (s.sq || 0) * 0.9 + (s.wave || 0) * 0.45, x: s.x, z: s.z, idx: i, gs, hp: s.hp, k: typeIdx[s.type].indexOf(i) };
+      fleetG.add(holder); ships[i] = holder;
+    });
+    // lueurs moteurs : un seul nuage de points pour toute la flotte (au lieu d'un sprite par tuyère)
+    const glowSrc = [];
+    list.forEach((s, i) => MODELS[s.type].glow.forEach(g => glowSrc.push({ i, x: g[0] * MODELS[s.type].scale, y: g[1] * MODELS[s.type].scale, z: g[2] * MODELS[s.type].scale, size: MODELS[s.type].glowSize, color: MODELS[s.type].color, hp: s.hp })));
+    let glowPts = null;
+    if (glowSrc.length) {
+      const g = new THREE.BufferGeometry(), pos = new Float32Array(glowSrc.length * 3), aS = new Float32Array(glowSrc.length * 3), col = new THREE.Color();
+      glowSrc.forEach((q, j) => { col.set(q.color); aS.set([q.size * (0.55 + 0.45 * q.hp / 100), j * 1.37, 0], j * 3); });
+      g.setAttribute('position', new THREE.BufferAttribute(pos, 3)); g.setAttribute('aS', new THREE.BufferAttribute(aS, 3));
+      const aC = new Float32Array(glowSrc.length * 3); glowSrc.forEach((q, j) => { col.set(q.color); aC.set([col.r, col.g, col.b], j * 3); });
+      g.setAttribute('aC', new THREE.BufferAttribute(aC, 3));
+      glowPts = new THREE.Points(g, new THREE.ShaderMaterial({
+        transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
+        uniforms: { uT: PT, uPR: { value: renderer.getPixelRatio() }, uH: { value: H() } },
+        vertexShader: `attribute vec3 aS; attribute vec3 aC; uniform float uT, uPR, uH; varying vec3 vC; varying float vA;
+          void main(){ vec4 mv = modelViewMatrix * vec4(position, 1.0); gl_Position = projectionMatrix * mv;
+            vC = aC; vA = .78 + .22 * sin(uT * 23.0 + aS.y * 5.0);
+            gl_PointSize = min(220.0, aS.x * 2.4 * uH * uPR * projectionMatrix[1][1] * .5 / -mv.z); }`,
+        fragmentShader: `varying vec3 vC; varying float vA;
+          void main(){ float d = length(gl_PointCoord - .5) * 2.0; float a = (exp(-d * d * 5.0) * .9 + exp(-d * d * 40.0) * .8) * vA; if (a < .01) discard;
+            gl_FragColor = vec4(mix(vC, vec3(1.0), exp(-d * d * 40.0) * .6) * a, a); }`,
+      }));
+      glowPts.frustumCulled = false; glowPts.renderOrder = 5; scene.add(glowPts);
+    }
+    const MAT4 = new THREE.Matrix4(), V3 = new THREE.Vector3();
+    const updateInstances = () => {
+      for (const s of ships) s && s.updateMatrix();
+      for (const p of inst) {
+        for (let k = 0; k < p.idx.length; k++) { MAT4.multiplyMatrices(ships[p.idx[k]].matrix, p.local); p.im.setMatrixAt(k, MAT4); }
+        p.im.instanceMatrix.needsUpdate = true;
       }
-      const holder = new THREE.Group(); holder.add(g);
-      if (mission) {
-        // repère local du porteur : proue vers +Z (le porteur est retourné pour filer vers −Z)
-        const bb = new THREE.Box3().setFromObject(g), sz = bb.getSize(new THREE.Vector3()), c = bb.getCenter(new THREE.Vector3());
-        const L = sz.z, bow = bb.max.z + L * 0.1, hw = sz.x / 2, hhh = sz.y / 2;
-        const R0 = Math.max(0.31 * L, 1.35 * Math.max(hw, hhh / 0.78));
+      if (glowPts) {
+        const a = glowPts.geometry.attributes.position;
+        glowSrc.forEach((q, j) => { V3.set(q.x, q.y, q.z).applyMatrix4(ships[q.i].matrix); a.setXYZ(j, V3.x, V3.y, V3.z); });
+        a.needsUpdate = true;
+      }
+    };
+    const addPlasma = (holder, type, k, bb, hp) => {
+      // LOD du plasma : complet sur les cuirassés, une enveloppe + quelques filaments sur les 18 premières frégates
+      // et les 12 premiers tankers, panaches à deux couches sur les 24 premiers ; les autres gardent leur lueur moteur
+      const M = MODELS[type], gs = holder.userData.gs;
+      const capital = type === 'cuirasse', near = capital || (type === 'fregate' ? k < 18 : k < 12);
+      const sz = bb.getSize(new THREE.Vector3()), c = bb.getCenter(new THREE.Vector3());
+      const L = sz.z, bow = bb.max.z + L * 0.1, hw = sz.x / 2, hhh = sz.y / 2;
+      const R0 = Math.max(0.31 * L, 1.35 * Math.max(hw, hhh / 0.78));
+      if (near) {
         const shock = new THREE.Group();
-        (LITE ? [[1.0, .7, 2.2, 1.6]] : [[1.0, .55, 2.2, 1.6], [1.12, .28, 3.2, 1.1], [0.9, .22, 1.6, 2.4]]).forEach(([sc, gain, fr, sp]) => {
+        ((LITE || !capital) ? [[1.0, capital ? .7 : .5, 2.2, 1.6]] : [[1.0, .55, 2.2, 1.6], [1.12, .28, 3.2, 1.1], [0.9, .22, 1.6, 2.4]]).forEach(([sc, gain, fr, sp]) => {
           const m = new THREE.Mesh(bubbleGeo(THREE, bow, c.y, L, R0, sc), shockMat(THREE, PT, gain * (hp > 0 ? 1 : .5), fr, sp));
           m.renderOrder = 2; m.frustumCulled = false; shock.add(m);
         });
         holder.add(shock);
-        holder.add(filaments(THREE, PT, Math.round(FIL_N[s.type] * (LITE ? .4 : 1)), bb.max.z, c.y, hw, hhh, L));
-        // panaches : 4 couches par tuyère (cœur blanc, corps, gaine, halo)
-        const pal = M.color === 0xffb070 ? PLUMES.amber : PLUMES.blue, thrust = 0.45 + 0.55 * hp / 100;
-        for (const [x, y, z] of M.glow) {
-          const pg = new THREE.Group(); pg.position.set(x, y, z);
-          const R = M.glowSize * 0.32 / M.scale;
-          for (const [len, rIn, rOut, col, alpha, flick, layer] of [[R * 40, R * .86, R * .2, pal[0], .16, 1, 1], [R * 28, R * .74, R * .1, pal[1], .3, 1, .7], [R * 16, R * .58, R * .05, pal[2], .42, .8, .4], [R * 7, R * .4, R * .03, pal[3], .55, .4, 0]]) {
-            const geo = new THREE.CylinderGeometry(rIn, rOut, len * thrust, 28, 1, true); geo.rotateX(Math.PI / 2); geo.translate(0, 0, -len * thrust / 2);
-            const pm = new THREE.Mesh(geo, plumeMat(THREE, PT, col, alpha, flick, layer)); pm.frustumCulled = false; pm.renderOrder = 4; pg.add(pm);
+        holder.add(filaments(THREE, PT, Math.round(FIL_N[type] * (LITE ? .4 : capital ? 1 : .35)), bb.max.z, c.y, hw, hhh, L));
+      }
+      if (!capital && k >= 24) return;
+      const pal = M.color === 0xffb070 ? PLUMES.amber : PLUMES.blue, thrust = 0.45 + 0.55 * hp / 100;
+      const layers = [[40, .86, .2, 0, .16, 1, 1], [28, .74, .1, 1, .3, 1, .7], [16, .58, .05, 2, .42, .8, .4], [7, .4, .03, 3, .55, .4, 0]];
+      for (const [x, y, z] of M.glow) {
+        const pg = new THREE.Group(); pg.position.set(x, y, z);
+        const R = M.glowSize * 0.32 / M.scale;
+        for (const [len, rIn, rOut, ci, alpha, flick, layer] of (capital ? layers : layers.slice(2))) {
+          const geo = new THREE.CylinderGeometry(R * rIn, R * rOut, R * len * thrust, capital ? 28 : 14, 1, true); geo.rotateX(Math.PI / 2); geo.translate(0, 0, -R * len * thrust / 2);
+          const pm = new THREE.Mesh(geo, plumeMat(THREE, PT, pal[ci], alpha, flick, layer)); pm.frustumCulled = false; pm.renderOrder = 4; pg.add(pm);
+        }
+        gs.add(pg);
+      }
+    };
+    const types = [...new Set(list.map(s => s.type))];
+    Promise.all(types.map(async type => {
+      const M = MODELS[type];
+      const gltf = await get(M.url);
+      if (!alive) return;
+      const root = gltf.scene; root.updateMatrixWorld(true);
+      const idx = typeIdx[type], n = idx.length;
+      const scM = new THREE.Matrix4().makeScale(M.scale, M.scale, M.scale);
+      const box = new THREE.Box3(), col = new THREE.Color();
+      const avgHp = idx.reduce((a, gi) => a + list[gi].hp, 0) / n;
+      root.traverse(o => {
+        if (!o.isMesh) return;
+        const local = new THREE.Matrix4().multiplyMatrices(scM, o.matrixWorld);
+        const m = o.material.clone(), gl = GLOSS[m.name];
+        if (gl) { m.roughness = gl[0]; m.metalness = gl[1]; m.envMapIntensity = 0.9; }
+        const glow = m.name === 'M_KV_GLOW_MOTEUR' || (m.emissive && m.emissive.getHex() && m.emissiveIntensity > 0);
+        if (m.name === 'M_KV_GLOW_MOTEUR') { m.emissive = new THREE.Color(M.color); m.emissiveIntensity = 4 * (0.35 + 0.65 * avgHp / 100); }
+        const im = new THREE.InstancedMesh(o.geometry, m, n);
+        im.instanceMatrix.setUsage(THREE.DynamicDrawUsage); im.frustumCulled = false;
+        im.userData = { type, idx };
+        if (!glow) for (let k = 0; k < n; k++) im.setColorAt(k, col.setScalar(1 - (1 - list[idx[k]].hp / 100) * 0.55));   // coque noircie selon les avaries
+        fleetG.add(im); inst.push({ im, local, idx });
+        if (!o.geometry.boundingBox) o.geometry.computeBoundingBox();
+        box.union(o.geometry.boundingBox.clone().applyMatrix4(local));
+      });
+      idx.forEach((gi, k) => {
+        const holder = ships[gi], hp = list[gi].hp;
+        if (mission) addPlasma(holder, type, k, box, hp);
+        if (hp < 80 && smoke.length < 60) {                              // fumées + feu au-dessous de 35 %
+          const sz = box.getSize(new THREE.Vector3()), nS = hp < 35 ? 4 : hp < 60 ? 3 : 2;
+          for (let j = 0; j < nS; j++) {
+            const off = new THREE.Vector3((Math.random() - 0.5) * sz.x * 0.6, box.max.y - sz.y * 0.15, (Math.random() - 0.5) * sz.z * 0.6);
+            const base = Math.max(sz.x, sz.z) * 0.12 + 10;
+            const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: smokeTex, color: 0x5a5650, transparent: true, depthWrite: false, opacity: 0 }));
+            fleetG.add(sp); smoke.push({ sp, ship: holder, off, base, ph: Math.random(), rate: 0.18 + Math.random() * 0.1, fire: null });
+            if (hp < 35 && j < 2) {
+              const f = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex, color: 0xff3a14, blending: THREE.AdditiveBlending, transparent: true, depthWrite: false }));
+              f.scale.setScalar(base * 0.7); fleetG.add(f); smoke[smoke.length - 1].fire = f;
+            }
           }
-          g.add(pg);
+        }
+      });
+    })).then(() => { if (!alive) return; updateInstances(); inst.forEach(p => p.im.computeBoundingSphere()); })
+      .catch(e => console.warn('[Formation3D]', e)).finally(() => { if (alive && opts.onReady) opts.onReady(); });
+
+    // ARMADA LOINTAINE : le reste de la flotte, une lueur moteur par vaisseau, en escadrilles autour de la formation,
+    // qui ondulent doucement dans la profondeur (un seul nuage de points)
+    const ov = list.overflow || { cuirasse: 0, fregate: 0, tanker: 0 };
+    const nFar = Math.min(2400, ov.cuirasse + ov.fregate + ov.tanker);
+    if (nFar) {
+      const pos = new Float32Array(nFar * 3), aP = new Float32Array(nFar * 3), aC = new Float32Array(nFar * 3);
+      const cBlue = new THREE.Color(0x9ccaff), cAmber = new THREE.Color(0xffb070), cBig = new THREE.Color(0xbcd8ff);
+      let j = 0, rnd = 7; const R = () => (rnd = (rnd * 16807) % 2147483647) / 2147483647;
+      const kinds = [['cuirasse', ov.cuirasse], ['fregate', ov.fregate], ['tanker', ov.tanker]];
+      for (const [type, cnt] of kinds) {
+        let left = Math.min(cnt, nFar - j);
+        while (left > 0) {
+          // centre d'une escadrille : anneau elliptique autour de la formation (tankers plutôt derrière)
+          // l'armada s'étire droit devant la formation jusqu'à l'horizon (tankers : convoi en arrière-garde)
+          const deep = R();
+          const cx = (R() - .5) * ext * (1.6 + deep * 2.4), cz = type === 'tanker' ? ext * (0.9 + R() * 1.8) : -ext * (1.05 + deep * 5.0), cy = (R() - .4) * ext * (.35 + deep * .5);
+          const grp = Math.min(left, type === 'cuirasse' ? 3 : 6), sp = type === 'cuirasse' ? 160 : 55;
+          for (let m = 0; m < grp; m++, j++, left--) {
+            const [ox, oz] = [[0, 0], [-1, 1], [1, 1], [-2, 2], [2, 2], [0, 2]][m];
+            pos.set([cx + ox * sp, cy + (R() - .5) * 20, cz + oz * sp * 1.3], j * 3);
+            aP.set([R() * 6.28, type === 'cuirasse' ? 80 : type === 'fregate' ? 38 : 30, 0], j * 3);
+            const c = type === 'tanker' ? cAmber : type === 'cuirasse' ? cBig : cBlue; aC.set([c.r, c.g, c.b], j * 3);
+          }
         }
       }
-      holder.position.set(s.x, 0, s.z); holder.rotation.y = Math.PI;      // cap vers −Z
-      holder.userData = { ph: i * 1.7, x: s.x, z: s.z, idx: i };
-      fleetG.add(holder); ships[i] = holder;
-      holder.userData.hp = hp;
-      if (hp < 80) {                                                    // fumées + feu au-dessous de 35 %
-        holder.updateMatrixWorld(true);
-        const b = new THREE.Box3().setFromObject(holder), sz = b.getSize(new THREE.Vector3());
-        const n = hp < 35 ? 4 : hp < 60 ? 3 : 2;
-        for (let j = 0; j < n; j++) {
-          const off = new THREE.Vector3((Math.random() - 0.5) * sz.x * 0.6, b.max.y - holder.position.y - sz.y * 0.15, (Math.random() - 0.5) * sz.z * 0.6);
-          const base = Math.max(sz.x, sz.z) * 0.12 + 10;
-          const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: smokeTex, color: 0x5a5650, transparent: true, depthWrite: false, opacity: 0 }));
-          fleetG.add(sp); smoke.push({ sp, ship: holder, off, base, ph: Math.random(), rate: 0.18 + Math.random() * 0.1, fire: null });
-          if (hp < 35 && j < 2) {
-            const f = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex, color: 0xff3a14, blending: THREE.AdditiveBlending, transparent: true, depthWrite: false }));
-            f.scale.setScalar(base * 0.7); fleetG.add(f); smoke[smoke.length - 1].fire = f;
-          }
-        }
-      }
-    })).catch(e => console.warn('[Formation3D]', e)).finally(() => { if (alive && opts.onReady) opts.onReady(); });
+      const g = new THREE.BufferGeometry();
+      g.setAttribute('position', new THREE.BufferAttribute(pos, 3)); g.setAttribute('aP', new THREE.BufferAttribute(aP, 3)); g.setAttribute('aC', new THREE.BufferAttribute(aC, 3));
+      const far = new THREE.Points(g, new THREE.ShaderMaterial({
+        transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
+        uniforms: { uT: PT, uPR: { value: renderer.getPixelRatio() }, uH: { value: H() } },
+        vertexShader: `attribute vec3 aP; attribute vec3 aC; uniform float uT, uPR, uH; varying vec3 vC; varying float vA;
+          void main(){ vec3 p = position + vec3(sin(uT * .21 + aP.x) * 6.0, sin(uT * .3 + aP.x + position.x * .002) * 9.0, sin(uT * .17 + aP.x * 1.3) * 8.0);
+            vec4 mv = modelViewMatrix * vec4(p, 1.0); gl_Position = projectionMatrix * mv;
+            vC = aC; vA = .7 + .3 * sin(uT * 2.3 + aP.x * 7.0);
+            gl_PointSize = clamp(aP.y * 2.6 * uH * uPR * projectionMatrix[1][1] * .5 / -mv.z, 3.0 * uPR, 70.0); }`,
+        fragmentShader: `varying vec3 vC; varying float vA;
+          void main(){ float d = length(gl_PointCoord - .5) * 2.0; float a = (exp(-d * d * 4.0) * .8 + exp(-d * d * 30.0) * 1.0) * vA; if (a < .01) discard;
+            gl_FragColor = vec4(mix(vC, vec3(1.0), exp(-d * d * 30.0) * .5) * a * 1.6, a); }`,
+      }));
+      far.frustumCulled = false; far.renderOrder = 5; scene.add(far);
+    }
+    // compteur discret dans la légende de la vue (« 214 vaisseaux · En orbite · touche un vaisseau »)
+    if (!LITE && list.total) {
+      const hint = container.querySelector('.u3d-hint');
+      if (hint) { const base = hint.dataset.base || hint.textContent; hint.dataset.base = base; hint.textContent = `${list.total} vaisseau${list.total > 1 ? 'x' : ''} · ${base}`; }
+    }
 
     // mission : hyperespace — tunnel de traînées lumineuses floues (violet, magenta, cyan) qui convergent vers
     // un cœur violet éblouissant droit devant ; tout est calculé sur le GPU (aucune mise à jour CPU)
@@ -477,18 +615,32 @@
 
     let sel = null;
     const t0 = performance.now(); let last = t0, raf = 0;
+    // RÉVÉLATION (20/10) : la caméra part au ras de la coque du vaisseau amiral et recule pour dévoiler l'armada
+    // (3,2 s la première fois pour cette flotte, 1 s ensuite ; pas sur l'écran d'accueil)
+    const seen = (window.__sbF3DSeen = window.__sbF3DSeen || {}), fkey = (opts.fleet && opts.fleet.id) || 'x';
+    const REVEAL = LITE || !ships.length ? 0 : (seen[fkey + (mission ? 'm' : 'o')] ? 1.0 : 3.2);
+    seen[fkey + (mission ? 'm' : 'o')] = true;
+    const flagI = list.findIndex(s => s.type === 'cuirasse') >= 0 ? list.findIndex(s => s.type === 'cuirasse') : 0;
+    const flagL = list.length ? DIM[list[flagI].type][1] : 100;
     const frame = (now) => {
       if (!alive) return;
       if (container.offsetParent === null) { last = now; raf = requestAnimationFrame(frame); return; }   // fiche masquée : pause
       const dt = Math.min(0.05, (now - last) / 1000); last = now;
       const t = (now - t0) / 1000;
-      const intro = 1 - Math.pow(1 - Math.min(1, t / 2.6), 3);         // la caméra descend sur la formation
+      const intro = REVEAL ? 1 - Math.pow(1 - Math.min(1, t / REVEAL), 3) : 1;
       if (idle) azT += dt * SPIN;
       const k = 1 - Math.exp(-dt * 7);
       az += (azT - az) * k; el += (elT - el) * k; zoom += (zoomT - zoom) * k;
-      const d = fit() * zoom * (1 + 0.8 * (1 - intro));
+      const d = fit() * zoom;
       const tgt = new THREE.Vector3(0, 0, -ext * 0.12);
       camera.position.set(tgt.x + Math.sin(az) * Math.cos(el) * d, tgt.y + Math.sin(el) * d, tgt.z + Math.cos(az) * Math.cos(el) * d);
+      if (intro < 1 && ships[flagI]) {
+        const f = ships[flagI].position, e = intro * intro * (3 - 2 * intro);
+        const ps = new THREE.Vector3(f.x + flagL * .32, f.y + flagL * .16, f.z + flagL * .78);   // derrière l'épaule du vaisseau amiral
+        const ts = new THREE.Vector3(f.x, f.y + flagL * .05, f.z - flagL * .45);
+        camera.position.lerpVectors(ps, camera.position, e);
+        tgt.lerpVectors(ts, tgt, e);
+      }
       camera.lookAt(tgt);
       PT.value = t;
       HYPER.value = t;
@@ -514,15 +666,15 @@
         }
       }
 
-      for (const s of ships) {
+      for (const s of ships) {                                          // vague lente qui parcourt les rangs, escadrilles qui s'inclinent à tour de rôle
         if (!s) continue;
-        const p = s.userData.ph;
+        const p = s.userData.ph, w = t * 0.55 - s.userData.x * 0.0022 - s.userData.z * 0.0011;
         s.position.x = s.userData.x + Math.sin(t * 0.21 + p) * 4;
         s.position.z = s.userData.z + Math.sin(t * 0.17 + p * 1.3) * 6;
-        s.position.y = Math.sin(t * 0.3 + p) * 3;
-        s.rotation.z = Math.sin(t * 0.25 + p) * 0.03;
-        s.traverse(o => { if (o.isSprite) o.material.opacity = 0.75 + 0.25 * Math.sin(t * 23 + p * 5); });
+        s.position.y = Math.sin(w + p * .3) * 5;
+        s.rotation.z = Math.sin(w * 0.8 + p) * 0.045;
       }
+      updateInstances();
       for (const p of smoke) {                                           // fumée qui monte et part vers l'arrière
         const s = p.ship, u = (t * p.rate + p.ph) % 1;
         p.sp.position.set(s.position.x + p.off.x, s.position.y + p.off.y + u * p.base * 2.2, s.position.z + p.off.z + u * p.base * 3.5);
@@ -552,9 +704,9 @@
       pick(cx, cy) {
         const r = renderer.domElement.getBoundingClientRect();
         raycaster.setFromCamera(new THREE.Vector2(((cx - r.left) / r.width) * 2 - 1, -((cy - r.top) / r.height) * 2 + 1), camera);
-        const hit = raycaster.intersectObjects(fleetG.children, true).find(h => h.object.userData.idx !== undefined);
+        const hit = raycaster.intersectObjects(inst.map(p => p.im), false).find(h => h.instanceId !== undefined);
         if (!hit) return null;
-        const i = hit.object.userData.idx;
+        const i = hit.object.userData.idx[hit.instanceId];
         return { index: i, type: list[i].type, tier: list[i].tier, hp: list[i].hp };
       },
       select(i) { sel = (i === null || i === undefined) ? null : i; },
