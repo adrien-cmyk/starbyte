@@ -51,7 +51,7 @@
     const by = { cuirasse: [], fregate: [], tanker: [] };
     list.forEach(s => by[s.type].push(s));
     const [cw, cl] = DIM.cuirasse, [fw, fl] = DIM.fregate, [tw, tl] = DIM.tanker;
-    const nc = by.cuirasse.length, perRank = 6, sx = cw * 3.5, rz = cl * 1.35;   // gros vaisseaux : de l'air entre eux
+    const nc = by.cuirasse.length, perRank = 6, sx = cw * 4.5, rz = cl * 1.35;   // gros vaisseaux : de l'air entre eux
     const ranks = Math.ceil(nc / perRank);
     by.cuirasse.forEach((s, i) => {
       const r = Math.floor(i / perRank), inRank = Math.min(perRank, nc - r * perRank), j = i - r * perRank;
@@ -500,7 +500,7 @@
           // centre d'une escadrille : anneau elliptique autour de la formation (tankers plutôt derrière)
           // l'armada s'étire droit devant la formation jusqu'à l'horizon (tankers : convoi en arrière-garde)
           const deep = R();
-          const cx = (R() - .5) * ext * (1.6 + deep * 2.4), cz = type === 'tanker' ? ext * (0.9 + R() * 1.8) : -ext * (1.05 + deep * 5.0), cy = (R() - .4) * ext * (.35 + deep * .5);
+          const cx = (R() - .5) * ext * (1.5 + deep * 1.6), cz = type === 'tanker' ? ext * (0.8 + R() * 1.1) : -ext * (0.75 + deep * 2.2), cy = (R() - .4) * ext * (.3 + deep * .35);   // armada resserrée : on la sent tout près
           const grp = Math.min(left, type === 'cuirasse' ? 3 : 6), sp = type === 'cuirasse' ? 160 : 55;
           for (let m = 0; m < grp; m++, j++, left--) {
             const [ox, oz] = [[0, 0], [-1, 1], [1, 1], [-2, 2], [2, 2], [0, 2]][m];
