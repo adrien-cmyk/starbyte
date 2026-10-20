@@ -39326,25 +39326,26 @@ function renderShipUnitDetail(key) {
   // ─── Doctrine (au lieu de "Coûts de réparation" pour les vaisseaux) ───
   // Le pattern de pertes (Battlestar Galactica) varie selon le type
   const doctrines = {
+    // PATCH_2010_DOCTRINE : ce qui arrive à un vaisseau ABATTU (les survivants rentrent tous)
     tanker: {
-      losses: 'Pertes 50% détruites · 50% récupérables',
-      role: 'Civil compartimenté — partiellement réparable après combat',
+      losses: 'Abattu : 1 sur 2 se récupère',
+      role: 'Si un tanker est abattu au combat, il a une chance sur deux d\'être ramené en réparation. Les tankers épargnés rentrent normalement.',
     },
     fregate: {
-      losses: 'Pertes 100% — vaisseaux jetables',
-      role: 'Production de masse — pas de canots de sauvetage',
+      losses: 'Abattue : perdue',
+      role: 'Une frégate qui rentre de mission revient à quai. Seule celle qui est abattue au combat est perdue : pas de canots de sauvetage.',
     },
     cuirasse: {
-      losses: 'Pertes 30% détruites · 70% récupérables',
-      role: 'Vaisseau capital — canots, compartiments étanches, identité narrative',
+      losses: 'Abattu : 7 sur 10 se récupèrent',
+      role: 'Si un cuirassé est abattu, ses canots et compartiments étanches permettent d\'en ramener 7 sur 10. Les cuirassés épargnés rentrent normalement.',
     },
   };
   const doctrine = doctrines[key];
   let costRows = '';
   if (doctrine) {
     costRows = `
-      <div class="dash-stat-row"><span class="lbl">Doctrine au combat</span><span class="val" style="color:var(--amber);font-size:10px">${doctrine.losses}</span></div>
-      <div class="dash-stat-row"><span class="lbl" style="font-size:10px;color:var(--mut);font-style:italic">${doctrine.role}</span><span class="val"></span></div>
+      <div class="dash-stat-row"><span class="lbl">Si abattu au combat</span><span class="val" style="color:var(--amber);font-size:10px">${doctrine.losses}</span></div>
+      <div style="font-size:11px;color:var(--mut);font-style:italic;line-height:1.5;padding:4px 0 2px">${doctrine.role}</div>
     `;
   }
   document.getElementById('ud-costs').innerHTML = costRows;
