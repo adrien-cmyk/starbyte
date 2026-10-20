@@ -38143,6 +38143,7 @@ function _recycleGo(idx) {
     const now = Date.now();
     p.recycleStartedAt = now; p.recycleEndsAt = now + recycleMs(p); p.recycleCost = cost;
     toast(`Démolition lancée · ${formatTankerDuration(p.recycleEndsAt - now)}`);
+    if (typeof renderPlanetMap === 'function') renderPlanetMap();   // PATCH_2010_RECYCLER_NUIT : ses lumières s'éteignent
     if (typeof saveGame === 'function') saveGame();
     if (typeof refreshCurrentScreen === 'function') refreshCurrentScreen();
   };
@@ -38155,6 +38156,7 @@ function cancelRecycle(idx) {
   for (const [r, q] of Object.entries(p.recycleCost || {})) if (G.res[r]) G.res[r].v = Math.min(G.res[r].max, G.res[r].v + Math.floor(q / 2));
   delete p.recycleStartedAt; delete p.recycleEndsAt; delete p.recycleCost;
   toast('Démolition annulée · la moitié du coût est rendue');
+  if (typeof renderPlanetMap === 'function') renderPlanetMap();
   if (typeof saveGame === 'function') saveGame();
   if (typeof refreshCurrentScreen === 'function') refreshCurrentScreen();
 }
@@ -46983,7 +46985,7 @@ if (G.knownTargets && Array.isArray(G.tankerMissions)) {
 
 </script>
 <!-- PLANET3D — carte 3D + boucle antenne (source : sb-build/src/planet3d.js) -->
-<script type="module" src="assets/planet3d.js?v=20261020-1600"></script>
+<script type="module" src="assets/planet3d.js?v=20261020-1615"></script>
 <!-- PERF_1310 — mesure des performances chez les joueurs + qualité 3D automatique (assets/perf.js) -->
 <script src="assets/perf.js?v=20261014-1540"></script>
 <!-- PATCH_1410_LIGNES — lignes PNJ à horaire sur les routes cachées (assets/lines.js) -->
