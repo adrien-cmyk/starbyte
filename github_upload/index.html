@@ -7505,7 +7505,23 @@ function _sectorDistance(a, b) {
 
 // Vérifie qu'une adresse parsée est dans la portée actuelle du joueur.
 // Retourne true/false. La règle exacte dépend du kind de l'adresse.
-function isInRange(parsed) {
+// PATCH_2010_DEPART — d'où partent les vaisseaux et jusqu'où on voit : la planète affichée, et toutes ses planètes pour la portée
+function _sbAddrOf(coord) {
+  const m = String(coord || '').match(/^([A-Z])-([A-Z])-(\d{4})-(\d{1,2})/);
+  return m ? { cluster: m[1], sector: m[2], system: parseInt(m[3], 10), planet: parseInt(m[4], 10) } : null;
+}
+function sbOrigin() {
+  try { const w = typeof sbActiveWorld === 'function' ? sbActiveWorld() : null; if (w && w.id !== 'home') { const a = _sbAddrOf(w.coord); if (a) return a; } } catch (e) {}
+  return MY_ADDRESS;
+}
+function sbOriginCoord() { const w = typeof sbActiveWorld === 'function' ? sbActiveWorld() : null; return (w && w.id !== 'home' && w.coord) ? w.coord : null; }
+function sbAllOrigins() {
+  const out = [MY_ADDRESS];
+  for (const w of (Array.isArray(G.worlds) ? G.worlds : [])) if (w && w.id !== 'home') { const a = _sbAddrOf(w.coord); if (a) out.push(a); }
+  return out;
+}
+function isInRange(parsed) { return sbAllOrigins().some(o => _isInRangeFrom(parsed, o)); }
+function _isInRangeFrom(parsed, MY_ADDRESS) {
   if (!parsed || typeof MY_ADDRESS === 'undefined' || !MY_ADDRESS) return false;
   const range = getMaxRange();
 
@@ -9236,7 +9252,7 @@ var _mpReturning = new Set();
 
 // Même règle que le serveur : 10 min + 5 min par secteur d'écart (aller) ; retour = aller × 2
 function mpRaidTravelMs(target) {
-  const mine = (typeof MY_ADDRESS !== 'undefined' && MY_ADDRESS) ? MY_ADDRESS.sector : null;
+  const mine = (typeof MY_ADDRESS !== 'undefined' && MY_ADDRESS) ? sbOrigin().sector : null;   // PATCH_2010_DEPART : depuis la planète affichée
   const sector = String(target.mpAddress || target.coord || '').split('-')[1];
   const d = (mine && sector) ? Math.min(Math.abs(mine.charCodeAt(0) - sector.charCodeAt(0)), 25) : 0;
   return (10 + 5 * d) * 60000;
@@ -13242,8 +13258,8 @@ function getFakeTarget(id) {
 //     non ciblables (Moyenne requise)
 // Le profil de combat est dérivé de la classe / du niveau joueur.
 function _carnetDistanceMult(sector) {
-  const mySector = (typeof MY_ADDRESS !== 'undefined' && MY_ADDRESS) ? MY_ADDRESS.sector : null;
-  const d = (typeof _sectorDistance === 'function') ? _sectorDistance(mySector, sector) : 0;
+  // PATCH_2010_DEPART : distance depuis la plus proche de mes planètes
+  const d = (typeof _sectorDistance === 'function') ? Math.min(...sbAllOrigins().map(o => _sectorDistance(o.sector, sector))) : 0;
   if (d <= 0) return 1;
   if (d <= 2) return 3;
   return 5;
@@ -36166,7 +36182,7 @@ function onAddressChange() {
   updateDispatchBtn(true, finalDuration);
 }
 
-function computeDistance(sector, system) {
+function computeDistance(sector, system) { const MY_ADDRESS = sbOrigin();   // PATCH_2010_DEPART : depuis la planète affichée
   // Même secteur : différence directe de numéro de système
   // Secteur adjacent : on simplifie en ajoutant 50 systèmes
   if (sector === MY_ADDRESS.sector) {
@@ -46842,7 +46858,7 @@ if (G.knownTargets && Array.isArray(G.tankerMissions)) {
 <!-- PATCH_1410_LIGNES — lignes PNJ à horaire sur les routes cachées (assets/lines.js) -->
 <script src="assets/lines.js?v=20261020-0150"></script>
 <!-- CLOUD — sauvegarde Supabase (source : sb-build/src/cloud.js) -->
-<script type="module" src="assets/cloud.js?v=20261020-0215"></script>
+<script type="module" src="assets/cloud.js?v=20261020-1150"></script>
 <!-- MATCH3 — Match-3 V2 (assets/match3.js, source src/match3.js + src/m3core.js) : remplace startM3 -->
 <script type="module" src="assets/match3.js?v=20261019-2140"></script>
 <!-- HOME V2 — « monde d'abord » : planète plein écran, ressources en ligne, Flotte / Défense / Prospection (assets/home.js) -->
