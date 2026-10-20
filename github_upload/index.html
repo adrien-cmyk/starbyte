@@ -8266,11 +8266,15 @@ function totalDefense() {
 // flottes, garnisons et missions tanker en RÉSERVENT une partie.
 var TANKER_BUSY_STATUSES = ['in_transit', 'docked', 'returning', 'exploring', 'orbital_relay', 'posted'];   // PATCH_1310_POSTES : + poste de route
 function _tankerMissionTier(m) { return m.tier || m.tankerTier || 0; }
-function _busyTankerMissions() { return (G.tankerMissions || []).filter(m => TANKER_BUSY_STATUSES.includes(m.status)); }
+// PATCH_2010_FLOTTES — chaque flotte, mission et garnison appartient à la planète d'où elle est partie
+function _sbMine(x) { return ((x && x.world) || 'home') === ((typeof G !== 'undefined' && G.activeWorld) || 'home'); }
+function sbTagWorld(x) { if (x && !x.world) x.world = (typeof G !== 'undefined' && G.activeWorld) || 'home'; return x; }
+function _busyTankerMissions() { return (G.tankerMissions || []).filter(m => TANKER_BUSY_STATUSES.includes(m.status) && _sbMine(m)); }
 function _tankersInFleets(t, excludeFleetId) {
   let n = 0;
   for (const f of (G.fleet && G.fleet.prepared) || []) {
     if (excludeFleetId && f.id === excludeFleetId) continue;
+    if (!_sbMine(f)) continue;
     n += (f.composition && f.composition.tanker && f.composition.tanker['t' + t]) || 0;
   }
   return n;
@@ -8291,8 +8295,9 @@ function tankerAvailability(tier) {
 // Soldats engagés hors des flottes de guerre : garnisons et cales de tankers
 function soldiersCommittedElsewhere(k) {
   let n = 0;
-  for (const g of G.garrisons || []) n += (g.soldiers && g.soldiers[k]) || 0;
+  for (const g of G.garrisons || []) if (_sbMine(g)) n += (g.soldiers && g.soldiers[k]) || 0;
   for (const m of G.tankerMissions || []) {
+    if (!_sbMine(m)) continue;
     if (m.status !== 'in_transit' && m.status !== 'orbital_relay' && m.status !== 'returning') continue;
     n += (m.cargo && m.cargo.soldiers && m.cargo.soldiers[k]) || 0;
   }
@@ -8311,7 +8316,7 @@ function loseShips(type, tierKey, n) {
 function getSoldiersInDeployedFleets(soldierKey) {
   let count = 0;
   for (const fleet of G.fleet.prepared) {
-    if ((fleet.status || 'prepared') !== 'deployed') continue;
+    if ((fleet.status || 'prepared') !== 'deployed' || !_sbMine(fleet)) continue;
     count += fleet.soldiers?.[soldierKey] || 0;
   }
   return count;
@@ -8322,7 +8327,7 @@ function getSoldiersInDeployedFleets(soldierKey) {
 function getSoldiersInPreparedFleets(soldierKey) {
   let count = 0;
   for (const fleet of G.fleet.prepared) {
-    if ((fleet.status || 'prepared') !== 'prepared') continue;
+    if ((fleet.status || 'prepared') !== 'prepared' || !_sbMine(fleet)) continue;
     count += fleet.soldiers?.[soldierKey] || 0;
   }
   return count;
@@ -8333,7 +8338,7 @@ function getSoldiersInPreparedFleets(soldierKey) {
 function getSoldiersInMissionFleets(soldierKey) {
   let count = 0;
   for (const fleet of G.fleet.prepared) {
-    if ((fleet.status || 'prepared') !== 'in_mission') continue;
+    if ((fleet.status || 'prepared') !== 'in_mission' || !_sbMine(fleet)) continue;
     count += fleet.soldiers?.[soldierKey] || 0;
   }
   return count;
@@ -8343,7 +8348,7 @@ function getSoldiersInMissionFleets(soldierKey) {
 function getOrbitalDefenseFromFleets() {
   let total = 0;
   for (const fleet of G.fleet.prepared) {
-    if ((fleet.status || 'prepared') !== 'deployed') continue;
+    if ((fleet.status || 'prepared') !== 'deployed' || !_sbMine(fleet)) continue;
     if (typeof syncFleetIntegrity === 'function') syncFleetIntegrity(fleet);
     for (const shipKey of ['tanker', 'fregate', 'cuirasse']) {
       for (let tier = 1; tier <= 3; tier++) {
@@ -8677,7 +8682,7 @@ var EXTRA_SAVE_KEYS = [
   'mpNeighbors',   // VOISINS_1310 — voisins déjà signalés
   'tuto',          // TUTO_1410 — premiers pas (étape, vu, terminé)
   'skillsLearned', 'research', '_skillsSeen', '_skillsMigrated',   // PATCH_1610_SKILLS
-  'worlds', 'activeWorld', 'colonyMissions',   // PATCH_2010_WORLDS — colonies (planètes inactives) et planète affichée
+  'worlds', 'activeWorld', 'colonyMissions', 'fleetTransfers',   // PATCH_2010_WORLDS — colonies (planètes inactives) et planète affichée
   '_linesCrown', 'crownSeen', '_linesSanct', 'sanctSeen', '_linesNoire', 'noireSeen', '_linesRefuge', '_linesRefuge2', 'refugeSeen', '_brest1',   // PATCH_1510_CROWN — lieu du secteur M devenu la Couronne, première arrivée vue
 ];
 
@@ -9404,7 +9409,7 @@ function _defHitUnits(keys, pct, out) {
 }
 function _defHitOrbitalFleets(pct, out) {
   for (const fleet of (G.fleet && G.fleet.prepared) || []) {
-    if ((fleet.status || 'prepared') !== 'deployed') continue;
+    if ((fleet.status || 'prepared') !== 'deployed' || !_sbMine(fleet)) continue;
     syncFleetIntegrity(fleet);
     for (const type of SHIP_TYPES_ALL) {
       const n = countShipsByType(fleet.composition, type), hit = Math.round(n * pct);
@@ -10471,7 +10476,7 @@ function launchRoutePost(routeId, sysKey) {
     cargo: { soldiers: { garde: 0, lourd: 0 }, resources: { metal: 0, energie: 0, cristal: 0 } }, riskLossPct: 0,
   };
   if (!Array.isArray(G.tankerMissions)) G.tankerMissions = [];
-  G.tankerMissions.push(m);
+  G.tankerMissions.push(sbTagWorld(m));
   if (typeof startTankerCountdownTicker === 'function') startTankerCountdownTicker();
   if (typeof saveGame === 'function') saveGame();
   toast(`${m.tankerName} part ouvrir un poste à ${sysKey} · ${formatTankerDuration(ms)}`);
@@ -12568,6 +12573,7 @@ function renderFleetScreen() {
     }
     let prepHtml = '';
     for (const fleet of G.fleet.prepared) {
+      if (!_sbMine(fleet)) continue;   // PATCH_2010_FLOTTES : les flottes des autres planètes s'affichent sur leur planète
       // Calc stats rapides
       let nShips = 0, nAtk = 0, nDef = 0;
       for (const sk of ['tanker', 'fregate', 'cuirasse']) {
@@ -13644,7 +13650,7 @@ function getAvailableShips(shipKey, tier) {
   const editingId = G.fleetComposing?.editingId || null;
   let reserved = 0;
   for (const prep of G.fleet.prepared) {
-    if (prep.id === editingId) continue; // skip la flotte en cours d'édition
+    if (prep.id === editingId || !_sbMine(prep)) continue; // skip la flotte en cours d'édition (et celles des autres planètes)
     reserved += prep.composition?.[shipKey]?.[tierKey] || 0;
   }
   if (shipKey === 'tanker') reserved += _busyTankerMissions().filter(m => _tankerMissionTier(m) === tier).length;
@@ -13657,7 +13663,7 @@ function getAvailableSoldiers(soldierKey) {
   const editingId = G.fleetComposing?.editingId || null;
   let reserved = 0;
   for (const prep of G.fleet.prepared) {
-    if (prep.id === editingId) continue; // skip la flotte en cours d'édition
+    if (prep.id === editingId || !_sbMine(prep)) continue; // skip la flotte en cours d'édition (et celles des autres planètes)
     reserved += prep.soldiers?.[soldierKey] || 0;
   }
   reserved += soldiersCommittedElsewhere(soldierKey);
@@ -14209,7 +14215,7 @@ function confirmFleetComposition() {
     createdAt: Date.now(),
   };
   ensureFleetHeroes(fleet); // passe 3.4 — génère les héros selon la composition
-  G.fleet.prepared.push(fleet);
+  G.fleet.prepared.push(sbTagWorld(fleet));
   G.fleetComposing = null;
   toast(`${fleet.name} prête au départ`);
   // Retour Vue d'amiral (REPLACE — on ne veut pas que goBack revienne sur le compose)
@@ -24959,7 +24965,7 @@ function launchTankerToTarget(reportId, targetId, force) {
     // Sécurité : forcer arrivalAt à now (au cas où une rencontre rare aurait modifié la durée)
     mission.arrivalAt = now;
   }
-  G.tankerMissions.push(mission);
+  G.tankerMissions.push(sbTagWorld(mission));
 
   // Marquer la cible comme engagée
   target.status = 'tanker_sent';
@@ -25045,7 +25051,7 @@ function launchTankerToKnownTarget(coordKey, force) {
     // Sécurité : forcer arrivalAt à now
     mission.arrivalAt = now;
   }
-  G.tankerMissions.push(mission);
+  G.tankerMissions.push(sbTagWorld(mission));
 
   // Marquer la cible comme engagée (reste visible mais grimée)
   if (typeof engageKnownTarget === 'function') {
@@ -26418,7 +26424,7 @@ function confirmTankerComposition() {
   }
 
   if (!Array.isArray(G.tankerMissions)) G.tankerMissions = [];
-  G.tankerMissions.push(mission);
+  G.tankerMissions.push(sbTagWorld(mission));
   if (mission.mpTarget) mpConvoyRegister(mission, 'out');   // PIRATERIE_1210
 
   // Démarrer le ticker
@@ -26560,7 +26566,7 @@ function handleTankerDropoffArrival(mission) {
       lastKnownResources: JSON.parse(JSON.stringify(mission.cargo.resources)),
       lastKnownTimestamp: now,
     };
-    G.garrisons.push(garrison);
+    G.garrisons.push(sbTagWorld(garrison));
   }
   // Sinon (isEmptyVigil + pas de garnison) : veille pure, pas de garnison créée — comportement initial
 
@@ -26633,7 +26639,7 @@ function tickGarrisonAttrition() {
         const lost = g.soldiers[sk] * lossRate;
         const lostInt = lost >= 1 ? Math.floor(lost) : (Math.random() < lost ? 1 : 0);
         if (lostInt > 0) {
-          loseSoldiers(sk, Math.min(lostInt, g.soldiers[sk]));
+          sbWithWorld(g.world || 'home', () => loseSoldiers(sk, Math.min(lostInt, g.soldiers[sk])));
           g.soldiers[sk] = Math.max(0, g.soldiers[sk] - lostInt);
           totalLost += lostInt;
         }
@@ -29061,6 +29067,175 @@ async function sbPublishColonies(client) {
     } catch (e) { console.warn('[colonie] publication', e); }
   }
 }
+
+/* ═══════════ PATCH_2010_FLOTTES — flotte par planète et transferts (Adrien, 20/10) ═══════════
+   Chaque planète a ses vaisseaux à quai (G.fleet.stationed, échangé avec la planète active) et sa file de chantier.
+   Flottes, missions tanker et garnisons portent la planète d'où elles sont parties (x.world) : leurs pertes
+   s'appliquent à cette planète, quelle que soit celle qu'on regarde. Un transfert déplace des vaisseaux à quai. */
+(function () {
+  const wrap = (name, pick) => {
+    const f = window[name];
+    if (typeof f !== 'function' || f._sbWorld) return;
+    const g = function (...a) {
+      let it = null; try { it = pick(...a); } catch (e) {}
+      const w = it && it.world;
+      return (w && typeof sbWithWorld === 'function') ? sbWithWorld(w, () => f.apply(this, a)) : f.apply(this, a);
+    };
+    g._sbWorld = true;
+    window[name] = g;
+  };
+  const byFleet = (f) => f, byMission = (m) => m;
+  const byMissionId = (id) => (G.tankerMissions || []).find(m => m.id === id);
+  wrap('applyCombatResult', byFleet);
+  wrap('applyIntegrityDamage', byFleet);
+  wrap('_mpSyncFleetLosses', byFleet);
+  wrap('handleTankerDropoffArrival', byMission);
+  wrap('handleTankerRouteArrival', byMission);
+  wrap('handleExplorationArrival', byMission);
+  wrap('handleTankerReturn', byMissionId);
+  wrap('handleTankerReturnFromCancellation', byMissionId);
+  wrap('completeExplorationReturn', byMissionId);
+  wrap('_completeRouteRunReturn', byMissionId);
+  wrap('_completeCancelledRouteRun', byMissionId);
+  wrap('returnTankerFromDock', byMissionId);
+})();
+const FLEET_SHIP_KEYS = ['tanker', 'fregate', 'cuirasse'];
+function _sbEmptyShips() { return { tanker: { t1: 0, t2: 0, t3: 0 }, fregate: { t1: 0, t2: 0, t3: 0 }, cuirasse: { t1: 0, t2: 0, t3: 0 } }; }
+function _sbShipCount(c) { let n = 0; for (const k of FLEET_SHIP_KEYS) for (const t of ['t1', 't2', 't3']) n += (c && c[k] && c[k][t]) || 0; return n; }
+function sbWorldCoord(w) { return (w && (w.id === 'home' ? (typeof MY_COORD_STRING !== 'undefined' ? MY_COORD_STRING : w.coord) : w.coord)) || ''; }
+// Transfert : 30 min dans le même secteur, +1 h par secteur d'écart, plafonné à 8 h
+function sbTransferMs(fromId, toId) {
+  const a = sbWorldCoord(sbWorld(fromId)).split('-'), b = sbWorldCoord(sbWorld(toId)).split('-');
+  const dSec = (a[1] && b[1]) ? Math.abs(a[1].charCodeAt(0) - b[1].charCodeAt(0)) : 0;
+  const dSys = Math.abs((parseInt(a[2], 10) || 0) - (parseInt(b[2], 10) || 0));
+  return Math.min(8 * 60, 30 + dSec * 60 + Math.min(30, Math.round(dSys / 300))) * 60000;
+}
+let _sbXfer = null;   // brouillon du transfert en cours de composition
+function sbOpenTransfer() {
+  sbWorldsInit();
+  const others = G.worlds.filter(w => w.id !== G.activeWorld);
+  if (!others.length) { toast('Il faut une deuxième planète pour transférer des vaisseaux'); return; }
+  if (!_sbXfer || _sbXfer.from !== G.activeWorld) _sbXfer = { from: G.activeWorld, to: others[0].id, ships: _sbEmptyShips() };
+  let el = document.getElementById('sb-xfer');
+  if (!el) {
+    el = document.createElement('div'); el.id = 'sb-xfer';
+    el.addEventListener('click', (e) => { if (e.target === el) el.remove(); });
+    document.body.appendChild(el);
+  }
+  const esc = (x) => String(x == null ? '' : x).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const nameOf = (w) => w.id === G.activeWorld ? G.planet.name : (w.id === 'home' ? (w.data && w.data.planet && w.data.planet.name) || w.name : w.name);
+  const rows = [];
+  for (const k of FLEET_SHIP_KEYS) for (let t = 1; t <= 3; t++) {
+    const av = getAvailableShips(k, t);
+    const sel = _sbXfer.ships[k]['t' + t] || 0;
+    if (!av && !sel) continue;
+    const nm = (SHIP_TIERS[k] && SHIP_TIERS[k][t] && SHIP_TIERS[k][t].name) || k;
+    rows.push(`<div class="sbx-row"><span>${esc(nm)}<i>${av} à quai</i></span>
+      <button onclick="sbXferStep('${k}',${t},-1)">−</button><b>${sel}</b><button onclick="sbXferStep('${k}',${t},1)">+</button>
+      <button class="all" onclick="sbXferStep('${k}',${t},999)">tous</button></div>`);
+  }
+  const n = _sbShipCount(_sbXfer.ships);
+  const ms = sbTransferMs(_sbXfer.from, _sbXfer.to);
+  el.innerHTML = `<div class="sbx-card">
+    <div class="sbx-h">Transférer des vaisseaux</div>
+    <div class="sbx-sub">Depuis <b>${esc(G.planet.name)}</b> vers :</div>
+    <div class="sbx-dest">${others.map(w => `<button class="${w.id === _sbXfer.to ? 'on' : ''}" onclick="_sbXfer.to='${w.id}';sbOpenTransfer()">${esc(nameOf(w))}<i>${w.kind === 'capital' ? 'Capitale' : 'Colonie'}</i></button>`).join('')}</div>
+    ${rows.length ? rows.join('') : '<div class="sbx-empty">Aucun vaisseau libre à quai sur cette planète.</div>'}
+    <div class="sbx-sub" style="margin-top:10px">Voyage : <b>${formatTankerDuration(ms)}</b> · les vaisseaux ne sont disponibles nulle part pendant le trajet.</div>
+    <button class="sbx-go${n ? '' : ' off'}" onclick="sbLaunchTransfer()">Lancer le transfert${n ? ' · ' + n + ' vaisseau' + (n > 1 ? 'x' : '') : ''}</button>
+    <button class="sbx-x" onclick="document.getElementById('sb-xfer').remove()">Fermer</button></div>`;
+}
+function sbXferStep(k, t, d) {
+  if (!_sbXfer) return;
+  const av = getAvailableShips(k, t);
+  const cur = _sbXfer.ships[k]['t' + t] || 0;
+  _sbXfer.ships[k]['t' + t] = d === 999 ? av : Math.max(0, Math.min(av, cur + d));
+  sbOpenTransfer();
+}
+function sbLaunchTransfer() {
+  if (!_sbXfer || !_sbShipCount(_sbXfer.ships)) return;
+  const x = _sbXfer;
+  if (x.from !== G.activeWorld || !sbWorld(x.to)) { _sbXfer = null; return; }
+  for (const k of FLEET_SHIP_KEYS) for (let t = 1; t <= 3; t++) {
+    const n = x.ships[k]['t' + t] || 0;
+    if (n > getAvailableShips(k, t)) { toast('Des vaisseaux ne sont plus libres : recompose le transfert'); _sbXfer = null; sbOpenTransfer(); return; }
+  }
+  for (const k of FLEET_SHIP_KEYS) for (let t = 1; t <= 3; t++) {
+    const n = x.ships[k]['t' + t] || 0;
+    if (n) G.fleet.stationed[k]['t' + t] = Math.max(0, (G.fleet.stationed[k]['t' + t] || 0) - n);
+  }
+  const ms = sbTransferMs(x.from, x.to);
+  const to = sbWorld(x.to);
+  if (!Array.isArray(G.fleetTransfers)) G.fleetTransfers = [];
+  G.fleetTransfers.push({ id: 'xf-' + Date.now().toString(36), from: x.from, to: x.to, toName: to.id === 'home' ? ((to.data && to.data.planet && to.data.planet.name) || to.name) : to.name, fromName: G.planet.name, ships: x.ships, departAt: Date.now(), arriveAt: Date.now() + ms });
+  _sbXfer = null;
+  const el = document.getElementById('sb-xfer'); if (el) el.remove();
+  toast(`⇄ Transfert lancé · arrivée dans ${formatTankerDuration(ms)}`);
+  try { saveGame(); } catch (e) {}
+  try { if (typeof refreshCurrentScreen === 'function') refreshCurrentScreen(); } catch (e) {}
+}
+function sbTransferTick() {
+  if (!Array.isArray(G.fleetTransfers) || !G.fleetTransfers.length) return;
+  const now = Date.now();
+  const due = G.fleetTransfers.filter(x => x.arriveAt <= now);
+  if (!due.length) return;
+  for (const x of due) {
+    G.fleetTransfers = G.fleetTransfers.filter(y => y !== x);
+    const dest = sbWorld(x.to) ? x.to : (sbWorld(x.from) ? x.from : 'home');
+    sbWithWorld(dest, () => {
+      if (!G.fleet.stationed) G.fleet.stationed = _sbEmptyShips();
+      for (const k of FLEET_SHIP_KEYS) {
+        if (!G.fleet.stationed[k]) G.fleet.stationed[k] = { t1: 0, t2: 0, t3: 0 };
+        for (const t of ['t1', 't2', 't3']) G.fleet.stationed[k][t] = (G.fleet.stationed[k][t] || 0) + ((x.ships[k] && x.ships[k][t]) || 0);
+      }
+    });
+    toast(`⇄ ${_sbShipCount(x.ships)} vaisseau${_sbShipCount(x.ships) > 1 ? 'x' : ''} arrivé${_sbShipCount(x.ships) > 1 ? 's' : ''} à ${x.toName}`);
+  }
+  try { saveGame(); } catch (e) {}
+  try { if (typeof refreshCurrentScreen === 'function') refreshCurrentScreen(); } catch (e) {}
+}
+setInterval(() => { try { sbTransferTick(); } catch (e) { console.warn('[transfert]', e); } }, 5000);
+// bouton « Transférer » sur l'écran Flotte, dès qu'il y a deux planètes
+setInterval(() => {
+  try {
+    const row = document.getElementById('fleet-compose-cta');
+    if (!row) return;
+    let b = document.getElementById('fleet-xfer-cta');
+    const multi = Array.isArray(G.worlds) && G.worlds.length > 1;
+    if (!multi) { if (b) b.remove(); return; }
+    if (!b) {
+      b = document.createElement('button');
+      b.id = 'fleet-xfer-cta'; b.className = 'btn-secondary';
+      b.style.cssText = 'flex:1;padding:14px;font-size:12px;border-radius:10px;border:1px solid rgba(255,176,102,.35);background:rgba(8,12,18,.6);color:#ffb066;letter-spacing:.08em';
+      b.textContent = '⇄ Transférer';
+      b.onclick = () => sbOpenTransfer();
+      row.parentNode.insertBefore(b, row.nextSibling);
+    }
+  } catch (e) {}
+}, 1000);
+(function () {
+  const st = document.createElement('style');
+  st.textContent = `
+    #sb-xfer { position: fixed; inset: 0; z-index: 9500; background: rgba(2,6,12,.6); display: flex; align-items: center; justify-content: center; padding: 16px; backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px); }
+    #sb-xfer .sbx-card { width: 100%; max-width: 380px; max-height: 88vh; overflow: auto; background: rgba(10,18,28,.97); border: 1px solid rgba(255,176,102,.3); border-radius: 14px; padding: 14px; color: #dfe8ea; }
+    #sb-xfer .sbx-h { font: 600 11px/1 ui-monospace, monospace; letter-spacing: .16em; text-transform: uppercase; color: #ffb066; margin: 2px 2px 10px; }
+    #sb-xfer .sbx-sub { font-size: 12px; color: #8aa0a6; margin: 4px 2px 8px; }
+    #sb-xfer .sbx-sub b { color: #dfe8ea; }
+    #sb-xfer .sbx-dest { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
+    #sb-xfer .sbx-dest button { flex: 1; min-width: 120px; text-align: left; padding: 9px 10px; border-radius: 10px; border: 1px solid rgba(255,255,255,.1); background: rgba(255,255,255,.03); color: #dfe8ea; font-weight: 600; }
+    #sb-xfer .sbx-dest button.on { border-color: rgba(255,176,102,.7); background: rgba(255,176,102,.1); }
+    #sb-xfer .sbx-dest i, #sb-xfer .sbx-row i { display: block; font-style: normal; font-weight: 400; font-size: 10px; color: #8aa0a6; }
+    #sb-xfer .sbx-row { display: flex; align-items: center; gap: 6px; padding: 8px 2px; border-top: 1px solid rgba(255,255,255,.06); }
+    #sb-xfer .sbx-row span { flex: 1; font-size: 13px; }
+    #sb-xfer .sbx-row button { width: 32px; height: 32px; border-radius: 8px; border: 1px solid rgba(255,255,255,.12); background: rgba(255,255,255,.04); color: #dfe8ea; font-size: 16px; }
+    #sb-xfer .sbx-row button.all { width: auto; padding: 0 8px; font-size: 11px; }
+    #sb-xfer .sbx-row b { width: 28px; text-align: center; }
+    #sb-xfer .sbx-empty { font-size: 12px; color: #8aa0a6; padding: 10px 2px; }
+    #sb-xfer .sbx-go { width: 100%; padding: 13px; margin-top: 8px; border-radius: 10px; border: 1px solid rgba(255,176,102,.5); background: rgba(255,176,102,.1); color: #ffb066; font-weight: 600; letter-spacing: .06em; }
+    #sb-xfer .sbx-go.off { opacity: .4; pointer-events: none; }
+    #sb-xfer .sbx-x { width: 100%; padding: 11px; margin-top: 8px; background: none; border: 1px solid rgba(255,255,255,.12); border-radius: 10px; color: #8aa0a6; }`;
+  document.head.appendChild(st);
+})();
 
 // Construit un vaisseau militaire (Tanker / Frégate / Cuirassé)
 function buildShip(shipKey, qty) {
@@ -31792,7 +31967,8 @@ function _sbPack() {
   for (const k of SB_WORLD_KEYS) d[k] = G[k];
   if (d.planet && d.planet.families instanceof Set) d.planet.families = Array.from(d.planet.families);   // JSON : pas de Set
   d.capitalLevel = (G.skills && G.skills.capitalLevel) || 1;
-  d.queues = { capital: QUEUES.capital || { upgrade: null }, barracks: QUEUES.barracks || { commands: [] } };
+  d.queues = { capital: QUEUES.capital || { upgrade: null }, barracks: QUEUES.barracks || { commands: [] }, shipyard: QUEUES.shipyard || { commands: [] } };
+  d.stationed = G.fleet.stationed;   // flotte à quai de cette planète (Adrien 20/10 : flotte par planète)
   return d;
 }
 function _sbUnpack(d) {
@@ -31803,6 +31979,8 @@ function _sbUnpack(d) {
   const q = d.queues || {};
   QUEUES.capital = q.capital || { upgrade: null };
   QUEUES.barracks = q.barracks || { commands: [] };
+  QUEUES.shipyard = q.shipyard || { commands: [] };
+  G.fleet.stationed = d.stationed || { tanker: { t1: 0, t2: 0, t3: 0 }, fregate: { t1: 0, t2: 0, t3: 0 }, cuirasse: { t1: 0, t2: 0, t3: 0 } };
 }
 function _sbSwap(id) {
   if (!id || id === G.activeWorld) return;
@@ -32388,7 +32566,7 @@ function _announceCommandDone(cmd) {
 }
 
 function _advanceQueues(secs, out, localOnly) {   // PATCH_2010_WORLDS : localOnly = files propres à une planète (caserne, amélioration)
-  for (const type of (localOnly ? ['barracks'] : ['barracks', 'shipyard', 'prospect'])) {
+  for (const type of (localOnly ? ['barracks', 'shipyard'] : ['barracks', 'shipyard', 'prospect'])) {
     const queue = QUEUES[type];
     if (!queue || !Array.isArray(queue.commands) || queue.commands.length === 0) continue;
     const slots = type === 'barracks' ? (G.skills?.barracksSlots || 1) : 1;
@@ -38821,7 +38999,7 @@ function confirmScrapUnit(key) {
   const stat = G.defense.units[key];
   const unit = DEFENSE_UNITS[key];
   if (stat.qty <= 0) return;
-  const engaged = (G.fleet.prepared || []).reduce((a, f) => a + (f.soldiers?.[key] || 0), 0) + soldiersCommittedElsewhere(key);
+  const engaged = (G.fleet.prepared || []).filter(_sbMine).reduce((a, f) => a + (f.soldiers?.[key] || 0), 0) + soldiersCommittedElsewhere(key);
   if (stat.qty - engaged <= 0) { toast('Toutes ces unités sont engagées (flotte, garnison ou tanker)'); return; }
   stat.qty--;
   for (const [res, q] of Object.entries(unit.scrapReturn)) {
@@ -41192,7 +41370,7 @@ function launchTankerOnRoute(routeId, tierKey, cargo) {
     mission.baliseCover = bal.cover;
     mission.arrivalAt = mission.departedAt + (mission.arrivalAt - mission.departedAt) * bal.factor;
   }
-  G.tankerMissions.push(mission);
+  G.tankerMissions.push(sbTagWorld(mission));
 
   // Marquer la route comme en cours d'utilisation
   route.status = 'in_use';
@@ -42499,7 +42677,7 @@ function launchExplorationOnLead(leadId, tierKey) {
     targetLabel: lead.title,
   };
   if (!G.tankerMissions) G.tankerMissions = [];
-  G.tankerMissions.push(mission);
+  G.tankerMissions.push(sbTagWorld(mission));
   lead.status = 'exploring';
   lead.missionId = mission.id;
   // D5.3 fix : démarrer le countdown ticker pour que la Flotte se rafraîchisse
@@ -45723,7 +45901,7 @@ function cheatPunisher() {
     createdAt: Date.now(),
   };
   ensureFleetHeroes(fleet); // passe 3.4 — génère les héros selon la composition
-  G.fleet.prepared.push(fleet);
+  G.fleet.prepared.push(sbTagWorld(fleet));
   toast('Punisher 1 préparée');
   refreshCurrentScreen();
 }
@@ -46679,7 +46857,7 @@ if (G.knownTargets && Array.isArray(G.tankerMissions)) {
 <script src="assets/radio.js?v=20261014-1440"></script>
 <script type="module" src="assets/ship3d.js?v=20261020-0135"></script>
 <!-- PATCH_1510_MISSIONS — tout ce qui vole, fiche de mission des tankers -->
-<script src="assets/missions.js?v=20261020-0230"></script>
+<script src="assets/missions.js?v=20261020-1130"></script>
 <!-- PATCH_1610_SKILLS — skills des bâtiments : apprendre, découvrir, effets -->
 <script src="assets/skills.js?v=20261020-0200"></script>
 <!-- PATCH_1510_CROWN — The Drifting Crown en 3D (assets/station3d.js, sur le moteur partagé window.SB3D) -->

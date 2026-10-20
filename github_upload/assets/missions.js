@@ -68,7 +68,7 @@
     const fleets = ((G.fleet && G.fleet.prepared) || []).filter(f => (f.status || 'prepared') === 'in_mission');
     return { probes, tankers, fleets };
   }
-  function count() { const l = list(); return l.probes.length + l.tankers.length + l.fleets.length + ((typeof G !== 'undefined' && Array.isArray(G.colonyMissions)) ? G.colonyMissions.length : 0); }
+  function count() { const l = list(); return l.probes.length + l.tankers.length + l.fleets.length + ((typeof G !== 'undefined' && Array.isArray(G.colonyMissions)) ? G.colonyMissions.length : 0) + ((typeof G !== 'undefined' && Array.isArray(G.fleetTransfers)) ? G.fleetTransfers.length : 0); }
 
   /* ── la feuille « Missions » ── */
   function row(o) {
@@ -90,6 +90,13 @@
     if (arks.length) {
       html += H('Arches coloniales', arks.length);
       for (const a of arks) html += row({ kind: 'Arche', name: a.name, color: '#ffb066', dest: `→ <span class="mono">${esc(a.coord)}</span>`, state: dur(a.arriveAt - now), t0: a.departAt, t1: a.arriveAt, onclick: "toast('L\\'Arche est en route : elle fondera la colonie à l\\'arrivée')" });
+    }
+    // PATCH_2010_FLOTTES — transferts de vaisseaux entre planètes
+    const xfers = (typeof G !== 'undefined' && Array.isArray(G.fleetTransfers)) ? G.fleetTransfers : [];
+    if (xfers.length) {
+      html += H('Transferts', xfers.length);
+      for (const x of xfers) { let n = 0; for (const k in x.ships) for (const t in x.ships[k]) n += x.ships[k][t] || 0;
+        html += row({ kind: 'Transfert', name: `${n} vaisseau${n > 1 ? 'x' : ''}`, color: '#ffb066', dest: `${esc(x.fromName || '')} → ${esc(x.toName || '')}`, state: dur(x.arriveAt - now), t0: x.departAt, t1: x.arriveAt, onclick: "toast('Transfert en route')" }); }
     }
     // tankers d'abord : ce sont eux qu'on suit le plus
     html += H('Tankers', l.tankers.length);
