@@ -51,11 +51,11 @@
     const by = { cuirasse: [], fregate: [], tanker: [] };
     list.forEach(s => by[s.type].push(s));
     const [cw, cl] = DIM.cuirasse, [fw, fl] = DIM.fregate, [tw, tl] = DIM.tanker;
-    const nc = by.cuirasse.length, perRank = 6, sx = cw * 2.7;
+    const nc = by.cuirasse.length, perRank = 6, sx = cw * 3.5, rz = cl * 1.35;   // gros vaisseaux : de l'air entre eux
     const ranks = Math.ceil(nc / perRank);
     by.cuirasse.forEach((s, i) => {
       const r = Math.floor(i / perRank), inRank = Math.min(perRank, nc - r * perRank), j = i - r * perRank;
-      s.x = (j - (inRank - 1) / 2) * sx + (r % 2 ? sx / 2 : 0); s.z = r * cl * 1.18; s.sq = r; s.wave = j;
+      s.x = (j - (inRank - 1) / 2) * sx + (r % 2 ? sx / 2 : 0); s.z = r * rz; s.sq = r; s.wave = j;
     });
     const lineHalf = nc ? (Math.min(perRank, nc) - 1) / 2 * sx + sx / 2 + cw / 2 : 0;
     // escadrille en chevron : chef, deux paires en ailes, un serre-file
@@ -72,7 +72,7 @@
       s.x = X(gx) + cx * dx; s.z = Z(row) + cz * dz; s.sq = q + 1; s.wave = gx * 3 + cx;
     });
     // convoi de tankers : colonnes de 2 (4 au-delà de 12), derrière la ligne de bataille
-    const nt = by.tanker.length, cols = nt > 12 ? 4 : 2, rear = nc ? (ranks - 1) * cl * 1.18 + cl / 2 + tl + 60 : (by.fregate.length ? 2 * dz + fl + 120 : 0);
+    const nt = by.tanker.length, cols = nt > 12 ? 4 : 2, rear = nc ? (ranks - 1) * rz + cl / 2 + tl + 60 : (by.fregate.length ? 2 * dz + fl + 120 : 0);
     by.tanker.forEach((s, i) => {
       const c = i % cols, r = Math.floor(i / cols);
       s.x = (c - (cols - 1) / 2) * tw * 3.2; s.z = rear + r * tl * 1.7; s.sq = 20 + r; s.wave = c;
