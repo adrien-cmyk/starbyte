@@ -39,6 +39,19 @@
     return emitMats;
   }
 
+  const glassCache = new Map();
+  function glassOf(m) {
+    let g = glassCache.get(m.uuid); if (g) return g;
+    g = m.clone(); g.name = (m.name || 'MAT') + '_LUM_VEILLE';
+    const c = m.emissive.clone(), hsl = {}; c.getHSL(hsl);
+    if (hsl.h > 0.2 && hsl.h < 0.45 || hsl.h > 0.7 && hsl.h < 0.95) c.setHSL(0.6, 0.35, Math.min(0.7, hsl.l));  // vert, violet → bleu froid
+    g.emissive = c;
+    const e0 = (m.userData.e0 !== undefined ? m.userData.e0 : m.emissiveIntensity) * 0.28;
+    g.userData = Object.assign({}, m.userData, { e0 }); g.emissiveIntensity = e0;
+    glassCache.set(m.uuid, g);
+    return g;
+  }
+
   // ───────── tri des pièces lumineuses d'un maillage ─────────
   function hueRole(hex, kind) {
     const c = new T.Color(hex), r = c.r, g = c.g, b = c.b;
@@ -84,14 +97,17 @@
     for (const c of list) {
       let r = base;
       const ring = c.dm >= 2.2 && c.sy <= 1.0 && c.hollow > 0.55 && c.fill < 0.4;         // anneau, cadre
-      const slab = c.y0 > 2.5 && c.dm >= 2.0 && c.sy <= Math.max(1.0, 0.25 * c.dm) && c.w > 1.4 * c.sy; // bague autour d'une tour
+      const slab = c.y0 > 2.5 && c.sy >= 0.2 && c.dm >= 2.0 && c.sy <= Math.max(1.0, 0.25 * c.dm) && c.w > 1.4 * c.sy; // bague autour d'une tour
       const line = c.w >= 3 && c.dm < 0.6 && c.sy < 0.8;                               // ligne néon horizontale
       const strip = c.sy >= 4 && c.w < 2.2;                                           // ligne néon verticale
-      const tube = c.sy >= 1.2 && c.hollow > 0.6 && c.dm >= 2.5 && c.fill < 0.4;        // manchon, colonne lumineuse
-      const sign = c.dm < 0.5 && c.w >= 4 && c.sy >= 2;                                // écran, enseigne
-      const volume = c.w >= 5 && c.sy >= 3;                                          // dôme, verrière
-      const door = c.dm < 0.8 && c.sy >= 1.4 && c.sy <= 4.6 && c.w >= 0.8 && c.w <= 5.5 && c.y0 < 6;
-      if (ring || slab || line || strip || tube) r = 5;
+      const round = c.dm / c.w > 0.8;
+      const tube = round && c.sy >= 1.2 && c.hollow > 0.6 && c.dm >= 2.5 && c.fill < 0.4;        // manchon, colonne lumineuse
+      const sign = c.dm < 0.5 && c.w >= 4 && c.sy >= 2 && c.sy <= 5 && c.w >= 1.5 * c.sy;                                // écran, enseigne
+      const pane = c.sy >= 5 && c.dm < 0.8;                                           // grande vitre verticale
+      const volume = c.w >= 5 && c.sy >= 3 || pane;                                          // dôme, verrière
+      const door = (c.dm < 0.8 || (c.fill < 0.2 && !round)) && c.sy >= 1.4 && c.sy <= 4.6 && c.w >= 0.8 && c.w <= 6 && c.y0 < 12;
+      if (door && !line) r = (kind === 'defense' && base === 3) ? 3 : 2;
+      else if (ring || slab || line || strip || tube) r = 5;
       else if (sign) r = base === 1 ? 1 : (kind === 'defense' && base === 3 ? 3 : (base === 0 ? 0 : 2));
       else if (volume) r = 4;
       else if (door) r = (kind === 'defense' && base === 3) ? 3 : 2;
@@ -247,6 +263,7 @@
           if (!g) { M.multiplyMatrices(inv, o.matrixWorld); g = classify(o.geometry, M, m.emissive.getHex(), kind); geoCache.set(key, g); }
           o.geometry = g;
           o.material = emitMats.slice();
+          o.material[4] = glassOf(m);                             // volumes (tour, dôme) : on garde le dessin d'origine, en veilleuse
           if (o.userData.dmgMat) o.material = o.material.map(x => { const k = x.clone(); k.userData.e0 = x.userData.e0 * 0.25; k.emissiveIntensity *= 0.25; return k; });
           o.castShadow = false;
         } else if (!dark && m.isMeshStandardMaterial && !m.transparent && !(m.emissive && m.emissiveIntensity > 0.3 && m.emissive.getHex() > 0)) {
