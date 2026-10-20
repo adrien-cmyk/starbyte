@@ -11,6 +11,7 @@
   let C = null, forced = null;
   function lerpHex(T, a, b, k) { return new T.Color(a).lerp(new T.Color(b), k); }
   function apply(k) {
+    if (window.SBSky) window.SBSky.k = k;   // PATCH_2010_LUMIERE : l'éclairage des bâtiments lit l'heure du ciel
     const P = window.Planet3D;
     if (!P || !P.ready || !P.scene) return;
     const T = window.SB3D && window.SB3D.THREE; if (!T) return;
