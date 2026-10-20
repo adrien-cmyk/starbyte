@@ -28,9 +28,40 @@
     if (P.renderer) P.renderer.toneMappingExposure = L(NIGHT.exp, DAY.exp);
     if ('environmentIntensity' in sc) sc.environmentIntensity = L(NIGHT.env, DAY.env);
     if (P.bloom) P.bloom.strength = L(NIGHT.bloom, DAY.bloom);
+    dimLights(sc, L(1, DAY_GLOW));
+  }
+  // 20/10 (Adrien) : en journée, les lumières des bâtiments baissent (fenêtres, néons, lampes, halos)
+  const DAY_GLOW = 0.35;
+  let lastF = -1;
+  function dimLights(sc, f) {
+    lastF = f;
+    sc.traverse(o => {
+      if (o.isLight && o.userData && o.userData.src) {            // lampes des bâtiments (sources de la réserve de lumières)
+        if (o.userData.i0 === undefined) o.userData.i0 = o.intensity;
+        o.intensity = o.userData.i0 * f; return;
+      }
+      if (!o.isMesh || !o.material) return;
+      const ms = Array.isArray(o.material) ? o.material : [o.material];
+      for (const m of ms) {
+        if (m.emissive && m.emissiveIntensity !== undefined && (m.emissiveIntensity > 0 || m.userData.e0 !== undefined)) {
+          if (m.userData.e0 === undefined) m.userData.e0 = m.emissiveIntensity;
+          m.emissiveIntensity = m.userData.e0 * f;
+        } else if (m.isMeshBasicMaterial && m.blending === 2) {      // halos additifs
+          if (m.userData.o0 === undefined) m.userData.o0 = m.opacity;
+          m.opacity = m.userData.o0 * f;
+        }
+      }
+    });
   }
   function tick() { try { apply(forced != null ? forced : dayK(new Date())); } catch (e) { console.warn('[ciel]', e); } }
   setInterval(tick, 30000);
-  const boot = setInterval(() => { if (window.Planet3D && Planet3D.ready) { clearInterval(boot); tick(); } }, 1000);
+  const boot = setInterval(() => {
+    if (!(window.Planet3D && Planet3D.ready)) return;
+    clearInterval(boot);
+    // après chaque reconstruction (nouveau bâtiment, avaries…), les nouvelles lumières suivent l'heure
+    const P = Planet3D, orig = P._rebuild;
+    P._rebuild = function () { const r = orig.apply(this, arguments); try { if (lastF >= 0) dimLights(this.scene, lastF); } catch (e) {} return r; };
+    tick();
+  }, 1000);
   window.SBSky = { dayK, apply, force(k) { forced = k; tick(); }, auto() { forced = null; tick(); } };
 })();
