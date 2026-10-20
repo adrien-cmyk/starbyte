@@ -9342,7 +9342,11 @@ function mpAdoptOrphanRaids(rows) {
     f.missionStartedAt = Date.parse(r.departed_at) || Date.now();
     f.mpArrivesAt = Date.parse(r.arrives_at) || Date.now();
     f.missionEndsAt = Date.parse(r.returns_at) || Date.now();
-    f.missionFuelSpent = 0;
+    // le carburant du raid est payé à l'adoption (le lancement ne l'avait pas débité : réponse perdue)
+    let _fuel = 0;
+    try { _fuel = Math.min(G.res.energie.v || 0, computeMissionFuelCost(f, { distanceMult: typeof _carnetDistanceMult === 'function' ? _carnetDistanceMult(String(r.defender_address || '').split('-')[1]) : 1 })); } catch (e) {}
+    if (_fuel > 0) G.res.energie.v = Math.max(0, G.res.energie.v - _fuel);
+    f.missionFuelSpent = _fuel;
     f.mpRaidId = r.id;
     f.mpTarget = { name: r.defender_pseudo || r.defender_address, pseudo: r.defender_pseudo || '', address: r.defender_address, profile: 'Joueur' };
     changed = true;
@@ -47196,6 +47200,7 @@ var SBProspectGuide = (function () {
 // À ce stade : G est défini, QUEUES est défini, toutes les fonctions sont disponibles.
 // loadGame() restaurera G et QUEUES depuis le localStorage 'starbyte_savegame'.
 const _SAVE_LOADED_AT_BOOT = loadGame();
+window._sbBootLoaded = _SAVE_LOADED_AT_BOOT;   // PATCH_2010_AUDIT — lu par la sauvegarde cloud : partie locale illisible ⇒ on prend celle du cloud
 if (_SAVE_LOADED_AT_BOOT) {
   console.log('[V0.5] Save complète restaurée');
 } else {
@@ -47342,7 +47347,7 @@ if (G.knownTargets && Array.isArray(G.tankerMissions)) {
 <!-- PATCH_1410_LIGNES — lignes PNJ à horaire sur les routes cachées (assets/lines.js) -->
 <script src="assets/lines.js?v=20261020-2200"></script>
 <!-- CLOUD — sauvegarde Supabase (source : sb-build/src/cloud.js) -->
-<script type="module" src="assets/cloud.js?v=20261020-2200"></script>
+<script type="module" src="assets/cloud.js?v=20261020-2330"></script>
 <!-- MATCH3 — Match-3 V2 (assets/match3.js, source src/match3.js + src/m3core.js) : remplace startM3 -->
 <script type="module" src="assets/match3.js?v=20261019-2140"></script>
 <!-- HOME V2 — « monde d'abord » : planète plein écran, ressources en ligne, Flotte / Défense / Prospection (assets/home.js) -->
