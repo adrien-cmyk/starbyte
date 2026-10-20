@@ -32083,6 +32083,7 @@ function startBuildingUpgrade(parcelIdx) {
     toast('Bâtiment abîmé : répare-le d\'abord');
     return false;
   }
+  if (parcel.recycleEndsAt) { toast('Démolition en cours : annule-la pour améliorer'); return false; }   // PATCH_2010_RECYCLER
   if (window.SBAftermath && SBAftermath.upgradeBlocked()) {
     toast('Planète dévastée : lance les secours avant d\'améliorer');
     return false;
@@ -38089,6 +38090,131 @@ function openBuildingDetail(parcelIdx) {
   goto('building-detail');
 }
 
+
+/* ═══════════ PATCH_2010_RECYCLER — recycler un bâtiment (Adrien 20/10 : « mais que ça coûte cher ») ═══════════
+   Depuis la fiche du bâtiment. Coût : 60 % de tout ce qu'il a coûté (tiers 1 → actuel), au moins 1 500 métal
+   et 500 énergie. Chantier de démolition : 2 h (tier 1), 4 h (tier 2), 8 h (tier 3). Rien n'est remboursé.
+   Le bâtiment tourne jusqu'au bout ; à la fin la parcelle redevient une plaine rocheuse (re-terraformer au match-3). */
+var RECYCLE_PCT = 0.6, RECYCLE_FLOOR = { metal: 1500, energie: 500 }, RECYCLE_MIN = { 1: 120, 2: 240, 3: 480 };
+function recycleCost(parcel) {
+  const out = {};
+  const tiers = BUILDING_TIERS[parcel.building] || {};
+  for (let t = 1; t <= (parcel.lvl || 1); t++) for (const [r, q] of Object.entries((tiers[t] && tiers[t].cost) || {})) out[r] = (out[r] || 0) + q;
+  if (!Object.keys(out).length && BUILDINGS[parcel.building]) Object.assign(out, BUILDINGS[parcel.building].cost || {});
+  for (const r of Object.keys(out)) out[r] = Math.ceil(out[r] * RECYCLE_PCT / 10) * 10;
+  for (const [r, q] of Object.entries(RECYCLE_FLOOR)) out[r] = Math.max(out[r] || 0, q);
+  return out;
+}
+function recycleMs(parcel) {
+  const min = RECYCLE_MIN[parcel.lvl || 1] || 120;
+  return Math.round(min * 60000 * (window.SBSkills ? SBSkills.durMult('build') : 1));
+}
+function recycleBlocker(idx) {
+  const p = G.planet && G.planet.parcels[idx];
+  if (!p || p.state !== 'built' || !p.building) return 'Rien à recycler ici';
+  if (p.building === 'capital' || p.state === 'capital') return 'Le Centre de commandement ne se recycle pas';
+  if (window.SBAntenna && SBAntenna.owns && SBAntenna.owns(idx)) return 'L\'antenne ne se recycle pas';
+  if (QUEUES.capital.upgrade && QUEUES.capital.upgrade.parcelIdx === idx) return 'Une amélioration est en cours sur ce bâtiment';
+  if (p.building === 'shipyard' && (QUEUES.shipyard.commands || []).length) return 'Le chantier orbital a des vaisseaux en construction';
+  if (p.building === 'caserne' && (QUEUES.barracks.commands || []).length) return 'La caserne forme des soldats';
+  return null;
+}
+function recycleBuilding(idx) {
+  const p = G.planet && G.planet.parcels[idx];
+  if (!p) return;
+  if (p.recycleEndsAt) { toast('Démolition déjà en cours'); return; }
+  const why = recycleBlocker(idx);
+  if (why) { toast(why); return; }
+  const cost = recycleCost(p);
+  if (!canAffordCost(cost)) { toast('Ressources insuffisantes : ' + Object.entries(cost).map(([r, q]) => fmt(q) + ' ' + r).join(' · ')); return; }
+  const name = p.n || (BUILDINGS[p.building] && BUILDINGS[p.building].name) || 'ce bâtiment';
+  const body = `Coût : ${Object.entries(cost).map(([r, q]) => fmt(q) + ' ' + r).join(' · ')}, démolition ${formatTankerDuration(recycleMs(p))}. Rien ne sera remboursé, et la parcelle redeviendra une plaine rocheuse à re-terraformer.`;
+  if (typeof sbConfirmDanger === 'function') { sbConfirmDanger(`Recycler ${name} ?`, body, 'Recycler').then(ok => { if (ok) _recycleGo(idx); }); return; }
+  _recycleGo(idx);
+}
+function _recycleGo(idx) {
+  const p = G.planet.parcels[idx];
+  if (!p || p.recycleEndsAt || recycleBlocker(idx)) return;
+  const cost = recycleCost(p);
+  if (!canAffordCost(cost)) { toast('Ressources insuffisantes'); return; }
+  const go = () => {
+    if (p.recycleEndsAt || !canAffordCost(cost)) return;
+    for (const [r, q] of Object.entries(cost)) G.res[r].v -= q;
+    const now = Date.now();
+    p.recycleStartedAt = now; p.recycleEndsAt = now + recycleMs(p); p.recycleCost = cost;
+    toast(`Démolition lancée · ${formatTankerDuration(p.recycleEndsAt - now)}`);
+    if (typeof saveGame === 'function') saveGame();
+    if (typeof refreshCurrentScreen === 'function') refreshCurrentScreen();
+  };
+  if (typeof playLaunchSequence === 'function') playLaunchSequence('recycle', go); else go();
+}
+function cancelRecycle(idx) {
+  const p = G.planet.parcels[idx];
+  if (!p || !p.recycleEndsAt) return;
+  // annuler rend la moitié (les équipes ont déjà commencé)
+  for (const [r, q] of Object.entries(p.recycleCost || {})) if (G.res[r]) G.res[r].v = Math.min(G.res[r].max, G.res[r].v + Math.floor(q / 2));
+  delete p.recycleStartedAt; delete p.recycleEndsAt; delete p.recycleCost;
+  toast('Démolition annulée · la moitié du coût est rendue');
+  if (typeof saveGame === 'function') saveGame();
+  if (typeof refreshCurrentScreen === 'function') refreshCurrentScreen();
+}
+function _recycleFinish(p) {
+  const key = p.building, tier = (BUILDING_TIERS[key] && BUILDING_TIERS[key][p.lvl || 1]) || {};
+  // la production du bâtiment s'arrête (moins la part déjà perdue s'il était abîmé)
+  const prod = tier.prod || (BUILDINGS[key] && BUILDINGS[key].prod) || {};
+  for (const [r, rate] of Object.entries(prod)) {
+    const lost = (p.damaged && p.damageLoss && p.damageLoss[r]) || 0;
+    if (G.res[r] && G.res[r].rate !== undefined) G.res[r].rate = Math.max(0, G.res[r].rate - (rate - lost));
+  }
+  // un silo emporte sa capacité
+  const meta = BUILDINGS[key];
+  if (meta && meta.kind === 'silo' && meta.silo && G.res[meta.silo.res]) {
+    const R = G.res[meta.silo.res], cap = tier.siloCap || (meta.silo.cap || 0);
+    R.max = Math.max(1000, R.max - cap); R.v = Math.min(R.v, R.max);
+  }
+  for (const k of ['recycleStartedAt', 'recycleEndsAt', 'recycleCost', 'damaged', 'damagedAt', 'damagedBy', 'damageLoss']) delete p[k];
+  Object.assign(p, { state: 'rocky', building: null, lvl: null, prod: null, n: 'Plaine rocheuse', sub: 'Bâtiment recyclé. Sol à re-terraformer.', remineCount: 0, successCount: 0 });
+  return key;
+}
+function tickRecycling() {
+  if (typeof G === 'undefined' || !G.planet) return;
+  const now = Date.now(), done = [];
+  const run = () => (G.planet.parcels || []).forEach((p, i) => {
+    if (p && p.recycleEndsAt && now >= p.recycleEndsAt && p.state === 'built') {
+      const key = _recycleFinish(p);
+      done.push((BUILDINGS[key] && BUILDINGS[key].name) || key);
+      if (selectedBuildingParcelIdx === i && typeof getCurrentScreen === 'function' && getCurrentScreen() === 'building-detail') goto('planet');
+    }
+  });
+  run();
+  for (const w of (Array.isArray(G.worlds) ? G.worlds : [])) if (w && w.data && w.id !== (G.activeWorld || 'home') && typeof sbWithWorld === 'function') sbWithWorld(w.id, run);
+  if (done.length) {
+    toast(done.length > 1 ? `${done.length} bâtiments recyclés` : `${done[0]} recyclé · la parcelle est libre`);
+    if (typeof renderPlanetMap === 'function') renderPlanetMap();
+    if (typeof saveGame === 'function') saveGame();
+  }
+}
+setInterval(() => { try { tickRecycling(); } catch (e) { console.warn('[recycler]', e); } }, 3000);
+function recycleSectionHtml(idx) {
+  const p = G.planet.parcels[idx];
+  if (!p || p.state !== 'built') return '';
+  if (p.recycleEndsAt) {
+    const left = Math.max(0, p.recycleEndsAt - Date.now()), pct = Math.min(100, Math.round((Date.now() - p.recycleStartedAt) / Math.max(1, p.recycleEndsAt - p.recycleStartedAt) * 100));
+    return `<div class="section-label">Démolition</div><div class="dash-section-card" style="border-color:rgba(255,120,90,.35)">
+      <div style="font-size:12px;color:var(--text);margin-bottom:8px">Démolition en cours · fin dans <b>${formatTankerDuration(left)}</b></div>
+      <div style="height:4px;border-radius:2px;background:rgba(255,255,255,.08);overflow:hidden;margin-bottom:10px"><div style="height:100%;width:${pct}%;background:#ff7a5a"></div></div>
+      <div style="font-size:11px;color:var(--mut);line-height:1.5;margin-bottom:10px">Le bâtiment produit jusqu'au bout. À la fin, la parcelle redevient une plaine rocheuse.</div>
+      <button class="btn-ghost" style="width:100%;padding:12px;color:var(--mut);border-color:var(--border)" onclick="cancelRecycle(${idx})">Annuler la démolition (la moitié du coût est rendue)</button></div>`;
+  }
+  const why = recycleBlocker(idx), cost = recycleCost(p), ok = !why && canAffordCost(cost);
+  const costLine = Object.entries(cost).map(([r, q]) => { const have = G.res[r] ? G.res[r].v : 0, lbl = (typeof prodInfo === 'function' && prodInfo(r) ? prodInfo(r).label : r).toLowerCase(); return `<span style="color:${have >= q ? 'var(--text)' : '#ff7a5a'}">${fmt(q)} ${lbl}</span>`; }).join(' · ');
+  return `<div class="section-label">Recycler le bâtiment</div><div class="dash-section-card">
+    <div style="font-size:11px;color:var(--mut);line-height:1.55;margin-bottom:10px">Démolir pour libérer la parcelle et y construire autre chose. <b style="color:var(--text)">Rien n'est remboursé</b> ; la parcelle redevient une plaine rocheuse à re-terraformer.</div>
+    <div style="display:flex;justify-content:space-between;gap:10px;font-size:12px;padding:6px 0;border-top:1px solid var(--border)"><span style="color:var(--mut)">Coût</span><span style="text-align:right">${costLine}</span></div>
+    <div style="display:flex;justify-content:space-between;gap:10px;font-size:12px;padding:6px 0 10px;border-top:1px solid var(--border)"><span style="color:var(--mut)">Démolition</span><span>${formatTankerDuration(recycleMs(p))}</span></div>
+    <button class="btn-ghost" style="width:100%;padding:12px;border-color:rgba(255,120,90,.45);color:${ok ? '#ff9a7a' : 'var(--mut)'};${ok ? '' : 'opacity:.6'}" onclick="recycleBuilding(${idx})">${why ? why : 'Recycler'}</button></div>`;
+}
+
 function renderBuildingDetail() {
   const idx = selectedBuildingParcelIdx;
   if (idx === null || idx === undefined) {
@@ -38265,6 +38391,11 @@ function renderBuildingDetail() {
 
   // PASSE 3.5-narrative : Archives ambient
   renderBuildingArchives(idx);
+  // PATCH_2010_RECYCLER — recycler, tout en bas de la fiche
+  { const arch = document.getElementById('bd-archives');
+    let rz = document.getElementById('bd-recycle');
+    if (!rz && arch) { rz = document.createElement('div'); rz.id = 'bd-recycle'; rz.style.marginTop = '14px'; arch.after(rz); }
+    if (rz) rz.innerHTML = recycleSectionHtml(idx); }
   // SHIP3D — le chantier orbital a sa fiche 3D plein cadre (OS-01) ; après les surcouches de home.js
   setTimeout(() => {
     if (BUILDING_SHIP3D[buildingKey]) mountBuildingShip3D(buildingKey, currentTier); else unmountBuildingShip3D();
