@@ -26676,7 +26676,8 @@ function handleTankerDropoffArrival(mission) {
   // ─── Routes Duales : appliquer le facteur de loot (taxe voie balisée ou
   // bonus/malus de rencontre voie directe) sur ce qui est réellement déposé.
   // Cf. ROUTE_TYPES + ENCOUNTER_TABLE.
-  const routeFactor = typeof computeRouteLootFactor === 'function' ? computeRouteLootFactor(mission) : 1.0;
+  const routeFactor = mission._routeApplied ? 1.0 : (typeof computeRouteLootFactor === 'function' ? computeRouteLootFactor(mission) : 1.0);
+  mission._routeApplied = true;   // PATCH_2010_CALE_ORBITE : le facteur de route ne s'applique qu'une fois
   if (routeFactor !== 1.0) {
     // Appliquer aux ressources (arrondi inférieur, mini 0)
     for (const rk of ['metal', 'energie', 'cristal']) {
@@ -26691,6 +26692,21 @@ function handleTankerDropoffArrival(mission) {
         mission.cargo.soldiers[sk] = Math.max(0, Math.floor(original * routeFactor));
         loseSoldiers(sk, original - mission.cargo.soldiers[sk]);
       }
+    }
+  }
+
+  // PATCH_2010_CALE_ORBITE (Adrien 20/10) : « j'aurais aimé avoir le tanker en orbite avec les soldats en cale
+  // et une option : déposer la cargaison ». À l'arrivée, le tanker se met en orbite, cale pleine ; le dépôt est un choix.
+  if (!mission._depositNow) {
+    const _c = mission.cargo || {}, _tot = (_c.soldiers?.garde || 0) + (_c.soldiers?.lourd || 0) + (_c.resources?.metal || 0) + (_c.resources?.energie || 0) + (_c.resources?.cristal || 0);
+    if (_tot > 0) {
+      mission.status = 'orbital_relay';
+      mission.holdCargo = true;
+      mission.holdSince = Date.now();
+      if (typeof toast === 'function') toast(`${mission.tankerName} en orbite au-dessus de ${mission.destinationPlanetName || mission.destinationPlanetCoord} · cale pleine : ouvre la fiche de la planète pour déposer la cargaison`);
+      if (typeof saveGame === 'function') saveGame();
+      if (typeof refreshCurrentScreen === 'function') refreshCurrentScreen();
+      return;
     }
   }
 
@@ -26891,6 +26907,7 @@ async function recallOrbitalTanker(missionId) {
     return;
   }
   if (mission.mpTarget) return mpRecallEmbassy(mission);   // AMBASSADES_1210
+  if (mission.holdCargo) return dropoffRecallFull(missionId);   // PATCH_2010_CALE_ORBITE : la cale rentre avec lui
 
   // Y a-t-il une garnison rattachée ?
   const garrison = (G.garrisons || []).find(g => g.contactingMissionId === missionId);
@@ -37914,9 +37931,10 @@ function renderPlanetDetailScreen() {
 
     // Bloc garnison si présente
     const garrisons = getGarrisonsAt(p.coord);
-    const garrisonBlock = garrisons.length > 0
+    const garrisonBlock = dropoffHoldMissions(p.coord).map(renderDropoffHoldBlock).join('')   // PATCH_2010_CALE_ORBITE
+      + (garrisons.length > 0
       ? garrisons.map(g => renderGarrisonBlock(g)).join('')
-      : '';
+      : '');
 
     // Note de design (16/05) : aucun joueur n'est un ennemi par défaut.
     // Le bouton "Préparer un raid" et "Envoyer un message" sont retirés du Carnet :
@@ -37946,6 +37964,55 @@ function renderPlanetDetailScreen() {
       ${isFreeHabitable ? `<button class="btn-ghost" style="width:100%;padding:14px;margin-bottom:8px" onclick="sbColonizeAsk('${p.coord}')">${(G.colonyMissions || []).some(m => m.coord === p.coord) ? 'Arche en route' : 'Coloniser'}</button>` : ''}
     `;
   }
+}
+
+
+// PATCH_2010_CALE_ORBITE — tanker en orbite, cale pleine : déposer la cargaison, ou rentrer avec
+function dropoffHoldMissions(coord) {
+  return (G.tankerMissions || []).filter(m => m.kind === 'dropoff' && m.holdCargo && m.status === 'orbital_relay' && m.destinationPlanetCoord === coord && !m.mpTarget);
+}
+function dropoffDeposit(missionId) {
+  const m = (G.tankerMissions || []).find(x => x.id === missionId);
+  if (!m || !m.holdCargo) return;
+  m.holdCargo = false; m._depositNow = true;
+  handleTankerDropoffArrival(m);
+  delete m._depositNow;
+  if (m.status === 'returned') { const i = G.tankerMissions.indexOf(m); if (i >= 0) G.tankerMissions.splice(i, 1); }
+  if (typeof saveGame === 'function') saveGame();
+  if (typeof refreshCurrentScreen === 'function') refreshCurrentScreen();
+}
+async function dropoffRecallFull(missionId) {
+  const m = (G.tankerMissions || []).find(x => x.id === missionId);
+  if (!m || !m.holdCargo) return;
+  const ok = typeof sbConfirmWarning === 'function' ? await sbConfirmWarning('Rentrer sans déposer', `<strong>${m.tankerName}</strong> quitte l'orbite et rentre avec toute sa cale.`, 'Rentrer') : true;
+  if (!ok) return;
+  const now = Date.now();
+  m.holdCargo = false;
+  m.status = 'returning'; m.cancelledAt = now;
+  m.returnArrivalAt = now + Math.max(60000, (m.arrivalAt || now) - (m.departedAt || now));
+  toast(`${m.tankerName} rentre avec sa cale`);
+  if (typeof startTankerCountdownTicker === 'function') startTankerCountdownTicker();
+  if (typeof saveGame === 'function') saveGame();
+  if (typeof refreshCurrentScreen === 'function') refreshCurrentScreen();
+}
+function renderDropoffHoldBlock(m) {
+  const c = m.cargo || {}, parts = [];
+  if (c.soldiers?.garde) parts.push(`${c.soldiers.garde} garde${c.soldiers.garde > 1 ? 's' : ''}`);
+  if (c.soldiers?.lourd) parts.push(`${c.soldiers.lourd} lourd${c.soldiers.lourd > 1 ? 's' : ''}`);
+  for (const rk of ['metal', 'energie', 'cristal']) if (c.resources?.[rk] > 0) parts.push(`${fmt(c.resources[rk])} ${(tileInfo(rk)?.label || rk).toLowerCase()}`);
+  const after = m.postArrival === 'orbit_relay' ? 'Après le dépôt, le tanker reste en orbite pour garder le contact.' : 'Après le dépôt, le tanker rentre à vide.';
+  const ptype = PLANET_TYPES[m.destinationPlanetType], hostile = (ptype?.hostility || 0) > 0;
+  return `
+    <div style="margin-bottom:14px;padding:12px 14px;background:rgba(80,55,15,.20);border:1px solid #ffc86470;border-radius:8px">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">${icon('tanker', { size: 16, color: '#ffc864' })}
+        <span style="color:#ffc864;font-size:11px;letter-spacing:.12em;text-transform:uppercase;font-weight:600">Tanker en orbite · cale pleine</span></div>
+      <div style="font-size:12px;color:var(--text);margin-bottom:4px"><b>${m.tankerName}</b> · en cale : ${parts.join(' · ') || 'rien'}</div>
+      <div style="font-size:10px;color:var(--mut);line-height:1.5">${after}${hostile ? ' Une fois au sol, la garnison subit l\'usure de ce monde.' : ''}</div>
+      <div style="display:flex;gap:6px;margin-top:10px">
+        <button onclick="dropoffRecallFull('${m.id}')" style="flex:1;background:transparent;border:1px solid var(--border);color:var(--mut);font-size:10px;letter-spacing:.1em;text-transform:uppercase;padding:9px 10px;border-radius:4px;cursor:pointer;font-family:inherit">Rentrer avec la cale</button>
+        <button onclick="dropoffDeposit('${m.id}')" style="flex:1.4;background:rgba(255,200,100,.14);border:1px solid #ffc864a0;color:#ffc864;font-size:10px;letter-spacing:.1em;text-transform:uppercase;padding:9px 10px;border-radius:4px;cursor:pointer;font-family:inherit;font-weight:600">Déposer la cargaison</button>
+      </div>
+    </div>`;
 }
 
 // ─── Rendu d'un bloc garnison sur la fiche planète ───
