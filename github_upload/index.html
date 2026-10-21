@@ -23781,6 +23781,40 @@ const PROBE_NAMES_ROOTS = [
   'Auris', 'Sigma', 'Spectra', 'Vesta', 'Aether', 'Nova',
   'Helios', 'Lyra', 'Phoenix', 'Orion', 'Arion', 'Selene',
 ];
+
+/* PATCH_2110_NOMS — destination lisible d'une sonde ou d'un tanker : le joueur, la signature, le système… jamais un nom inventé seul */
+function sbDestLabel(target) {
+  const t = String(target || '').toUpperCase().split('/')[0].trim();
+  const sysOf = k => String(k || '').split('-').slice(0, 3).join('-');
+  const planetLbl = (coord) => {
+    const p = typeof findPlanetByCoord === 'function' ? findPlanetByCoord(coord) : null;
+    if (p && p.isMine) return 'ta planète';
+    if (p && p.playerName) return p.playerName;
+    if (p && (p.customName || p.name)) return p.customName || p.name;
+    return 'planète';
+  };
+  const sysLbl = (k) => {
+    try {
+      const sys = (G.knownSystems || {})[k];
+      const pl = sys && (sys.planets || []).find(x => x && x.playerName && !x.isMine);
+      if (pl) return 'système de ' + pl.playerName;
+      if (typeof MY_ADDRESS !== 'undefined' && k === `${MY_ADDRESS.cluster}-${MY_ADDRESS.sector}-${MY_ADDRESS.system}`) return 'ton système';
+    } catch (e) {}
+    return 'système';
+  };
+  if (!t) return { label: 'secteur au hasard', coords: '' };
+  if (/^SIG-/.test(t)) {
+    const sig = (G.signatures || {})[t] || Object.values(G.signatures || {}).find(x => String(x.id || '').toUpperCase() === t);
+    if (sig && sig.fixedAddress) return { label: planetLbl(sig.fixedAddress), coords: sig.fixedAddress };
+    const where = sig && sig.system ? sysLbl(sysOf(sig.system)) : '';
+    return { label: 'signature ' + (sig ? sig.id : t) + (where && where !== 'système' ? ' · ' + where : ''), coords: sig && sig.system ? sysOf(sig.system) : '' };
+  }
+  if (/^[A-Z]-[A-Z]-\d{4}-\d{1,2}$/.test(t)) return { label: planetLbl(t), coords: t };
+  if (/^[A-Z]-[A-Z]-\d{4}$/.test(t)) return { label: sysLbl(t), coords: t };
+  if (/^[A-Z]-[A-Z]$/.test(t)) return { label: 'secteur ' + t, coords: t };
+  return { label: t, coords: '' };
+}
+function sbProbeTierLabel(tier) { return ({ radar: 'Radar', light: 'Légère', medium: 'Moyenne', stealth: 'Furtive', beacon: 'Balise' })[tier] || 'Sonde'; }
 function generateProbeName() {
   const root = PROBE_NAMES_ROOTS[Math.floor(Math.random() * PROBE_NAMES_ROOTS.length)];
   const num = Math.floor(Math.random() * 99) + 1;
@@ -23908,8 +23942,8 @@ function launchProbe(tier, targetCoords, mode, force) {
   if (typeof toast === 'function') {
     const tierLabel = ({ radar: 'Radar', light: 'légère', medium: 'moyenne', stealth: 'furtive' })[tier];
     toast(force
-      ? `${icon('satellite', {size:12})} Sonde ${mission.probeName} (${tierLabel}) lancée — retour immédiat`
-      : `${icon('satellite', {size:12})} Sonde ${mission.probeName} (${tierLabel}) lancée — retour dans ${formatTankerDuration(duration)}${window.SBSkills ? SBSkills.durTag('probes') : ''}`);
+      ? `${icon('satellite', {size:12})} ${sbProbeTierLabel(tier)} → ${sbDestLabel(coords).label} · retour immédiat · ${mission.probeName}`
+      : `${icon('satellite', {size:12})} ${sbProbeTierLabel(tier)} lancée → ${sbDestLabel(coords).label} · retour dans ${formatTankerDuration(duration)}${window.SBSkills ? SBSkills.durTag('probes') : ''} · <span style="opacity:.6">${mission.probeName}</span>`);
   }
   return mission;
 }
@@ -24531,13 +24565,13 @@ function handleProbeReturn(missionId) {
   if (typeof toast === 'function') {
     if (mission.tier === 'radar') {
       toast(report.silent
-        ? `${icon('satellite', {size:12})} ${mission.probeName} : silence radio`
-        : `${icon('satellite', {size:12})} ${mission.probeName} : signal détecté à ${mission.targetCoords}`);
+        ? `${icon('satellite', {size:12})} ${sbProbeTierLabel(mission.tier)} de retour de ${sbDestLabel(mission.targetCoords).label} : silence radio`
+        : `${icon('satellite', {size:12})} ${sbProbeTierLabel(mission.tier)} de retour de ${sbDestLabel(mission.targetCoords).label} : signal détecté`);
     } else {
       const n = report.targets?.length || 0;
       toast(n === 0
-        ? `${icon('satellite', {size:12})} ${mission.probeName} revenue — secteur vide`
-        : `${icon('satellite', {size:12})} ${mission.probeName} revenue — ${n} cible${n > 1 ? 's' : ''} détectée${n > 1 ? 's' : ''}`);
+        ? `${icon('satellite', {size:12})} ${sbProbeTierLabel(mission.tier)} de retour de ${sbDestLabel(mission.targetCoords).label} : rien de relevé`
+        : `${icon('satellite', {size:12})} ${sbProbeTierLabel(mission.tier)} de retour de ${sbDestLabel(mission.targetCoords).label} : ${n} cible${n > 1 ? 's' : ''} détectée${n > 1 ? 's' : ''}`);
     }
   }
 
@@ -34933,7 +34967,7 @@ function renderProbeDetailScreen() {
           return `
             <div style="padding:10px 12px;background:var(--bg-soft);border:1px solid ${cfg.accent}30;border-radius:6px;margin-bottom:6px">
               <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:5px">
-                <span style="font-size:11px;color:var(--text)">${m.probeName || 'Sonde'} · ${targetTxt}</span>
+                <span style="font-size:11px;color:var(--text)">${m.targetCoords ? sbDestLabel(m.targetCoords).label : 'cible au hasard'} · ${targetTxt} <span style="color:var(--mut);font-size:10px">· ${m.probeName || 'Sonde'}</span></span>
                 <span style="font-size:11px;color:${cfg.accent};font-family:'SF Mono',monospace">${timerText}</span>
               </div>
               <div style="height:3px;background:var(--bg);border-radius:2px;overflow:hidden">
@@ -35922,7 +35956,7 @@ function renderProbeReportRow(r, isUnread) {
         <div class="rapport-dot ${isUnread ? 'unread' : ''}" style="background:${accent}"></div>
         <div class="rapport-info">
           <div class="rapport-coord" style="color:${accent};font-size:10px">${typeLabel}</div>
-          <div class="rapport-name">${r.probeName || 'Sonde'} · ${r.sector || r.targetCoords || '—'}</div>
+          <div class="rapport-name">${(r.targetCoords || r.sigId) ? sbDestLabel(r.targetCoords || r.sigId).label : (r.sector || '—')}${(r.targetCoords && sbDestLabel(r.targetCoords).coords) ? ` <span style="font-family:'SF Mono',monospace;font-size:10px;opacity:.7">${sbDestLabel(r.targetCoords).coords}</span>` : ''} <span style="color:var(--mut);font-size:10px">· ${r.probeName || 'Sonde'}</span></div>
           ${previewHtml}
           ${tsText ? `<div class="rapport-time">${tsText}</div>` : ''}
         </div>
@@ -36349,7 +36383,7 @@ function renderProbeReportRow(r, isUnread) {
           <div class="rapport-coord" style="color:${accent};font-size:10px">${typeLabel}</div>
           <div style="color:var(--mut);font-size:10px;font-family:'SF Mono',monospace">${dateText}</div>
         </div>
-        <div class="rapport-name" style="margin-top:4px">${r.probeName || 'Sonde'} · ${r.sector || '—'}</div>
+        <div class="rapport-name" style="margin-top:4px">${(r.targetCoords || r.sigId) ? sbDestLabel(r.targetCoords || r.sigId).label : (r.sector || '—')} <span style="color:var(--mut);font-size:10px">· ${r.probeName || 'Sonde'}</span></div>
         ${coordsHtml}
         ${fullBodyHtml}
         <div style="margin-top:10px;display:flex;justify-content:space-between;align-items:center;gap:8px">
@@ -48261,7 +48295,7 @@ if (G.knownTargets && Array.isArray(G.tankerMissions)) {
 <!-- HOME V2 — « monde d'abord » : planète plein écran, ressources en ligne, Flotte / Défense / Prospection (assets/home.js) -->
 <script type="module" src="assets/home.js?v=20261020-2150"></script>
 <!-- SPACE MAP v0 — carte du Centre de prospection (assets/spacemap.js, source src/spacemap.js) -->
-<script src="assets/spacemap.js?v=20261021-1809"></script>
+<script src="assets/spacemap.js?v=20261021-1830"></script>
 <!-- SPACE MAP niveau B — diorama 3D d'un système (assets/system3d.js, source src/system3d.js) -->
 <script type="module" src="assets/system3d.js?v=20261014-1440"></script>
 <!-- SHIP3D — fiches 3D : cuirassé KV-01, frégate SR-01, tanker TK-07, chantier orbital OS-01 (assets/ship3d.js, sur le moteur partagé window.SB3D) -->
@@ -48402,7 +48436,7 @@ if (G.knownTargets && Array.isArray(G.tankerMissions)) {
 <script src="assets/radio.js?v=20261014-1440"></script>
 <script type="module" src="assets/ship3d.js?v=20261020-2230"></script>
 <!-- PATCH_1510_MISSIONS — tout ce qui vole, fiche de mission des tankers -->
-<script src="assets/missions.js?v=20261020-1130"></script>
+<script src="assets/missions.js?v=20261021-1830"></script>
 <!-- PATCH_1610_SKILLS — skills des bâtiments : apprendre, découvrir, effets -->
 <script src="assets/skills.js?v=20261021-1130"></script>
 <!-- PATCH_1510_CROWN — The Drifting Crown en 3D (assets/station3d.js, sur le moteur partagé window.SB3D) -->

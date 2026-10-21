@@ -392,7 +392,9 @@
       let to;
       if (/^SIG-/.test(tc)) to = cell['sig:' + tc];
       else if (/^[A-Z]-[A-Z]-\d{4}/.test(tc)) to = cell['sys:' + tc.split('-').slice(0, 3).join('-')];
-      if (to !== undefined) flights.push({ kind: 'probe', tier: m.tier, id: m.id, label: `Sonde ${m.probeName || ''}`.trim(), from: 0, to, toCk: /^SIG-/.test(tc) ? 'sig:' + tc : null, departedAt: m.departedAt, arrivalAt: m.arrivalAt, target: tc });
+      // PATCH_2110_NOMS : « Légère → système de Panzerstorm », le nom de la sonde en petit
+      const _pd = typeof sbDestLabel === 'function' ? sbDestLabel(tc) : { label: tc, coords: tc };
+      if (to !== undefined) flights.push({ kind: 'probe', tier: m.tier, id: m.id, label: `${typeof sbProbeTierLabel === 'function' ? sbProbeTierLabel(m.tier) : 'Sonde'} → ${_pd.label}`, shipName: m.probeName || 'Sonde', destCoords: _pd.coords, from: 0, to, toCk: /^SIG-/.test(tc) ? 'sig:' + tc : null, departedAt: m.departedAt, arrivalAt: m.arrivalAt, target: tc });
     }
     for (const m of (G.tankerMissions || [])) {
       if (!(m.status === 'in_transit' || m.status === 'returning' || m.status === 'exploring')) continue;
@@ -410,7 +412,8 @@
         const cells = [0].concat(SBLines.knownChain(m.portSys).map(k => cell['sys:' + k]).filter(i => i !== undefined));
         if (cells.length > 2) path = back ? cells.slice().reverse() : cells;
       }
-      flights.push({ kind: 'tanker', id: m.id, label: m.tankerName || 'Tanker', from: back ? at : 0, to: back ? 0 : at, toCk: back ? null : toCk, path,
+      const _td = (m.mpTarget && m.mpTarget.pseudo) ? { label: m.mpTarget.pseudo, coords: tc } : (m.dock && m.dock.name) ? { label: m.dock.name, coords: sysKey } : m.targetLabel ? { label: m.targetLabel, coords: sysKey } : (typeof sbDestLabel === 'function' ? sbDestLabel(tc) : { label: tc, coords: '' });
+      flights.push({ kind: 'tanker', id: m.id, label: `Tanker → ${_td.label}`, shipName: m.tankerName || 'Tanker', destCoords: _td.coords, from: back ? at : 0, to: back ? 0 : at, toCk: back ? null : toCk, path,
         departedAt: back ? (m.returnDepartedAt || m.arrivalAt || m.departedAt) : m.departedAt, arrivalAt: back ? (m.returnArrivalAt || m.arrivalAt) : m.arrivalAt, target: tc, back });
     }
     // 15/10 (E6) — flottes qui gagnent leur embuscade ou en reviennent : par la route connue quand elles l'empruntent
@@ -636,8 +639,9 @@
       const f = state.flights.find(x => x.id === s.key);
       if (!f) { _sel = null; return panelMarkup(state); }
       const eta = formatTankerDuration(Math.max(0, (f.arrivalAt || 0) - Date.now()));
-      if (f.kind === 'tanker' && window.SBMissions) return `<div class="sm-panel"><div class="sm-ptitle" style="color:#ffc864">${esc(f.label)}${f.back ? ' · retour' : ''}</div><div class="sm-psub">${f.back ? 'Rentre au port' : 'Vers ' + esc(f.target)} · arrivée dans ${esc(eta)}</div>${_sigBtn('#ffc864', 'Voir la mission', `SBMissions.open('${esc(f.id)}')`, 'trajet, cale, temps restant', true)}</div>`;
+      if (f.kind === 'tanker' && window.SBMissions) return `<div class="sm-panel"><div class="sm-ptitle" style="color:#ffc864">${f.back ? 'Tanker · retour au port' : esc(f.label)}</div><div class="sm-psub">${f.destCoords ? `<span class="mono">${esc(f.destCoords)}</span> · ` : ''}${f.back ? 'à quai' : 'arrivée'} dans ${esc(eta)} · <span style="opacity:.6">${esc(f.shipName || '')}</span></div>${_sigBtn('#ffc864', 'Voir la mission', `SBMissions.open('${esc(f.id)}')`, 'trajet, cale, temps restant', true)}</div>`;
       if (f.kind === 'fleet') return `<div class="sm-panel"><div class="sm-ptitle" style="color:#c9a8ff">${esc(f.label)}${f.back ? ' · retour' : ''}</div><div class="sm-psub">${f.back ? 'Rentre au port' : 'En route vers son embuscade sur ' + esc(f.target)} · ${f.back ? 'à quai' : 'en place'} dans ${esc(eta)}</div>${_sigBtn('#c9a8ff', 'Voir la flotte', `openFleetDetail('${esc(f.fleetId)}')`, '', true)}</div>`;
+      if (f.kind === 'probe') return `<div class="sm-panel"><div class="sm-ptitle">${esc(f.label)}</div><div class="sm-psub">${f.destCoords ? `<span class="mono">${esc(f.destCoords)}</span> · ` : ''}arrivée dans ${esc(eta)} · <span style="opacity:.6">${esc(f.shipName || '')}</span></div></div>`;   // PATCH_2110_NOMS
       return `<div class="sm-panel"><div class="sm-ptitle">${esc(f.label)}${f.back ? ' · retour' : ''}</div><div class="sm-psub">${f.back ? 'Rentre au port' : 'Vers ' + esc(f.target)} · arrivée dans ${esc(eta)}</div></div>`;
     }
     return '';

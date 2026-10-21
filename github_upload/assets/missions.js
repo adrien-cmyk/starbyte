@@ -103,8 +103,10 @@
     if (!l.tankers.length) html += `<div class="sbm-empty">Aucun tanker en mission. Envoie-en un depuis une route (carte ou Commerce).</div>`;
     for (const m of l.tankers.slice().sort((a, b) => (phaseOf(a, now).left || 9e15) - (phaseOf(b, now).left || 9e15))) {
       const ph = phaseOf(m, now), d = destOf(m);
-      html += row({ kind: `Tanker T${tierOf(m)}`, name: m.tankerName || 'Tanker', color: ph.color,
-        dest: `${ph.key === 'back' ? '← ' : '→ '}${esc(d.label)}${d.coords && d.coords !== d.label ? ` <span class="mono">${esc(d.coords)}</span>` : ''}`,
+      // PATCH_2110_NOMS : la destination en gros, le nom du tanker en petit
+      const _dl = (m.mpTarget && m.mpTarget.pseudo) ? m.mpTarget.pseudo : (!m.dock && !m.targetLabel && typeof sbDestLabel === 'function' && m.targetCoords) ? sbDestLabel(m.targetCoords).label : d.label;
+      html += row({ kind: `Tanker T${tierOf(m)}${ph.key === 'back' ? ' · retour' : ''}`, name: (ph.key === 'back' ? '← ' : '→ ') + _dl, color: ph.color,
+        dest: `${d.coords && d.coords !== _dl ? `<span class="mono">${esc(d.coords)}</span> · ` : ''}<span style="opacity:.6">${esc(m.tankerName || 'Tanker')}</span>`,
         state: ph.left != null && ph.left > 0 ? `${ph.label} · ${dur(ph.left)}` : ph.label, t0: ph.t0, t1: ph.t1, onclick: `SBMissions.open('${esc(m.id)}')` });
     }
     html += H('Flottes', l.fleets.length);
@@ -125,8 +127,9 @@
     if (!l.probes.length) html += `<div class="sbm-empty">Aucune sonde en vol.</div>`;
     for (const m of l.probes.slice().sort((a, b) => a.arrivalAt - b.arrivalAt)) {
       const cfg = (typeof PROBE_TIER_CONFIG !== 'undefined' && PROBE_TIER_CONFIG[m.tier]) || { label: m.tier, accent: '#9fb3bf' };
-      html += row({ kind: m.mode === 'scout' ? 'Moyenne · éclaireur' : (cfg.label || m.tier), name: m.probeName || 'Sonde', color: cfg.accent || '#9fb3bf',
-        dest: `→ <span class="mono">${esc(m.scoutLabel || m.targetCoords || '?')}</span>`, state: 'Arrivée · ' + dur(m.arrivalAt - now), t0: m.departedAt, t1: m.arrivalAt,
+      const _pd = typeof sbDestLabel === 'function' ? sbDestLabel(m.targetCoords) : { label: m.targetCoords || '?', coords: '' };
+      html += row({ kind: m.mode === 'scout' ? 'Moyenne · éclaireur' : (cfg.label || m.tier), name: '→ ' + (m.scoutLabel || _pd.label), color: cfg.accent || '#9fb3bf',
+        dest: `${_pd.coords ? `<span class="mono">${esc(_pd.coords)}</span> · ` : ''}<span style="opacity:.6">${esc(m.probeName || 'Sonde')}</span>`, state: 'Arrivée · ' + dur(m.arrivalAt - now), t0: m.departedAt, t1: m.arrivalAt,
         onclick: `SBMissions.showProbe('${esc(m.id)}')` });
     }
     return css() + `<div class="sbm">${html}</div>`;
