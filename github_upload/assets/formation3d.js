@@ -521,12 +521,12 @@
       g.setAttribute('position', new THREE.BufferAttribute(pos, 3)); g.setAttribute('aP', new THREE.BufferAttribute(aP, 3)); g.setAttribute('aC', new THREE.BufferAttribute(aC, 3));
       const far = new THREE.Points(g, new THREE.ShaderMaterial({
         transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
-        uniforms: { uT: PT, uPR: { value: renderer.getPixelRatio() }, uH: { value: H() } },
-        vertexShader: `attribute vec3 aP; attribute vec3 aC; uniform float uT, uPR, uH; varying vec3 vC; varying float vA;
+        uniforms: { uT: PT, uPR: { value: renderer.getPixelRatio() }, uH: { value: H() }, uNear: { value: ext * 1.2 } },
+        vertexShader: `attribute vec3 aP; attribute vec3 aC; uniform float uT, uPR, uH, uNear; varying vec3 vC; varying float vA;
           void main(){ vec3 p = position + vec3(sin(uT * .21 + aP.x) * 6.0, sin(uT * .3 + aP.x + position.x * .002) * 9.0, sin(uT * .17 + aP.x * 1.3) * 8.0);
             vec4 mv = modelViewMatrix * vec4(p, 1.0); gl_Position = projectionMatrix * mv;
-            vC = aC; vA = .7 + .3 * sin(uT * 2.3 + aP.x * 7.0);
-            gl_PointSize = clamp(aP.y * 2.6 * uH * uPR * projectionMatrix[1][1] * .5 / -mv.z, 3.0 * uPR, 70.0); }`,
+            vC = aC; vA = (.7 + .3 * sin(uT * 2.3 + aP.x * 7.0)) * smoothstep(uNear * .6, uNear * 1.6, -mv.z);   // s'efface à l'approche de la caméra
+            gl_PointSize = clamp(aP.y * 2.6 * uH * uPR * projectionMatrix[1][1] * .5 / -mv.z, 3.0 * uPR, 16.0 * uPR); }`,
         fragmentShader: `varying vec3 vC; varying float vA;
           void main(){ float d = length(gl_PointCoord - .5) * 2.0; float a = (exp(-d * d * 4.0) * .8 + exp(-d * d * 30.0) * 1.0) * vA; if (a < .01) discard;
             gl_FragColor = vec4(mix(vC, vec3(1.0), exp(-d * d * 30.0) * .5) * a * 1.6, a); }`,
@@ -536,7 +536,7 @@
     // compteur discret dans la légende de la vue (« 214 vaisseaux · En orbite · touche un vaisseau »)
     if (!LITE && list.total) {
       const hint = container.querySelector('.u3d-hint');
-      if (hint) { const base = hint.dataset.base || hint.textContent; hint.dataset.base = base; hint.textContent = `${list.total} vaisseau${list.total > 1 ? 'x' : ''} · ${base}`; }
+      if (hint) { const base = hint.textContent.replace(/^\d+ vaisseaux? · /, ''); hint.textContent = `${list.total} vaisseau${list.total > 1 ? 'x' : ''} · ${base}`; }   // légende du mode courant (orbite / mission)
     }
 
     // mission : hyperespace — tunnel de traînées lumineuses floues (violet, magenta, cyan) qui convergent vers
