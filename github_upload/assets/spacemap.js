@@ -258,8 +258,19 @@
     occ.set(0, { kind: 'home', key: home });
     cell['sys:' + home] = 0;
     const keys = Object.keys(systems).filter(k => k !== home).sort();
-    // 15/10 (Adrien : « la route fait des courbes étranges ») — les jalons d'une route connue sont posés LE LONG de la route :
-    // ses deux bouts se placent comme les autres systèmes, ses systèmes de passage sur la ligne droite qui les relie, dans l'ordre.
+    // 21/10 (Adrien : « la route du Linceul a encore changé ») — positions FIGÉES : un système qui a reçu une case la garde
+    // pour toujours (G.mapCells). Les nouveaux venus se placent autour ; une route qui s'allonge ajoute ses jalons sans
+    // déplacer ceux qu'on connaît. Les cases des systèmes absents (rapports supprimés…) restent réservées.
+    if (!G.mapCells || G.mapCells.v !== 2 || G.mapCells.home !== home) G.mapCells = { v: 2, home, cells: {} };
+    const MC = G.mapCells.cells;
+    const fixed = new Set(), reserved = [];
+    for (const [k, idx] of Object.entries(MC)) {
+      const c = CELLS[idx];
+      if (k === home || !c || c.ring < 1 || c.ring > BOARD || occ.has(idx)) { delete MC[k]; continue; }
+      if (systems[k]) { occ.set(idx, { kind: 'system', key: k }); cell['sys:' + k] = idx; fixed.add(k); }
+      else { occ.set(idx, { kind: 'reserved', key: k }); reserved.push(idx); }
+    }
+    // 15/10 — les jalons d'une route connue sont posés LE LONG de la route, entre ses points déjà placés.
     const routeChains = [];
     if (window.SBLines) {
       try {
@@ -267,11 +278,12 @@
         for (const r of (G.routes || [])) if (r.portSys) { const ch = SBLines.knownChain(r.portSys); if (ch.length > 2) routeChains.push(ch); }
       } catch (e) {}
     }
+    routeChains.sort((a, b) => b.length - a.length);   // la plus longue d'abord : les routes qui partagent des jalons suivent son tracé
     const ends = new Set(routeChains.flatMap(ch => [ch[0], ch[ch.length - 1]]));
     const mids = new Set(routeChains.flatMap(ch => ch.slice(1, -1)).filter(k => !ends.has(k) && k !== home));
-    // 19/10 (Adrien : « ma route a changé de forme ») — les routes se posent AVANT les autres systèmes :
-    // un système qui entre sur la carte (convoi d'un autre commandant relevé par mes balises…) ne déloge plus leurs jalons.
+    // 19/10 — les routes se posent AVANT les autres systèmes : un nouveau venu ne déloge pas leurs jalons.
     const placeSys = (k) => {
+      if (cell['sys:' + k] !== undefined) return;
       const { cands, k: p } = primarySlot(k);
       let placed = null;
       for (let j = 0; j < cands.length && !placed; j++) { const c = cands[(p + j) % cands.length]; if (!occ.has(c.idx)) placed = c; }
@@ -281,28 +293,34 @@
       cell['sys:' + k] = placed.idx;
     };
     for (const k of keys) if (ends.has(k) && !mids.has(k)) placeSys(k);
-    // une route = une ligne régulière sur la grille : si ses deux bouts sont trop proches pour ses jalons, l'arrivée
-    // s'écarte dans la même direction ; les jalons se posent ensuite à intervalles réguliers sur le plus court chemin.
     const nearestFree = (x, z, minRing) => { let best = null, bd = Infinity;
       for (const c of CELLS) { if (c.ring > BOARD || c.ring < minRing || occ.has(c.idx)) continue; const d = Math.hypot(c.x - x, c.z - z); if (d < bd) { bd = d; best = c; } }
       return best; };
+    const moved = new Set();
     for (const ch of routeChains) {
       const n = ch.length - 1, kB = ch[n];
       let ia = cell['sys:' + ch[0]], ib = cell['sys:' + kB];
       if (ia === undefined || ib === undefined) continue;
       const minRing = ia === 0 ? 2 : 1;   // l'anneau 1 autour de ma planète, c'est mon propre système
-      if (kB !== home && hexDist(CELLS[ia], CELLS[ib]) < n + 1) {
+      // un bout trop proche pour ses jalons s'écarte — une seule fois, et jamais s'il a déjà sa case pour toujours
+      if (kB !== home && !fixed.has(kB) && !moved.has(kB) && hexDist(CELLS[ia], CELLS[ib]) < n + 1) {
         const A = CELLS[ia], B = CELLS[ib];
         let dx = B.x - A.x, dz = B.z - A.z, L = Math.hypot(dx, dz);
         if (L < 1) { const ang = _mulberry32(_hashSeed('SMr:' + kB))() * Math.PI * 2; dx = Math.cos(ang); dz = Math.sin(ang); L = 1; }
         const far = nearestFree(A.x + dx / L * CELL * (n + 1.2), A.z + dz / L * CELL * (n + 1.2), minRing);
         if (far) { occ.delete(ib); occ.set(far.idx, { kind: 'system', key: kB }); cell['sys:' + kB] = ib = far.idx; }
       }
-      const path = hexPath(ia, ib, null) || [ia, ib];
+      moved.add(kB);
+      // chaque jalon manquant se pose entre le jalon placé qui le précède et le suivant, à sa place dans l'ordre
       for (let i = 1; i < n; i++) {
         const k = ch[i];
         if (!mids.has(k) || cell['sys:' + k] !== undefined || !systems[k]) continue;
-        const c0 = CELLS[path[Math.round(i * (path.length - 1) / n)]];
+        let a = i - 1; while (a > 0 && cell['sys:' + ch[a]] === undefined) a--;
+        let b = i + 1; while (b < n && cell['sys:' + ch[b]] === undefined) b++;
+        const ca = cell['sys:' + ch[a]], cb = cell['sys:' + ch[b]];
+        if (ca === undefined || cb === undefined) continue;
+        const path = hexPath(ca, cb, null) || [ca, cb];
+        const c0 = CELLS[path[Math.max(1, Math.min(path.length - 2, Math.round((i - a) * (path.length - 1) / (b - a))))]] || CELLS[path[0]];
         const c = (c0 && !occ.has(c0.idx) && c0.ring >= minRing) ? c0 : (c0 ? nearestFree(c0.x, c0.z, minRing) : null);
         if (!c) continue;
         occ.set(c.idx, { kind: 'system', key: k });
@@ -313,6 +331,8 @@
     for (const k of mids) if (cell['sys:' + k] === undefined && systems[k]) {   // jalon d'une route dont un bout manque
       const c = freeAround(CELLS[0], 2, BOARD, occ, k)[0]; if (c) { occ.set(c.idx, { kind: 'system', key: k }); cell['sys:' + k] = c.idx; }
     }
+    for (const idx of reserved) occ.delete(idx);
+    for (const k of keys) if (cell['sys:' + k] !== undefined) MC[k] = cell['sys:' + k];   // mémorisé (sauvegardé avec la partie)
     // 13/10 (Adrien) — zoom sémantique : chaque objet vit DANS la case de son système, sur une orbite.
     // De loin on ne voit qu'un point par système ; de près, la case s'ouvre et montre le système.
     const items = {};                 // clé de système → [{ kind, key, ck, orbit, ang }]
