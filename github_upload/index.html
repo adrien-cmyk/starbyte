@@ -8739,7 +8739,7 @@ var EXTRA_SAVE_KEYS = [
   'mpNeighbors',   // VOISINS_1310 — voisins déjà signalés
   'tuto',          // TUTO_1410 — premiers pas (étape, vu, terminé)
   'skillsLearned', 'research', '_skillsSeen', '_skillsMigrated',   // PATCH_1610_SKILLS
-  'mpRaidsApplied', 'mpRaidsReturned', 'mpPostsToClose',   // PATCH_2010_AUDIT — raids déjà intégrés (indépendant des rapports, qu'on peut supprimer)
+  'mpRaidsApplied', 'mpRaidsReturned', 'mpPostsToClose', 'mpRelations',   // PATCH_2010_AUDIT — raids déjà intégrés (indépendant des rapports, qu'on peut supprimer)
   'worlds', 'activeWorld', 'colonyMissions', 'fleetTransfers',   // PATCH_2010_WORLDS — colonies (planètes inactives) et planète affichée
   '_linesCrown', 'crownSeen', '_linesSanct', 'sanctSeen', '_linesNoire', 'noireSeen', '_linesRefuge', '_linesRefuge2', 'refugeSeen', '_brest1',   // PATCH_1510_CROWN — lieu du secteur M devenu la Couronne, première arrivée vue
 ];
@@ -9611,7 +9611,7 @@ function _mpApplyRaidAgainstHome(raid) {
     startedAt: Date.parse(raid.departed_at) || null, returnedAt: Date.parse(raid.resolved_at) || Date.now(), read: false,
     defense: {
       won: !won, attacker: raid.attacker_pseudo, attackerAddress: raid.attacker_address, fleetName: raid.fleet_name || '',
-      loot, damagedName, losses: defLosses,
+      loot, damagedName, losses: defLosses, lootPct: Number(res.loot_pct) || 0.3,
       atk: combat && combat.phases && combat.phases.phase1 ? combat.phases.phase1.atkEffective : null,
       def: combat && combat.phases && combat.phases.phase1 ? combat.phases.phase1.defEffective : null,
       landed: !!(combat && combat.phases && combat.phases.phase2 && combat.phases.phase2.won),
@@ -9745,6 +9745,7 @@ function renderFlagReportDetail(r) {
 async function mpReplyFlag(reportId, key) {
   const r = (G.reports || []).find(x => x.id === reportId);
   if (!r || !r.flag || r.flag.replied || !window.SBMP) return;
+  if (!(await _mpConfirmFlag(key, r.flag.from))) return;
   try {
     await window.SBMP.replyFlag(r.mpFlagId, key);
     r.flag.replied = true;
@@ -9758,6 +9759,7 @@ async function mpFlagAttacker(reportId, key) {
   const r = (G.reports || []).find(x => x.id === reportId);
   const d = r && r.defense;
   if (!d || d.flagSent || !d.attackerAddress || !window.SBMP) return;
+  if (!(await _mpConfirmFlag(key, d.attacker))) return;
   try {
     await window.SBMP.sendFlag(d.attackerAddress, key, 'raid');
     d.flagSent = key;
@@ -9795,11 +9797,36 @@ function _mpDiplo() {
   return G.mpDiplo;
 }
 // Pacte ouvert (proposé ou actif) avec le commandant de cette adresse — dernière image connue du registre
-function mpPactWith(address) {
-  if (!address) return null;
+function mpPactWith(address, pseudo) {
+  if (!address && !pseudo) return null;
   const all = Object.values(_mpDiplo().pacts);
-  return all.find(k => k.status === 'active' && k.otherAddress === address)
-      || all.find(k => k.status === 'proposed' && k.otherAddress === address) || null;
+  const same = k => (address && k.otherAddress === address) || (pseudo && k.otherPseudo === pseudo);   // PATCH_2110_PAVILLONS : une colonie du même commandant
+  return all.find(k => k.status === 'active' && same(k))
+      || all.find(k => k.status === 'proposed' && same(k)) || null;
+}
+// PATCH_2110_PAVILLONS — relations officielles (ennemi, accord commercial), relevées au registre chaque minute
+function mpRelWith(address, pseudo, kind) {
+  return (G.mpRelations || []).find(r => (!kind || r.kind === kind) && ((address && (r.addresses || []).includes(address)) || (pseudo && r.pseudo === pseudo))) || null;
+}
+function mpIngestRelations(rows) {
+  const prev = Array.isArray(G.mpRelations) ? G.mpRelations : null;
+  const key = r => r.kind + ':' + r.pseudo;
+  if (prev) {
+    const before = new Set(prev.map(key)), after = new Set(rows.map(key));
+    for (const r of rows) if (!before.has(key(r))) {
+      toast(r.kind === 'enemy' ? (r.byMe ? `⚔ ${r.pseudo} est désormais ton ennemi déclaré` : `⚔ ${r.pseudo} t'a déclaré ennemi`) : `⚑ Accord commercial avec ${r.pseudo} · 7 jours`);
+    }
+    for (const r of prev) if (!after.has(key(r))) {
+      toast(r.kind === 'enemy' ? `☮ Paix conclue avec ${r.pseudo} : la rivalité est levée` : `Accord commercial avec ${r.pseudo} terminé`);
+    }
+  }
+  const changed = JSON.stringify(prev) !== JSON.stringify(rows);
+  G.mpRelations = rows;
+  if (changed) { try { saveGame(); } catch (e) {} try { if (typeof refreshCurrentScreen === 'function') refreshCurrentScreen(); } catch (e) {} }
+}
+function mpRelBadge(address, pseudo) {
+  const e = mpRelWith(address, pseudo, 'enemy'), t = mpRelWith(address, pseudo, 'trade');
+  return (e ? ' <span style="color:#ff4d4d;font-weight:600">· Ennemi</span>' : '') + (t ? ' <span style="color:#ffc864">· Partenaire commercial</span>' : '');
 }
 function _mpCargoSum(c) { return ['metal', 'energie', 'cristal'].reduce((s, k) => s + Math.max(0, Math.floor(Number(c && c[k]) || 0)), 0); }
 var _mpDiploBusy = new Set();
@@ -10151,11 +10178,11 @@ function renderDiploReportDetail(r) {
       ? `<div style="display:flex;gap:8px">${_mpDiploBtn('Signer le pacte', `mpAnswerPact('${d.pactId}',true)`)}${_mpDiploBtn('Décliner', `mpAnswerPact('${d.pactId}',false)`, 'mut')}</div>`
       : `<div style="font-size:12px;color:var(--mut);font-style:italic;text-align:center;padding:8px">${st === 'active' ? 'Pacte signé.' : st === 'declined' ? 'Tu as décliné ce pacte.' : st === 'broken' ? 'Ce pacte a été rompu.' : st === 'expired' ? 'La proposition a expiré.' : 'Proposition retirée : son ambassade est fermée.'}</div>`}</div>`;
   } else if (d.type === 'pact_signed') {
-    html += box(`Pacte de non-agression avec <strong>${d.pseudo}</strong>. Aucun raid n'est possible entre vous tant que l'ambassade reste en orbite.${addr}`);
+    html += box(`Pacte de non-agression avec <strong>${d.pseudo}</strong>. Aucun raid n'est possible entre vous ${k && !k.anchor ? 'pendant 48 h (alliance temporaire conclue par pavillons)' : 'tant que l\'ambassade reste en orbite'}.${addr}`);
     if (k && k.status === 'active') html += `<div style="margin:0 16px 14px;display:flex">${_mpDiploBtn('Dénoncer le pacte', `mpEndPact('${d.pactId}')`, 'red')}</div>`;
     else if (k) html += `<div style="margin:0 16px 14px;font-size:12px;color:var(--mut);font-style:italic;text-align:center">Ce pacte n'est plus en vigueur.</div>`;
   } else if (d.type === 'pact_broken') {
-    html += box(`<strong>${d.pseudo}</strong> ${d.reason === 'recall' ? 'a rappelé son ambassade' : 'a dénoncé votre pacte'}. Les raids redeviennent possibles entre vous.${addr}`);
+    html += box(`${d.reason === 'enemy' ? `Une déclaration d'hostilité a rompu le pacte avec <strong>${d.pseudo}</strong>` : d.reason === 'expired' ? `L'alliance temporaire avec <strong>${d.pseudo}</strong> est arrivée à son terme` : `<strong>${d.pseudo}</strong> ${d.reason === 'recall' ? 'a rappelé son ambassade' : 'a dénoncé votre pacte'}`}. Les raids redeviennent possibles entre vous.${addr}`);
   } else if (d.type === 'neighbor') {   // VOISINS_1310
     html += box(`Une signature de commandant se détache du bruit de fond : <strong>${d.pseudo}</strong>${d.planet ? `, sur ${d.planet}` : ''}, niveau estimé ~${d.level || 1}. C'est l'un de tes plus proches voisins.${addr}`)
       + `<div style="margin:0 16px 14px;font-size:12px;color:var(--mut);line-height:1.6">Depuis sa fiche (Carnet ou onglet Joueurs) : envoyer un tanker en ambassade, hisser un pavillon, proposer un pacte… ou préparer un raid.</div>`
@@ -10175,10 +10202,13 @@ function mpEmbassyBlockHtml(p) {
   if (!p || !p.isReal) return '';
   const addr = p.mpAddress || p.coord;
   const m = (G.tankerMissions || []).find(x => x.status === 'orbital_relay' && x.mpTarget && x.destinationPlanetCoord === p.coord);
-  const k = mpPactWith(addr);
+  const k = mpPactWith(addr, p.playerName);
   const inc = _mpEmbInFor(addr);
-  if (!m && !k && !inc) return '';
+  const _en = mpRelWith(addr, p.playerName, 'enemy'), _tr = mpRelWith(addr, p.playerName, 'trade');   // PATCH_2110_PAVILLONS
+  if (!m && !k && !inc && !_en && !_tr) return '';
   const rows = [];
+  if (_en) rows.push(`<div style="font-size:12px;color:#ff4d4d;font-weight:600">⚔ Ennemi déclaré${_en.byMe ? ' (par toi)' : ''}</div><div style="font-size:11px;color:var(--mut);margin-top:2px">Pillage jusqu'à 40 % entre vous · pas de pacte possible · « Paix ? » des deux côtés pour en sortir</div>`);
+  if (_tr) rows.push(`<div style="font-size:12px;color:#ffc864">⚑ Accord commercial${_tr.until ? ' jusqu\'au ' + new Date(_tr.until).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' }) : ''}</div><div style="font-size:11px;color:var(--mut);margin-top:2px">Tes convois vers lui mieux protégés · canal ouvert</div>`);
   if (inc) rows.push(`<div style="font-size:12px;color:#e6f0ff">Son tanker ${_esc(inc.tanker || '')} est en orbite chez toi</div>`);
   if (m) {
     const res = (m.cargo && m.cargo.resources) || {};
@@ -10189,7 +10219,7 @@ function mpEmbassyBlockHtml(p) {
   let action = '';
   if (k && k.status === 'active') {
     const since = k.activeAt ? new Date(k.activeAt).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' }) : '';
-    const held = m && k.anchor === m.mpPresenceId ? `tenu par ${m.tankerName}` : k.mine ? 'tenu par ton tanker' : 'tenu par son tanker en orbite chez toi';
+    const held = !k.anchor ? 'alliance temporaire · 48 h' : m && k.anchor === m.mpPresenceId ? `tenu par ${m.tankerName}` : k.mine ? 'tenu par ton tanker' : 'tenu par son tanker en orbite chez toi';
     rows.push(`<div style="font-size:12px;color:var(--green);margin-top:8px">Pacte de non-agression actif${since ? ' depuis le ' + since : ''}</div><div style="font-size:11px;color:var(--mut);margin-top:2px">${held}</div>`);
     action = _mpDiploBtn('Dénoncer le pacte', `mpEndPact('${k.id}')`, 'red');
   } else if (k && k.status === 'proposed' && k.mine) {
@@ -11393,6 +11423,7 @@ function renderDefenseReportDetail(r) {
     <div class="dash-section-card" style="margin:0 16px 14px">
       <div style="font-size:10px;letter-spacing:.14em;color:var(--mut);text-transform:uppercase;margin-bottom:6px">Pillage</div>
       ${lootRows}
+      ${d.lootPct > 0.3 ? `<div style="font-size:10px;color:#ff8a8a;margin-top:6px">Pillage majoré : jusqu'à ${Math.round(d.lootPct * 100)} %${d.lootPct >= 0.5 ? ' (ennemis déclarés + dernier avertissement)' : ' (ennemis déclarés ou dernier avertissement)'}</div>` : ''}
       <div class="dash-stat-row"><span class="lbl">Bâtiment abîmé</span><span class="val" style="color:${d.damagedName ? 'var(--red)' : 'var(--mut)'}">${d.damagedName || 'aucun'}</span></div>
     </div>
     ${_defLossLines(d.losses).length ? `<div class="dash-section-card" style="margin:0 16px 14px">
@@ -11679,6 +11710,9 @@ function _mpRumorText(r) {
     case 'convoy_robbed': return `${r.actor} a dévalisé un convoi de ${r.target}${s}. Les marchands doublent leurs escortes.`;
     case 'ambush_repelled': return `Le convoi de ${r.actor} a repoussé l'embuscade de ${r.target}${s}.`;
     case 'pact_signed': return `${r.actor} et ${r.target} ont signé un pacte de non-agression${s}. Reste à voir combien de temps il tiendra.`;
+    case 'war_declared': return `${r.actor} a déclaré ${r.target} ennemi${s}. Les deux camps comptent leurs vaisseaux.`;   // PATCH_2110_PAVILLONS
+    case 'peace_made': return `${r.actor} et ${r.target} ont fait la paix${s}. Pour combien de temps ?`;
+    case 'trade_signed': return `${r.actor} et ${r.target} ont signé un accord commercial${s}. Leurs convois circulent mieux escortés.`;
     case 'pact_broken': return (r.payload && r.payload.reason === 'recall')
       ? `${r.actor} a rappelé son ambassade de chez ${r.target}${s}. Le pacte est rompu.`
       : `${r.actor} a dénoncé son pacte avec ${r.target}${s}. Les quais retiennent leur souffle.`;
@@ -11843,6 +11877,7 @@ async function mpFlagConvoy(presenceId, key) {
   if (!mission || !window.SBMP) return;
   const mine = window.SBMP.presenceFor(mission.id);
   if (!mine) { toast('Ton convoi n\'est pas encore inscrit au registre du dock'); return; }
+  if (!(await _mpConfirmFlag(key))) return;
   try {
     await window.SBMP.sendFlagDock(mine, presenceId, key);
     mission.mpFlagged = Object.assign({}, mission.mpFlagged, { [presenceId]: key });
@@ -13393,7 +13428,8 @@ function _carnetTargetFromPlanet(p) {
   // par le serveur (fonction resolve-raids) avec sa vraie défense et ses vrais stocks.
   if (p.isReal) {
     const online = !!(window.SBMP && window.SBMP.ready && window.SBMP.ready());
-    const _pact = mpPactWith(p.mpAddress || p.coord);   // AMBASSADES_1210
+    const _pact = mpPactWith(p.mpAddress || p.coord, p.playerName);   // AMBASSADES_1210
+    const _enemy = mpRelWith(p.mpAddress || p.coord, p.playerName, 'enemy');   // PATCH_2110_PAVILLONS
     if (_pact && _pact.status === 'active') {
       return Object.assign(base, {
         name: p.name || p.coord, level: p.playerLevel || 1, profile: 'Commandant · ' + p.playerName,
@@ -13404,8 +13440,8 @@ function _carnetTargetFromPlanet(p) {
       });
     }
     return Object.assign(base, {
-      name: p.name || p.coord, level: p.playerLevel || 1, profile: 'Commandant · ' + p.playerName,
-      kind: 'player', mp: true, mpAddress: p.mpAddress || p.coord, mpPseudo: p.playerName,
+      name: p.name || p.coord, level: p.playerLevel || 1, profile: (_enemy ? 'Ennemi déclaré · ' : 'Commandant · ') + p.playerName,
+      kind: 'player', mp: true, mpAddress: p.mpAddress || p.coord, mpPseudo: p.playerName, mpEnemy: !!_enemy,
       targetable: online, defense: 0, garrison: 0, resources: {},
       hint: online ? '' : 'Connexion au registre requise pour attaquer un commandant',
       description: 'Défense inconnue : le combat se joue sur le serveur, à l\'arrivée de ta flotte.',
@@ -38640,12 +38676,14 @@ function renderGarrisonBlock(g) {
 // avec des pavillons (messages prédéfinis selon GDD_v0.2). Solo : envoi simulé
 // avec toast de confirmation. Backend multijoueur arrivera plus tard.
 const PLAYER_MESSAGE_FLAGS = [
-  { id: 'peace',     label: 'Paix ?',                  desc: 'Proposition de paix neutre',         color: '#5fcc8a' },
-  { id: 'trade',     label: 'Commerce ?',              desc: 'Proposition d\'échange',             color: '#ffc864' },
-  { id: 'alliance',  label: 'Alliance temporaire ?',   desc: 'Pacte de courte durée',              color: '#5fffe8' },
-  { id: 'why_probe', label: 'Tu m\'as sondé. Explique-toi.', desc: 'Demande d\'explication',     color: '#9a8aff' },
-  { id: 'warning',   label: 'Dernier avertissement.',  desc: 'Annonce d\'attaque imminente',      color: '#ff8a8a' },
-  { id: 'respect',   label: 'Respect pour ta défense.',desc: 'Reconnaissance — pas d\'agression', color: '#cececd' },
+  // PATCH_2110_PAVILLONS (Adrien) : chaque pavillon a un effet concret (serveur v23)
+  { id: 'peace',     label: 'Paix ?',                  desc: 'S\'il répond « Paix ? » : la rivalité est levée',                 color: '#5fcc8a' },
+  { id: 'trade',     label: 'Commerce ?',              desc: 'S\'il répond « Commerce ? » : accord 7 j, convois protégés, canal ouvert', color: '#ffc864' },
+  { id: 'alliance',  label: 'Alliance temporaire ?',   desc: 'S\'il répond pareil : pacte de non-agression 48 h',               color: '#5fffe8' },
+  { id: 'why_probe', label: 'Tu m\'as sondé. Explique-toi.', desc: 'Message, sans effet',                                 color: '#9a8aff' },
+  { id: 'warning',   label: 'Dernier avertissement.',  desc: '24 h : ton prochain raid sur lui pille +10 %',                   color: '#ff8a8a' },
+  { id: 'respect',   label: 'Respect pour ta défense.',desc: 'Message d\'honneur, sans effet',                                color: '#cececd' },
+  { id: 'enemy',     label: 'Je te déclare ennemi.',   desc: 'Rivalité officielle : visible de tous, pillage 40 %, plus de pacte', color: '#ff4d4d' },
 ];
 
 function openMessagePlayer(planetCoord) {
@@ -38690,7 +38728,12 @@ function closeMessageOverlay(event) {
 }
 
 // PAVILLONS_1110 — clés du registre (table flags)
-var MP_FLAG_KEY = { peace: 'paix', trade: 'commerce', alliance: 'alliance', why_probe: 'sonde', warning: 'avertissement', respect: 'respect' };
+var MP_FLAG_KEY = { peace: 'paix', trade: 'commerce', alliance: 'alliance', why_probe: 'sonde', warning: 'avertissement', respect: 'respect', enemy: 'ennemi' };
+// PATCH_2110_PAVILLONS — déclarer un ennemi se confirme
+async function _mpConfirmFlag(key, who) {
+  if (key !== 'ennemi') return true;
+  return sbConfirmWarning('Déclarer ' + (who || 'ce commandant') + ' ennemi ?', 'La rivalité devient officielle : elle s\'affiche chez vous deux et une rumeur circule au comptoir.<br><br>Entre ennemis, un raid gagné pille jusqu\'à <b>40 %</b> (au lieu de 30). Tout pacte entre vous tombe, et aucun ne peut être signé tant que la rivalité dure.<br><br>Pour en sortir : un pavillon « Paix ? » auquel il répond « Paix ? ».', 'Déclarer ennemi');
+}
 var MP_FLAG_BY_KEY = {};
 PLAYER_MESSAGE_FLAGS.forEach(f => { MP_FLAG_BY_KEY[MP_FLAG_KEY[f.id]] = f; });
 var MP_FLAG_ERRORS = { flag_quota: 'Assez de pavillons pour aujourd\'hui (20 par jour)', target_unknown: 'Ce commandant n\'est plus au registre',
@@ -38708,6 +38751,10 @@ function sendPlayerMessage(planetCoord, flagId) {
   if (planet.isReal) {   // vrai commandant : le pavillon part au registre
     closeMessageOverlay();
     if (!window.SBMP || !window.SBMP.ready()) { toast('Registre hors ligne : réessaie dans un instant'); return; }
+    Promise.resolve(_mpConfirmFlag(MP_FLAG_KEY[flag.id], planet.playerName)).then(ok => ok && window.SBMP.sendFlag(planet.mpAddress || planetCoord, MP_FLAG_KEY[flag.id], 'orbit')
+      .then(() => { toast(`Pavillon « ${flag.label} » hissé devant ${planet.playerName}`); if (window.SBMP.pollRelations) setTimeout(() => SBMP.pollRelations(true), 1500); })
+      .catch((e) => toast(_mpFlagErr(e))));
+    return;
     window.SBMP.sendFlag(planet.mpAddress || planetCoord, MP_FLAG_KEY[flag.id], 'orbit')
       .then(() => toast(`Pavillon « ${flag.label} » hissé devant ${planet.playerName}`))
       .catch((e) => toast(_mpFlagErr(e)));
@@ -47960,7 +48007,7 @@ if (G.knownTargets && Array.isArray(G.tankerMissions)) {
 <!-- PATCH_1410_LIGNES — lignes PNJ à horaire sur les routes cachées (assets/lines.js) -->
 <script src="assets/lines.js?v=20261020-2200"></script>
 <!-- CLOUD — sauvegarde Supabase (source : sb-build/src/cloud.js) -->
-<script type="module" src="assets/cloud.js?v=20261021-1230"></script>
+<script type="module" src="assets/cloud.js?v=20261021-1400"></script>
 <!-- MATCH3 — Match-3 V2 (assets/match3.js, source src/match3.js + src/m3core.js) : remplace startM3 -->
 <script type="module" src="assets/match3.js?v=20261021-1500"></script>
 <!-- HOME V2 — « monde d'abord » : planète plein écran, ressources en ligne, Flotte / Défense / Prospection (assets/home.js) -->
