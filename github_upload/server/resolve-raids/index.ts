@@ -51,11 +51,23 @@ Deno.serve(async (req) => {
         // v23 (21/10) — dépôt colonial : un raid sur une colonie ne voit que son dépôt, pas le stock de l'empire
         dw = col ? { ...dw0, address: col.address, planet_name: col.name, level: col.level, defense: col.defense, buildings: col.buildings, shield_until: col.shield_until, stocks: col.stocks || { metal: 0, energie: 0, cristal: 0 } } : null;
       }
-      const result = dw
-        ? resolveRaid(raid, dw)
+      // v26 (21/10) — garnisons alliées en orbite chez le défenseur : elles combattent avec ses défenses
+      let gar: { id: string; owner_pseudo: string; fleet_name: string; def: number }[] = [];
+      if (dw) {
+        const { data: g, error: eg } = await admin.rpc('mp_raid_garrisons', { p_raid: raid.id });
+        if (!eg && Array.isArray(g)) gar = g.map((x: any) => ({ id: x.id, owner_pseudo: x.owner_pseudo, fleet_name: x.fleet_name, def: Math.max(0, Number(x.def) || 0) }));
+      }
+      const extra = gar.reduce((s, x) => s + x.def, 0);
+      const result: any = dw
+        ? resolveRaid(raid, extra > 0 ? { ...dw, defense: (Number(dw.defense) || 0) + extra } : dw)
         : { outcome: 'aborted', reason: 'defender_gone', loot: { metal: 0, energie: 0, cristal: 0 }, damaged_building: null };
+      if (gar.length && result.outcome !== 'aborted') result.garrisons = gar.map(x => ({ owner: x.owner_pseudo, fleet: x.fleet_name, def: x.def }));
       const { data: fin, error: finErr } = await admin.rpc('mp_finish_raid', { p_raid: raid.id, p_result: result });
       if (finErr) throw finErr;
+      if (gar.length && result.outcome !== 'aborted') {
+        const { error: ea } = await admin.rpc('mp_garrison_apply_raid', { p_raid: raid.id, p_ids: gar.map(x => x.id), p_victory: result.outcome === 'victory' });
+        if (ea) console.warn('garnisons :', ea.message);
+      }
       done.push({ id: raid.id, outcome: fin?.result?.outcome ?? result.outcome });
     } catch (e) {
       // Le raid reste « resolving » ; mp_requeue_stuck_raids le reprendra au prochain appel.

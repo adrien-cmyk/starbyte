@@ -8739,7 +8739,7 @@ var EXTRA_SAVE_KEYS = [
   'mpNeighbors',   // VOISINS_1310 — voisins déjà signalés
   'tuto',          // TUTO_1410 — premiers pas (étape, vu, terminé)
   'skillsLearned', 'research', '_skillsSeen', '_skillsMigrated',   // PATCH_1610_SKILLS
-  'mpRaidsApplied', 'mpRaidsReturned', 'mpPostsToClose', 'mpRelations', 'mpTradeCaps', 'mpAlliance', 'mpAllianceTags', 'mpAllyUnread',   // PATCH_2010_AUDIT — raids déjà intégrés (indépendant des rapports, qu'on peut supprimer)
+  'mpRaidsApplied', 'mpRaidsReturned', 'mpPostsToClose', 'mpRelations', 'mpTradeCaps', 'mpAlliance', 'mpAllianceTags', 'mpAllyUnread', 'mpGarHosted',   // PATCH_2010_AUDIT — raids déjà intégrés (indépendant des rapports, qu'on peut supprimer)
   'worlds', 'activeWorld', 'colonyMissions', 'fleetTransfers',   // PATCH_2010_WORLDS — colonies (planètes inactives) et planète affichée
   '_linesCrown', 'crownSeen', '_linesSanct', 'sanctSeen', '_linesNoire', 'noireSeen', '_linesRefuge', '_linesRefuge2', 'refugeSeen', '_brest1',   // PATCH_1510_CROWN — lieu du secteur M devenu la Couronne, première arrivée vue
 ];
@@ -9613,6 +9613,7 @@ function _mpApplyRaidAgainstHome(raid) {
     startedAt: Date.parse(raid.departed_at) || null, returnedAt: Date.parse(raid.resolved_at) || Date.now(), read: false,
     defense: {
       won: !won, attacker: raid.attacker_pseudo, attackerAddress: raid.attacker_address, fleetName: raid.fleet_name || '',
+      garrisons: Array.isArray(res.garrisons) ? res.garrisons.slice(0, 3).map(x => ({ owner: String(x.owner || '').slice(0, 24), fleet: String(x.fleet || '').slice(0, 40), def: Math.max(0, Math.floor(Number(x.def) || 0)) })) : null,   // PATCH_2110_GARNISON
       loot, damagedName, losses: defLosses, lootPct: Number(res.loot_pct) || (_depW ? 0.5 : 0.3), lootBase: _depW ? 0.5 : 0.3,   // PATCH_2110_LOOTBASE : base 50 % (dépôt colonial) / 30 % (capitale)
       atk: combat && combat.phases && combat.phases.phase1 ? combat.phases.phase1.atkEffective : null,
       def: combat && combat.phases && combat.phases.phase1 ? combat.phases.phase1.defEffective : null,
@@ -10207,6 +10208,7 @@ function mpAllyRender() {
       </div>`).join('');
     if (A.sent.length) body += `<div style="font-size:10px;color:var(--mut);letter-spacing:.12em;text-transform:uppercase;margin:14px 0 6px">Invitations en attente</div>` + A.sent.map(i => `<div style="display:flex;justify-content:space-between;font-size:12px;color:#e6f0ff;padding:4px 0">${_esc(i.pseudo)} <a onclick="mpAllyCancelInvite('${i.id}')" style="color:var(--mut);text-decoration:underline;cursor:pointer;font-size:11px">retirer</a></div>`).join('');
     if (al.leader) body += `<div style="font-size:11px;color:var(--mut);margin-top:10px;line-height:1.5">Pour inviter : ouvre la fiche d'un commandant chez qui un membre a un tanker en ambassade.</div>`;
+    body += mpGarSheetHtml();
     body += `<div style="font-size:10px;color:var(--mut);letter-spacing:.12em;text-transform:uppercase;margin:16px 0 6px">Canal de l'alliance</div>
       <div id="sb-ally-msgs" style="max-height:32vh;overflow-y:auto;font-size:12px;line-height:1.5;padding:4px 0">${A.messages.length ? A.messages.map(x => `<div style="margin-bottom:6px"><span style="color:${x.mine ? 'var(--mut)' : al.color}">${_esc(x.pseudo)}</span> <span style="color:#e6f0ff">${_esc(x.body)}</span></div>`).join('') : '<div style="color:var(--mut);font-style:italic">Aucun message.</div>'}</div>
       <div style="display:flex;gap:8px;margin-top:8px"><input id="sb-ally-input" maxlength="280" placeholder="Message à l'alliance" onkeydown="if(event.key==='Enter')mpAllySend()" style="flex:1;padding:10px;background:rgba(255,255,255,.04);border:1px solid var(--border);border-radius:8px;color:#e6f0ff;font-family:inherit;font-size:13px"><button onclick="mpAllySend()" style="padding:0 14px;background:rgba(95,255,232,.08);border:1px solid rgba(95,255,232,.45);color:#5fffe8;border-radius:8px;font-family:inherit">Envoyer</button></div>
@@ -10235,7 +10237,12 @@ function mpAllyCardHtml() {
 // Bloc sur la fiche d'un commandant (ambassade)
 function mpAllyEmbassyHtml(addr, pseudo) {
   const A = mpAlly(), al = A.alliance, mem = mpAllyMember(addr, pseudo), tag = mpAllyTag(addr);
-  if (mem) return `<div style="margin-top:8px;font-size:12px;color:${al.color}">★ Allié · ${_esc(al.name)}</div><div style="font-size:11px;color:var(--mut);margin-top:2px">Ni raid ni abordage entre vous · accord commercial · canal de l'alliance</div>`;
+  if (mem) {
+    const mine = (G.fleet.prepared || []).filter(f => f.garrison && f.garrison.address && (mem.addresses || []).includes(f.garrison.address));
+    return `<div style="margin-top:8px;font-size:12px;color:${al.color}">★ Allié · ${_esc(al.name)}</div><div style="font-size:11px;color:var(--mut);margin-top:2px">Ni raid ni abordage entre vous · accord commercial · canal de l'alliance</div>`
+      + (mine.length ? `<div style="font-size:11px;color:#5fffe8;margin-top:4px">${mine.map(f => _esc(f.name) + ' · ' + _mpGarPhaseText(f)).join('<br>')}</div>` : '')
+      + `<div style="display:flex;margin-top:8px">${_mpDiploBtn('Envoyer une flotte en garnison', `mpGarrisonStart('${addr}')`)}</div>`;
+  }
   if (tag) return `<div style="margin-top:8px;font-size:12px;color:${tag.color}">Membre de l'alliance ${_esc(tag.alliance)}</div>`;
   if (al && al.leader) {
     const sent = A.sent.some(i => i.address === addr);
@@ -10244,6 +10251,153 @@ function mpAllyEmbassyHtml(addr, pseudo) {
   }
   if (!al && mpAllyCanFound()) return `<div style="display:flex;margin-top:8px">${_mpDiploBtn(`Fonder une alliance · ${fmt(MP_ALLY_COST)} CG`, 'mpAllyFound()')}</div>`;
   return '';
+}
+
+// ── PATCH_2110_GARNISON — flotte en garnison chez un allié (elle reste à toi ; tu paies ses pertes) ──
+Object.assign(MP_ALLY_ERRORS, { not_ally: 'Ce commandant n\'est pas (ou plus) dans ton alliance', garrison_full: 'Déjà 3 flottes alliées en garnison chez lui',
+  fleet_invalid: 'Il faut au moins un vaisseau dans la flotte', garrison_unknown: 'Cette garnison n\'existe plus' });
+var _mpGarBusy = new Set();
+async function mpGarrisonStart(address) {
+  const mem = mpAllyMember(address);
+  if (!mem) { toast(MP_ALLY_ERRORS.not_ally); return; }
+  if (!_mpOnline()) { toast('Registre hors ligne : réessaie dans un instant'); return; }
+  const fleets = (G.fleet.prepared || []).filter(f => (f.status || 'prepared') === 'deployed' && _sbMine(f) && !f.repair);
+  if (!fleets.length) { toast('Aucune flotte en orbite : déploie d\'abord une flotte'); return; }
+  const travel = mpRaidTravelMs({ mpAddress: address });
+  const sector = String(address).split('-')[1];
+  const fuelOf = f => { try { return computeMissionFuelCost(f, { distanceMult: typeof _carnetDistanceMult === 'function' ? _carnetDistanceMult(sector) : 1 }); } catch (e) { return 0; } };
+  const pick = fleets.length === 1 ? { f: fleets[0] } : await _mpChoose('Garnison chez ' + _esc(mem.pseudo), fleets.map(f => ({ f, label: _esc(f.name), sub: `${['tanker', 'fregate', 'cuirasse'].reduce((s, t) => s + countShipsByType(f.composition, t), 0)} vaisseaux · ${fmt(fuelOf(f))} énergie` })));
+  if (!pick) return;
+  const f = pick.f, fuel = fuelOf(f);
+  if ((G.res.energie.v || 0) < fuel) { toast(`Énergie insuffisante : ${fmt(fuel)} requis`); return; }
+  const ok = await sbConfirmWarning('Garnison chez ' + mem.pseudo,
+    `Envoyer <strong>${_esc(f.name)}</strong> en garnison chez <strong>${_esc(mem.pseudo)}</strong> ?<br><br>Trajet ${Math.round(travel / 60000)} min · ${fmt(fuel)} énergie.`
+    + `<br><br>En orbite chez lui, elle combat avec ses défenses si un raid arrive. Elle reste à toi : tu paies ses pertes (la moitié des vaisseaux si l'orbite tombe, un dixième si le raid est repoussé).`
+    + `<br><br><em>Pendant ce temps, elle ne protège plus ta planète. Tu peux la rappeler à tout moment (trajet retour).</em>`, 'Envoyer');
+  if (!ok || _mpGarBusy.has(f.id)) return;
+  _mpGarBusy.add(f.id);
+  try {
+    const p = _mpFleetPayload(f); p.soldiers = { garde: 0, lourd: 0 };
+    const g = await SBMP.garrisonPost(address, f.id, f.name, p, travel);
+    const now = Date.now();
+    G.res.energie.v = Math.max(0, G.res.energie.v - fuel);
+    f.status = 'in_mission';
+    f.missionStartedAt = now; f.missionEndsAt = null; f.missionTargetId = null; f.missionFuelSpent = fuel;
+    f.garrison = { address, pseudo: mem.pseudo, phase: 'going', departedAt: now, arrivesAt: Date.parse(g.arrives_at) || now + travel, travelMs: travel, mpGarrisonId: g.id };
+    if (typeof startMissionTimerLoop === 'function') startMissionTimerLoop();
+    toast(`${f.name} part en garnison chez ${mem.pseudo} · ${Math.round(travel / 60000)} min`);
+    if (typeof saveGame === 'function') saveGame();
+    if (typeof refreshCurrentScreen === 'function') refreshCurrentScreen();
+  } catch (e) { toast(_mpAllyErr(e)); }
+  finally { _mpGarBusy.delete(f.id); }
+}
+function _mpGarPhaseText(f) {
+  const a = f.garrison; if (!a) return '';
+  const now = Date.now();
+  if (a.phase === 'going') return `Arrivée chez ${a.pseudo} dans ${formatMissionTimer(Math.max(0, a.arrivesAt - now))}`;
+  if (a.phase === 'returning') return `Retour dans ${formatMissionTimer(Math.max(0, a.returnsAt - now))}`;
+  return `En garnison chez ${a.pseudo}`;
+}
+function _mpGarTick(f, now) {
+  const a = f.garrison;
+  if (a.phase === 'going' && now >= a.arrivesAt) {
+    a.phase = 'posted';
+    toast(`${f.name} en garnison chez ${a.pseudo}`);
+    if (typeof saveGame === 'function') saveGame();
+    if (typeof refreshCurrentScreen === 'function') refreshCurrentScreen();
+  }
+  if (a.phase === 'returning' && now >= a.returnsAt) {
+    toast(`${f.name} est rentrée de garnison`);
+    delete f.garrison;
+    f.status = 'deployed';
+    f.missionStartedAt = null; f.missionFuelSpent = null;
+    if (typeof saveGame === 'function') saveGame();
+    return true;
+  }
+  const el = document.getElementById('fleet-detail-garrison-timer');
+  if (el && f.id === selectedFleetId) el.textContent = _mpGarPhaseText(f);
+  return false;
+}
+// la composition du registre fait foi (pertes subies en garnison) : on s'aligne, une seule fois par vaisseau perdu
+function _mpGarApplyLosses(f, g) {
+  let any = false;
+  for (const ty of ['tanker', 'fregate', 'cuirasse']) for (const t of ['t1', 't2', 't3']) {
+    const n = (f.composition[ty] && f.composition[ty][t]) || 0, s = (g.composition[ty] && g.composition[ty][t]) || 0;
+    if (s < n) { f.composition[ty][t] = s; const _l = n - s; (typeof sbWithWorld === 'function' ? sbWithWorld : (w, fn) => fn())(f.world || 'home', () => loseShips(ty, t, _l)); any = true; }   // hangar de la planète de la flotte
+  }
+  if (any && typeof syncFleetIntegrity === 'function') try { syncFleetIntegrity(f); } catch (e) {}
+  return any;
+}
+function _mpGarStartReturn(f, why) {
+  const a = f.garrison; if (!a || a.phase === 'returning') return;
+  const now = Date.now();
+  const back = a.phase === 'going' ? Math.max(5000, now - a.departedAt) : a.travelMs;
+  a.phase = 'returning'; a.returnsAt = now + back;
+  if (why) toast(`${f.name} : ${why} · retour dans ${Math.round(back / 60000)} min`);
+}
+async function mpGarrisonRecall(fleetId) {
+  const f = (G.fleet.prepared || []).find(x => x.id === fleetId);
+  const a = f && f.garrison;
+  if (!a || a.phase === 'returning' || _mpGarBusy.has(fleetId)) return;
+  if (!_mpOnline()) { toast('Registre hors ligne : réessaie dans un instant'); return; }
+  const ok = await sbConfirmWarning('Rappeler ' + f.name, `Rappeler <strong>${_esc(f.name)}</strong> de chez <strong>${_esc(a.pseudo)}</strong> ?<br><br>Il ne sera plus protégé par elle. Retour dans ~${Math.round((a.phase === 'going' ? Date.now() - a.departedAt : a.travelMs) / 60000)} min.`, 'Rappeler');
+  if (!ok) return;
+  _mpGarBusy.add(fleetId);
+  try {
+    const g = await SBMP.garrisonRecall(a.mpGarrisonId);
+    _mpGarApplyLosses(f, g);
+    _mpGarStartReturn(f);
+    toast(`${f.name} quitte la garnison chez ${a.pseudo}`);
+    if (typeof startMissionTimerLoop === 'function') startMissionTimerLoop();
+    if (typeof saveGame === 'function') saveGame();
+    if (typeof refreshCurrentScreen === 'function') refreshCurrentScreen();
+  } catch (e) {
+    if (/garrison_unknown/.test(String(e && e.message))) { _mpGarStartReturn(f); if (typeof saveGame === 'function') saveGame(); }
+    else toast(_mpAllyErr(e));
+  } finally { _mpGarBusy.delete(fleetId); }
+}
+function mpIngestGarrisons(mine, hosted) {
+  const prevHosted = JSON.stringify(G.mpGarHosted || []);
+  G.mpGarHosted = hosted;
+  let dirty = prevHosted !== JSON.stringify(hosted);
+  for (const g of mine) {
+    const f = (G.fleet.prepared || []).find(x => x.garrison && x.garrison.mpGarrisonId === g.id);
+    if (f) {
+      if (_mpGarApplyLosses(f, g)) dirty = true;
+      if (g.last_raid && !g.losses_seen) {
+        _mpDiploReport('garrison_hit', { pseudo: f.garrison.pseudo, address: f.garrison.address, fleet: f.name, attacker: g.last_raid.attacker, victory: g.last_raid.victory, lost: g.last_raid.lost, destroyed: g.left_reason === 'destroyed' }, 'gar-' + g.id + '-' + (g.last_raid.at || ''));
+        toast(`⚔ ${f.name} a combattu chez ${f.garrison.pseudo} : raid de ${g.last_raid.attacker} ${g.last_raid.victory ? 'victorieux' : 'repoussé'}`);
+        dirty = true;
+      }
+      if (g.left_at && f.garrison.phase !== 'returning') {
+        _mpGarStartReturn(f, g.left_reason === 'destroyed' ? 'détruite en garnison' : g.left_reason === 'alliance' ? 'l\'alliance est rompue' : 'garnison levée');
+        if (typeof startMissionTimerLoop === 'function') startMissionTimerLoop();
+        dirty = true;
+      }
+    }
+    if (!g.losses_seen) SBMP.garrisonSeen(g.id);
+  }
+  if (dirty) {
+    if (typeof saveGame === 'function') saveGame();
+    if (document.getElementById('sb-ally-sheet')) mpAllyRender();
+    if (typeof refreshCurrentScreen === 'function') refreshCurrentScreen();
+  }
+}
+function _mpGarLostLine(lost) {
+  const parts = [];
+  for (const ty of ['tanker', 'fregate', 'cuirasse']) for (const t of ['t1', 't2', 't3']) {
+    const n = (lost && lost[ty] && lost[ty][t]) || 0;
+    if (n) parts.push(`${n} ${(SHIP_TIERS[ty] && SHIP_TIERS[ty][t.slice(1)] && SHIP_TIERS[ty][t.slice(1)].name) || ty}`);
+  }
+  return parts.join(' · ') || 'aucune perte';
+}
+function mpGarSheetHtml() {
+  const mine = (G.fleet.prepared || []).filter(f => f.garrison && _sbMine(f));
+  const hosted = G.mpGarHosted || [];
+  let h = '';
+  if (mine.length) h += `<div style="font-size:10px;color:var(--mut);letter-spacing:.12em;text-transform:uppercase;margin:16px 0 6px">Tes flottes en garnison</div>` + mine.map(f => `<div style="display:flex;justify-content:space-between;align-items:center;font-size:12px;color:#e6f0ff;padding:5px 0">${_esc(f.name)} <span style="color:var(--mut);font-size:11px">${_mpGarPhaseText(f)}</span></div>`).join('');
+  if (hosted.length) h += `<div style="font-size:10px;color:var(--mut);letter-spacing:.12em;text-transform:uppercase;margin:16px 0 6px">Flottes alliées qui te gardent</div>` + hosted.map(g => `<div style="font-size:12px;color:#e6f0ff;padding:4px 0">${_esc(g.fleet_name)} de ${_esc(g.owner_pseudo)} <span style="color:var(--mut);font-size:11px">· ${fmt(g.def)} def${Date.parse(g.arrives_at) > Date.now() ? ' · en route' : ''}${(G.worlds || []).length > 1 ? ' · ' + (g.host_address || '') : ''}</span></div>`).join('');
+  return h;
 }
 
 function _mpCargoSum(c) { return ['metal', 'energie', 'cristal'].reduce((s, k) => s + Math.max(0, Math.floor(Number(c && c[k]) || 0)), 0); }
@@ -10258,6 +10412,7 @@ var MP_DIPLO_TYPES = {
   pact_signed:    { title: 'PACTE SIGNÉ',         list: 'Pacte signé',         sub: 'pacte de non-agression actif', color: '#7ed080' },
   pact_broken:    { title: 'PACTE ROMPU',         list: 'Pacte rompu',         sub: 'les raids redeviennent possibles', color: '#ff8a8a' },
   pact_declined:  { title: 'PACTE DÉCLINÉ',       list: 'Pacte décliné',       sub: 'proposition refusée', color: '#cececd' },
+  garrison_hit:   { title: 'GARNISON AU COMBAT',  list: 'Garnison au combat',  sub: 'ta flotte a défendu un allié', color: '#5fffe8' },   // PATCH_2110_GARNISON
   alliance_invite: { title: 'INVITATION D\'ALLIANCE', list: 'Invitation d\'alliance', sub: 'rejoindre une alliance', color: '#5fffe8' },   // PATCH_2110_ALLIANCES
   trade_sold:     { title: 'LIVRAISON VENDUE',    list: 'Livraison commerciale', sub: 'surplus vendu à ton partenaire', color: '#ffc864' },   // PATCH_2110_COMMERCE
   trade_bought:   { title: 'LIVRAISON REÇUE',     list: 'Livraison reçue',     sub: 'achat à ton partenaire', color: '#ffc864' },
@@ -10612,6 +10767,8 @@ function renderDiploReportDetail(r) {
     html += box(`Une signature de commandant se détache du bruit de fond : <strong>${d.pseudo}</strong>${d.planet ? `, sur ${d.planet}` : ''}, niveau estimé ~${d.level || 1}. C'est l'un de tes plus proches voisins.${addr}`)
       + `<div style="margin:0 16px 14px;font-size:12px;color:var(--mut);line-height:1.6">Depuis sa fiche (Carnet ou onglet Joueurs) : envoyer un tanker en ambassade, hisser un pavillon, proposer un pacte… ou préparer un raid.</div>`
       + `<div style="margin:0 16px 14px;display:flex">${_mpDiploBtn('Voir sa planète', `openPlanetDetail('${d.address}')`)}</div>`;
+  } else if (d.type === 'garrison_hit') {   // PATCH_2110_GARNISON
+    html += box(`<strong>${_esc(d.fleet || '')}</strong>, en garnison chez <strong>${d.pseudo}</strong>, a combattu le raid de <strong>${_esc(d.attacker || '?')}</strong> : ${d.victory ? '<span style="color:#ff8a8a">l\'orbite est tombée</span>' : '<span style="color:var(--green)">raid repoussé</span>'}.<br><br>Pertes : ${_mpGarLostLine(d.lost)}.${d.destroyed ? '<br><br><strong style="color:#ff8a8a">La flotte a été détruite.</strong>' : ''}${addr}`);
   } else if (d.type === 'alliance_invite') {   // PATCH_2110_ALLIANCES
     const pend = mpAlly().invites.some(i => i.id === d.inviteId);
     html += box(`<strong>${d.pseudo}</strong> t'invite dans l'alliance <strong style="color:${d.color || '#5fffe8'}">${_esc(d.alliance || '')}</strong> (${d.members || 1} membre${(d.members || 1) > 1 ? 's' : ''}).<br><br>Entre membres : ni raid ni abordage, accord commercial automatique, canal commun. Le chef seul peut exclure ; si tu pars, aucune attaque entre anciens alliés pendant 24 h.${addr}`)
@@ -11867,6 +12024,7 @@ function renderDefenseReportDetail(r) {
       ${lootRows}
       ${(() => { const _b = d.lootBase || 0.3, _n = Math.round(((d.lootPct || _b) - _b) * 10); return _n > 0 ? `<div style="font-size:10px;color:#ff8a8a;margin-top:6px">Pillage majoré : jusqu'à ${Math.round(d.lootPct * 100)} %${_n >= 2 ? ' (ennemis déclarés + dernier avertissement)' : ' (ennemis déclarés ou dernier avertissement)'}</div>` : ''; })()}
       <div class="dash-stat-row"><span class="lbl">Bâtiment abîmé</span><span class="val" style="color:${d.damagedName ? 'var(--red)' : 'var(--mut)'}">${d.damagedName || 'aucun'}</span></div>
+      ${d.garrisons && d.garrisons.length ? `<div style="font-size:11px;color:#5fffe8;margin-top:8px">⛨ Garnisons alliées au combat : ${d.garrisons.map(x => _esc(x.fleet) + ' de ' + _esc(x.owner) + ' (' + fmt(x.def) + ' def)').join(' · ')}</div>` : ''}
     </div>
     ${_defLossLines(d.losses).length ? `<div class="dash-section-card" style="margin:0 16px 14px">
       <div style="font-size:10px;letter-spacing:.14em;color:var(--mut);text-transform:uppercase;margin-bottom:6px">Pertes de la défense</div>
@@ -13242,6 +13400,8 @@ function renderFleetScreen() {
       let missionLine = '';
       if (isInMission && fleet.ambush) {   // PIRATERIE_1210
         missionLine = `<div style="font-size:10px;color:#a370ff;margin-top:3px;font-family:'SF Mono',monospace">⌖ Embuscade ${fleet.ambush.system} · ${_mpAmbushPhaseText(fleet)}${_mpCargoSum(fleet.ambush.hold) > 0 ? ' · ' + _mpResLine(fleet.ambush.hold) + ' en cale' : ''}</div>`;
+      } else if (isInMission && fleet.garrison) {   // PATCH_2110_GARNISON
+        missionLine = `<div style="font-size:10px;color:#5fffe8;margin-top:3px;font-family:'SF Mono',monospace">⛨ ${_mpGarPhaseText(fleet)}</div>`;
       } else if (isInMission && fleet.missionTargetId) {
         const target = getFakeTarget(fleet.missionTargetId);
         const remaining = fleet.missionEndsAt ? Math.max(0, fleet.missionEndsAt - Date.now()) : 0;
@@ -15002,7 +15162,7 @@ function renderFleetDetail() {
       bannerIcon.innerHTML = `<div style="width:42px;height:42px;color:#e6f0ff">${svgFleetWings('#e6f0ff')}</div>`;
     }
     document.getElementById('fleet-detail-meta').innerHTML = `<span style="color:#e6f0ff">${icon('zap', {size:12})} En mission</span> · <span style="color:var(--blue)">${totalShips} vaisseaux</span> · <span style="color:var(--red)">${fmt(grandAtk)} atk</span>`;
-    document.getElementById('fleet-detail-sub').innerHTML = fleet.ambush ? `<span style="color:#a370ff">Embuscade sur ${fleet.ambush.system}</span>` : `<span style="color:#e6f0ff">En transit vers ${target ? target.name : 'cible'}</span>`;
+    document.getElementById('fleet-detail-sub').innerHTML = fleet.garrison ? `<span style="color:#5fffe8">Garnison chez ${_esc(fleet.garrison.pseudo)}</span>` : fleet.ambush ? `<span style="color:#a370ff">Embuscade sur ${fleet.ambush.system}</span>` : `<span style="color:#e6f0ff">En transit vers ${target ? target.name : 'cible'}</span>`;
   } else if (isDeployed) {
     if (bannerEl) bannerEl.style.borderColor = 'rgba(184,208,255,.4)';
     if (bannerIcon) {
@@ -15132,6 +15292,19 @@ function renderFleetDetail() {
       </div>
       <div style="padding:0 16px 14px">
         <button class="btn-ghost" onclick="mpAmbushRecall('${fleet.id}')" style="width:100%;padding:14px;color:#c9a8ff;border-color:rgba(163,112,255,.4)">Lever l'embuscade · rentrer au port</button>
+      </div>`;
+  } else if (isInMission && fleet.garrison) {   // PATCH_2110_GARNISON — garnison chez un allié
+    const a = fleet.garrison;
+    primaryHtml = `
+      <div style="background:linear-gradient(180deg, rgba(20,60,60,.5), rgba(10,35,40,.7));border:1.5px solid rgba(95,255,232,.4);border-radius:12px;padding:18px;text-align:center">
+        <div style="font-size:10px;letter-spacing:.14em;color:var(--mut);margin-bottom:8px">GARNISON CHEZ</div>
+        <div style="font-size:20px;color:#5fffe8;font-weight:700;margin-bottom:10px">${_esc(a.pseudo)}</div>
+        <div style="font-size:13px;color:#e6f0ff;font-family:'SF Mono',monospace;letter-spacing:.06em" id="fleet-detail-garrison-timer">${_mpGarPhaseText(fleet)}</div>
+        <div style="font-size:11px;color:var(--mut);margin-top:10px">Elle combat avec ses défenses si un raid arrive · tu paies ses pertes</div>
+      </div>`;
+    actionsHtml = a.phase === 'returning' ? '' : `
+      <div style="padding:0 16px 14px">
+        <button class="btn-ghost" onclick="mpGarrisonRecall('${fleet.id}')" style="width:100%;padding:14px;color:#5fffe8;border-color:rgba(95,255,232,.4)">Rappeler · rentrer au port</button>
       </div>`;
   } else if (isInMission) {
     // ÉTAT EN MISSION : remplacer le CTA par un panneau d'information mission en cours
@@ -15614,6 +15787,7 @@ function tickMissionTimers() {
   for (const fleet of G.fleet.prepared) {
     if ((fleet.status || 'prepared') !== 'in_mission') continue;
     if (fleet.ambush) { if (_mpAmbushTick(fleet, now)) anyReturned = true; else anyActive = true; continue; }   // PIRATERIE_1210
+    if (fleet.garrison) { if (_mpGarTick(fleet, now)) anyReturned = true; else anyActive = true; continue; }   // PATCH_2110_GARNISON
     if (!fleet.missionEndsAt) continue;
     if (fleet.mpRaidId && fleet.mpArrivesAt && now >= fleet.mpArrivesAt && !_mpResolveAsked.has(fleet.mpRaidId)) {
       _mpResolveAsked.add(fleet.mpRaidId);
@@ -28305,7 +28479,7 @@ function cheatReturnAllMissions() {
 
   // 1) Flottes militaires en mission (existant)
   for (const fleet of G.fleet.prepared) {
-    if ((fleet.status || 'prepared') === 'in_mission' && !fleet.ambush) {   // PIRATERIE_1210 : une embuscade se lève par « rentrer au port »
+    if ((fleet.status || 'prepared') === 'in_mission' && !fleet.ambush && !fleet.garrison) {   // PIRATERIE_1210 : une embuscade se lève par « rentrer au port »
       returnMission(fleet);
       count++;
     }

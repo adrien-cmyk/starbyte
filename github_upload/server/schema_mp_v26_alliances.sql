@@ -4,7 +4,8 @@
 --   · entre membres : ni raid ni abordage ; accord commercial automatique (convois protégés, commerce par tanker, canal) ;
 --   · quitter : pas d'attaque contre un ancien allié pendant 24 h ; le chef seul exclut ; déclarer un membre « ennemi » = quitter ;
 --   · le comptoir annonce fondation, entrées, départs, exclusions ; nom et couleur visibles de tous.
--- À coller tel quel dans Supabase → SQL Editor → Run (après v25 ; pas de fonction à redéployer).
+--   · garnison chez un allié : 3 flottes alliées au plus par planète ; elles combattent avec ses défenses ; pertes 50 % (orbite perdue) / 10 % (raid repoussé).
+-- À coller tel quel dans Supabase → SQL Editor → Run (après v25), PUIS redéployer la fonction resolve-raids.
 
 create table if not exists public.alliances (
   id           uuid primary key default gen_random_uuid(),
@@ -110,6 +111,11 @@ begin
   if not found then return; end if;
   select * into al from public.alliances where id = m.alliance_id for update;
   update public.alliance_members set left_at = now(), left_reason = why where id = m.id;
+  -- ses garnisons chez les alliés, et celles des alliés chez lui, rentrent
+  if to_regclass('public.alliance_garrisons') is not null then
+    update public.alliance_garrisons set left_at = now(), left_reason = 'alliance'
+     where left_at is null and (owner_id = u or host_id = u);
+  end if;
   select pseudo into ps from public.worlds where user_id = u;
   if al.leader_id = u then
     select user_id into nxt from public.alliance_members where alliance_id = al.id and left_at is null order by joined_at limit 1;
@@ -410,4 +416,132 @@ begin
   return n;
 end $function$;
 
--- Fin v26. Vérification : select count(*) from pg_proc where proname like 'mp_alliance_%';  → 9
+-- ── garnison chez un allié (flotte prêtée : elle reste au propriétaire, il paie ses pertes) ──
+create table if not exists public.alliance_garrisons (
+  id           uuid primary key default gen_random_uuid(),
+  owner_id     uuid not null references auth.users (id) on delete cascade,
+  owner_pseudo text not null default '',
+  host_id      uuid not null references auth.users (id) on delete cascade,
+  host_pseudo  text not null default '',
+  host_address text not null,
+  fleet_id     text not null,
+  fleet_name   text not null default '',
+  composition  jsonb not null,
+  departed_at  timestamptz not null default now(),
+  arrives_at   timestamptz not null,
+  left_at      timestamptz,
+  left_reason  text,
+  losses       jsonb not null default '{}'::jsonb,
+  last_raid    jsonb,
+  losses_seen  boolean not null default true
+);
+create unique index if not exists alliance_garrisons_fleet on public.alliance_garrisons (owner_id, fleet_id) where left_at is null;
+create index if not exists alliance_garrisons_host on public.alliance_garrisons (host_address) where left_at is null;
+alter table public.alliance_garrisons enable row level security;
+revoke all on public.alliance_garrisons from anon, authenticated;
+
+-- puissance défensive d'une flotte (mêmes valeurs que le moteur : def par vaisseau)
+create or replace function public._mp_fleet_def(c jsonb) returns bigint
+language sql immutable as $$
+  select coalesce(public._mp_num(c -> 'tanker' ->> 't1') * 200 + public._mp_num(c -> 'tanker' ->> 't2') * 500 + public._mp_num(c -> 'tanker' ->> 't3') * 1200
+       + public._mp_num(c -> 'fregate' ->> 't1') * 200 + public._mp_num(c -> 'fregate' ->> 't2') * 600 + public._mp_num(c -> 'fregate' ->> 't3') * 1800
+       + public._mp_num(c -> 'cuirasse' ->> 't1') * 1500 + public._mp_num(c -> 'cuirasse' ->> 't2') * 4500 + public._mp_num(c -> 'cuirasse' ->> 't3') * 13500, 0)
+$$;
+
+create or replace function public.mp_garrison_post(p_host_address text, p_fleet_id text, p_fleet_name text, p_fleet jsonb, p_travel_ms bigint)
+returns public.alliance_garrisons
+language plpgsql security definer set search_path = public as $$
+declare me public.worlds; host uuid; hw public.worlds; g public.alliance_garrisons; f jsonb;
+begin
+  select * into me from public.worlds where user_id = auth.uid();
+  if not found then raise exception 'no_world'; end if;
+  select * into g from public.alliance_garrisons where owner_id = me.user_id and fleet_id = left(coalesce(p_fleet_id, ''), 80) and left_at is null;
+  if found then return g; end if;
+  host := public._mp_owner_of(p_host_address);
+  if host is null then raise exception 'target_unknown'; end if;
+  if host = me.user_id then raise exception 'target_self'; end if;
+  if not public._mp_same_alliance(me.user_id, host) then raise exception 'not_ally'; end if;
+  perform pg_advisory_xact_lock(hashtext('garrison:' || p_host_address));
+  if (select count(*) from public.alliance_garrisons where host_address = p_host_address and left_at is null) >= 3 then raise exception 'garrison_full'; end if;
+  f := public._mp_clean_fleet(p_fleet);
+  if f is null or public._mp_fleet_def(f -> 'composition') <= 0 then raise exception 'fleet_invalid'; end if;
+  select * into hw from public.worlds where user_id = host;
+  insert into public.alliance_garrisons (owner_id, owner_pseudo, host_id, host_pseudo, host_address, fleet_id, fleet_name, composition, arrives_at)
+  values (me.user_id, me.pseudo, host, coalesce(hw.pseudo, '?'), p_host_address, left(coalesce(p_fleet_id, ''), 80), left(coalesce(p_fleet_name, ''), 40),
+          f -> 'composition', now() + make_interval(secs => greatest(60, least(86400, coalesce(p_travel_ms, 0) / 1000.0))))
+  returning * into g;
+  return g;
+end $$;
+
+create or replace function public.mp_garrison_recall(p_id uuid)
+returns public.alliance_garrisons
+language plpgsql security definer set search_path = public as $$
+declare g public.alliance_garrisons;
+begin
+  update public.alliance_garrisons set left_at = coalesce(left_at, now()), left_reason = coalesce(left_reason, 'recall')
+   where id = p_id and owner_id = auth.uid() returning * into g;
+  if not found then raise exception 'garrison_unknown'; end if;
+  return g;
+end $$;
+
+create or replace function public.mp_garrison_seen(p_id uuid)
+returns void
+language sql security definer set search_path = public as $$
+  update public.alliance_garrisons set losses_seen = true where id = p_id and owner_id = auth.uid();
+$$;
+
+-- mes garnisons (en place, ou parties avec des pertes pas encore vues) et celles qui gardent mes planètes
+create or replace function public.mp_garrisons()
+returns jsonb
+language sql stable security definer set search_path = public as $$
+  select jsonb_build_object(
+    'mine', coalesce((select jsonb_agg(to_jsonb(g) - 'owner_id' - 'host_id') from public.alliance_garrisons g
+                       where g.owner_id = auth.uid() and (g.left_at is null or not g.losses_seen or g.left_at > now() - interval '2 days')), '[]'::jsonb),
+    'hosted', coalesce((select jsonb_agg(jsonb_build_object('id', g.id, 'owner_pseudo', g.owner_pseudo, 'fleet_name', g.fleet_name, 'host_address', g.host_address,
+                                                            'arrives_at', g.arrives_at, 'def', public._mp_fleet_def(g.composition)))
+                         from public.alliance_garrisons g where g.host_id = auth.uid() and g.left_at is null), '[]'::jsonb))
+$$;
+
+-- résolution d'un raid (fonction serveur resolve-raids, clé de service) : garnisons arrivées avant le raid, toujours alliées
+create or replace function public.mp_raid_garrisons(p_raid uuid)
+returns table (id uuid, owner_pseudo text, fleet_name text, def bigint)
+language sql stable security definer set search_path = public as $$
+  select g.id, g.owner_pseudo, g.fleet_name, public._mp_fleet_def(g.composition)
+    from public.raids r join public.alliance_garrisons g on g.host_address = r.defender_address
+   where r.id = p_raid and g.left_at is null and g.arrives_at <= r.arrives_at and public._mp_same_alliance(g.owner_id, g.host_id)
+$$;
+-- pertes des garnisons : 50 % des vaisseaux si l'orbite tombe, 10 % si le raid est repoussé
+create or replace function public.mp_garrison_apply_raid(p_raid uuid, p_ids uuid[], p_victory boolean)
+returns void
+language plpgsql security definer set search_path = public as $$
+declare g public.alliance_garrisons; r public.raids; ty text; t text; n bigint; lost bigint; comp jsonb; lo jsonb; los jsonb; pct numeric := case when p_victory then 0.5 else 0.1 end;
+begin
+  select * into r from public.raids where id = p_raid;
+  for g in select * from public.alliance_garrisons where id = any(p_ids) and left_at is null for update loop
+    comp := g.composition; lo := '{}'::jsonb; los := g.losses;
+    foreach ty in array array['tanker', 'fregate', 'cuirasse'] loop
+      foreach t in array array['t1', 't2', 't3'] loop
+        n := public._mp_num(comp -> ty ->> t);
+        lost := floor(n * pct);
+        if lost > 0 then
+          comp := jsonb_set(comp, array[ty, t], to_jsonb(n - lost));
+          lo := jsonb_set(case when lo ? ty then lo else lo || jsonb_build_object(ty, '{}'::jsonb) end, array[ty, t], to_jsonb(lost));
+          los := jsonb_set(case when los ? ty then los else los || jsonb_build_object(ty, '{}'::jsonb) end, array[ty, t], to_jsonb(public._mp_num(los -> ty ->> t) + lost));
+        end if;
+      end loop;
+    end loop;
+    update public.alliance_garrisons set composition = comp, losses = los, losses_seen = false,
+      last_raid = jsonb_build_object('raid', p_raid, 'attacker', r.attacker_pseudo, 'victory', p_victory, 'lost', lo, 'at', now()),
+      left_at = case when public._mp_fleet_def(comp) <= 0 then now() else null end,
+      left_reason = case when public._mp_fleet_def(comp) <= 0 then 'destroyed' else null end
+     where id = g.id;
+  end loop;
+end $$;
+
+revoke all on function public.mp_garrison_post(text, text, text, jsonb, bigint), public.mp_garrison_recall(uuid), public.mp_garrison_seen(uuid), public.mp_garrisons() from public, anon;
+grant execute on function public.mp_garrison_post(text, text, text, jsonb, bigint), public.mp_garrison_recall(uuid), public.mp_garrison_seen(uuid), public.mp_garrisons() to authenticated;
+revoke all on function public.mp_raid_garrisons(uuid), public.mp_garrison_apply_raid(uuid, uuid[], boolean) from public, anon, authenticated;
+grant execute on function public.mp_raid_garrisons(uuid), public.mp_garrison_apply_raid(uuid, uuid[], boolean) to service_role;
+
+-- Fin v26. Vérification : select count(*) from pg_proc where proname like 'mp_alliance_%' or proname like 'mp_garrison%';  → 14
+-- PUIS redéployer la fonction resolve-raids (les garnisons combattent avec le défenseur).
