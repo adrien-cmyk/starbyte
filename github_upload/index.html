@@ -1788,6 +1788,14 @@ svg.map {
 #fd-form-hero .fd-sel-name span { color: var(--amber); margin-left: 6px; }
 #fd-form-hero .fd-sel-stats { display: flex; gap: 14px; font-size: 9px; letter-spacing: .16em; color: rgba(190,208,220,.75); }
 #fd-form-hero .fd-sel-stats b { font-family: var(--font-mono, monospace); font-size: 12px; margin-left: 4px; letter-spacing: 0; }
+/* PATCH_2110_ARCHE_DEPART — l'Arche en mission : la 3D derrière la fiche, comme une flotte */
+#scr-ark-mission.ud-hero > .stars, #scr-ark-mission.ud-hero > .glow, #scr-ark-mission.ud-hero .bld-banner { display: none; }
+#scr-ark-mission:not(.ud-hero) > .u3d-hero, #scr-ark-mission:not(.ud-hero) .ud-hero-space { display: none; }
+#scr-ark-mission.ud-hero .screen-scroll { position: relative; z-index: 2; touch-action: pan-y; }
+#scr-ark-mission.ud-hero .head { text-shadow: 0 2px 12px rgba(0,0,0,.8); }
+#scr-ark-mission.ud-hero .dash-section-card { background: rgba(8,12,18,.86); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); }
+#scr-ark-mission.ud-ship .ud-hero-space { touch-action: none; }
+#ark-mis-hero .u3d-canvas { touch-action: none; }
 #scr-fleet:not(.ud-hero) > .u3d-hero, #scr-fleet:not(.ud-hero) .ud-hero-space { display: none; }
 #scr-fleet.ud-hero .screen-scroll { position: relative; z-index: 2; touch-action: pan-y; }
 #scr-fleet.ud-hero .head { text-shadow: 0 2px 12px rgba(0,0,0,.8); }
@@ -4974,6 +4982,31 @@ svg.map {
 </div>
 
 <!-- ═════════ DÉTAIL FLOTTE PRÉPARÉE (passe 3.2) ═════════ -->
+<!-- PATCH_2110_ARCHE_DEPART — l'Arche coloniale en route : vue 3D en mission, comme une flotte -->
+<div id="scr-ark-mission" class="screen hidden">
+  <div class="stars"></div>
+  <div class="glow"></div>
+  <div class="screen-scroll">
+    <header class="head">
+      <h1 class="smaller">ARCHE COLONIALE</h1>
+      <div class="meta" id="ark-mis-meta">En route · elle ne revient pas</div>
+    </header>
+    <div class="bld-banner" style="border-color:rgba(255,170,90,.3)">
+      <div class="bld-banner-name">AK-01 Arche coloniale</div>
+      <div class="bld-banner-sub">Vaisseau-colonie · 2,4 km · six serres</div>
+    </div>
+    <div class="section-label">Voyage</div>
+    <div class="dash-section-card" id="ark-mis-card" style="margin:0 16px 14px"></div>
+    <div class="section-label">À l'arrivée</div>
+    <div class="dash-section-card" style="margin:0 16px 14px"><div style="font-size:12px;line-height:1.6;color:rgba(214,226,240,.82)">L'Arche se pose et devient un nouveau Centre de commandement. Ses colons construisent l'antenne, et la planète rejoint tes mondes.</div></div>
+    <div style="padding:0 16px 14px;display:flex;gap:8px">
+      <button class="btn-ghost" style="flex:1;padding:14px;color:#ffb066;border-color:rgba(255,170,90,.4)" onclick="arkReplayLaunch()">Revoir le départ</button>
+      <button class="btn-ghost" style="flex:1;padding:14px" onclick="goBack()">Retour</button>
+    </div>
+    <div style="height:24px"></div>
+  </div>
+</div>
+
 <div id="scr-fleet-detail" class="screen hidden">
   <div class="stars"></div>
   <div class="glow"></div>
@@ -11917,6 +11950,7 @@ function goBack() {
 }
 
 function _doGoto(scr) {
+  if (scr !== 'ark-mission' && typeof unmountArkMission3D === 'function') unmountArkMission3D();   // PATCH_2110_ARCHE_DEPART
   document.querySelectorAll('.screen').forEach(s => s.classList.add('hidden'));
   const target = document.getElementById('scr-' + scr);
   if (target) {
@@ -11954,6 +11988,7 @@ function _doGoto(scr) {
   if (scr === 'fleet')          renderFleetScreen();
   if (scr === 'fleet-compose')  renderFleetCompose();
   if (scr === 'fleet-detail')   renderFleetDetail();
+  if (scr === 'ark-mission')    renderArkMission();   // PATCH_2110_ARCHE_DEPART
   if (scr === 'tanker-compose') renderTankerCompose();  // chunk 15/05 — tanker logistique
   if (scr === 'commerce')       renderCommerceScreen(); // Phase 1 Routes Secrètes — 16/05
   if (scr === 'dock')           renderDockScreen();     // Chunk D Phase 1→2 — 18/05
@@ -12751,6 +12786,7 @@ function renderFleetScreen() {
     prepList.innerHTML = '';
   }
 
+  try { renderArkMissionRows(); } catch (e) {}   // PATCH_2110_ARCHE_DEPART
   // Liste stationnée (hangar) — affiche le DISPONIBLE (= stationné - réservé)
   const listEl = document.getElementById('fleet-stationed-list');
   if (listEl) {
@@ -29171,6 +29207,91 @@ function renderColonialDetail() {
     : `<button class="btn-ghost" style="width:100%;padding:14px" onclick="goBack()">Retour</button>`;
 }
 
+
+/* ═══════════ PATCH_2110_ARCHE_DEPART — l'Arche coloniale en mission ═══════════ */
+let arkMissionId = null, arkMission3D = null, arkMissionTimer = null;
+function openArkMission(id) { arkMissionId = id; goto('ark-mission'); }
+function arkMissionRowsHtml() {
+  const ms = G.colonyMissions || [];
+  if (!ms.length) return '';
+  return `<div class="section-label">Arche en route</div>` + ms.map(m => `
+    <div class="fleet-prepared-row in-mission" onclick="openArkMission('${m.id}')" style="border-color:rgba(255,170,90,.35)">
+      <div class="fleet-prepared-icon"><div style="width:20px;height:20px;color:#ffb066">${svgFleetWings('#ffb066')}</div></div>
+      <div class="fleet-prepared-info">
+        <div class="fleet-prepared-name">Arche coloniale<span style="display:inline-block;background:rgba(255,170,90,.12);border:1px solid rgba(255,170,90,.45);color:#ffb066;padding:1px 6px;border-radius:3px;font-size:9px;font-family:'SF Mono',monospace;letter-spacing:.06em;margin-left:6px">EN MISSION</span></div>
+        <div style="font-size:10px;color:#ffd9a8;margin-top:3px;font-family:'SF Mono',monospace">→ ${m.name} · arrivée dans <span data-ark-timer="${m.id}">${formatTankerDuration(Math.max(0, m.arriveAt - Date.now()))}</span></div>
+        <div class="fleet-prepared-stats">Une colonie entière à bord · elle ne revient pas</div>
+      </div>
+      <div class="fleet-prepared-arrow">→</div>
+    </div>`).join('');
+}
+function renderArkMissionRows() {
+  const label = document.getElementById('fleet-prepared-section-label');
+  if (!label) return;
+  let box = document.getElementById('fleet-ark-missions');
+  if (!box) { box = document.createElement('div'); box.id = 'fleet-ark-missions'; label.parentNode.insertBefore(box, label); }
+  box.innerHTML = arkMissionRowsHtml();
+  arkTimersTick();
+}
+function arkTimersTick() {
+  clearInterval(arkMissionTimer);
+  if (!(G.colonyMissions || []).length) return;
+  arkMissionTimer = setInterval(() => {
+    const ms = G.colonyMissions || [];
+    if (!ms.length) { clearInterval(arkMissionTimer); return; }
+    for (const m of ms) document.querySelectorAll(`[data-ark-timer="${m.id}"]`).forEach(el => { el.textContent = formatTankerDuration(Math.max(0, m.arriveAt - Date.now())); });
+    const bar = document.getElementById('ark-mis-bar');
+    const cur = ms.find(x => x.id === arkMissionId);
+    if (bar && cur) bar.style.width = Math.min(100, Math.max(0, (Date.now() - cur.departAt) / Math.max(1, cur.arriveAt - cur.departAt) * 100)).toFixed(1) + '%';
+  }, 1000);
+}
+function renderArkMission() {
+  const m = (G.colonyMissions || []).find(x => x.id === arkMissionId) || (G.colonyMissions || [])[0];
+  if (!m) { toast('L\'Arche est arrivée'); goto('fleet'); return; }
+  arkMissionId = m.id;
+  const row = (l, v, c) => `<div class="dash-stat-row"><span class="lbl">${l}</span><span class="val"${c ? ` style="color:${c}"` : ''}>${v}</span></div>`;
+  const pct = Math.min(100, Math.max(0, (Date.now() - m.departAt) / Math.max(1, m.arriveAt - m.departAt) * 100));
+  document.getElementById('ark-mis-meta').textContent = `En route vers ${m.name} · elle ne revient pas`;
+  document.getElementById('ark-mis-card').innerHTML =
+    row('Destination', `${m.name} · ${m.coord}`, '#ffd9a8') +
+    row('Arrivée dans', `<span data-ark-timer="${m.id}">${formatTankerDuration(Math.max(0, m.arriveAt - Date.now()))}</span>`, 'var(--amber)') +
+    `<div style="height:5px;border-radius:3px;background:rgba(255,255,255,.08);overflow:hidden;margin-top:8px"><div id="ark-mis-bar" style="height:100%;width:${pct.toFixed(1)}%;background:linear-gradient(90deg,#ff8a2a,#ffd9a8)"></div></div>`;
+  arkTimersTick();
+  setTimeout(() => mountArkMission3D(m), 0);
+}
+function mountArkMission3D(m) {
+  const scr = document.getElementById('scr-ark-mission');
+  const scroll = scr && scr.querySelector('.screen-scroll');
+  if (!scr || !scroll || !window.WebGLRenderingContext || !window.Formation3D) return;
+  let hero = document.getElementById('ark-mis-hero');
+  if (!hero) { hero = document.createElement('div'); hero.id = 'ark-mis-hero'; hero.className = 'u3d u3d-hero'; scr.insertBefore(hero, scroll); }
+  let space = document.getElementById('ark-mis-space');
+  if (!space) { space = document.createElement('div'); space.id = 'ark-mis-space'; space.className = 'ud-hero-space'; const h = scroll.querySelector('.head'); scroll.insertBefore(space, h ? h.nextSibling : scroll.firstChild); }
+  scr.classList.add('ud-hero', 'ud-ship');
+  hero.style.display = ''; space.style.display = '';
+  if (!hero.querySelector('.u3d-hint')) hero.insertAdjacentHTML('beforeend', `<div class="u3d-hint">AK-01 · en mission</div>`);
+  requestAnimationFrame(() => { const hb = hero.getBoundingClientRect(), sb = space.getBoundingClientRect(); if (hb.height) hero.style.setProperty('--u3d-band', Math.max(0, hb.bottom - sb.bottom) + 'px'); });
+  shipHeroGestures('scr-ark-mission', () => arkMission3D && arkMission3D.handle, null);
+  if (arkMission3D && arkMission3D.id === m.id) return;
+  unmountArkMission3D(true);
+  hero.classList.add('u3d-loading');
+  const fleet = { id: m.id, composition: { colonial: { t1: 1 } }, integrity: {} };
+  arkMission3D = { id: m.id, handle: window.Formation3D.mount(hero, { fleet, mode: 'mission', shiftY: 0.2, onReady: () => hero.classList.remove('u3d-loading') }) };
+}
+function unmountArkMission3D(keepClasses) {
+  if (arkMission3D) { try { arkMission3D.handle.dispose(); } catch (e) {} arkMission3D = null; }
+  if (keepClasses) return;
+  const hero = document.getElementById('ark-mis-hero'); if (hero) hero.style.display = 'none';
+  const space = document.getElementById('ark-mis-space'); if (space) space.style.display = 'none';
+  const scr = document.getElementById('scr-ark-mission'); if (scr) scr.classList.remove('ud-hero', 'ud-ship');
+}
+function arkReplayLaunch() {
+  const m = (G.colonyMissions || []).find(x => x.id === arkMissionId);
+  if (!window.SBArkLaunch || !m) return;
+  unmountArkMission3D(true);
+  SBArkLaunch.play({ name: m.name, eta: formatTankerDuration(Math.max(0, m.arriveAt - Date.now())), onDone: () => { if (!document.getElementById('scr-ark-mission').classList.contains('hidden')) renderArkMission(); } });
+}
+
 /* ═══════════ PATCH_2010_COLONIE — le voyage de l'Arche et la fondation (étape 3) + sélecteur de planète (étape 4) ═══════════ */
 function sbFindPlanet(coord) {
   const sysKey = String(coord || '').split('-').slice(0, 3).join('-');
@@ -29195,15 +29316,17 @@ async function sbColonizeAsk(coord) {
   }
   const name = String(p.customName || p.name || coord).toUpperCase();
   const ms = colonyTravelMs(coord);
+  try { if (window.SBArkLaunch) SBArkLaunch.preload(); } catch (e) {}   // PATCH_2110_ARCHE_DEPART : le modèle se charge pendant que tu confirmes
   const ok = await sbConfirmWarning('Coloniser ' + name,
     `L'Arche coloniale part vers <strong>${name}</strong> (${coord}).<br><br>Voyage : <strong>${formatTankerDuration(ms)}</strong>. Elle ne reviendra pas : à l'arrivée, elle devient ta nouvelle colonie, avec son Centre de commandement et une antenne à bâtir.`, 'Lancer l\'Arche');
   if (!ok) return;
   G.fleet.colonial -= 1;
   if (!Array.isArray(G.colonyMissions)) G.colonyMissions = [];
   G.colonyMissions.push({ id: 'ark-' + Date.now().toString(36), coord, name, departAt: Date.now(), arriveAt: Date.now() + ms });
-  toast(`◈ L'Arche quitte l'orbite · arrivée dans ${formatTankerDuration(ms)}`);
   try { saveGame(); } catch (e) {}
-  try { if (typeof refreshCurrentScreen === 'function') refreshCurrentScreen(); } catch (e) {}
+  // PATCH_2110_ARCHE_DEPART : le départ se vit en grand (cinématique plein écran), puis la fiche reprend
+  const _after = () => { toast(`◈ L'Arche quitte l'orbite · arrivée dans ${formatTankerDuration(ms)}`); try { if (typeof refreshCurrentScreen === 'function') refreshCurrentScreen(); } catch (e) {} };
+  if (window.SBArkLaunch) { try { SBArkLaunch.play({ name, eta: formatTankerDuration(ms), onDone: _after }); } catch (e) { _after(); } } else _after();
 }
 function sbColonyTick() {
   if (typeof G === 'undefined' || !Array.isArray(G.colonyMissions) || !G.colonyMissions.length) return;
@@ -29270,7 +29393,7 @@ function sbOpenWorldPicker() {
     <button class="sbw-row${w.id === G.activeWorld ? ' on' : ''}" onclick="document.getElementById('sb-worlds').remove();sbSwitchWorld('${w.id}')">
       <b>${esc(w.id === 'home' ? ((w.id === G.activeWorld ? G.planet.name : w.name) || 'Capitale') : w.name)}</b>
       <span>${w.kind === 'capital' ? 'Capitale' : 'Colonie'}${w.coord ? ' · ' + esc(w.coord) : ''}</span>
-    </button>`).join('')}${(G.colonyMissions || []).map(m => `<div class="sbw-row off"><b>${esc(m.name)}</b><span>Arche en route · ${formatTankerDuration(Math.max(0, m.arriveAt - Date.now()))}</span></div>`).join('')}
+    </button>`).join('')}${(G.colonyMissions || []).map(m => `<div class="sbw-row off" style="cursor:pointer" onclick="document.getElementById('sb-worlds').remove();openArkMission('${m.id}')"><b>${esc(m.name)}</b><span>Arche en route · ${formatTankerDuration(Math.max(0, m.arriveAt - Date.now()))}</span></div>`).join('')}
     <button class="sbw-x" onclick="document.getElementById('sb-worlds').remove()">Fermer</button></div>`;
   el.addEventListener('click', (e) => { if (e.target === el) el.remove(); });
   document.body.appendChild(el);
@@ -47376,8 +47499,10 @@ if (G.knownTargets && Array.isArray(G.tankerMissions)) {
 <!-- PATCH_2010_TERRAIN — planète-jardin continue : sol, eau, forêt et rails jointifs (assets/terrain.js ; variante désert archivée : terrain_desert.js, non chargée) -->
 <script src="assets/terrain.js?v=20261020-1745"></script>
 <!-- PATCH_2010_FLUIDITE — ombres à la demande, 30 images/s au repos sur téléphone -->
-<script src="assets/fluid.js?v=20261020-2230"></script>
+<script src="assets/fluid.js?v=20261021-1100"></script>
 <!-- PATCH_2010_LUMIERE — éclairage architectural des bâtiments : néons décoratifs éteints, projecteurs au sol la nuit (assets/lumiere.js) -->
+<!-- PATCH_2110_ARCHE_DEPART — cinématique de départ de l'Arche coloniale (assets/arche_launch.js) -->
+<script src="assets/arche_launch.js?v=20261021-1100"></script>
 <script src="assets/lumiere.js?v=20261020-2350"></script>
 <!-- PERF_1310 — mesure des performances chez les joueurs + qualité 3D automatique (assets/perf.js) -->
 <script src="assets/perf.js?v=20261014-1540"></script>
@@ -47405,6 +47530,6 @@ if (G.knownTargets && Array.isArray(G.tankerMissions)) {
 <!-- PATCH_1510_CROWN — The Drifting Crown en 3D (assets/station3d.js, sur le moteur partagé window.SB3D) -->
 <script type="module" src="assets/station3d.js?v=20261020-0120"></script>
 <!-- FORMATION3D — flotte déployée en orbite, vue de haut en formation (remplace la vue orbite) -->
-<script src="assets/formation3d.js?v=20261020-2230"></script>
+<script src="assets/formation3d.js?v=20261021-1100"></script>
 </body>
 </html>

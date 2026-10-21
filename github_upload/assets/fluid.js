@@ -23,6 +23,7 @@
     if (P.controls && P.controls.addEventListener) P.controls.addEventListener('change', poke);
     const origFrame = P._frame;
     P._frame = function () {
+      if (window.__sbCinema) return;   // PATCH_2110_ARCHE_DEPART : cinématique plein écran, la planète se repose
       const now = performance.now();
       const busy = this._focusAnim || now - lastInput < IDLE_MS;
       if (MOBILE && !busy && now - lastFrame < IDLE_FRAME_MS) return;   // 30 images/s au repos

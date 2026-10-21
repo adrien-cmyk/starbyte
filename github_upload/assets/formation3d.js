@@ -12,13 +12,15 @@
     cuirasse: { url: 'assets/3d/sb_kv01_lod.glb?v=20261012-0100', scale: 0.22, glow: [[-44, 76, -660], [44, 76, -660]], glowSize: 70, color: 0x9ccaff, ring: 170 },
     fregate:  { url: 'assets/3d/sb_sr01_lod.glb?v=20261012-0100', scale: 1.3,  glow: [[-2.3, 4.4, -35], [2.3, 4.4, -35]], glowSize: 7, color: 0x9ccaff, ring: 58 },
     tanker:   { url: 'assets/3d/sb_tk07_lod.glb?v=20261012-0100', scale: 2.0,  glow: [[-2.5, 2.55, -15], [2.5, 2.55, -15]], glowSize: 5, color: 0xffb070, ring: 40 },
+    // PATCH_2110_ARCHE_DEPART — l'Arche coloniale (2,2 km) : modèle complet, trois tuyères à la porte arrière
+    colonial: { url: 'assets/3d/sb_ak01.glb?v=20261020', scale: 0.2, glow: [[-100, 300, -1015], [0, 300, -1015], [92, 300, -1015]], glowSize: 26, color: 0xffb070, ring: 300 },
   };
   // échelles d'affichage : le cuirassé fait 1 200 m, la frégate 68 m, le tanker 28,6 m — on comprime l'écart pour que tout se lise
   // ARMADA (20/10) : jusqu'à 12 cuirassés, 60 frégates et 24 tankers modélisés ; au-delà, l'armada lointaine (une lueur par vaisseau)
-  const MAX = { cuirasse: 12, fregate: 60, tanker: 24 };
+  const MAX = { cuirasse: 12, fregate: 60, tanker: 24, colonial: 1 };
   // gabarits mesurés sur les modèles LOD, à l'échelle d'affichage (largeur, longueur)
-  const DIM = { cuirasse: [57, 290], fregate: [25, 93], tanker: [22, 57] };
-  const GLOSS = { M_TK_ARMOR_JAUNE: [0.40, 0.08], M_KV_ARMOR_WHITE: [0.38, 0.0], M_KV_ARMOR_RED: [0.28, 0.3], M_KV_GUNMETAL: [0.26, 0.85],
+  const DIM = { cuirasse: [57, 290], fregate: [25, 93], tanker: [22, 57], colonial: [490, 430] };
+  const GLOSS = { M_AK_HULL: [0.62, 0.0], M_AK_HULL2: [0.64, 0.0], M_AK_ORANGE: [0.5, 0.2], M_AK_GUNMETAL: [0.45, 0.7], M_AK_DARK: [0.5, 0.45], M_AK_STEEL: [0.45, 0.7], M_TK_ARMOR_JAUNE: [0.40, 0.08], M_KV_ARMOR_WHITE: [0.38, 0.0], M_KV_ARMOR_RED: [0.28, 0.3], M_KV_GUNMETAL: [0.26, 0.85],
                   M_KV_STRUCT_BLACK: [0.30, 0.55], M_TK_GRAPHITE: [0.30, 0.6], M_SR_VERRIERE: [0.06, 0.4] };
   const cache = {};
 
@@ -26,9 +28,9 @@
   // hp : intégrité de coque (0–100) lue dans fleet.integrity[type]['tN'][i] (triée du plus sain au plus abîmé)
   function roster(fleet) {
     const out = [], comp = fleet && fleet.composition, integ = (fleet && fleet.integrity) || {};
-    const overflow = { cuirasse: 0, fregate: 0, tanker: 0 };
+    const overflow = { cuirasse: 0, fregate: 0, tanker: 0, colonial: 0 };
     let total = 0;
-    for (const type of ['cuirasse', 'fregate', 'tanker']) {
+    for (const type of ['colonial', 'cuirasse', 'fregate', 'tanker']) {
       const c = (comp && comp[type]) || {};
       let k = 0;
       for (const tier of [3, 2, 1]) {
@@ -48,8 +50,9 @@
   // cuirassés en ligne de bataille au centre (rangs de 6, le 2e décalé en quinconce),
   // frégates en escadrilles de 6 en chevron (avant-garde puis flancs), tankers en convoi derrière
   function place(list) {
-    const by = { cuirasse: [], fregate: [], tanker: [] };
+    const by = { cuirasse: [], fregate: [], tanker: [], colonial: [] };
     list.forEach(s => by[s.type].push(s));
+    by.colonial.forEach(s => { s.x = 0; s.z = 0; s.sq = 0; s.wave = 0; });   // PATCH_2110_ARCHE_DEPART
     const [cw, cl] = DIM.cuirasse, [fw, fl] = DIM.fregate, [tw, tl] = DIM.tanker;
     const nc = by.cuirasse.length, perRank = 6, sx = cw * 4.5, rz = cl * 1.35;   // gros vaisseaux : de l'air entre eux
     const ranks = Math.ceil(nc / perRank);
@@ -183,7 +186,7 @@
       }`,
   });
   const PLUMES = { blue: [0x2a5cff, 0x3f86ff, 0x86c0ff, 0xe6f3ff], amber: [0xff5a1a, 0xff8a2a, 0xffc070, 0xfff2d8] };
-  const FIL_N = { cuirasse: 420, fregate: 160, tanker: 110 };
+  const FIL_N = { cuirasse: 420, fregate: 160, tanker: 110, colonial: 520 };
 
   function mount(container, opts = {}) {
     const { THREE, GLTFLoader, RoomEnvironment, EffectComposer, RenderPass, UnrealBloomPass, OutputPass } = window.SB3D;
@@ -263,6 +266,7 @@
     const ships = [];
     let ext = 300;
     for (const s of list) ext = Math.max(ext, Math.abs(s.x) + 200, Math.abs(s.z) + 260);
+    if (list.some(s => s.type === 'colonial')) ext = Math.max(ext, 440);   // PATCH_2110_ARCHE_DEPART
     // ORBITE (14/10) : environnement de la fiche du chantier orbital — ciel de nébuleuse, étoiles colorées,
     // planète procédurale à contre-jour avec atmosphère, soleil droit devant (disque, halo, voile, reflet anamorphique),
     // et de temps en temps une étoile filante
@@ -365,7 +369,7 @@
     // ARMADA (20/10) : chaque pièce de chaque modèle est dessinée en une passe pour toute la flotte (InstancedMesh) ;
     // un porteur (Object3D) par vaisseau garde sa position animée et accroche plasma, panaches et fumées
     const inst = [];                                                   // { im, local, idx }
-    const typeIdx = { cuirasse: [], fregate: [], tanker: [] };
+    const typeIdx = { cuirasse: [], fregate: [], tanker: [], colonial: [] };
     list.forEach((s, i) => typeIdx[s.type].push(i));
     list.forEach((s, i) => {
       const M = MODELS[s.type];
@@ -415,7 +419,7 @@
       // LOD du plasma : complet sur les cuirassés, une enveloppe + quelques filaments sur les 18 premières frégates
       // et les 12 premiers tankers, panaches à deux couches sur les 24 premiers ; les autres gardent leur lueur moteur
       const M = MODELS[type], gs = holder.userData.gs;
-      const capital = type === 'cuirasse', near = capital || (type === 'fregate' ? k < 18 : k < 12);
+      const capital = type === 'cuirasse' || type === 'colonial', near = capital || (type === 'fregate' ? k < 18 : k < 12);
       const sz = bb.getSize(new THREE.Vector3()), c = bb.getCenter(new THREE.Vector3());
       const L = sz.z, bow = bb.max.z + L * 0.1, hw = sz.x / 2, hhh = sz.y / 2;
       const R0 = Math.max(0.31 * L, 1.35 * Math.max(hw, hhh / 0.78));
@@ -456,6 +460,8 @@
         const local = new THREE.Matrix4().multiplyMatrices(scM, o.matrixWorld);
         const m = o.material.clone(), gl = GLOSS[m.name];
         if (gl) { m.roughness = gl[0]; m.metalness = gl[1]; m.envMapIntensity = 0.9; }
+        if (/^M_AK_HULL/.test(m.name)) { m.color.multiplyScalar(0.6); m.envMapIntensity = 0.3; }   // PATCH_2110_ARCHE_DEPART : coque crème moins éblouissante
+        if (m.name === 'M_AK_GLASS') { m.transparent = true; m.opacity = 0.2; m.depthWrite = false; }
         const glow = m.name === 'M_KV_GLOW_MOTEUR' || (m.emissive && m.emissive.getHex() && m.emissiveIntensity > 0);
         if (m.name === 'M_KV_GLOW_MOTEUR') { m.emissive = new THREE.Color(M.color); m.emissiveIntensity = 4 * (0.35 + 0.65 * avgHp / 100); }
         const im = new THREE.InstancedMesh(o.geometry, m, n);
@@ -488,7 +494,7 @@
 
     // ARMADA LOINTAINE : le reste de la flotte, une lueur moteur par vaisseau, en escadrilles autour de la formation,
     // qui ondulent doucement dans la profondeur (un seul nuage de points)
-    const ov = list.overflow || { cuirasse: 0, fregate: 0, tanker: 0 };
+    const ov = list.overflow || { cuirasse: 0, fregate: 0, tanker: 0, colonial: 0 };
     const nFar = Math.min(2400, ov.cuirasse + ov.fregate + ov.tanker);
     if (nFar) {
       const pos = new Float32Array(nFar * 3), aP = new Float32Array(nFar * 3), aC = new Float32Array(nFar * 3);
