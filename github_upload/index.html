@@ -8739,7 +8739,7 @@ var EXTRA_SAVE_KEYS = [
   'mpNeighbors',   // VOISINS_1310 — voisins déjà signalés
   'tuto',          // TUTO_1410 — premiers pas (étape, vu, terminé)
   'skillsLearned', 'research', '_skillsSeen', '_skillsMigrated',   // PATCH_1610_SKILLS
-  'mpRaidsApplied', 'mpRaidsReturned', 'mpPostsToClose', 'mpRelations', 'mpTradeCaps',   // PATCH_2010_AUDIT — raids déjà intégrés (indépendant des rapports, qu'on peut supprimer)
+  'mpRaidsApplied', 'mpRaidsReturned', 'mpPostsToClose', 'mpRelations', 'mpTradeCaps', 'mpAlliance', 'mpAllianceTags', 'mpAllyUnread',   // PATCH_2010_AUDIT — raids déjà intégrés (indépendant des rapports, qu'on peut supprimer)
   'worlds', 'activeWorld', 'colonyMissions', 'fleetTransfers',   // PATCH_2010_WORLDS — colonies (planètes inactives) et planète affichée
   '_linesCrown', 'crownSeen', '_linesSanct', 'sanctSeen', '_linesNoire', 'noireSeen', '_linesRefuge', '_linesRefuge2', 'refugeSeen', '_brest1',   // PATCH_1510_CROWN — lieu du secteur M devenu la Couronne, première arrivée vue
 ];
@@ -9322,6 +9322,8 @@ var MP_RAID_ERRORS = {
   target_other_season: 'Ce monde appartient à une autre saison',
   no_world: 'Ton monde n\'est pas encore au registre',
   pact_active: 'Pacte de non-agression en cours avec ce commandant',   // AMBASSADES_1210
+  ally: 'C\'est un membre de ton alliance',   // PATCH_2110_ALLIANCES
+  ally_cooldown: 'Ancien allié : aucune attaque possible pendant 24 h après un départ de l\'alliance',
 };
 
 var _mpLaunching = false;
@@ -9812,7 +9814,11 @@ function mpPactWith(address, pseudo) {
 }
 // PATCH_2110_PAVILLONS — relations officielles (ennemi, accord commercial), relevées au registre chaque minute
 function mpRelWith(address, pseudo, kind) {
-  return (G.mpRelations || []).find(r => (!kind || r.kind === kind) && ((address && (r.addresses || []).includes(address)) || (pseudo && r.pseudo === pseudo))) || null;
+  const r = (G.mpRelations || []).find(r => (!kind || r.kind === kind) && ((address && (r.addresses || []).includes(address)) || (pseudo && r.pseudo === pseudo))) || null;
+  if (r || (kind && kind !== 'trade') || typeof mpAllyMember !== 'function') return r;
+  // PATCH_2110_ALLIANCES — entre alliés, l'accord commercial est automatique
+  const m = mpAllyMember(address, pseudo);
+  return m ? { kind: 'trade', pseudo: m.pseudo, addresses: m.addresses, byMe: false, ally: true, since: m.joined_at, until: null } : null;
 }
 function mpIngestRelations(rows) {
   const prev = Array.isArray(G.mpRelations) ? G.mpRelations : null;
@@ -9833,7 +9839,8 @@ function mpIngestRelations(rows) {
 }
 function mpRelBadge(address, pseudo) {
   const e = mpRelWith(address, pseudo, 'enemy'), t = mpRelWith(address, pseudo, 'trade');
-  return (e ? ' <span style="color:#ff4d4d;font-weight:600">· Ennemi</span>' : '') + (t ? ' <span style="color:#ffc864">· Partenaire commercial</span>' : '');
+  const al = typeof mpAllyMember === 'function' && mpAllyMember(address, pseudo);
+  return (al ? ` <span style="color:${mpAlly().alliance.color};font-weight:600">· Allié</span>` : '') + (e ? ' <span style="color:#ff4d4d;font-weight:600">· Ennemi</span>' : '') + (t && !al ? ' <span style="color:#ffc864">· Partenaire commercial</span>' : '');
 }
 // ═══ PATCH_2110_COMMERCE — commerce entre joueurs (serveur v25) ═══
 // Pendant un accord commercial, un commandant livre son surplus à son partenaire : le tanker part (convoi normal),
@@ -10031,6 +10038,214 @@ function mpTradeBlockHtml(addr, pseudo) {
     <div style="display:flex;margin-top:8px">${_mpDiploBtn('Livrer le surplus', `mpTradeDeliver('${addr}')`)}</div>`;
 }
 
+// ═══ PATCH_2110_ALLIANCES — alliances entre commandants (serveur v26) ═══
+// Fonder (pacte d'ambassade actif, 1 000 CG), inviter (le chef, chez un commandant où un membre a une ambassade), 7 membres au plus.
+// Entre membres : ni raid ni abordage, accord commercial automatique, canal commun. Le chef seul exclut.
+var MP_ALLY_COST = 1000;
+var MP_ALLY_MAX = 7;
+var MP_ALLY_COLORS = ['#5fffe8', '#ffc864', '#ff8a8a', '#a370ff', '#7ed080', '#6aa8ff', '#ff9ad5'];
+var MP_ALLY_ERRORS = {
+  no_world: 'Ton monde n\'est pas encore au registre', already_in_alliance: 'Tu es déjà dans une alliance',
+  alliance_name_invalid: 'Nom invalide (3 à 24 caractères : lettres, chiffres, espaces, - _ . \')', alliance_name_taken: 'Ce nom d\'alliance est déjà pris',
+  alliance_needs_pact: 'Il faut d\'abord un pacte d\'ambassade actif avec un commandant', no_alliance: 'Tu n\'es dans aucune alliance',
+  not_leader: 'Seul le chef peut faire ça', target_unknown: 'Ce commandant n\'est plus au registre', target_self: 'C\'est toi',
+  already_member: 'Il est déjà membre', target_in_alliance: 'Il est déjà dans une autre alliance', alliance_full: `L'alliance est complète (${MP_ALLY_MAX} membres)`,
+  invite_needs_embassy: 'Il faut qu\'un membre de l\'alliance ait un tanker en ambassade chez lui', enemies: 'Il est l\'ennemi déclaré d\'un membre',
+  invite_unknown: 'Cette invitation n\'existe plus', raid_en_route: 'Une flotte est en route entre vous et un membre : impossible maintenant',
+  not_member: 'Il n\'est pas membre de ton alliance', chat_empty: 'Message vide', chat_rate: 'Doucement : 6 messages par minute au plus',
+};
+function _mpAllyErr(e) {
+  const code = (String(e && e.message || e).match(/[a-z_]+/g) || []).find(c => MP_ALLY_ERRORS[c]);
+  return code ? MP_ALLY_ERRORS[code] : 'Le registre ne répond pas, réessaie';
+}
+var _mpAllyBusy = false;
+function mpAlly() { return G.mpAlliance || { alliance: null, members: [], invites: [], sent: [], messages: [] }; }
+function mpAllyMember(address, pseudo) {
+  const A = mpAlly();
+  if (!A.alliance) return null;
+  return A.members.find(m => !m.me && ((address && (m.addresses || []).includes(address)) || (pseudo && m.pseudo === pseudo))) || null;
+}
+function mpAllyTag(address) { return (G.mpAllianceTags || {})[address] || null; }
+function mpAllyBadge(address) {
+  const t = mpAllyTag(address);
+  return t ? ` <span style="color:${t.color};font-weight:600">[${_esc(t.alliance)}]</span>` : '';
+}
+function mpIngestAlliance(st, tags) {
+  const prev = G.mpAlliance || null;
+  if (tags) { const o = {}; for (const t of tags) o[t.address] = { alliance: t.alliance, color: t.color }; G.mpAllianceTags = o; }
+  // nouvelles invitations
+  for (const i of st.invites) {
+    if (prev && (prev.invites || []).some(x => x.id === i.id)) continue;
+    _mpDiploReport('alliance_invite', { pseudo: i.by, address: i.by_address, inviteId: i.id, alliance: i.alliance, color: i.color, members: i.members, state: 'pending' }, 'ainv-' + i.id);
+    toast(`⚑ ${i.by} t'invite dans l'alliance ${i.alliance}`);
+  }
+  if (prev) {
+    const was = prev.alliance, now = st.alliance;
+    if (was && !now && !G._mpAllyLeaving) toast(`Tu ne fais plus partie de l'alliance ${was.name}`);
+    if (!was && now) toast(`Tu as rejoint l'alliance ${now.name}`);
+    if (was && now && was.id === now.id) {
+      const before = new Set(prev.members.map(m => m.pseudo)), after = new Set(st.members.map(m => m.pseudo));
+      for (const m of st.members) if (!before.has(m.pseudo)) toast(`⚑ ${m.pseudo} rejoint ${now.name}`);
+      for (const m of prev.members) if (!after.has(m.pseudo)) toast(`${m.pseudo} a quitté ${now.name}`);
+      if (!was.leader && now.leader) toast(`Tu es désormais chef de ${now.name}`);
+      const seen = new Set((prev.messages || []).map(x => x.id));
+      const fresh = st.messages.filter(x => !seen.has(x.id) && !x.mine);
+      if (fresh.length) { G.mpAllyUnread = (G.mpAllyUnread || 0) + fresh.length; if (!document.getElementById('sb-ally-sheet')) toast(`💬 ${fresh[fresh.length - 1].pseudo} (${now.name}) : ${fresh[fresh.length - 1].body.slice(0, 60)}`); }
+    }
+  }
+  G._mpAllyLeaving = false;
+  const changed = JSON.stringify(prev) !== JSON.stringify(st);
+  G.mpAlliance = st;
+  if (changed) {
+    try { saveGame(); } catch (e) {}
+    if (document.getElementById('sb-ally-sheet')) mpAllyRender();
+    try { if (typeof refreshCurrentScreen === 'function') refreshCurrentScreen(); } catch (e) {}
+  }
+}
+function _mpAllyResync() { setTimeout(() => { try { SBMP.pollAlliance(true); SBMP.pollRelations && SBMP.pollRelations(true); } catch (e) {} }, 600); }
+function mpAllyCanFound() {
+  return !mpAlly().alliance && Object.values(_mpDiplo().pacts).some(k => k.status === 'active' && k.anchor);
+}
+async function mpAllyFound() {
+  if (_mpAllyBusy || !window.SBMP || !SBMP.ready()) { toast('Registre hors ligne : réessaie dans un instant'); return; }
+  if (!mpAllyCanFound()) { toast(MP_ALLY_ERRORS.alliance_needs_pact); return; }
+  if ((G.credits || 0) < MP_ALLY_COST) { toast(`Fonder une alliance coûte ${fmt(MP_ALLY_COST)} CG`); return; }
+  const name = await sbPrompt({ title: 'Fonder une alliance', body: `Son nom, visible de tous (3 à 24 caractères).<br><br>Coût : <strong>${fmt(MP_ALLY_COST)} CG</strong>. Tu en deviens le chef ; ${MP_ALLY_MAX} membres au plus.`,
+    placeholder: 'ex. Ligue d\'Alphard', confirmLabel: 'Fonder', maxLength: 24 });
+  if (name == null || !String(name).trim()) return;
+  const color = MP_ALLY_COLORS[Math.floor(Math.random() * MP_ALLY_COLORS.length)];
+  _mpAllyBusy = true;
+  try {
+    await SBMP.allianceFound(String(name).trim(), color);
+    G.credits = Math.max(0, (G.credits || 0) - MP_ALLY_COST);
+    if (typeof saveGame === 'function') saveGame();
+    toast(`Alliance ${String(name).trim()} fondée · −${fmt(MP_ALLY_COST)} CG`);
+    await SBMP.pollAlliance(true);
+    mpOpenAlliance();
+  } catch (e) { toast(_mpAllyErr(e)); }
+  finally { _mpAllyBusy = false; }
+}
+async function mpAllyInvite(address) {
+  if (_mpAllyBusy || !window.SBMP || !SBMP.ready()) return;
+  _mpAllyBusy = true;
+  try { await SBMP.allianceInvite(address); toast('Invitation envoyée'); _mpAllyResync(); }
+  catch (e) { toast(_mpAllyErr(e)); }
+  finally { _mpAllyBusy = false; }
+}
+async function mpAllyAnswer(inviteId, accept) {
+  if (_mpAllyBusy || !window.SBMP || !SBMP.ready()) return;
+  const inv = mpAlly().invites.find(i => i.id === inviteId);
+  if (accept && inv && !(await sbConfirmWarning('Rejoindre ' + inv.alliance, `Rejoindre l'alliance <strong>${_esc(inv.alliance)}</strong> (${inv.members} membre${inv.members > 1 ? 's' : ''}) ?<br><br>Entre membres : ni raid ni abordage, accord commercial et canal commun. Si tu pars, tu ne pourras pas attaquer un ancien allié pendant 24 h.`, 'Rejoindre'))) return;
+  _mpAllyBusy = true;
+  try {
+    const st = await SBMP.allianceAnswer(inviteId, accept);
+    const rep = (G.reports || []).find(r => r.id === 'rpt-diplo-ainv-' + inviteId);
+    if (rep) rep.diplo.state = st;
+    toast(st === 'accepted' ? 'Bienvenue dans l\'alliance' : st === 'declined' ? 'Invitation déclinée' : 'Cette invitation a expiré');
+    _mpAllyResync();
+  } catch (e) { toast(_mpAllyErr(e)); }
+  finally { _mpAllyBusy = false; if (typeof renderReportDetail === 'function') try { renderReportDetail(); } catch (e) {} }
+}
+async function mpAllyLeave() {
+  const A = mpAlly(); if (!A.alliance || _mpAllyBusy) return;
+  const ok = await sbConfirmWarning('Quitter ' + A.alliance.name, `Quitter l'alliance <strong>${_esc(A.alliance.name)}</strong> ?<br><br>Le comptoir le saura. Pendant 24 h, ni toi ni tes anciens alliés ne pourrez vous attaquer.${A.alliance.leader && A.members.length > 1 ? '<br><br>Le membre le plus ancien deviendra chef.' : A.members.length <= 1 ? '<br><br>Tu es le dernier membre : l\'alliance sera dissoute.' : ''}`, 'Quitter');
+  if (!ok) return;
+  _mpAllyBusy = true;
+  try { G._mpAllyLeaving = true; await SBMP.allianceLeave(); toast(`Tu as quitté ${A.alliance.name}`); _mpAllyResync(); }
+  catch (e) { G._mpAllyLeaving = false; toast(_mpAllyErr(e)); }
+  finally { _mpAllyBusy = false; }
+}
+async function mpAllyKick(address) {
+  const A = mpAlly(); const m = A.members.find(x => x.address === address);
+  if (!A.alliance || !A.alliance.leader || !m || _mpAllyBusy) return;
+  const ok = await sbConfirmWarning('Exclure ' + m.pseudo, `Exclure <strong>${_esc(m.pseudo)}</strong> de ${_esc(A.alliance.name)} ?<br><br>Le comptoir le saura. Pendant 24 h, aucune attaque possible entre vous.`, 'Exclure');
+  if (!ok) return;
+  _mpAllyBusy = true;
+  try { await SBMP.allianceKick(address); toast(`${m.pseudo} exclu`); _mpAllyResync(); }
+  catch (e) { toast(_mpAllyErr(e)); }
+  finally { _mpAllyBusy = false; }
+}
+async function mpAllyCancelInvite(id) {
+  try { await SBMP.allianceCancelInvite(id); _mpAllyResync(); } catch (e) { toast(_mpAllyErr(e)); }
+}
+async function mpAllySend() {
+  const el = document.getElementById('sb-ally-input'); if (!el) return;
+  const body = el.value.trim(); if (!body) return;
+  try { await SBMP.allianceChat(body); el.value = ''; await SBMP.pollAlliance(true); }
+  catch (e) { toast(_mpAllyErr(e)); }
+}
+function mpOpenAlliance() {
+  let ov = document.getElementById('sb-ally-sheet');
+  if (!ov) {
+    ov = document.createElement('div'); ov.id = 'sb-ally-sheet';
+    ov.style.cssText = 'position:fixed;inset:0;z-index:9500;background:rgba(2,6,12,.62);display:flex;align-items:flex-end';
+    ov.onclick = (e) => { if (e.target === ov) ov.remove(); };
+    document.body.appendChild(ov);
+  }
+  G.mpAllyUnread = 0;
+  mpAllyRender();
+  if (window.SBMP && SBMP.ready()) SBMP.pollAlliance(true);
+}
+function mpAllyRender() {
+  const ov = document.getElementById('sb-ally-sheet'); if (!ov) return;
+  const A = mpAlly(), al = A.alliance;
+  const btn = (label, on, tone) => _mpDiploBtn(label, on, tone);
+  let body = '';
+  if (!al) {
+    body += `<div style="font-size:12px;color:var(--mut);line-height:1.6;margin-bottom:12px">Tu n'es dans aucune alliance.<br>Entre membres : ni raid ni abordage, accord commercial automatique, canal commun. ${MP_ALLY_MAX} membres au plus.</div>`;
+    for (const i of A.invites) body += `<div style="padding:12px;border:1px solid ${i.color}66;border-radius:8px;margin-bottom:10px"><div style="font-size:13px;color:${i.color};font-weight:600">${_esc(i.alliance)}</div><div style="font-size:11px;color:var(--mut);margin:3px 0 10px">Invitation de ${_esc(i.by)} · ${i.members} membre${i.members > 1 ? 's' : ''}</div><div style="display:flex;gap:8px">${btn('Rejoindre', `mpAllyAnswer('${i.id}',true)`)}${btn('Décliner', `mpAllyAnswer('${i.id}',false)`, 'mut')}</div></div>`;
+    body += mpAllyCanFound()
+      ? `<div style="display:flex">${btn(`Fonder une alliance · ${fmt(MP_ALLY_COST)} CG`, 'mpAllyFound()')}</div>`
+      : `<div style="font-size:11px;color:var(--mut);font-style:italic">Pour fonder une alliance, il faut d'abord un pacte d'ambassade actif avec un commandant (un tanker en orbite chez lui, pacte signé).</div>`;
+  } else {
+    body += `<div style="font-size:11px;color:var(--mut);margin-bottom:10px">${A.members.length}/${MP_ALLY_MAX} membres${al.leader ? ' · tu es le chef' : ''}</div>`;
+    body += A.members.map(m => `<div style="display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid var(--border)">
+        <div style="flex:1;min-width:0"><div style="font-size:13px;color:#e6f0ff">${m.leader ? '★ ' : ''}${_esc(m.pseudo)}${m.me ? ' <span style="color:var(--mut);font-size:11px">(toi)</span>' : ''}</div>
+        <div style="font-size:10px;color:var(--mut);font-family:'SF Mono',monospace">${m.address || ''}</div></div>
+        ${!m.me && m.address ? `<button onclick="document.getElementById('sb-ally-sheet').remove();openPlanetDetail('${m.address}')" style="background:none;border:1px solid var(--border);color:var(--mut);border-radius:6px;font-size:10px;padding:5px 8px;font-family:inherit">fiche</button>` : ''}
+        ${al.leader && !m.me && m.address ? `<button onclick="mpAllyKick('${m.address}')" style="background:none;border:1px solid rgba(255,138,138,.45);color:#ff8a8a;border-radius:6px;font-size:10px;padding:5px 8px;font-family:inherit">exclure</button>` : ''}
+      </div>`).join('');
+    if (A.sent.length) body += `<div style="font-size:10px;color:var(--mut);letter-spacing:.12em;text-transform:uppercase;margin:14px 0 6px">Invitations en attente</div>` + A.sent.map(i => `<div style="display:flex;justify-content:space-between;font-size:12px;color:#e6f0ff;padding:4px 0">${_esc(i.pseudo)} <a onclick="mpAllyCancelInvite('${i.id}')" style="color:var(--mut);text-decoration:underline;cursor:pointer;font-size:11px">retirer</a></div>`).join('');
+    if (al.leader) body += `<div style="font-size:11px;color:var(--mut);margin-top:10px;line-height:1.5">Pour inviter : ouvre la fiche d'un commandant chez qui un membre a un tanker en ambassade.</div>`;
+    body += `<div style="font-size:10px;color:var(--mut);letter-spacing:.12em;text-transform:uppercase;margin:16px 0 6px">Canal de l'alliance</div>
+      <div id="sb-ally-msgs" style="max-height:32vh;overflow-y:auto;font-size:12px;line-height:1.5;padding:4px 0">${A.messages.length ? A.messages.map(x => `<div style="margin-bottom:6px"><span style="color:${x.mine ? 'var(--mut)' : al.color}">${_esc(x.pseudo)}</span> <span style="color:#e6f0ff">${_esc(x.body)}</span></div>`).join('') : '<div style="color:var(--mut);font-style:italic">Aucun message.</div>'}</div>
+      <div style="display:flex;gap:8px;margin-top:8px"><input id="sb-ally-input" maxlength="280" placeholder="Message à l'alliance" onkeydown="if(event.key==='Enter')mpAllySend()" style="flex:1;padding:10px;background:rgba(255,255,255,.04);border:1px solid var(--border);border-radius:8px;color:#e6f0ff;font-family:inherit;font-size:13px"><button onclick="mpAllySend()" style="padding:0 14px;background:rgba(95,255,232,.08);border:1px solid rgba(95,255,232,.45);color:#5fffe8;border-radius:8px;font-family:inherit">Envoyer</button></div>
+      <div style="display:flex;margin-top:14px">${btn('Quitter l\'alliance', 'mpAllyLeave()', 'red')}</div>`;
+  }
+  const keep = document.getElementById('sb-ally-input'), draft = keep ? keep.value : '';
+  ov.innerHTML = `<div style="width:100%;max-height:88vh;overflow-y:auto;background:#0b1016;border-top:1px solid ${al ? al.color + '88' : 'var(--border)'};border-radius:16px 16px 0 0;padding:18px 16px calc(18px + env(safe-area-inset-bottom))">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+      <div><div style="font-size:10px;color:var(--mut);letter-spacing:.16em;text-transform:uppercase">Alliance</div><div style="font-size:18px;color:${al ? al.color : '#e6f0ff'};font-weight:600">${al ? _esc(al.name) : 'Aucune'}</div></div>
+      <button onclick="document.getElementById('sb-ally-sheet').remove()" style="background:none;border:1px solid var(--border);color:var(--mut);border-radius:8px;padding:6px 10px;font-family:inherit">Fermer</button>
+    </div>${body}</div>`;
+  const inp = document.getElementById('sb-ally-input'); if (inp && draft) inp.value = draft;
+  const box = document.getElementById('sb-ally-msgs'); if (box) box.scrollTop = box.scrollHeight;
+}
+// Carte « Alliance » en tête de l'onglet Joueurs
+function mpAllyCardHtml() {
+  const A = mpAlly(), al = A.alliance;
+  const unread = G.mpAllyUnread ? ` <span style="color:#ffc864">· ${G.mpAllyUnread} message${G.mpAllyUnread > 1 ? 's' : ''}</span>` : '';
+  const sub = al ? `${A.members.length}/${MP_ALLY_MAX} membres${al.leader ? ' · chef' : ''}${unread}`
+    : A.invites.length ? `${A.invites.length} invitation${A.invites.length > 1 ? 's' : ''} en attente` : 'Aucune alliance';
+  return `<div onclick="mpOpenAlliance()" style="margin:8px 16px 4px;padding:12px 14px;border:1px solid ${al ? al.color + '77' : 'var(--border)'};border-radius:8px;background:rgba(95,255,232,.03);cursor:pointer;display:flex;align-items:center;gap:10px">
+    <div style="flex:1"><div style="font-size:10px;color:var(--mut);letter-spacing:.14em;text-transform:uppercase">Alliance</div>
+    <div style="font-size:14px;color:${al ? al.color : '#e6f0ff'};font-weight:600;margin-top:2px">${al ? _esc(al.name) : (A.invites.length ? 'Invitation reçue' : 'Fonder ou rejoindre')}</div>
+    <div style="font-size:11px;color:var(--mut);margin-top:2px">${sub}</div></div>${icon('chevronRight', { size: 14 })}</div>`;
+}
+// Bloc sur la fiche d'un commandant (ambassade)
+function mpAllyEmbassyHtml(addr, pseudo) {
+  const A = mpAlly(), al = A.alliance, mem = mpAllyMember(addr, pseudo), tag = mpAllyTag(addr);
+  if (mem) return `<div style="margin-top:8px;font-size:12px;color:${al.color}">★ Allié · ${_esc(al.name)}</div><div style="font-size:11px;color:var(--mut);margin-top:2px">Ni raid ni abordage entre vous · accord commercial · canal de l'alliance</div>`;
+  if (tag) return `<div style="margin-top:8px;font-size:12px;color:${tag.color}">Membre de l'alliance ${_esc(tag.alliance)}</div>`;
+  if (al && al.leader) {
+    const sent = A.sent.some(i => i.address === addr);
+    return sent ? `<div style="margin-top:8px;font-size:11px;color:var(--mut)">Invitation dans ${_esc(al.name)} envoyée</div>`
+      : `<div style="display:flex;margin-top:8px">${_mpDiploBtn('Inviter dans ' + _esc(al.name), `mpAllyInvite('${addr}')`)}</div>`;
+  }
+  if (!al && mpAllyCanFound()) return `<div style="display:flex;margin-top:8px">${_mpDiploBtn(`Fonder une alliance · ${fmt(MP_ALLY_COST)} CG`, 'mpAllyFound()')}</div>`;
+  return '';
+}
+
 function _mpCargoSum(c) { return ['metal', 'energie', 'cristal'].reduce((s, k) => s + Math.max(0, Math.floor(Number(c && c[k]) || 0)), 0); }
 var _mpDiploBusy = new Set();
 var _mpOrbitRegistering = new Set();
@@ -10043,6 +10258,7 @@ var MP_DIPLO_TYPES = {
   pact_signed:    { title: 'PACTE SIGNÉ',         list: 'Pacte signé',         sub: 'pacte de non-agression actif', color: '#7ed080' },
   pact_broken:    { title: 'PACTE ROMPU',         list: 'Pacte rompu',         sub: 'les raids redeviennent possibles', color: '#ff8a8a' },
   pact_declined:  { title: 'PACTE DÉCLINÉ',       list: 'Pacte décliné',       sub: 'proposition refusée', color: '#cececd' },
+  alliance_invite: { title: 'INVITATION D\'ALLIANCE', list: 'Invitation d\'alliance', sub: 'rejoindre une alliance', color: '#5fffe8' },   // PATCH_2110_ALLIANCES
   trade_sold:     { title: 'LIVRAISON VENDUE',    list: 'Livraison commerciale', sub: 'surplus vendu à ton partenaire', color: '#ffc864' },   // PATCH_2110_COMMERCE
   trade_bought:   { title: 'LIVRAISON REÇUE',     list: 'Livraison reçue',     sub: 'achat à ton partenaire', color: '#ffc864' },
   neighbor:       { title: 'SIGNAL CAPTÉ',        list: 'Commandant voisin',   sub: 'ajouté à ton carnet', color: '#5fffe8' },   // VOISINS_1310
@@ -10396,6 +10612,11 @@ function renderDiploReportDetail(r) {
     html += box(`Une signature de commandant se détache du bruit de fond : <strong>${d.pseudo}</strong>${d.planet ? `, sur ${d.planet}` : ''}, niveau estimé ~${d.level || 1}. C'est l'un de tes plus proches voisins.${addr}`)
       + `<div style="margin:0 16px 14px;font-size:12px;color:var(--mut);line-height:1.6">Depuis sa fiche (Carnet ou onglet Joueurs) : envoyer un tanker en ambassade, hisser un pavillon, proposer un pacte… ou préparer un raid.</div>`
       + `<div style="margin:0 16px 14px;display:flex">${_mpDiploBtn('Voir sa planète', `openPlanetDetail('${d.address}')`)}</div>`;
+  } else if (d.type === 'alliance_invite') {   // PATCH_2110_ALLIANCES
+    const pend = mpAlly().invites.some(i => i.id === d.inviteId);
+    html += box(`<strong>${d.pseudo}</strong> t'invite dans l'alliance <strong style="color:${d.color || '#5fffe8'}">${_esc(d.alliance || '')}</strong> (${d.members || 1} membre${(d.members || 1) > 1 ? 's' : ''}).<br><br>Entre membres : ni raid ni abordage, accord commercial automatique, canal commun. Le chef seul peut exclure ; si tu pars, aucune attaque entre anciens alliés pendant 24 h.${addr}`)
+      + `<div style="margin:0 16px 14px">${pend ? `<div style="display:flex;gap:8px">${_mpDiploBtn('Rejoindre', `mpAllyAnswer('${d.inviteId}',true)`)}${_mpDiploBtn('Décliner', `mpAllyAnswer('${d.inviteId}',false)`, 'mut')}</div>`
+        : `<div style="font-size:12px;color:var(--mut);font-style:italic;text-align:center;padding:8px">${d.state === 'accepted' ? 'Tu as rejoint l\'alliance.' : d.state === 'declined' ? 'Invitation déclinée.' : 'Cette invitation n\'est plus valable.'}</div>`}</div>`;
   } else if (d.type === 'trade_sold') {   // PATCH_2110_COMMERCE
     html += box(d.why ? `${d.tanker || 'Ton tanker'} n'a pas pu livrer <strong>${d.pseudo}</strong> : ${d.why}. Il est rentré avec sa cale.${addr}`
       : d.expired ? `<strong>${d.pseudo}</strong> n'a pas répondu en 12 h : ${d.tanker || 'ton tanker'} est rentré avec sa cale.${addr}`
@@ -10423,10 +10644,12 @@ function mpEmbassyBlockHtml(p) {
   const k = mpPactWith(addr, p.playerName);
   const inc = _mpEmbInFor(addr);
   const _en = mpRelWith(addr, p.playerName, 'enemy'), _tr = mpRelWith(addr, p.playerName, 'trade');   // PATCH_2110_PAVILLONS
-  if (!m && !k && !inc && !_en && !_tr) return '';
+  const _al = mpAllyEmbassyHtml(addr, p.playerName);   // PATCH_2110_ALLIANCES
+  if (!m && !k && !inc && !_en && !_tr && !_al) return '';
   const rows = [];
+  if (_al) rows.push(_al);
   if (_en) rows.push(`<div style="font-size:12px;color:#ff4d4d;font-weight:600">⚔ Ennemi déclaré${_en.byMe ? ' (par toi)' : ''}</div><div style="font-size:11px;color:var(--mut);margin-top:2px">Pillage +10 points entre vous · pas de pacte possible · « Paix ? » des deux côtés pour en sortir</div>`);
-  if (_tr) rows.push(`<div style="font-size:12px;color:#ffc864">⚑ Accord commercial${_tr.until ? ' jusqu\'au ' + new Date(_tr.until).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' }) : ''}</div><div style="font-size:11px;color:var(--mut);margin-top:2px">Tes convois vers lui mieux protégés · canal ouvert</div>` + mpTradeBlockHtml(addr, p.playerName));
+  if (_tr) rows.push(`<div style="font-size:12px;color:#ffc864;${_al ? 'margin-top:8px' : ''}">⚑ Accord commercial${_tr.ally ? ' (alliance)' : ''}${_tr.until ? ' jusqu\'au ' + new Date(_tr.until).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' }) : ''}</div><div style="font-size:11px;color:var(--mut);margin-top:2px">Tes convois vers lui mieux protégés · canal ouvert</div>` + mpTradeBlockHtml(addr, p.playerName));
   if (inc) rows.push(`<div style="font-size:12px;color:#e6f0ff">Son tanker ${_esc(inc.tanker || '')} est en orbite chez toi</div>`);
   if (m) {
     const res = (m.cargo && m.cargo.resources) || {};
@@ -10726,6 +10949,7 @@ function mpEmbassyUnmount() {
 
 // PIRATERIE_1210 — balises & piraterie entre commandants (GDD starbyte_balises_piratage.md : P1 réel, P5-P7)
 var MP_PIRACY_ERRORS = {
+  ally: 'C\'est le convoi d\'un membre de ton alliance',   // PATCH_2110_ALLIANCES
   no_world: 'Ton monde n\'est pas encore au registre',
   convoy_gone: 'Le convoi est sorti de la zone de ta balise',
   no_ambush: 'Aucune de tes flottes n\'est en embuscade sur ce système',
@@ -37904,7 +38128,7 @@ function renderKnownPlayersView() {
   }
 
   if (playerPlanets.length === 0) {
-    return `
+    return mpAllyCardHtml() + `
       <div style="padding:40px 24px;text-align:center;color:var(--mut);font-size:12px;line-height:1.7">
         <div style="font-size:32px;opacity:.4;margin-bottom:12px;display:flex;align-items:center;justify-content:center">${icon('shield', {size:32})}</div>
         <div style="font-style:italic">Aucun joueur connu.</div>
@@ -37925,7 +38149,7 @@ function renderKnownPlayersView() {
           ${icon('shield', {size:18})}
         </div>
         <div style="flex:1;min-width:0">
-          <div style="font-size:14px;color:#ff8a8a;font-weight:500;line-height:1.2">${_escapeHtml(p.playerName)}</div>
+          <div style="font-size:14px;color:#ff8a8a;font-weight:500;line-height:1.2">${_escapeHtml(p.playerName)}${mpAllyBadge(p.mpAddress || p.coord)}</div>
           <div style="font-size:10px;color:var(--mut);margin-top:3px;font-family:'SF Mono',monospace"><span onclick="event.stopPropagation();openPlanetOnMap('${p.coord}')" title="Voir sur la carte" style="color:var(--cyan);cursor:pointer;text-decoration:underline dotted;text-underline-offset:3px">${p.coord}</span> · ${_escapeHtml(planetName)} · ${lvl}</div>
         </div>
         <div style="flex-shrink:0;color:var(--mut)">${icon('chevronRight', {size:14})}</div>
@@ -37933,7 +38157,7 @@ function renderKnownPlayersView() {
     `;
   }).join('');
 
-  return `
+  return mpAllyCardHtml() + `
     <div style="padding:8px 0 12px;font-size:10px;color:var(--mut);letter-spacing:.10em;text-transform:uppercase;text-align:center">
       ${playerPlanets.length} joueur${playerPlanets.length > 1 ? 's' : ''} connu${playerPlanets.length > 1 ? 's' : ''}
     </div>
