@@ -47144,11 +47144,22 @@ var SBTuto = (function () {
   const veins = () => { try { return Math.min(3, window.SBAntenna && SBAntenna.veinStep ? SBAntenna.veinStep() : 0); } catch (e) { return 0; } };
   const st = () => G.tuto;
   function init() {
-    if (G.tuto) return G.tuto;
-    // comptes déjà avancés : rien à apprendre ici (rejouable depuis le centre de commandement)
     const ps = PARCELS();
-    const veteran = (G.worlds || []).some(w => w && w.kind === 'colony') || antennaDone() || ps.some(q => q && (q.state === 'built' || q.state === 'building' || (q.successCount || 0) > 0 || q.state === 'resource'));
-    G.tuto = veteran ? { done: true, legacy: true } : { step: 0, at: Date.now(), seen: {} };
+    // PATCH_2110_TUTO_VETERAN : vétéran = au moins un vrai bâtiment (ou une colonie). Un gisement conquis
+    // ou l'antenne finie ne suffisent pas : Flotix (arrivé avant le didacticiel) n'a jamais eu ses leçons.
+    const hasColony = (G.worlds || []).some(w => w && w.kind === 'colony');
+    const hasBuilding = ps.some(q => q && (q.state === 'built' || q.state === 'building'));
+    if (G.tuto) {
+      if (G.tuto.legacy && !G.tuto.vetFix && !hasColony && !hasBuilding) {
+        // marqué vétéran à tort : reprise du didacticiel là où en est la partie (advance() saute les étapes faites)
+        G.tuto = { step: 1, at: Date.now(), seen: { m3: true }, vetFix: true };
+      }
+      return G.tuto;
+    }
+    const played = antennaDone() || ps.some(q => q && ((q.successCount || 0) > 0 || q.state === 'resource' || q.state === 'depleted'));
+    G.tuto = (hasColony || hasBuilding) ? { done: true, legacy: true }
+      : played ? { step: 1, at: Date.now(), seen: { m3: true }, vetFix: true }
+      : { step: 0, at: Date.now(), seen: {} };
     return G.tuto;   // pas de sauvegarde ici : au démarrage, elle se mêlerait à la réconciliation avec le cloud
   }
   const active = () => {
@@ -47334,7 +47345,7 @@ var SBTuto = (function () {
   }
   function tick() {
     if (typeof G === 'undefined' || !G || !G.planet) return;
-    if (!G.tuto && onPlanet()) init();
+    if (onPlanet() && (!G.tuto || (G.tuto.legacy && !G.tuto.vetFix))) init();   // PATCH_2110_TUTO_VETERAN
     if (!st()) return;
     const m3 = document.getElementById('scr-m3');
     if (m3 && !m3.classList.contains('hidden') && active() && !(st().seen && st().seen.m3)) {
