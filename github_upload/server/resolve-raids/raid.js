@@ -14,7 +14,8 @@ export function targetFromWorld(w) {
   const s = w?.stocks || {};
   return {
     defense,
-    garrison: Math.round(defense * GARRISON_SHARE),
+    // v26 : les garnisons alliées sont en orbite : elles ne comptent pas au sol
+    garrison: Math.round(Math.max(0, Number(w?.ground_defense ?? defense) || 0) * GARRISON_SHARE),
     resources: { metal: Number(s.metal) || 0, energie: Number(s.energie) || 0, cristal: Number(s.cristal) || 0 },
   };
 }

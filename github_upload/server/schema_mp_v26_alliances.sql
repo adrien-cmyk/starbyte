@@ -517,12 +517,13 @@ language plpgsql security definer set search_path = public as $$
 declare g public.alliance_garrisons; r public.raids; ty text; t text; n bigint; lost bigint; comp jsonb; lo jsonb; los jsonb; pct numeric := case when p_victory then 0.5 else 0.1 end;
 begin
   select * into r from public.raids where id = p_raid;
-  for g in select * from public.alliance_garrisons where id = any(p_ids) and left_at is null for update loop
+  for g in select * from public.alliance_garrisons where id = any(p_ids) and left_at is null
+             and (last_raid is null or last_raid ->> 'raid' is distinct from p_raid::text) for update loop   -- une seule fois par raid
     comp := g.composition; lo := '{}'::jsonb; los := g.losses;
     foreach ty in array array['tanker', 'fregate', 'cuirasse'] loop
       foreach t in array array['t1', 't2', 't3'] loop
         n := public._mp_num(comp -> ty ->> t);
-        lost := floor(n * pct);
+        lost := least(n, floor(n * pct + random())::bigint);   -- arrondi au hasard : juste en moyenne, même pour une petite pile
         if lost > 0 then
           comp := jsonb_set(comp, array[ty, t], to_jsonb(n - lost));
           lo := jsonb_set(case when lo ? ty then lo else lo || jsonb_build_object(ty, '{}'::jsonb) end, array[ty, t], to_jsonb(lost));

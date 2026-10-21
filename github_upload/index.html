@@ -10270,6 +10270,13 @@ async function mpGarrisonStart(address) {
   if (!pick) return;
   const f = pick.f, fuel = fuelOf(f);
   if ((G.res.energie.v || 0) < fuel) { toast(`Énergie insuffisante : ${fmt(fuel)} requis`); return; }
+  const _ns = ((f.soldiers && f.soldiers.garde) || 0) + ((f.soldiers && f.soldiers.lourd) || 0);
+  if (_ns > 0) {   // une garnison combat en orbite : les soldats débarquent et défendent ta planète
+    const okS = await sbConfirm({ title: 'Les soldats restent au sol', body: `Une garnison combat en orbite chez ton allié.<br><br>Les <strong>${_ns} soldat${_ns > 1 ? 's' : ''}</strong> de ${_esc(f.name)} retournent à la caserne et défendent ta planète pendant son absence.`, confirmLabel: 'Débarquer et continuer', cancelLabel: 'Annuler' });
+    if (!okS) return;
+    f.soldiers = Object.assign({}, f.soldiers, { garde: 0, lourd: 0 });
+    if (typeof syncFleetIntegrity === 'function') syncFleetIntegrity(f);
+  }
   const ok = await sbConfirmWarning('Garnison chez ' + mem.pseudo,
     `Envoyer <strong>${_esc(f.name)}</strong> en garnison chez <strong>${_esc(mem.pseudo)}</strong> ?<br><br>Trajet ${Math.round(travel / 60000)} min · ${fmt(fuel)} énergie.`
     + `<br><br>En orbite chez lui, elle combat avec ses défenses si un raid arrive. Elle reste à toi : tu paies ses pertes (la moitié des vaisseaux si l'orbite tombe, un dixième si le raid est repoussé).`
@@ -10360,6 +10367,12 @@ function mpIngestGarrisons(mine, hosted) {
   const prevHosted = JSON.stringify(G.mpGarHosted || []);
   G.mpGarHosted = hosted;
   let dirty = prevHosted !== JSON.stringify(hosted);
+  // garnison inconnue du registre (levée depuis longtemps, jeu fermé) : la flotte rentre
+  const ids = new Set(mine.map(g => g.id));
+  for (const f of G.fleet.prepared || []) if (f.garrison && f.garrison.mpGarrisonId && f.garrison.phase !== 'returning' && !ids.has(f.garrison.mpGarrisonId)) {
+    _mpGarStartReturn(f, 'garnison levée'); dirty = true;
+    if (typeof startMissionTimerLoop === 'function') startMissionTimerLoop();
+  }
   for (const g of mine) {
     const f = (G.fleet.prepared || []).find(x => x.garrison && x.garrison.mpGarrisonId === g.id);
     if (f) {
@@ -39412,7 +39425,8 @@ var MP_FLAG_KEY = { peace: 'paix', trade: 'commerce', alliance: 'alliance', why_
 // PATCH_2110_PAVILLONS — déclarer un ennemi se confirme
 async function _mpConfirmFlag(key, who) {
   if (key !== 'ennemi') return true;
-  return sbConfirmWarning('Déclarer ' + (who || 'ce commandant') + ' ennemi ?', 'La rivalité devient officielle : elle s\'affiche chez vous deux et une rumeur circule au comptoir.<br><br>Entre ennemis, un raid gagné pille <b>10 points de plus</b> : jusqu\'à 40 % d\'une capitale, 60 % d\'un dépôt colonial. Tout pacte entre vous tombe, et aucun ne peut être signé tant que la rivalité dure.<br><br>Pour en sortir : un pavillon « Paix ? » auquel il répond « Paix ? ».', 'Déclarer ennemi');
+  const _al = typeof mpAllyMember === 'function' && mpAllyMember(null, who);   // PATCH_2110_ALLIANCES
+  return sbConfirmWarning('Déclarer ' + (who || 'ce commandant') + ' ennemi ?', (_al ? `<strong style="color:#ff8a8a">${_esc(who)} est membre de ton alliance : c'est toi qui la quittes.</strong><br><br>` : '') + 'La rivalité devient officielle : elle s\'affiche chez vous deux et une rumeur circule au comptoir.<br><br>Entre ennemis, un raid gagné pille <b>10 points de plus</b> : jusqu\'à 40 % d\'une capitale, 60 % d\'un dépôt colonial. Tout pacte entre vous tombe, et aucun ne peut être signé tant que la rivalité dure.<br><br>Pour en sortir : un pavillon « Paix ? » auquel il répond « Paix ? ».', 'Déclarer ennemi');
 }
 var MP_FLAG_BY_KEY = {};
 PLAYER_MESSAGE_FLAGS.forEach(f => { MP_FLAG_BY_KEY[MP_FLAG_KEY[f.id]] = f; });

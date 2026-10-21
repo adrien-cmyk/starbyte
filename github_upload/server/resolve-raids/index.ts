@@ -59,7 +59,7 @@ Deno.serve(async (req) => {
       }
       const extra = gar.reduce((s, x) => s + x.def, 0);
       const result: any = dw
-        ? resolveRaid(raid, extra > 0 ? { ...dw, defense: (Number(dw.defense) || 0) + extra } : dw)
+        ? resolveRaid(raid, extra > 0 ? { ...dw, defense: (Number(dw.defense) || 0) + extra, ground_defense: Number(dw.defense) || 0 } : dw)
         : { outcome: 'aborted', reason: 'defender_gone', loot: { metal: 0, energie: 0, cristal: 0 }, damaged_building: null };
       if (gar.length && result.outcome !== 'aborted') result.garrisons = gar.map(x => ({ owner: x.owner_pseudo, fleet: x.fleet_name, def: x.def }));
       const { data: fin, error: finErr } = await admin.rpc('mp_finish_raid', { p_raid: raid.id, p_result: result });
