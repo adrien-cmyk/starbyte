@@ -312,6 +312,7 @@
 
   // ambiance : ciel, brouillard et lumières tirés vers l'orange de catastrophe
   function setAmbience(k) {
+    if (window.SBSky && SBSky.ownsDevast) { try { SBSky.auto(); } catch (e) {} return; }   // PATCH_2110_DEVAST_SOMBRE : le ciel s'en charge
     const T = three(), P = window.Planet3D; if (!T || !P || !P.scene) return;
     const sc = P.scene;
     if (!FX.amb) {
@@ -350,10 +351,29 @@
     FX.forest.forEach(f => {
       const m = f.mesh, mat = m.material;
       if (!mat.userData.sbOrig) mat.userData.sbOrig = mat.color.clone();
-      mat.color.copy(mat.userData.sbOrig).lerp(new T.Color(f.foliage ? TGT[f.type] : 0x1a120d), f.foliage ? Math.min(1, k * 1.1) : k * 0.7);
+      // PATCH_2110_DEVAST_SOMBRE : la forêt-jardin porte ses couleurs par arbre (instanceColor, matériau blanc) :
+      // on les garde de côté et on les rougit, au lieu de les écraser en blanc
+      if (m.instanceColor && !m.userData.sbOrigIC) m.userData.sbOrigIC = Float32Array.from(m.instanceColor.array);
+      const OIC = m.userData.sbOrigIC;
+      if (OIC && f.foliage === false && OIC.length >= 3 && OIC[1] > OIC[0] * 1.05) f.foliage = 'ic';
+      if (OIC) { mat.color.copy(mat.userData.sbOrig); }
+      else mat.color.copy(mat.userData.sbOrig).lerp(new T.Color(f.foliage ? TGT[f.type] : 0x1a120d), f.foliage ? Math.min(1, k * 1.1) : k * 0.7);
       if (!m.instanceColor) { m.instanceColor = new T.InstancedBufferAttribute(new Float32Array(m.count * 3).fill(1), 3); mat.needsUpdate = true; }
       const arr = m.instanceColor.array;
-      if (!info || !k) { arr.fill(1); m.instanceColor.needsUpdate = true; return; }
+      if (!info || !k) { if (OIC) arr.set(OIC); else arr.fill(1); m.instanceColor.needsUpdate = true; return; }
+      if (OIC) {
+        const tag = info.tag[f.type];
+        for (let i = 0; i < m.count; i++) {
+          const t = tag ? tag[i] : 0, r = hash(i * 3.7 + f.type * 11), o = i * 3;
+          let R, G2, B;
+          if (t === 2) { R = G2 = B = 0.07; }
+          else if (t === 1) { R = .16; G2 = .12; B = .1; }
+          else if (f.foliage) { const d = .72 + .2 * r; R = (OIC[o] + OIC[o + 1] * (.35 + .3 * r)) * d; G2 = OIC[o + 1] * .78 * d; B = OIC[o + 2] * .45 * d; }   // vert rougeâtre, assombri
+          else { R = OIC[o] * .5; G2 = OIC[o + 1] * .42; B = OIC[o + 2] * .38; }
+          arr[o] = R; arr[o + 1] = G2; arr[o + 2] = B;
+        }
+        m.instanceColor.needsUpdate = true; return;
+      }
       const tag = info.tag[f.type];
       for (let i = 0; i < m.count; i++) {
         const t = tag ? tag[i] : 0, r = hash(i * 3.7 + f.type * 11);

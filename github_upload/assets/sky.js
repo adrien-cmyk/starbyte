@@ -29,8 +29,21 @@
     if (P.renderer) P.renderer.toneMappingExposure = L(NIGHT.exp, DAY.exp);
     if ('environmentIntensity' in sc) sc.environmentIntensity = L(NIGHT.env, DAY.env);
     if (P.bloom) P.bloom.strength = L(NIGHT.bloom, DAY.bloom);
+    // PATCH_2110_DEVAST_SOMBRE (Adrien) : planète dévastée = ambiance sombre de catastrophe (braise, suie), réglée ici
+    // pour ne plus se battre avec aftermath.js (qui teintait les mêmes lumières puis se faisait écraser par le ciel)
+    const cat = devCat();
+    if (cat > 0) {
+      const LC = (c, hex, f) => c.lerp(new T.Color(hex), f);
+      if (sc.background && sc.background.isColor) LC(sc.background, 0x0c0403, cat * .85);
+      if (sc.fog) LC(sc.fog.color, 0x1a0805, cat * .85);
+      if (C.hemi) { LC(C.hemi.color, 0x7a2e14, cat * .7); LC(C.hemi.groundColor, 0x120402, cat * .8); C.hemi.intensity *= 1 - .45 * cat; }
+      if (C.key) { LC(C.key.color, 0xff6a2a, cat * .6); C.key.intensity *= 1 - .55 * cat; }
+      if (P.renderer) P.renderer.toneMappingExposure *= 1 - .18 * cat;
+      if ('environmentIntensity' in sc) sc.environmentIntensity *= 1 - .5 * cat;
+    }
     dimLights(sc, L(1, DAY_GLOW));
   }
+  function devCat() { try { const d = window.SBAftermath ? SBAftermath.dev : 0; return d > 0 ? .6 + .4 * Math.min(1, d / 50) : 0; } catch (e) { return 0; } }
   // 20/10 (Adrien) : en journée, les lumières des bâtiments baissent (fenêtres, néons, lampes, halos)
   const DAY_GLOW = 0.35;
   let lastF = -1;
@@ -59,7 +72,7 @@
   function devNight() { try { const d = window.SBAftermath ? SBAftermath.dev : 0; return d > 0 ? Math.min(1, d / 10) : 0; } catch (e) { return 0; } }
   function tick() { try { apply(forced != null ? forced : dayK(new Date()) * (1 - devNight())); } catch (e) { console.warn('[ciel]', e); } }
   setInterval(tick, 30000);
-  let _dn = -1; setInterval(() => { const d = devNight(); if (d !== _dn) { _dn = d; tick(); } }, 2000);   // PATCH_2110_NUIT_SECOURS : dès que la dévastation change
+  let _dn = -1; setInterval(() => { const d = devNight() + devCat() * 10; if (d !== _dn) { _dn = d; tick(); } }, 2000);   // PATCH_2110_NUIT_SECOURS : dès que la dévastation change
   const boot = setInterval(() => {
     if (!(window.Planet3D && Planet3D.ready)) return;
     clearInterval(boot);
@@ -68,5 +81,5 @@
     P._rebuild = function () { const r = orig.apply(this, arguments); try { if (lastF >= 0) dimLights(this.scene, lastF); } catch (e) {} return r; };
     tick();
   }, 1000);
-  window.SBSky = { dayK, apply, force(k) { forced = k; tick(); }, auto() { forced = null; tick(); } };
+  window.SBSky = { ownsDevast: true, dayK, apply, force(k) { forced = k; tick(); }, auto() { forced = null; tick(); } };
 })();
