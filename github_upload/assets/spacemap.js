@@ -261,7 +261,7 @@
     // 21/10 (Adrien : « la route du Linceul a encore changé ») — positions FIGÉES : un système qui a reçu une case la garde
     // pour toujours (G.mapCells). Les nouveaux venus se placent autour ; une route qui s'allonge ajoute ses jalons sans
     // déplacer ceux qu'on connaît. Les cases des systèmes absents (rapports supprimés…) restent réservées.
-    if (!G.mapCells || G.mapCells.v !== 3 || G.mapCells.home !== home) G.mapCells = { v: 3, home, cells: {} };   // v3 (21/10 soir) : recalcul unique avec le tracé en ligne droite
+    if (!G.mapCells || G.mapCells.v !== 4 || G.mapCells.home !== home) G.mapCells = { v: 4, home, cells: {} };   // v4 (22/10) : recalcul unique — routes en ligne droite depuis mon côté
     const MC = G.mapCells.cells;
     const fixed = new Set(), reserved = [];
     for (const [k, idx] of Object.entries(MC)) {
@@ -276,6 +276,9 @@
       try {
         for (const o of SBLines.openedRoutes()) if (o.chain && o.chain.length > 2) routeChains.push(o.chain);
         for (const r of (G.routes || [])) if (r.portSys) { const ch = SBLines.knownChain(r.portSys); if (ch.length > 2) routeChains.push(ch); }
+        // 22/10 — une ligne qu'un de mes tankers emprunte (même sans route enregistrée) se trace aussi en ligne droite
+        const seen = new Set(routeChains.map(ch => ch[ch.length - 1]));
+        for (const m of (G.tankerMissions || [])) if (m.portSys && !seen.has(m.portSys)) { const ch = SBLines.knownChain(m.portSys); if (ch.length > 1) { routeChains.push(ch); seen.add(m.portSys); } }
       } catch (e) {}
     }
     routeChains.sort((a, b) => b.length - a.length);   // la plus longue d'abord : les routes qui partagent des jalons suivent son tracé
@@ -306,13 +309,16 @@
       if (ib === undefined) continue;
       const minRing = kA === home || kB === home ? 2 : 1;
       if (cell['sys:' + kA] === undefined && systems[kA]) {
-        const B = CELLS[ib], R = CELL * (n + 0.5);
-        let base = Math.atan2(B.z, B.x);
-        if (Math.hypot(B.x, B.z) < 1) base = _mulberry32(_hashSeed('SMr:' + kB))() * Math.PI * 2;
-        // dans le prolongement ma planète → lieu si la grille le permet, sinon on tourne (±30°, ±60°…) jusqu'à trouver la place
+        const B = CELLS[ib], dB = Math.hypot(B.x, B.z);
+        // 22/10 — le départ connu se pose DE MON CÔTÉ du lieu (le tanker part de chez moi, rejoint la ligne et la suit
+        // jusqu'au lieu : un trait sans retour en arrière) ; s'il n'y a pas la place vers moi, on tourne (±30°, ±60°…)
+        let base = Math.atan2(-B.z, -B.x);
+        if (dB < 1) base = _mulberry32(_hashSeed('SMr:' + kB))() * Math.PI * 2;
         let c = null;
         for (const dd of [0, 30, -30, 60, -60, 90, -90, 120, -120, 150, -150, 180]) {
-          const a = base + dd * Math.PI / 180, x = B.x + Math.cos(a) * R, z = B.z + Math.sin(a) * R;
+          const a = base + dd * Math.PI / 180;
+          const R = dd === 0 ? Math.max(CELL, Math.min(CELL * (n + 0.5), dB - CELL * 2)) : CELL * (n + 0.5);
+          const x = B.x + Math.cos(a) * R, z = B.z + Math.sin(a) * R;
           let near = null, bd = Infinity; for (const q of CELLS) { const d = Math.hypot(q.x - x, q.z - z); if (d < bd) { bd = d; near = q; } }
           if (!near || near.ring > BOARD - 1 || near.ring < minRing || bd > CELL) continue;
           c = occ.has(near.idx) ? nearestFree(x, z, minRing) : near;
