@@ -29535,6 +29535,17 @@ function sbTransferMs(fromId, toId) {
 let _sbXfer = null;   // brouillon du transfert : { from, to, fleetId }
 // PATCH_2110_XFER_FLOTTE (Adrien, 21/10) : on transfère une FLOTTE composée (vaisseaux, soldats, héros), pas des vaisseaux en vrac
 function _sbXferFleets() { return ((G.fleet && G.fleet.prepared) || []).filter(f => _sbMine(f) && ['prepared', 'deployed'].includes(f.status || 'prepared') && _sbShipCount(f.composition) > 0); }
+// PATCH_2110_XFER_REPAIR (Adrien) : une flotte en réparation peut partir, mais seulement une fois réparée à 60 % au moins
+// (la réparation avance linéairement entre son intégrité de départ et 100 %)
+function _sbFleetIntegrityNow(f) {
+  let avg = 100; try { avg = fleetDamageSummary(f).avg; } catch (e) {}
+  if (f.repair && f.repair.endsAt > f.repair.startedAt) {
+    const k = Math.max(0, Math.min(1, (Date.now() - f.repair.startedAt) / (f.repair.endsAt - f.repair.startedAt)));
+    avg = Math.round(avg + (100 - avg) * k);
+  }
+  return avg;
+}
+function _sbXferBlocked(f) { return !!(f && f.repair && _sbFleetIntegrityNow(f) < 60); }
 function _sbFleetLine(f) {
   const parts = [];
   for (const k of FLEET_SHIP_KEYS) { let n = 0; for (const t of ['t1', 't2', 't3']) n += (f.composition && f.composition[k] && f.composition[k][t]) || 0; if (n) parts.push(n + ' ' + ({ tanker: 'tanker', fregate: 'frégate', cuirasse: 'cuirassé' })[k] + (n > 1 ? 's' : '')); }
@@ -29548,7 +29559,7 @@ function sbOpenTransfer() {
   if (!others.length) { toast('Il faut une deuxième planète pour transférer une flotte'); return; }
   const fleets = _sbXferFleets();
   if (!_sbXfer || _sbXfer.from !== G.activeWorld) _sbXfer = { from: G.activeWorld, to: others[0].id, fleetId: null };
-  if (!fleets.some(f => f.id === _sbXfer.fleetId)) _sbXfer.fleetId = fleets.length === 1 ? fleets[0].id : null;
+  if (!fleets.some(f => f.id === _sbXfer.fleetId && !_sbXferBlocked(f))) { const ok1 = fleets.filter(f => !_sbXferBlocked(f)); _sbXfer.fleetId = ok1.length === 1 ? ok1[0].id : null; }
   let el = document.getElementById('sb-xfer');
   if (!el) {
     el = document.createElement('div'); el.id = 'sb-xfer';
@@ -29557,8 +29568,10 @@ function sbOpenTransfer() {
   }
   const esc = (x) => String(x == null ? '' : x).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const nameOf = (w) => w.id === G.activeWorld ? G.planet.name : (w.id === 'home' ? (w.data && w.data.planet && w.data.planet.name) || w.name : w.name);
-  const rows = fleets.map(f => `<button class="sbx-fleet${f.id === _sbXfer.fleetId ? ' on' : ''}" onclick="_sbXfer.fleetId='${f.id}';sbOpenTransfer()">
-      <b>${esc(f.name || 'Flotte')}</b><i>${esc(_sbFleetLine(f))} · ${(f.status || 'prepared') === 'deployed' ? 'en orbite' : 'au sol'}</i></button>`);
+  const rows = fleets.map(f => _sbXferBlocked(f)
+    ? `<div class="sbx-fleet off"><b>${esc(f.name || 'Flotte')}</b><i>${esc(_sbFleetLine(f))} · en réparation · ${_sbFleetIntegrityNow(f)} % (départ possible dès 60 %)</i></div>`
+    : `<button class="sbx-fleet${f.id === _sbXfer.fleetId ? ' on' : ''}" onclick="_sbXfer.fleetId='${f.id}';sbOpenTransfer()">
+      <b>${esc(f.name || 'Flotte')}</b><i>${esc(_sbFleetLine(f))} · ${(f.status || 'prepared') === 'deployed' ? 'en orbite' : 'au sol'}${f.repair ? ` · en réparation · ${_sbFleetIntegrityNow(f)} % (elle continue en route)` : ''}</i></button>`);
   const enroute = (G.fleetTransfers || []).filter(x => x.from === G.activeWorld || x.to === G.activeWorld)
     .map(x => `<div class="sbx-transit">⇄ ${esc(x.fleetName || (_sbShipCount(x.ships) + ' vaisseaux'))} · ${x.from === G.activeWorld ? 'vers ' + esc(x.toName) : 'depuis ' + esc(x.fromName)} · arrivée dans ${formatTankerDuration(Math.max(0, x.arriveAt - Date.now()))}</div>`).join('');
   const ms = sbTransferMs(_sbXfer.from, _sbXfer.to);
@@ -29579,6 +29592,7 @@ function sbLaunchTransfer() {
   if (!x || !x.fleetId) return;
   const f = _sbXferFleets().find(y => y.id === x.fleetId);
   if (x.from !== G.activeWorld || !sbWorld(x.to) || !f) { _sbXfer = null; toast('Cette flotte n\'est plus disponible'); sbOpenTransfer(); return; }
+  if (_sbXferBlocked(f)) { toast(`${f.name || 'La flotte'} n'est réparée qu'à ${_sbFleetIntegrityNow(f)} % : départ possible dès 60 %`); sbOpenTransfer(); return; }
   // les vaisseaux et les soldats quittent la planète de départ
   for (const k of FLEET_SHIP_KEYS) for (const t of ['t1', 't2', 't3']) {
     const n = (f.composition[k] && f.composition[k][t]) || 0;
@@ -29674,6 +29688,7 @@ setInterval(() => {
     #sb-xfer .sbx-row button.all { width: auto; padding: 0 8px; font-size: 11px; }
     #sb-xfer .sbx-row b { width: 28px; text-align: center; }
     #sb-xfer .sbx-fleet { display: block; width: 100%; text-align: left; padding: 10px 12px; margin-bottom: 6px; border-radius: 10px; border: 1px solid rgba(255,255,255,.1); background: rgba(255,255,255,.03); color: #dfe8ea; font-size: 13px; }
+    #sb-xfer .sbx-fleet.off { opacity: .5; }
     #sb-xfer .sbx-fleet.on { border-color: rgba(255,176,102,.7); background: rgba(255,176,102,.1); }
     #sb-xfer .sbx-fleet i { display: block; font-style: normal; font-size: 11px; color: #8aa0a6; margin-top: 2px; }
     #sb-xfer .sbx-transit { font-size: 11px; color: #ffb066; padding: 6px 2px; }
