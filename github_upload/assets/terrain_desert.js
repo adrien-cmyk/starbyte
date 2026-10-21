@@ -271,8 +271,9 @@
     }
     P.scene.add(overlay);
     if (P.decoGroup) P.decoGroup.traverse(o => {
-      if (!o.isMesh || !o.material || !o.material.color || o.userData.terraTint) return;
-      const c = o.material.color; if (c.g > c.r * 1.08 && c.g > c.b) { o.material = o.material.clone(); o.material.color.set(0x6f6157); o.userData.terraTint = true; }
+      if (!o.isMesh || !o.material || !o.material.color) return;
+      // PATCH_2110 : désert — pas d'arbres sur les parcelles (troncs et feuillages masqués), on garde les rochers
+      if (o.material.color.getHex() !== 0x44474d) o.visible = false;
     });
   }
   function hook() {

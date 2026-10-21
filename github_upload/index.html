@@ -29415,10 +29415,12 @@ function sbOpenWorldPicker() {
   el = document.createElement('div');
   el.id = 'sb-worlds';
   const esc = (x) => String(x == null ? '' : x).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-  el.innerHTML = `<div class="sbw-card"><div class="sbw-h">Tes planètes</div>${G.worlds.map(w => `
+  el.innerHTML = `<div class="sbw-card"><div class="sbw-h">Tes planètes</div><div class="sbw-sub">Touche une planète pour t'y rendre. Le stock est commun à tout l'empire.</div>${G.worlds.map(w => `
     <button class="sbw-row${w.id === G.activeWorld ? ' on' : ''}" onclick="document.getElementById('sb-worlds').remove();sbSwitchWorld('${w.id}')">
-      <b>${esc(w.id === 'home' ? ((w.id === G.activeWorld ? G.planet.name : w.name) || 'Capitale') : w.name)}</b>
-      <span>${w.kind === 'capital' ? 'Capitale' : 'Colonie'}${w.coord ? ' · ' + esc(w.coord) : ''}</span>
+      <span class="sbw-k">${w.kind === 'capital' ? 'Capitale' : 'Colonie'}</span>
+      <span class="sbw-m"><b>${esc(w.id === 'home' ? ((w.id === G.activeWorld ? G.planet.name : w.name) || 'Capitale') : w.name)}</b>
+      <span>${w.coord ? esc(w.coord) : (w.kind === 'capital' ? 'Planète d\'origine' : '')}</span></span>
+      <span class="sbw-go">${w.id === G.activeWorld ? 'Tu es ici' : 'Y aller →'}</span>
     </button>${w.kind === 'colony' ? `<button class="sbw-ren" onclick="event.stopPropagation();document.getElementById('sb-worlds').remove();sbAskColonyName('${w.id}')">Renommer ${esc(w.name)}</button>` : ''}`).join('')}${(G.colonyMissions || []).map(m => `<div class="sbw-row off" style="cursor:pointer" onclick="document.getElementById('sb-worlds').remove();openArkMission('${m.id}')"><b>${esc(m.name)}</b><span>Arche en route · ${formatTankerDuration(Math.max(0, m.arriveAt - Date.now()))}</span></div>`).join('')}
     <button class="sbw-x" onclick="document.getElementById('sb-worlds').remove()">Fermer</button></div>`;
   el.addEventListener('click', (e) => { if (e.target === el) el.remove(); });
@@ -29427,14 +29429,25 @@ function sbOpenWorldPicker() {
 (function () {
   const st = document.createElement('style');
   st.textContent = `
-    body.sb-multi #w-planet { pointer-events: auto; cursor: pointer; }
-    body.sb-multi #w-planet::after { content: ' ▾'; color: #ffb066; }
+    /* PATCH_2110_SELECTEUR : le nom de la planète devient un vrai bouton dès qu'il y a plusieurs planètes */
+    body.sb-multi #w-planet { pointer-events: auto; cursor: pointer; display: table; margin: 6px auto 0; padding: 7px 12px 7px 10px; border-radius: 18px;
+      background: rgba(18,13,8,.82); border: 1px solid rgba(255,176,102,.55); color: #ffe2bd; font-size: 10.5px; letter-spacing: .16em; font-weight: 600;
+      box-shadow: 0 4px 14px rgba(0,0,0,.45); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); }
+    body.sb-multi #w-planet::before { content: attr(data-kind); margin-right: 8px; padding: 2px 6px; border-radius: 8px; background: rgba(255,176,102,.18); color: #ffb066; font-size: 8.5px; letter-spacing: .18em; }
+    body.sb-multi #w-planet::after { content: '⇄'; margin-left: 9px; color: #ffb066; font-size: 12px; letter-spacing: 0; }
+    body.sb-multi #w-planet:active { transform: scale(.97); }
+    #scr-planet .p3d-goal, .p3d-overlay .p3d-goal { top: calc(var(--sb-top-h, 46px) + 6px) !important; }   /* l'objectif passe sous le nom de la planète au lieu de le cacher */
     #sb-worlds { position: fixed; inset: 0; z-index: 9500; background: rgba(2,6,12,.6); display: flex; align-items: center; justify-content: center; padding: 16px; backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px); }
     #sb-worlds .sbw-card { width: 100%; max-width: 360px; background: rgba(10,18,28,.96); border: 1px solid rgba(95,255,232,.25); border-radius: 14px; padding: 14px; }
-    #sb-worlds .sbw-h { font: 600 11px/1 ui-monospace, monospace; letter-spacing: .16em; text-transform: uppercase; color: #5fffe8; margin: 2px 2px 12px; }
-    #sb-worlds .sbw-row { display: block; width: 100%; text-align: left; background: rgba(255,255,255,.03); border: 1px solid rgba(255,255,255,.08); border-radius: 10px; padding: 11px 12px; margin-bottom: 8px; color: #dfe8ea; }
-    #sb-worlds .sbw-row b { display: block; font-size: 14px; letter-spacing: .04em; }
+    #sb-worlds .sbw-h { font: 600 11px/1 ui-monospace, monospace; letter-spacing: .16em; text-transform: uppercase; color: #5fffe8; margin: 2px 2px 6px; }
+    #sb-worlds .sbw-sub { font-size: 11px; color: #8aa0a6; margin: 0 2px 12px; }
+    #sb-worlds .sbw-row { display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; background: rgba(255,255,255,.03); border: 1px solid rgba(255,255,255,.1); border-radius: 12px; padding: 12px 12px; margin-bottom: 8px; color: #dfe8ea; cursor: pointer; }
+    #sb-worlds .sbw-row .sbw-k { flex-shrink: 0; padding: 3px 7px; border-radius: 8px; font-size: 8.5px; letter-spacing: .16em; text-transform: uppercase; background: rgba(255,176,102,.14); color: #ffb066; }
+    #sb-worlds .sbw-row .sbw-m { flex: 1; min-width: 0; }
+    #sb-worlds .sbw-row b { display: block; font-size: 15px; letter-spacing: .05em; }
     #sb-worlds .sbw-row span { font-size: 11px; color: #8aa0a6; }
+    #sb-worlds .sbw-row .sbw-go { flex-shrink: 0; font-size: 10px; letter-spacing: .12em; text-transform: uppercase; color: #ffb066; }
+    #sb-worlds .sbw-row.on .sbw-go { color: #8aa0a6; }
     #sb-worlds .sbw-row.on { border-color: rgba(255,176,102,.6); background: rgba(255,176,102,.08); }
     #sb-worlds .sbw-row.off { opacity: .6; }
     #sb-worlds .sbw-ren { display: block; width: 100%; margin: -2px 0 8px; padding: 7px 10px; background: none; border: 0; text-align: right; color: #ffb066; font-size: 10px; letter-spacing: .14em; text-transform: uppercase; cursor: pointer; }
@@ -29444,7 +29457,13 @@ function sbOpenWorldPicker() {
     const t = e.target && e.target.closest && e.target.closest('#w-planet');
     if (t && Array.isArray(G.worlds) && G.worlds.length > 1) sbOpenWorldPicker();
   });
-  setInterval(() => { try { document.body.classList.toggle('sb-multi', Array.isArray(G.worlds) && G.worlds.length > 1); } catch (e) {} }, 1000);
+  setInterval(() => { try {
+    const multi = Array.isArray(G.worlds) && G.worlds.length > 1;
+    document.body.classList.toggle('sb-multi', multi);
+    const wp = document.getElementById('w-planet');
+    if (wp && multi) { const w = G.worlds.find(x => x && x.id === G.activeWorld); const k = w && w.kind === 'colony' ? 'Colonie' : 'Capitale'; if (wp.dataset.kind !== k) wp.dataset.kind = k; }   // PATCH_2110_SELECTEUR
+    const wt = wp && wp.closest('.w-top'); if (wt) { const h = Math.round(wt.getBoundingClientRect().bottom); if (h > 0) document.body.style.setProperty('--sb-top-h', h + 'px'); }
+  } catch (e) {} }, 1000);
 })();
 
 // PATCH_2010_COLONIE (multijoueur, v18) — chaque colonie publie sa défense et ses bâtiments à côté de la capitale
@@ -47550,7 +47569,7 @@ if (G.knownTargets && Array.isArray(G.tankerMissions)) {
   const v = window.sbTerrainVariant();
   window.__sbTerrainLoaded = v;
   const sc = document.createElement('script');
-  sc.src = v === 'desert' ? 'assets/terrain_desert.js?v=20261021-1130' : 'assets/terrain.js?v=20261021-1130';
+  sc.src = v === 'desert' ? 'assets/terrain_desert.js?v=20261021-1130b' : 'assets/terrain.js?v=20261021-1130';
   document.head.appendChild(sc);
   // la partie du cloud peut arriver après le démarrage avec une autre planète affichée : on se recale une fois
   setTimeout(function chk() {
