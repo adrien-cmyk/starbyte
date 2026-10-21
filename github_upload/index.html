@@ -5869,6 +5869,9 @@ svg.map {
   <button onclick="cheatShips('fregate', 5)">+5 Frégates</button>
   <button onclick="cheatShips('tanker', 3)">+3 Tankers</button>
   <button onclick="cheatShips('cuirasse', 2)">+2 Cuirassés</button>
+  <button onclick="cheatToggleFastShips()" id="cheat-fastships-btn">⏱ Vaisseaux : durée normale</button>
+  <button onclick="cheatArche()">◈ +1 Arche coloniale (skill débloqué)</button>
+  <button onclick="cheatArcheArrive()">◈ Arche en route : arrivée immédiate</button>
   <button onclick="cheatPunisher()"><span class="icon-static" data-icon="anchor" data-icon-size="11" style="margin-right:5px"></span>Spawn Punisher 1</button>
 
   <div class="cheat-divider"></div>
@@ -32692,6 +32695,7 @@ let queueTicker = null;
 function startQueueTicker() {
   if (queueTicker) return;
   queueTicker = setInterval(() => {
+    try { cheatFastShipsApply(); } catch (e) {}   // PATCH_2110_CHEAT_VAISSEAUX10
     // OFFLINE — les files avancent du temps réellement écoulé (simulateTo)
     const out = simulateTo(Date.now());
     for (const type of out.queueTypes) renderQueue(type);
@@ -46346,6 +46350,39 @@ function cheatShips(shipKey, qty) {
   const meta = SHIP_UNITS[shipKey];
   toast(`+${qty} ${meta?.name || shipKey} T1`);
   refreshCurrentScreen();
+}
+
+// PATCH_2110_CHEAT_VAISSEAUX10 — chaque vaisseau du chantier orbital sort en 10 s (file en cours comprise)
+function cheatFastShipsApply() {
+  if (!(G.cheats && G.cheats.fastShips) || !QUEUES.shipyard) return;
+  for (const c of QUEUES.shipyard.commands) if (c.unitDuration > 10) { c.unitDuration = 10; if (c.currentElapsed > 10) c.currentElapsed = 10; }
+}
+function cheatToggleFastShips() {
+  if (!G.cheats) G.cheats = {};
+  G.cheats.fastShips = !G.cheats.fastShips;
+  const btn = document.getElementById('cheat-fastships-btn');
+  if (btn) btn.textContent = G.cheats.fastShips ? '⏱ Vaisseaux : 10 s (actif)' : '⏱ Vaisseaux : durée normale';
+  cheatFastShipsApply();
+  toast(G.cheats.fastShips ? 'Vaisseaux construits en 10 s' : 'Construction des vaisseaux : durée normale');
+  try { saveGame(); } catch (e) {}
+  if (typeof renderShipyard === 'function' && !document.getElementById('scr-shipyard').classList.contains('hidden')) renderShipyard();
+}
+
+// PATCH_2110_CHEAT_ARCHE — une Arche prête au chantier, sans Centre 3 ni chantier 2
+function cheatArche() {
+  G.skills.colonialShipUnlocked = true;
+  G.fleet.colonial = (G.fleet.colonial || 0) + 1;
+  toast(`◈ Arche coloniale prête (${G.fleet.colonial}) · ouvre une planète habitable libre et « Coloniser »`);
+  try { saveGame(); } catch (e) {}
+  refreshCurrentScreen();
+}
+function cheatArcheArrive() {
+  const ms = G.colonyMissions || [];
+  if (!ms.length) { toast('Aucune Arche en route'); return; }
+  ms.forEach(m => { m.arriveAt = Date.now() - 1000; });
+  try { sbColonyTick(); } catch (e) {}
+  toast('◈ Arche arrivée');
+  try { saveGame(); } catch (e) {}
 }
 
 // Cheat passe 3.2 : crée une flotte préparée "Punisher 1" pré-composée
