@@ -48109,6 +48109,32 @@ if (G.knownTargets && Array.isArray(G.tankerMissions)) {
     g._sbGuard = true; window.onHexClick = g;
   }, 1000);
 
+  // 3c) PATCH_2110_GHOST — clics fantômes : sur la carte, toucher un objet affiche sa fiche SOUS le doigt, et le click
+  //     qui suit tombait sur le bouton qui venait d'apparaître (« Envoyer une Moyenne »…) : des sondes partaient seules.
+  //     Un bouton né après que le doigt s'est posé ne peut pas être celui qu'on visait → click ignoré
+  //     (sauf si c'est le même bouton redessiné : même action, même texte).
+  const BTN = 'button, [onclick], a[href]';
+  const born = new WeakMap();
+  const sigOf = el => el ? (el.getAttribute('onclick') || el.getAttribute('href') || (el.id ? '#' + el.id : '') || (el.dataset && (el.dataset.a || el.dataset.k)) || (el.textContent || '').replace(/[0-9]+/g, '').trim().slice(0, 40)) : '';
+  let gDown = { t: -1, sig: '' }, gTouchAt = -1e9;
+  const gMark = e => { const el = e.target && e.target.closest ? e.target.closest(BTN) : null; gDown = { t: performance.now(), sig: sigOf(el) }; };
+  document.addEventListener('touchstart', e => { gTouchAt = performance.now(); gMark(e); }, { passive: true, capture: true });
+  document.addEventListener('touchend', () => { gTouchAt = performance.now(); }, { passive: true, capture: true });
+  // les souris « émulées » qui suivent un toucher (mousedown après touchend) ne comptent pas comme un nouvel appui
+  document.addEventListener('mousedown', e => { if (performance.now() - gTouchAt > 1000) gMark(e); }, true);
+  new MutationObserver(ms => { const now = performance.now(); for (const m of ms) for (const n of m.addedNodes) if (n.nodeType === 1) born.set(n, now); })
+    .observe(document.body, { childList: true, subtree: true });
+  const bornOf = el => { for (let x = el; x && x !== document.body; x = x.parentElement) { const b = born.get(x); if (b !== undefined) return b; } return -1; };
+  document.addEventListener('click', e => {
+    if (!e.isTrusted || gDown.t < 0 || performance.now() - gDown.t > 1500) return;
+    const el = e.target && e.target.closest ? e.target.closest(BTN) : null;
+    if (!el) return;
+    if (bornOf(el) > gDown.t && sigOf(el) !== gDown.sig) {
+      e.stopImmediatePropagation(); e.preventDefault();
+      console.info('[toucher] clic fantôme ignoré :', sigOf(el));
+    }
+  }, true);
+
   // 4) Défilements latéraux (onglets de sondes, catégories…) : la position est gardée quand l'écran se redessine
   const hs = new Map();
   const keyOf = el => { const host = el.parentElement && el.parentElement.closest('[id]'); return (host ? host.id : '') + '|' + String(el.className || '').replace(/\b(on|sb-press)\b/g, '').trim(); };
