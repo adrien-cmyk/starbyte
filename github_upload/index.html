@@ -9749,7 +9749,7 @@ async function mpReplyFlag(reportId, key) {
   try {
     await window.SBMP.replyFlag(r.mpFlagId, key);
     r.flag.replied = true;
-    toast(`Réponse hissée : « ${(MP_FLAG_BY_KEY[key] || {}).label || key} »`);
+    toast(`Réponse hissée : « ${(MP_FLAG_BY_KEY[key] || {}).label || key} »`); _mpRelRefreshSoon();
     if (typeof saveGame === 'function') saveGame();
   } catch (e) { toast(_mpFlagErr(e)); if (/already_replied/.test(String(e && e.message))) r.flag.replied = true; if (/flag_too_old/.test(String(e && e.message))) r.flag.tooOld = true; }
   renderFlagReportDetail(r);
@@ -9763,7 +9763,7 @@ async function mpFlagAttacker(reportId, key) {
   try {
     await window.SBMP.sendFlag(d.attackerAddress, key, 'raid');
     d.flagSent = key;
-    toast(`Pavillon « ${(MP_FLAG_BY_KEY[key] || {}).label || key} » envoyé à ${d.attacker}`);
+    toast(`Pavillon « ${(MP_FLAG_BY_KEY[key] || {}).label || key} » envoyé à ${d.attacker}`); _mpRelRefreshSoon();
     if (typeof saveGame === 'function') saveGame();
   } catch (e) { toast(_mpFlagErr(e)); }
   renderDefenseReportDetail(r);
@@ -9785,7 +9785,13 @@ var MP_DIPLO_ERRORS = {
   pact_unknown: 'Ce pacte n\'existe plus',
   pact_closed: 'Ce pacte est déjà clos',
   raid_en_route: 'Une flotte est en route entre vous : impossible de signer maintenant',
+  enemies: 'Vous êtes ennemis déclarés : pas de pacte tant que la rivalité dure',
 };
+// PATCH_2110_PAV_FIX — après un pavillon : relations et pactes relus tout de suite (pas au prochain tour de veille)
+function _mpRelRefreshSoon() {
+  if (!window.SBMP) return;
+  setTimeout(() => { try { SBMP.pollRelations && SBMP.pollRelations(true); SBMP.pollOrbits && SBMP.pollOrbits(); } catch (e) {} }, 1500);
+}
 function _mpDiploErr(e) {
   const code = (String(e && e.message || e).match(/[a-z_]+/g) || []).find(c => MP_DIPLO_ERRORS[c]);
   return code ? MP_DIPLO_ERRORS[code] : 'Le registre ne répond pas, réessaie';
@@ -10001,6 +10007,10 @@ async function mpIngestOrbits(orbits, pacts, meId) {
     } else if (k.status === 'broken' && prev && !snap.endedByMe) {
       _mpDiploReport('pact_broken', d, 'brk-' + k.id);
       toast(`⚠ ${snap.otherPseudo} a rompu votre pacte de non-agression`);
+    } else if (k.status === 'expired' && prev && prev.status === 'active') {
+      // PATCH_2110_PAV_FIX — alliance temporaire (pavillon) arrivée à son terme : les deux côtés sont prévenus
+      _mpDiploReport('pact_broken', Object.assign({}, d, { reason: 'expired' }), 'exp-' + k.id);
+      toast(`L'alliance temporaire avec ${snap.otherPseudo} est terminée : les raids redeviennent possibles`);
     } else if (k.status === 'declined' && mine && prev) {
       _mpDiploReport('pact_declined', d, 'dec-' + k.id);
       toast(`${snap.otherPseudo} a décliné ton pacte`);
@@ -11881,7 +11891,7 @@ async function mpFlagConvoy(presenceId, key) {
   try {
     await window.SBMP.sendFlagDock(mine, presenceId, key);
     mission.mpFlagged = Object.assign({}, mission.mpFlagged, { [presenceId]: key });
-    toast(`Pavillon « ${(MP_FLAG_BY_KEY[key] || {}).label || key} » hissé`);
+    toast(`Pavillon « ${(MP_FLAG_BY_KEY[key] || {}).label || key} » hissé`); _mpRelRefreshSoon();
     if (typeof saveGame === 'function') saveGame();
   } catch (e) {
     toast(_mpFlagErr(e));
@@ -38752,11 +38762,11 @@ function sendPlayerMessage(planetCoord, flagId) {
     closeMessageOverlay();
     if (!window.SBMP || !window.SBMP.ready()) { toast('Registre hors ligne : réessaie dans un instant'); return; }
     Promise.resolve(_mpConfirmFlag(MP_FLAG_KEY[flag.id], planet.playerName)).then(ok => ok && window.SBMP.sendFlag(planet.mpAddress || planetCoord, MP_FLAG_KEY[flag.id], 'orbit')
-      .then(() => { toast(`Pavillon « ${flag.label} » hissé devant ${planet.playerName}`); if (window.SBMP.pollRelations) setTimeout(() => SBMP.pollRelations(true), 1500); })
+      .then(() => { toast(`Pavillon « ${flag.label} » hissé devant ${planet.playerName}`); _mpRelRefreshSoon(); })
       .catch((e) => toast(_mpFlagErr(e))));
     return;
     window.SBMP.sendFlag(planet.mpAddress || planetCoord, MP_FLAG_KEY[flag.id], 'orbit')
-      .then(() => toast(`Pavillon « ${flag.label} » hissé devant ${planet.playerName}`))
+      .then(() => { toast(`Pavillon « ${flag.label} » hissé devant ${planet.playerName}`); _mpRelRefreshSoon(); })
       .catch((e) => toast(_mpFlagErr(e)));
     return;
   }

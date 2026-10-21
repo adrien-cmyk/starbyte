@@ -1,6 +1,6 @@
--- v23 (21/10/2026) — PAVILLONS AVEC DES EFFETS (décisions d'Adrien, 21/10)
+-- v24 (21/10/2026) — PAVILLONS AVEC DES EFFETS (décisions d'Adrien, 21/10)
 --   · « Je te déclare ennemi » (nouveau) : rivalité officielle, visible des deux côtés ; rumeur au comptoir ;
---     entre ennemis, un raid gagné pille jusqu'à 40 % (au lieu de 30) ; pas de pacte tant que dure la rivalité ;
+--     entre ennemis, un raid gagné pille 10 points de plus (40 % de la capitale, 60 % d'un dépôt colonial) ; pas de pacte tant que dure la rivalité ;
 --     un pacte en cours tombe.
 --   · « Paix ? » répondu par « Paix ? » : la rivalité est levée.
 --   · « Commerce ? » répondu par « Commerce ? » : accord commercial 7 jours — les convois de l'un vers l'autre
@@ -71,9 +71,15 @@ declare a uuid := least(new.from_id, new.to_id); b uuid := greatest(new.from_id,
 begin
   perform public._mp_pair_lock(new.from_id, new.to_id);
   perform public._mp_expire_relations();
-  -- la même réponse de l'autre côté dans les 48 h ?
+  -- la même proposition de l'autre côté dans les 48 h, encore sans réponse (pas déjà « consommée » par un pavillon
+  -- identique de ma part), et hissée après la dernière déclaration d'hostilité entre nous
   mutual := exists (select 1 from public.flags f where f.from_id = new.to_id and f.to_id = new.from_id
-                     and f.flag_key = new.flag_key and f.created_at > now() - interval '48 hours' and f.id <> new.id);
+                     and f.flag_key = new.flag_key and f.created_at > now() - interval '48 hours' and f.id <> new.id
+                     and not exists (select 1 from public.flags g where g.from_id = new.from_id and g.to_id = new.to_id
+                                      and g.flag_key = new.flag_key and g.id <> new.id and g.created_at >= f.created_at)
+                     and not exists (select 1 from public.flags e where e.flag_key = 'ennemi' and e.id <> new.id
+                                      and least(e.from_id, e.to_id) = a and greatest(e.from_id, e.to_id) = b
+                                      and e.created_at > f.created_at));
   select * into fw from public.worlds where user_id = new.from_id;
   select * into tw from public.worlds where user_id = new.to_id;
 
@@ -195,7 +201,7 @@ declare
   blds jsonb;
   src  jsonb;
   dmg  text := p_result ->> 'damaged_building';
-  pct  numeric := 0.30;
+  pct  numeric;
 begin
   select * into r from public.raids where id = p_raid and status = 'resolving' for update;
   if not found then raise exception 'raid_not_resolving'; end if;
@@ -206,17 +212,19 @@ begin
   end if;
   victory := coalesce(p_result ->> 'outcome', '') in ('victory', 'pyrrhic', 'heroic');
 
-  -- v23 : ennemis déclarés +10 % ; « Dernier avertissement » hissé dans les 24 h avant le départ +10 %
+  -- v24 : base 50 % (dépôt colonial) / 30 % (capitale) ; ennemis déclarés +10 % ; « Dernier avertissement » hissé dans les 24 h avant le départ +10 %
+  pct := case when is_col then 0.50 else 0.30 end;
   if public._mp_rel_active(r.attacker_id, r.defender_id, 'enemy') then pct := pct + 0.10; end if;
   if exists (select 1 from public.flags fl where fl.from_id = r.attacker_id and fl.to_id = r.defender_id and fl.flag_key = 'avertissement'
               and fl.created_at between r.departed_at - interval '24 hours' and r.departed_at) then pct := pct + 0.10; end if;
+
   if victory then
     foreach k in array array['metal', 'energie', 'cristal'] loop
       want := public._mp_num(p_result -> 'loot' ->> k);
-      have := public._mp_num(dw.stocks ->> k);
-      if is_col then have := least(have, public._mp_colony_loot_cap(col.buildings, k)); end if;   -- v22 : une colonie n'expose que ce que ses silos peuvent contenir
-      -- stock commun déjà pillé ces 12 dernières heures (n'importe quelle planète) : rien de plus à prendre
-      if public.mp_guards_on() and exists (select 1 from public.raids x where x.defender_id = r.defender_id and x.id <> r.id and x.status = 'resolved'
+      -- v23 : une colonie n'expose que son dépôt (production pas encore expédiée), jamais le stock de l'empire
+      have := case when is_col then public._mp_num(col.stocks ->> k) else public._mp_num(dw.stocks ->> k) end;
+      -- stock commun déjà pillé ces 12 dernières heures (capitale seulement) : rien de plus à prendre
+      if not is_col and public.mp_guards_on() and exists (select 1 from public.raids x where x.defender_id = r.defender_id and x.id <> r.id and x.status = 'resolved'
                  and x.resolved_at > now() - interval '12 hours'
                  and public._mp_num(x.result -> 'loot' ->> 'metal') + public._mp_num(x.result -> 'loot' ->> 'energie') + public._mp_num(x.result -> 'loot' ->> 'cristal') > 0) then have := 0; end if;
       got  := least(want, floor(have * pct)::bigint);
@@ -232,15 +240,20 @@ begin
         from arr;
     end if;
     update public.worlds set
-      stocks = stocks || jsonb_build_object(
+      stocks = case when is_col then stocks else stocks || jsonb_build_object(
         'metal',   greatest(0, public._mp_num(stocks ->> 'metal')   - (loot ->> 'metal')::bigint),
         'energie', greatest(0, public._mp_num(stocks ->> 'energie') - (loot ->> 'energie')::bigint),
-        'cristal', greatest(0, public._mp_num(stocks ->> 'cristal') - (loot ->> 'cristal')::bigint)),
+        'cristal', greatest(0, public._mp_num(stocks ->> 'cristal') - (loot ->> 'cristal')::bigint)) end,
       buildings = case when is_col then buildings else blds end,
       shield_until = case when is_col then shield_until else greatest(shield_until, now() + interval '12 hours') end
     where user_id = r.defender_id;
     if is_col then
-      update public.colonies set buildings = blds, shield_until = greatest(shield_until, now() + interval '12 hours') where id = col.id;
+      update public.colonies set buildings = blds, shield_until = greatest(shield_until, now() + interval '12 hours'),
+        stocks = coalesce(stocks, '{}'::jsonb) || jsonb_build_object(
+          'metal',   greatest(0, public._mp_num(stocks ->> 'metal')   - (loot ->> 'metal')::bigint),
+          'energie', greatest(0, public._mp_num(stocks ->> 'energie') - (loot ->> 'energie')::bigint),
+          'cristal', greatest(0, public._mp_num(stocks ->> 'cristal') - (loot ->> 'cristal')::bigint))
+      where id = col.id;
     end if;
   elsif coalesce(p_result ->> 'outcome', '') <> 'aborted' then
     if is_col then
