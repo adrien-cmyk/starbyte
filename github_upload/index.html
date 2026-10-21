@@ -12367,7 +12367,7 @@ function renderResourcesScreen() {
     if (r.rate > 0 && r.v >= r.max) {
       info = 'Stock plein : la production est en pause. Dépense ou agrandis ton stockage.';
     } else if (r.rate > 0) {
-      info = `Production active${skillMult(key) > 1.0001 ? ` (dont +${Math.round((skillMult(key) - 1) * 100)} % skills)` : ''}. Stock plein dans ${formatTime(Math.round((r.max - r.v) / (effRate(key) / 3600)))}.`;
+      info = `Production active${skillMult(key) > 1.0001 ? ` (dont +${Math.round((skillMult(key) - 1) * 100)} % · ${(window.SBSkills && SBSkills.prodBy ? SBSkills.prodBy(key) : []).join(', ') || 'skills'})` : ''}. Stock plein dans ${formatTime(Math.round((r.max - r.v) / (effRate(key) / 3600)))}.`;
     } else if (r.v > 0) {
       info = 'Aucune source de production active.';
     } else {
@@ -23645,7 +23645,7 @@ function launchProbe(tier, targetCoords, mode, force) {
     const tierLabel = ({ radar: 'Radar', light: 'légère', medium: 'moyenne', stealth: 'furtive' })[tier];
     toast(force
       ? `${icon('satellite', {size:12})} Sonde ${mission.probeName} (${tierLabel}) lancée — retour immédiat`
-      : `${icon('satellite', {size:12})} Sonde ${mission.probeName} (${tierLabel}) lancée — retour dans ${formatTankerDuration(duration)}`);
+      : `${icon('satellite', {size:12})} Sonde ${mission.probeName} (${tierLabel}) lancée — retour dans ${formatTankerDuration(duration)}${window.SBSkills ? SBSkills.durTag('probes') : ''}`);
   }
   return mission;
 }
@@ -29685,7 +29685,7 @@ function buildShip(shipKey, qty) {
     cost: totalCost,
     addedAt: Date.now(),
   });
-  toast(`${tierData.name} × ${qty} en assemblage`);
+  toast(`${tierData.name} × ${qty} en assemblage${window.SBSkills ? SBSkills.durTag('ships') : ''}`);
   // Render
   renderShipyard();
   startQueueTicker();
@@ -38405,7 +38405,7 @@ function renderDefenseScreen() {
     </svg>`;
   }
   defIcon.style.color = status.color;
-  document.getElementById('def-status-total').innerHTML = `<span style="color:${status.color}">${fmt(total)}</span> défense · ${totalUnits} unités`;
+  document.getElementById('def-status-total').innerHTML = `<span style="color:${status.color}">${fmt(total)}</span> défense · ${totalUnits} unités${window.SBSkills && SBSkills.defTag ? SBSkills.defTag() : ''}`;
   document.getElementById('def-status-sub').innerHTML = `<span style="color:${status.color}">${status.label}</span>`;
 
   // Badge sur l'onglet Garnison = nombre d'unités
@@ -38525,7 +38525,7 @@ function renderDefenseScreen() {
           <div class="unit-icon" style="color:${unit.color}">${PNG_ILLUSTRATIONS[key] ? `<img src="${PNG_ILLUSTRATIONS[key]}" alt="${unit.name}" onerror="pngFallback(this, '${key}')">` : unit.icon}</div>
           <div class="unit-info">
             <div class="unit-name">${unit.name}</div>
-            <div class="unit-stats">+${unit.defPerUnit} déf${unit.atkPerUnit ? ` · +${unit.atkPerUnit} atk` : ''} · ${costStr} · ${formatTime(adjustedDuration)}/u</div>
+            <div class="unit-stats">+${unit.defPerUnit} déf${unit.atkPerUnit ? ` · +${unit.atkPerUnit} atk` : ''} · ${costStr} · ${formatTime(adjustedDuration)}/u${window.SBSkills ? SBSkills.durTag('troops') : ''}</div>
             ${isLocked ? `<div style="font-size:9px;color:var(--mut);margin-top:2px;font-style:italic">${lockReason}</div>` : ''}
           </div>
           ${isLocked
@@ -39000,7 +39000,7 @@ function renderTierProduction(tierData, buildingMeta, prevTierForCompare) {
       const color = resInfo?.color || 'var(--txt)';
       let txt = `<span style="color:${color}">${label}</span> <strong style="color:${color}">${rateLbl(res, rate)}</strong>`;
       const _sm = skillMult(res);   // PATCH_1610_SKILLS_DISPLAY : la part des skills, lisible
-      if (_sm > 1.0001) txt += ` <span style="color:var(--green);font-size:10px">dont +${Math.round((_sm - 1) * 100)} % skills</span>`;
+      if (_sm > 1.0001) txt += window.SBSkills && SBSkills.prodTag ? SBSkills.prodTag(res) : ` <span style="color:var(--green);font-size:10px">dont +${Math.round((_sm - 1) * 100)} % skills</span>`;
       if (prevTierForCompare?.prod?.[res]) {
         const factor = (rate / prevTierForCompare.prod[res]).toFixed(1);
         txt += ` <span style="color:var(--mut);font-size:10px">(×${factor})</span>`;
@@ -39054,7 +39054,7 @@ function renderTierCost(tierData) {
   if (tierData.duration > 0) {
     html += `<div style="display:flex;justify-content:space-between;padding:8px 0;font-size:13px">
       <span style="color:var(--mut)">⏱ Durée</span>
-      <span style="color:var(--amber);font-family:var(--font-mono)">${formatDuration(tierData.duration)}</span>
+      <span style="color:var(--amber);font-family:var(--font-mono)">${formatDuration(Math.max(1, Math.round(tierData.duration * (window.SBSkills ? SBSkills.durMult('build') : 1))))}${window.SBSkills ? SBSkills.durTag('build') : ''}</span>
     </div>`;
   }
   return html;
@@ -47208,7 +47208,7 @@ function openBuildingSheet(key, idx) {
     <div class="hd"><div class="ic" style="color:${b.color}">${renderIcon(b.icon, { size: 26 })}</div>
       <div><div class="fam">${b.family || ''}${reco ? ' · <span style="color:#5fffe8">recommandé pour commencer</span>' : ''}</div><div class="nm">${b.name}</div></div></div>
     <div class="lead">${g.lead}</div>
-    <div class="facts"><div><span>Produit</span><b>${b.prodLbl}</b></div><div><span>Chantier</span><b>${mins ? mins + ' min' : 'immédiat'}</b></div><div><span>Coût</span><b>${costHtml}</b></div></div>
+    <div class="facts"><div><span>Produit</span><b>${b.prodLbl}</b></div><div><span>Chantier</span><b>${mins ? Math.max(1, Math.round(mins * (window.SBSkills ? SBSkills.durMult('build') : 1))) + ' min' + (window.SBSkills ? SBSkills.durTag('build') : '') : 'immédiat'}</b></div><div><span>Coût</span><b>${costHtml}</b></div></div>
     <div class="sec"><div class="lb">Comment ça marche</div><p>${g.how}</p></div>
     ${g.unlocks && g.unlocks.length ? `<div class="sec"><div class="lb">Ce qu'il permet</div><ul>${g.unlocks.map(u => `<li>${u}</li>`).join('')}</ul></div>` : ''}
     ${evo ? `<div class="sec"><div class="lb">Évolution</div><p>${evo}</p></div>` : ''}
@@ -47576,7 +47576,7 @@ if (G.knownTargets && Array.isArray(G.tankerMissions)) {
 <!-- CLOUD — sauvegarde Supabase (source : sb-build/src/cloud.js) -->
 <script type="module" src="assets/cloud.js?v=20261020-2330"></script>
 <!-- MATCH3 — Match-3 V2 (assets/match3.js, source src/match3.js + src/m3core.js) : remplace startM3 -->
-<script type="module" src="assets/match3.js?v=20261019-2140"></script>
+<script type="module" src="assets/match3.js?v=20261021-1130"></script>
 <!-- HOME V2 — « monde d'abord » : planète plein écran, ressources en ligne, Flotte / Défense / Prospection (assets/home.js) -->
 <script type="module" src="assets/home.js?v=20261020-2150"></script>
 <!-- SPACE MAP v0 — carte du Centre de prospection (assets/spacemap.js, source src/spacemap.js) -->
@@ -47591,7 +47591,7 @@ if (G.knownTargets && Array.isArray(G.tankerMissions)) {
 <!-- PATCH_1510_MISSIONS — tout ce qui vole, fiche de mission des tankers -->
 <script src="assets/missions.js?v=20261020-1130"></script>
 <!-- PATCH_1610_SKILLS — skills des bâtiments : apprendre, découvrir, effets -->
-<script src="assets/skills.js?v=20261020-0200"></script>
+<script src="assets/skills.js?v=20261021-1130"></script>
 <!-- PATCH_1510_CROWN — The Drifting Crown en 3D (assets/station3d.js, sur le moteur partagé window.SB3D) -->
 <script type="module" src="assets/station3d.js?v=20261020-0120"></script>
 <!-- FORMATION3D — flotte déployée en orbite, vue de haut en formation (remplace la vue orbite) -->

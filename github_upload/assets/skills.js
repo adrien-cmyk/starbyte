@@ -94,6 +94,26 @@
     const g = G_(), ps = g && g.skills && g.skills.productionSpeed > 1 ? g.skills.productionSpeed : 1;
     return kind === 'build' ? m / ps : m;
   }
+  // PATCH_2110_SKILLS_VISIBLES — ce que les skills apportent, nommé là où l'effet s'applique
+  const namesFor = (sec, k) => SKILLS.filter(s => has(s.key) && s.fx[sec] && s.fx[sec][k]).map(s => s.name);
+  const GREEN = 'color:var(--green);font-size:10px;font-weight:500';
+  function durTag(kind) {
+    const m = durMult(kind); if (!(m < 0.9999)) return '';
+    const by = namesFor('dur', kind); const g = G_();
+    if (kind === 'build' && g && g.skills && g.skills.productionSpeed > 1) by.push('Production accélérée');
+    return ` <span style="${GREEN}">−${Math.round((1 - m) * 100)} %${by.length ? ' · ' + esc(by.join(', ')) : ''}</span>`;
+  }
+  function prodBy(res) { return namesFor('prod', res).concat(['metal', 'energie', 'cristal', 'biomass'].includes(res) ? namesFor('prod', 'all') : []); }
+  function prodTag(res) {
+    const m = prodMult(res); if (!(m > 1.0001)) return '';
+    const by = prodBy(res);
+    return ` <span style="${GREEN}">dont +${Math.round((m - 1) * 100)} %${by.length ? ' · ' + esc(by.join(', ')) : ' skills'}</span>`;
+  }
+  function m3By(res) { return namesFor('m3', res); }
+  function defTag() {
+    const by = SKILLS.filter(s => has(s.key) && s.fx.def && (s.fx.def.flat || s.fx.def.pct || s.fx.def.soldiers)).map(s => s.name);
+    return by.length ? ` <span style="${GREEN}">skills · ${esc(by.join(', '))}</span>` : '';
+  }
   function defense(total, soldierPart) {
     const extraSoldiers = (soldierPart || 0) * sumFx('def', 'soldiers');
     return Math.round((total + extraSoldiers + sumFx('def', 'flat')) * (1 + sumFx('def', 'pct')));
@@ -355,5 +375,5 @@
     }, 120);
   }
 
-  window.SBSkills = { SKILLS, has, stateOf, prodMult, m3Mult, durMult, defense, applyM3, learn, grant, dropPool, buildingHtml, familyHtml, familyCount, openTree, buildingTier, tick, discover, m3Discover, learnCapital, capitalState, capDur, researchName, COST, DUR_MIN, rehab, rehabBtn, tickRehab };
+  window.SBSkills = { SKILLS, has, stateOf, prodMult, m3Mult, durMult, durTag, prodTag, prodBy, m3By, defTag, defense, applyM3, learn, grant, dropPool, buildingHtml, familyHtml, familyCount, openTree, buildingTier, tick, discover, m3Discover, learnCapital, capitalState, capDur, researchName, COST, DUR_MIN, rehab, rehabBtn, tickRehab };
 })();
