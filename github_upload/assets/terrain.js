@@ -225,7 +225,7 @@
     }
     // 4. la forêt d'origine : teintes extraterrestres par biome (émeraude, bleu-vert, touches violettes)
     sc.traverse(o => {
-      if (!o.isInstancedMesh || o.parent !== sc) return;
+      if (!o.isInstancedMesh || o.parent !== sc || !o.material || !o.material.color || o.name === 'SB_LUM_POOLS') return;   // PATCH_2110 : ignore les halos de lumiere.js
       const hex = o.material.color.getHex();
       if (hex === 0x33261c || hex === 0x44474d) return;   // troncs et rochers
       const m4 = new T.Matrix4(), pos = new T.Vector3(), cc = new T.Color();
