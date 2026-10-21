@@ -47,6 +47,7 @@ language sql security definer set search_path = public as $$
   update public.mp_trade_deliveries set status = 'expired', settled_at = now()
    where status = 'waiting' and created_at < now() - interval '12 hours';
 $$;
+revoke all on function public._mp_trade_expire() from public, anon, authenticated;
 
 -- arrivée du tanker chez le partenaire (rejouable : la même mission rend la même livraison)
 create or replace function public.mp_trade_arrive(p_to_address text, p_mission text, p_tanker text, p_cargo jsonb)

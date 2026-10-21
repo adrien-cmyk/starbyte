@@ -9933,7 +9933,9 @@ function mpTradeReturn(m, d, why) {
   const sold = (d && d.status === 'settled') ? d.bought : { metal: 0, energie: 0, cristal: 0 };
   const res = (m.cargo && m.cargo.resources) || {};
   const back = {};
-  for (const k of ['metal', 'energie', 'cristal']) back[k] = Math.max(0, (res[k] || 0) - (sold[k] || 0));
+  // la taxe de la voie ne s'applique qu'à ce qui est livré : vendu = cale × facteur, le reste rentre intact
+  const f = typeof computeRouteLootFactor === 'function' ? (computeRouteLootFactor(m) || 1) : 1;
+  for (const k of ['metal', 'energie', 'cristal']) back[k] = Math.max(0, (res[k] || 0) - ((sold[k] || 0) > 0 ? Math.ceil((sold[k] || 0) / f) : 0));
   if (m.cargo) m.cargo.resources = back;
   m.mpTradeCG = (d && d.status === 'settled') ? d.paid_cg : 0;
   m.mpTradeResult = { sold, paid: m.mpTradeCG, expired: !!(d && d.status === 'expired'), why: why || null };
@@ -26956,7 +26958,8 @@ function confirmTankerComposition() {
   } else {
     goto('planet-detail');
   }
-  if (typeof renderPlanetDetailScreen === 'function') renderPlanetDetailScreen();
+  // PATCH_2110_COMMERCE_FICHE — lancé depuis l'offre de signature (aucune fiche ouverte) : pas de « Planète introuvable » ni de renvoi vers l'univers
+  if (typeof renderPlanetDetailScreen === 'function' && findPlanetByCoord(G.selectedPlanetCoord)) renderPlanetDetailScreen();
 }
 
 // Génère un nom court de tanker (Σ-XX)
