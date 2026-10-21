@@ -48028,7 +48028,113 @@ if (G.knownTargets && Array.isArray(G.tankerMissions)) {
 <script type="module" src="assets/system3d.js?v=20261014-1440"></script>
 <!-- SHIP3D — fiches 3D : cuirassé KV-01, frégate SR-01, tanker TK-07, chantier orbital OS-01 (assets/ship3d.js, sur le moteur partagé window.SB3D) -->
 <script src="assets/aftermath.js?v=20261014-1440"></script>
-<script src="assets/fete_caserne.js?v=20261014-1440"></script>
+<script src="assets/fete_caserne.js?v=20261021-1800"></script>
+<script>
+/* ═══════════ PATCH_2110_TOUCHER — retours d'Adrien du 21/10 (iPhone) ═══════════ */
+(function () {
+  'use strict';
+  // 1) Boutons « enfoncés » : Safari iOS n'applique :active qu'avec un écouteur touchstart ; on ajoute en plus
+  //    une classe tenue au moins 140 ms pour qu'un appui bref se voie toujours.
+  const st = document.createElement('style');
+  st.textContent = `
+    button:not(:disabled), [onclick], .bld-opt, .wd-tile, .w-chip { -webkit-tap-highlight-color: transparent; }
+    .sb-press:not(:disabled):not(.disabled) { filter: brightness(1.35) saturate(1.1); }
+    button.sb-press:not(:disabled):not(.disabled):not(.btn-nuke) { transform: scale(.97); transition: transform .06s ease; }
+    .btn-nuke.sb-press { transform: scale(.94); }`;
+  document.head.appendChild(st);
+  const PRESS = 'button, [onclick], .bld-opt, .wd-tile, .w-chip, .rap-sub, .rap-tab, [data-a], [data-k]';
+  let pressed = null, pressT = 0;
+  const big = el => { const r = el.getBoundingClientRect(); return r.width * r.height > innerWidth * innerHeight * 0.45; };
+  const release = () => { const el = pressed; if (!el) return; pressed = null; const wait = Math.max(0, 140 - (performance.now() - pressT)); setTimeout(() => el.classList.remove('sb-press'), wait); };
+  document.addEventListener('touchstart', e => {
+    const el = e.target.closest && e.target.closest(PRESS);
+    if (!el || big(el) || el.disabled) return;
+    pressed = el; pressT = performance.now(); el.classList.add('sb-press');
+  }, { passive: true, capture: true });
+  document.addEventListener('touchmove', e => { if (!pressed) return; const t = e.touches[0]; if (Math.hypot(t.clientX - tap.x, t.clientY - tap.y) > 10) release(); }, { passive: true, capture: true });
+  document.addEventListener('touchend', release, { passive: true, capture: true });
+  document.addEventListener('touchcancel', release, { passive: true, capture: true });
+  document.addEventListener('mousedown', e => { const el = e.target.closest && e.target.closest(PRESS); if (el && !big(el)) { pressed = el; pressT = performance.now(); el.classList.add('sb-press'); } }, true);
+  document.addEventListener('mouseup', release, true);
+
+  // 2) Gros boutons de lancement : un appui suffit. Sur iPhone, le premier toucher pouvait servir à arrêter
+  //    le défilement en cours de la page (pas de click) : on déclenche au relâcher, sans attendre le click.
+  const tap = { x: 0, y: 0, t: 0, el: null };
+  document.addEventListener('touchstart', e => {
+    const t = e.touches[0]; tap.x = t.clientX; tap.y = t.clientY; tap.t = performance.now();
+    tap.el = e.target.closest ? e.target.closest('.btn-nuke, .btn-ignition') : null;
+    tap.down = e.target;
+  }, { passive: true, capture: true });
+  document.addEventListener('touchend', e => {
+    const el = tap.el; tap.el = null;
+    if (!el || el.disabled || el.classList.contains('disabled')) return;
+    const t = e.changedTouches[0];
+    if (Math.hypot(t.clientX - tap.x, t.clientY - tap.y) > 12 || performance.now() - tap.t > 900) return;
+    const r = el.getBoundingClientRect();
+    if (t.clientX < r.left || t.clientX > r.right || t.clientY < r.top || t.clientY > r.bottom) return;
+    e.preventDefault();   // pas de click natif en double
+    el.click();
+  }, { passive: false, capture: true });
+
+  // 3) Tiroirs : le fond ne referme que sur un vrai toucher du fond (doigt posé ET levé dessus, sans glisser).
+  //    En défilant le contenu, iOS pouvait livrer le click au fond (contenu qui change de hauteur sous le doigt).
+  const BACKDROPS = '.w-sheet, #sb-sheet, #mp-choose, #sb-m3tip';
+  let down = { el: null, x: 0, y: 0 };
+  const onDown = (x, y, target) => { down = { el: target, x, y }; };
+  document.addEventListener('touchstart', e => { const t = e.touches[0]; onDown(t.clientX, t.clientY, e.target); }, { passive: true, capture: true });
+  document.addEventListener('mousedown', e => onDown(e.clientX, e.clientY, e.target), true);
+  let lastXY = { x: 0, y: 0 };
+  document.addEventListener('touchend', e => { const t = e.changedTouches[0]; lastXY = { x: t.clientX, y: t.clientY }; }, { passive: true, capture: true });
+  document.addEventListener('mouseup', e => { lastXY = { x: e.clientX, y: e.clientY }; }, true);
+  document.addEventListener('click', e => {
+    const tg = e.target;
+    if (!tg || !tg.matches || !tg.matches(BACKDROPS)) return;
+    const moved = Math.hypot(lastXY.x - down.x, lastXY.y - down.y) > 10;
+    if (down.el !== tg || moved) { e.stopImmediatePropagation(); e.preventDefault(); }
+  }, true);
+
+  // 3b) Le tiroir Défense se refermait en défilant : un toucher dans le tiroir arrivait jusqu'à la planète 3D
+  //     derrière, qui y voyait le toucher d'une parcelle (onHexClick → la fiche de parcelle remplace le tiroir).
+  let lastDownIn = null;
+  document.addEventListener('pointerdown', e => { lastDownIn = e.target; }, true);
+  document.addEventListener('touchstart', e => { lastDownIn = e.target; }, { passive: true, capture: true });
+  setInterval(() => {
+    const f = window.onHexClick;
+    if (typeof f !== 'function' || f._sbGuard) return;
+    const g = function (i) {
+      const sh = document.querySelector('.w-sheet.on, #sb-sheet, #mp-choose');
+      if (sh && lastDownIn && sh.contains(lastDownIn)) return;   // le doigt était dans le tiroir : ce n'est pas un toucher de parcelle
+      return f.apply(this, arguments);
+    };
+    g._sbGuard = true; window.onHexClick = g;
+  }, 1000);
+
+  // 4) Défilements latéraux (onglets de sondes, catégories…) : la position est gardée quand l'écran se redessine
+  const hs = new Map();
+  const keyOf = el => { const host = el.parentElement && el.parentElement.closest('[id]'); return (host ? host.id : '') + '|' + String(el.className || '').replace(/\b(on|sb-press)\b/g, '').trim(); };
+  document.addEventListener('scroll', e => {
+    const el = e.target;
+    if (!el || el.nodeType !== 1 || el.scrollWidth <= el.clientWidth + 4) return;
+    hs.set(keyOf(el), el.scrollLeft);
+  }, true);
+  const restore = (root) => {
+    if (!hs.size || !root.querySelectorAll) return;
+    for (const [k, x] of hs) {
+      if (!x) continue;
+      const cls = k.split('|')[1].split(/\s+/)[0]; if (!cls) continue;
+      const cands = root.matches && root.matches('.' + CSS.escape(cls)) ? [root] : root.querySelectorAll('.' + CSS.escape(cls));
+      cands.forEach(el => { if (keyOf(el) === k && el.scrollLeft !== x) el.scrollLeft = x; });
+    }
+  };
+  new MutationObserver(ms => {
+    if (!hs.size) return;
+    const roots = new Set();
+    for (const m of ms) for (const n of m.addedNodes) if (n.nodeType === 1) roots.add(n);
+    if (roots.size) requestAnimationFrame(() => roots.forEach(restore));
+  }).observe(document.body, { childList: true, subtree: true });
+})();
+</script>
+
 <script src="assets/radio.js?v=20261014-1440"></script>
 <script type="module" src="assets/ship3d.js?v=20261020-2230"></script>
 <!-- PATCH_1510_MISSIONS — tout ce qui vole, fiche de mission des tankers -->

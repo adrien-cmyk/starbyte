@@ -409,7 +409,7 @@
         case 'chug':    // cul sec : se cambre en arrière par à-coups
           m.rotation.x = -Math.max(0, Math.sin(k * 1.4)) * .55; m.rotation.z = Math.sin(k * .9) * .12 * dk; break;
         case 'stumble': { // titube en rond autour du feu, zigzague
-          const a = s.a + k * .35 * (1 + .3 * Math.sin(k * 1.7)), r = s.r + 1.2 + Math.sin(k * 2.3) * 1.3 * dk;
+          const a = s.a + k * .35 + Math.sin(k * 1.7) * .06   /* PATCH_2110_BRINGUE : l'ancien k × sin(k) accélérait sans fin avec le temps */, r = s.r + 1.2 + Math.sin(k * 2.3) * 1.3 * dk;
           m.position.set(s.fx + Math.cos(a) * r, y0 + Math.abs(Math.sin(k * 4)) * .25, s.fz + Math.sin(a) * r);
           m.rotation.set(Math.sin(k * 2.1) * .15 * dk, -a + Math.sin(k * 3) * .6, Math.sin(k * 1.9) * .38 * dk, 'YXZ'); break; }
         case 'puke':    // penché en avant, secoué de spasmes
