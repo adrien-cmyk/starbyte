@@ -9,12 +9,11 @@
 (function () {
   'use strict';
   const ARK_URL = 'assets/3d/sb_ak01.glb?v=20261020';
-  const ESC_URL = 'assets/3d/sb_sr01_lod.glb?v=20261012-0100';
   const K = 0.1;                       // 1 unité = 10 m (l'Arche : 245 × 215 × 86)
   const R = 600000;                    // rayon planétaire (6 000 km)
   const CLOUD_TOP = 850, CLOUD_BASE = 650;   // 8,5 km / 6,5 km
   const DUR = 23.0;
-  let arkP = null, escP = null;
+  let arkP = null;
 
   function libs() { return window.SB3D; }
   function load(url) {
@@ -24,7 +23,6 @@
   function preload() {
     if (!libs()) return;
     if (!arkP) arkP = load(ARK_URL).catch(e => { arkP = null; throw e; });
-    if (!escP) escP = load(ESC_URL).catch(() => null);
   }
 
   // hauteur du sol (y monde) à la verticale de (x, z) : la planète est centrée en (0, −R, 0)
@@ -278,7 +276,7 @@
     const bounce = new THREE.HemisphereLight(0x06080e, 0x2a3c5c, 0.95); scene.add(bounce);
     const engLight = new THREE.PointLight(0xff8a3a, 0, 260, 2.0);   // n'éclaire que la poupe scene.add(engLight);
 
-    /* ── Arche, escorte, panaches, particules ── */
+    /* ── Arche, panaches, particules ── */
     const ark = new THREE.Group(); ark.visible = false; scene.add(ark);
     const frost = { value: 1 };
     const sunView = { value: new THREE.Vector3() };
@@ -296,7 +294,6 @@
           float turb = .85 + .15 * vn(vec2(vUv.x * 6.0, t * 8.0 - uT * 9.0));
           float a = uA * along * core * turb; gl_FragColor = vec4(mix(uC * vec3(.8,.75,1.1), uC, t) * a, a); }`,
     });
-    const escorts = [];
     let ready = false, failed = false, tStart = 0;
     const hullPts = [], cornerPts = [], nozzles = [];
     arkP.then(gltf => {
@@ -353,19 +350,6 @@
         plumes.add(g);
       }
       buildParticles();
-      return escP;
-    }).then(eg => {
-      if (!alive) return;
-      if (eg && eg.scene) {
-        // l'escorte : trois frégates de 70 m à 2 km de l'Arche — des points de lumière à côté d'un géant
-        for (const [ox, oy, oz, ph] of [[-215, 25, 60, 0], [230, 40, 10, 1.7], [20, 110, -90, 3.1]]) {
-          const e = eg.scene.clone(true); e.scale.setScalar(K); e.traverse(o => { if (o.isMesh) o.frustumCulled = false; });
-          const holder = new THREE.Group(); holder.add(e);
-          const gl = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex, color: 0x9ccaff, blending: THREE.AdditiveBlending, depthWrite: false, transparent: true }));
-          gl.position.set(0, .44, -3.6); gl.scale.setScalar(16); holder.add(gl);
-          scene.add(holder); escorts.push({ holder, off: new THREE.Vector3(ox, oy, oz), ph });
-        }
-      }
       ready = true;
     }).catch(e => { console.warn('[Arche]', e); failed = true; });
 
@@ -491,12 +475,6 @@
       plumes.children.forEach(g => { const s = .6 + .4 * sstep(2, 7, t); g.scale.set(s, s, s * (1 + .4 * sstep(6, 12, t))); });
       frost.value = 1 - sstep(9, 20, t) * .85;
 
-      for (const e of escorts) {
-        const o = e.off.clone().applyQuaternion(AQ);
-        e.holder.position.copy(AP).add(o).add(new THREE.Vector3(Math.sin(t * .5 + e.ph) * 4, Math.sin(t * .7 + e.ph) * 3, 0));
-        e.holder.quaternion.copy(AQ);
-        e.holder.visible = t > 6.5;
-      }
 
       // caméra : dérive lente ; elle accompagne l'ascension en gardant le limbe dans le cadre, puis lève les yeux
       camAt(t, CPOS);
