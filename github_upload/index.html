@@ -10265,7 +10265,8 @@ async function mpGarrisonStart(address) {
   if (!fleets.length) { toast('Aucune flotte en orbite : déploie d\'abord une flotte'); return; }
   const travel = mpRaidTravelMs({ mpAddress: address });
   const sector = String(address).split('-')[1];
-  const fuelOf = f => { try { return computeMissionFuelCost(f, { distanceMult: typeof _carnetDistanceMult === 'function' ? _carnetDistanceMult(sector) : 1 }); } catch (e) { return 0; } };
+  // garnison : moitié prix d'une mission (service rendu à un allié, sans butin) — décision d'Adrien 21/10
+  const fuelOf = f => { try { return Math.max(50, Math.round(computeMissionFuelCost(f, { distanceMult: typeof _carnetDistanceMult === 'function' ? _carnetDistanceMult(sector) : 1 }) * 0.5)); } catch (e) { return 0; } };
   const pick = fleets.length === 1 ? { f: fleets[0] } : await _mpChoose('Garnison chez ' + _esc(mem.pseudo), fleets.map(f => ({ f, label: _esc(f.name), sub: `${['tanker', 'fregate', 'cuirasse'].reduce((s, t) => s + countShipsByType(f.composition, t), 0)} vaisseaux · ${fmt(fuelOf(f))} énergie` })));
   if (!pick) return;
   const f = pick.f, fuel = fuelOf(f);
