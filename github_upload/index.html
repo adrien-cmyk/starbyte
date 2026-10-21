@@ -33332,6 +33332,166 @@ function _fmtAway(ms) {
   return hh ? `${d} j ${hh} h` : `${d} j`;
 }
 
+
+/* ═══════════ PATCH_2110_PROJET — projet suggéré (North Star §56 : suivre, masquer ou ignorer) ═══════════
+   Après le didacticiel, un bandeau discret propose le prochain bâtiment (ou amélioration) avec ce qui manque
+   et le temps de production pour l'avoir. Toucher = y aller ; balayer = masquer ce projet (il revient au suivant). */
+const SB_PROJ_BUILD = ['mine', 'centrale', 'labo', 'shipyard', 'comptoir', 'raffinerie', 'caserne', 'turret'];
+const SB_PROJ_UP = ['mine', 'centrale', 'labo', 'shipyard'];
+function _sbProjParcels() { return (G.planet && G.planet.parcels) || []; }
+function sbNextProject() {
+  try {
+    if (!G || !G.planet || !G.res) return null;
+    if (window.SBTuto && SBTuto.active()) return null;
+    const a = (window.SBAntenna && SBAntenna.data) ? SBAntenna.data() : G.antenna;
+    if (!a || !a.built || a.building) return null;          // l'objectif antenne a son propre bandeau
+    const ps = _sbProjParcels();
+    const has = k => ps.some(q => q && q.building === k && (q.state === 'built' || q.state === 'building'));
+    let pick = null;
+    for (const k of SB_PROJ_BUILD) if (BUILDINGS[k] && !has(k)) { pick = { kind: 'build', key: k, name: BUILDINGS[k].name, cost: BUILDINGS[k].cost }; break; }
+    if (!pick) {
+      const busy = typeof QUEUES !== 'undefined' && QUEUES.capital && QUEUES.capital.upgrade;
+      for (const k of SB_PROJ_UP) {
+        const i = ps.findIndex(q => q && q.building === k && q.state === 'built' && (q.lvl || 1) < 2 && !q.damaged);
+        const t = i >= 0 && BUILDING_TIERS[k] && BUILDING_TIERS[k][2];
+        if (t && !busy) { pick = { kind: 'up', key: k, idx: i, name: (t.name || BUILDINGS[k].name), cost: t.cost || {} }; break; }
+      }
+    }
+    if (!pick) return null;
+    pick.id = pick.kind + ':' + pick.key;
+    const miss = {}; let eta = 0;
+    for (const [r, q] of Object.entries(pick.cost || {})) {
+      const have = (G.res[r] && G.res[r].v) || 0;
+      if (have < q) {
+        miss[r] = Math.ceil(q - have);
+        const rate = (G.res[r] && G.res[r].rate) || 0;
+        eta = Math.max(eta, rate > 0 ? (q - have) / rate * 3600000 : Infinity);
+      }
+    }
+    pick.miss = miss; pick.ready = !Object.keys(miss).length; pick.eta = eta;
+    if (pick.kind === 'build') {
+      pick.slot = ps.findIndex(q => q && q.state === 'resource' && !q.building);
+      if (pick.slot < 0) pick.rocky = ps.findIndex(q => q && q.state === 'rocky');
+    }
+    return pick;
+  } catch (e) { console.warn('[projet]', e); return null; }
+}
+function _sbProjLabel(k) { return (typeof tileInfo === 'function' && tileInfo(k) && tileInfo(k).label) || k; }
+function sbProjectLine(pr) {
+  if (pr.ready) {
+    if (pr.kind === 'build' && pr.slot < 0) return 'Tout est prêt : il te faut un gisement libre pour la bâtir';
+    return pr.kind === 'up' ? 'Tout est prêt : lance l\'amélioration' : 'Tout est prêt : lance le chantier';
+  }
+  const m = Object.entries(pr.miss).map(([k, n]) => `<b>${fmt(n)}</b> ${_sbProjLabel(k).toLowerCase()}`).join(' · ');
+  const eta = isFinite(pr.eta) && pr.eta > 0 ? ` · ~${_fmtAway(pr.eta)} de production` : '';
+  return `Il manque ${m}${eta}`;
+}
+function sbProjectGo(pr) {
+  pr = pr || sbNextProject(); if (!pr) return;
+  const ps = _sbProjParcels();
+  let i = -1, sheet = false;
+  if (pr.ready) {
+    if (pr.kind === 'up') i = pr.idx;
+    else if (pr.slot >= 0) { i = pr.slot; sheet = true; }
+    else i = pr.rocky;
+  } else {
+    // il manque des ressources : exploiter la mine (inépuisable), sinon un gisement
+    i = ps.findIndex(q => q && q.building === 'mine' && q.state === 'built');
+    if (i < 0) i = ps.findIndex(q => q && q.state === 'resource');
+    if (i < 0) i = ps.findIndex(q => q && q.state === 'rocky');
+  }
+  if (typeof goto === 'function') goto('planet');
+  if (i < 0) return;
+  let moved = false;
+  try { if (window.Planet3D && Planet3D.ready) { Planet3D.focus(i); moved = true; } } catch (e) {}
+  setTimeout(() => {
+    if (sheet && typeof openBuildingSheet === 'function') openBuildingSheet(pr.key, i);
+    else if (typeof onHexClick === 'function') onHexClick(i);
+  }, moved ? 950 : 0);
+}
+// balayer pour fermer (bandeau du projet, récapitulatif d'absence)
+function sbSwipeAway(el, onGone, onTap) {
+  let x0 = null, y0 = 0, dx = 0, moved = false;
+  const down = (x, y) => { x0 = x; y0 = y; dx = 0; moved = false; el.style.transition = 'none'; };
+  const move = (x, y, ev) => {
+    if (x0 == null) return;
+    dx = x - x0; const dy = y - y0;
+    if (!moved && Math.abs(dx) < 8 && Math.abs(dy) < 8) return;
+    if (!moved && Math.abs(dy) > Math.abs(dx)) {   // glissé vertical vers le haut : ferme aussi
+      if (dy < -30) { x0 = null; gone(0, -1); }
+      return;
+    }
+    moved = true; if (ev && ev.cancelable) ev.preventDefault();
+    el.style.transform = el.dataset.base.replace('X', dx + 'px'); el.style.opacity = String(Math.max(0, 1 - Math.abs(dx) / 220));
+  };
+  const up = () => {
+    if (x0 == null) return; x0 = null;
+    el.style.transition = 'transform .22s ease, opacity .22s ease';
+    if (moved && Math.abs(dx) > 70) gone(dx > 0 ? 1 : -1, 0);
+    else { el.style.transform = el.dataset.base.replace('X', '0px'); el.style.opacity = ''; if (!moved && onTap) onTap(); }
+  };
+  const gone = (sx, sy) => {
+    el.style.transition = 'transform .22s ease, opacity .22s ease';
+    el.style.transform = el.dataset.base.replace('X', (sx * 120) + 'vw') + (sy ? ' translateY(-80px)' : '');
+    el.style.opacity = '0'; el._gone = true;
+    setTimeout(() => onGone && onGone(), 230);
+  };
+  el.addEventListener('touchstart', e => { const t = e.touches[0]; down(t.clientX, t.clientY); }, { passive: true });
+  el.addEventListener('touchmove', e => { const t = e.touches[0]; move(t.clientX, t.clientY, e); }, { passive: false });
+  el.addEventListener('touchend', e => { e.preventDefault(); up(); });
+  el.addEventListener('mousedown', e => { down(e.clientX, e.clientY); const mm = ev => move(ev.clientX, ev.clientY, ev), mu = () => { removeEventListener('mousemove', mm); removeEventListener('mouseup', mu); up(); }; addEventListener('mousemove', mm); addEventListener('mouseup', mu); });
+}
+const SB_PROJ_KEY = 'sb_proj_hidden';
+function _sbProjHidden() { try { return localStorage.getItem(SB_PROJ_KEY) || ''; } catch (e) { return ''; } }
+function sbProjectRender() {
+  const scr = document.getElementById('scr-planet');
+  const onPlanet = scr && !scr.classList.contains('hidden');
+  const pr = onPlanet && !window.__sbCinema ? sbNextProject() : null;
+  let el = document.getElementById('sb-proj');
+  const blocked = document.querySelector('#sb-coach[style*="block"], .p3d-goal, #sb-sheet, #sb-away, #scr-m3:not(.hidden)');
+  if (!pr || blocked || _sbProjHidden() === pr.id) { if (el && !el._gone) el.remove(); return; }
+  if (!el || el._gone) {
+    if (el) el.remove();
+    el = document.createElement('div'); el.id = 'sb-proj';
+    el.dataset.base = 'translateX(X)';
+    document.body.appendChild(el);
+    sbSwipeAway(el, () => { try { localStorage.setItem(SB_PROJ_KEY, el.dataset.pid || ''); } catch (e) {} el.remove(); toast('Projet masqué · il reviendra au suivant'); }, () => sbProjectGo());
+  }
+  const top = document.querySelector('#scr-planet .w-top');
+  const t = (top ? top.getBoundingClientRect().bottom : 46) + 6;
+  if (el.style.top !== t + 'px') el.style.top = t + 'px';
+  el.dataset.pid = pr.id;
+  const html = `<div class="k">Projet suggéré<span>balaye pour masquer</span></div>
+    <div class="n">${pr.kind === 'up' ? 'Améliorer · ' : ''}${pr.name}</div>
+    <div class="m">${sbProjectLine(pr)}</div>
+    <div class="g">${pr.ready ? (pr.kind === 'build' && pr.slot < 0 ? 'Conquérir un gisement →' : 'Y aller →') : 'Exploiter ta mine →'}</div>`;
+  if (el._html !== html) { el._html = html; el.innerHTML = html; el.classList.toggle('ready', !!pr.ready); }
+}
+(function () {
+  const st = document.createElement('style');
+  st.textContent = `
+  #sb-proj{position:fixed;left:12px;right:12px;z-index:30;padding:9px 12px 9px;border-radius:10px;background:rgba(8,14,20,.82);
+    border:1px solid rgba(255,190,90,.28);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);color:#dfe8ec;
+    font-family:'Space Grotesk',system-ui,sans-serif;touch-action:pan-y;user-select:none;-webkit-user-select:none;cursor:pointer}
+  #sb-proj.ready{border-color:rgba(255,190,90,.7);box-shadow:0 0 16px rgba(255,170,60,.18)}
+  #sb-proj .k{display:flex;justify-content:space-between;font-size:9px;letter-spacing:.14em;text-transform:uppercase;color:#ffbf5a;margin-bottom:2px}
+  #sb-proj .k span{color:rgba(200,215,225,.42);letter-spacing:.08em}
+  #sb-proj .n{font-size:14px;font-weight:600;color:#f2f8fb}
+  #sb-proj .m{font-family:'JetBrains Mono',monospace;font-size:11px;color:#c8d2d6;margin-top:2px}
+  #sb-proj .m b{color:#ffd27a;font-weight:600}
+  #sb-proj .g{margin-top:4px;font-size:10px;letter-spacing:.06em;color:#ffd9a0}
+  #sb-away .pj{margin-top:10px;padding-top:9px;border-top:1px solid rgba(255,255,255,.08)}
+  #sb-away .pj .k{font-size:9px;letter-spacing:.14em;text-transform:uppercase;color:#ffbf5a}
+  #sb-away .pj .n{font-size:14px;font-weight:600;margin:2px 0}
+  #sb-away .pj .m{font-family:var(--font-mono);font-size:11px;color:var(--mut)}
+  #sb-away .pj .m b{color:#ffd27a;font-weight:600}
+  #sb-away .pj button{margin-top:8px;width:100%;padding:10px;border-radius:9px;border:1px solid rgba(255,190,90,.55);background:rgba(255,190,90,.1);
+    color:#ffd9a0;font:inherit;font-size:11px;letter-spacing:.12em;text-transform:uppercase;cursor:pointer}
+  #sb-away .sw{margin-top:8px;font-size:9px;letter-spacing:.1em;text-transform:uppercase;color:rgba(200,215,225,.38);text-align:center}`;
+  document.head.appendChild(st);
+  setInterval(() => { try { sbProjectRender(); } catch (e) { console.warn('[projet]', e); } }, 700);
+})();
+
 function showOfflineRecap(out, gains, dc, df) {
   if (!document.getElementById('sb-away-style')) {
     const st = document.createElement('style');
@@ -33361,12 +33521,20 @@ function showOfflineRecap(out, gains, dc, df) {
   if (out.builds && out.builds.length) extra.push(`terminé : ${out.builds.join(', ')}`);
   const el = document.createElement('div');
   el.id = 'sb-away';
-  el.innerHTML = `<div class="t">Pendant ton absence · <b>${_fmtAway(out.dtMs)}</b></div>${rows}${extra.length ? `<div class="x">${extra.join(' · ')}</div>` : ''}`;
-  const close = () => { el.classList.remove('on'); setTimeout(() => el.remove(), 260); };
-  el.addEventListener('click', close);
+  // PATCH_2110_PROJET : le prochain projet dans le récapitulatif, et on le ferme en balayant
+  const _pr = (typeof sbNextProject === 'function') ? sbNextProject() : null;
+  const _pj = _pr ? `<div class="pj"><div class="k">Prochain projet</div><div class="n">${_pr.kind === 'up' ? 'Améliorer · ' : ''}${_pr.name}</div><div class="m">${sbProjectLine(_pr)}</div><button>${_pr.ready ? 'Y aller' : 'Exploiter ta mine'}</button></div>` : '';
+  el.innerHTML = `<div class="t">Pendant ton absence · <b>${_fmtAway(out.dtMs)}</b></div>${rows}${extra.length ? `<div class="x">${extra.join(' · ')}</div>` : ''}${_pj}<div class="sw">Balaye pour fermer</div>`;
+  let _closed = false;
+  const close = () => { if (_closed) return; _closed = true; el.classList.remove('on'); setTimeout(() => el.remove(), 260); };
+  el.dataset.base = 'translate(-50%,0) translateX(X)';
   document.body.appendChild(el);
+  const _btn = el.querySelector('.pj button');
+  if (_btn) { _btn.addEventListener('click', ev => { ev.stopPropagation(); close(); sbProjectGo(_pr); }); _btn.addEventListener('touchend', ev => { ev.stopPropagation(); close(); sbProjectGo(_pr); }); }
+  sbSwipeAway(el, () => { _closed = true; el.remove(); }, close);
   requestAnimationFrame(() => el.classList.add('on'));
-  setTimeout(close, 6500);
+  let _t = setTimeout(close, _pr ? 12000 : 6500);
+  el.addEventListener('touchstart', () => { clearTimeout(_t); _t = setTimeout(close, 12000); }, { passive: true });
 }
 
 // Antenne : si la page a été fermée pendant le rituel de construction (~4 s),
