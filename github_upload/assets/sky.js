@@ -54,8 +54,12 @@
       }
     });
   }
-  function tick() { try { apply(forced != null ? forced : dayK(new Date())); } catch (e) { console.warn('[ciel]', e); } }
+  // PATCH_2110_NUIT_SECOURS (Adrien) : une planète dévastée reste de nuit, même en plein jour — bien plus terrifiant.
+  // La nuit tombe dès les premiers dégâts et se lève à mesure que les secours soignent (dévastation → 0).
+  function devNight() { try { const d = window.SBAftermath ? SBAftermath.dev : 0; return d > 0 ? Math.min(1, d / 10) : 0; } catch (e) { return 0; } }
+  function tick() { try { apply(forced != null ? forced : dayK(new Date()) * (1 - devNight())); } catch (e) { console.warn('[ciel]', e); } }
   setInterval(tick, 30000);
+  let _dn = -1; setInterval(() => { const d = devNight(); if (d !== _dn) { _dn = d; tick(); } }, 2000);   // PATCH_2110_NUIT_SECOURS : dès que la dévastation change
   const boot = setInterval(() => {
     if (!(window.Planet3D && Planet3D.ready)) return;
     clearInterval(boot);
