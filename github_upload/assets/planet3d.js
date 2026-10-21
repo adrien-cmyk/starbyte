@@ -4438,7 +4438,7 @@ void main() {
           Origine : ${r.origin||"inconnue"}<br>Distance : ${r.dist||"0.7 UA"}<br>
           Intensit\xE9 : ${r.intensity||"faible"}<br>Classification : ${r.cls||"impossible"}
         </div>
-        <div class="cta"><button class="btn-primary" onclick="SBAntenna.showSignal()">Revoir le signal</button><button class="btn-ghost" onclick="toast('Poste de prospection : bient\xF4t')">\xC9voluer</button></div>`}else{let r=this.affordable(),a=G.planet.parcels.findIndex((l,c)=>c!==s&&(l.state==="rocky"||l.state==="resource")),o=t.pending?`<button class="btn-primary" onclick="SBAntenna.build()">Activer l'antenne</button>`:`<button class="btn-primary" onclick="${a>=0?`onHexClick(${a})`:"toast('Aucune parcelle exploitable')"}">Exploiter une parcelle</button>`;e.innerHTML=`
+        <div class="cta"><button class="btn-primary" onclick="SBAntenna.showSignal()">Revoir le signal</button><button class="btn-ghost" onclick="toast('Poste de prospection : bient\xF4t')">\xC9voluer</button></div>`}else{let r=this.affordable(),a=G.planet.parcels.findIndex((l,c)=>c!==s&&(l.state==="rocky"||l.state==="resource")),o=t.pending?`<button class="btn-primary" onclick="SBAntenna.build()">Activer l'antenne</button>`:`<button class="btn-primary" onclick="startM3(${s},'Antenne')">${["Couler les fondations","\xC9riger la structure","Monter la parabole"][Math.min(this.veinStep(),2)]} \xB7 match-3</button>`;e.innerHTML=`
         <div class="row1"><span class="tag" style="color:${_c}">Projet</span><span class="coord">${n}</span></div>
         <div class="name">Antenne de prospection</div>
         <div class="sub">Aucune liaison externe. ${i} ignore tout de ce qui l'entoure : cette antenne sera ses premiers yeux.</div>
