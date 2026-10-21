@@ -9588,7 +9588,9 @@ function _mpApplyRaidAgainstHome(raid) {
   if (raid.status === 'aborted' || res.outcome === 'aborted') return true;   // aucun combat : rien à intégrer
   const won = res.outcome === 'victory';
   const loot = Object.assign({ metal: 0, energie: 0, cristal: 0 }, won ? (res.loot || {}) : {});
+  const _depW = (G.worlds || []).find(w => w && w.kind === 'colony' && w.id === G.activeWorld);   // PATCH_2110_DEPOT
   for (const k of ['metal', 'energie', 'cristal']) {
+    if (_depW) { const d = sbDepot(_depW); d[k] = Math.max(0, (d[k] || 0) - (loot[k] || 0)); continue; }
     if (G.res[k]) G.res[k].v = Math.max(0, (G.res[k].v || 0) - (loot[k] || 0));
   }
   let damagedName = null;
@@ -29419,7 +29421,7 @@ function sbOpenWorldPicker() {
     <button class="sbw-row${w.id === G.activeWorld ? ' on' : ''}" onclick="document.getElementById('sb-worlds').remove();sbSwitchWorld('${w.id}')">
       <span class="sbw-k">${w.kind === 'capital' ? 'Capitale' : 'Colonie'}</span>
       <span class="sbw-m"><b>${esc(w.id === 'home' ? ((w.id === G.activeWorld ? G.planet.name : w.name) || 'Capitale') : w.name)}</b>
-      <span>${w.coord ? esc(w.coord) : (w.kind === 'capital' ? 'Planète d\'origine' : '')}</span></span>
+      <span>${w.coord ? esc(w.coord) : (w.kind === 'capital' ? 'Planète d\'origine' : '')}${w.kind === 'colony' ? (() => { const L = sbDepotLine(w); return ' · dépôt ' + fmt(L.tot) + ' / ' + fmt(L.cap); })() : ''}</span></span>
       <span class="sbw-go">${w.id === G.activeWorld ? 'Tu es ici' : 'Y aller →'}</span>
     </button>${w.kind === 'colony' ? `<button class="sbw-ren" onclick="event.stopPropagation();document.getElementById('sb-worlds').remove();sbAskColonyName('${w.id}')">Renommer ${esc(w.name)}</button>` : ''}`).join('')}${(G.colonyMissions || []).map(m => `<div class="sbw-row off" style="cursor:pointer" onclick="document.getElementById('sb-worlds').remove();openArkMission('${m.id}')"><b>${esc(m.name)}</b><span>Arche en route · ${formatTankerDuration(Math.max(0, m.arriveAt - Date.now()))}</span></div>`).join('')}
     <button class="sbw-x" onclick="document.getElementById('sb-worlds').remove()">Fermer</button></div>`;
@@ -29484,11 +29486,152 @@ async function sbPublishColonies(client) {
         w.mpClaimed = true;
       }
       const snap = sbWithWorld(w.id, () => _mpWorldSnapshotHome());
-      const { error } = await client.rpc('mp_colony_publish', { p_address: w.coord, p_name: w.name, p_level: snap.level, p_defense: snap.defense, p_buildings: snap.buildings });
+      const _d = sbDepot(w), _st = { metal: Math.floor(_d.metal || 0), energie: Math.floor(_d.energie || 0), cristal: Math.floor(_d.cristal || 0) };   // PATCH_2110_DEPOT
+      let { error } = await client.rpc('mp_colony_publish', { p_address: w.coord, p_name: w.name, p_level: snap.level, p_defense: snap.defense, p_buildings: snap.buildings, p_stocks: _st });
+      if (error && /p_stocks|function|schema cache|PGRST202/i.test(error.message || '')) ({ error } = await client.rpc('mp_colony_publish', { p_address: w.coord, p_name: w.name, p_level: snap.level, p_defense: snap.defense, p_buildings: snap.buildings }));
       if (error) console.warn('[colonie] publication', w.coord, error.message);
     } catch (e) { console.warn('[colonie] publication', e); }
   }
 }
+
+
+/* ═══════════ PATCH_2110_DEPOT — dépôt colonial (Adrien, 21/10) ═══════════
+   Une colonie stocke sa production dans son dépôt (plafonné par ses silos). Un convoi l'expédie vers l'empire
+   toutes les 6 h ; on peut aussi l'expédier tout de suite (carburant, une fois par heure).
+   Un raid sur une colonie ne pille que ce dépôt (serveur v23) : le stock de la capitale n'est plus exposé. */
+const DEPOT_SHIP_MS = 6 * 3600 * 1000;
+const DEPOT_BASE = 3000;
+const DEPOT_SILO = [15000, 60000, 250000];
+const DEPOT_MANUAL_FUEL = 150, DEPOT_MANUAL_CD = 3600 * 1000;
+const DEPOT_LB = { metal: 'métal', energie: 'énergie', cristal: 'cristal' };
+function sbDepot(w) {
+  if (!w.depot) w.depot = { metal: 0, energie: 0, cristal: 0, nextShip: Date.now() + DEPOT_SHIP_MS };
+  if (!w.depot.nextShip) w.depot.nextShip = Date.now() + DEPOT_SHIP_MS;
+  return w.depot;
+}
+function _sbWorldParcels(w) {
+  if (!w) return [];
+  if (w.id === (G.activeWorld || 'home')) return (G.planet && G.planet.parcels) || [];
+  return (w.data && w.data.planet && w.data.planet.parcels) || [];
+}
+function sbDepotCap(w, k) {
+  let cap = DEPOT_BASE;
+  for (const p of _sbWorldParcels(w)) {
+    if (!p || p.state !== 'built' || p.damaged || p.building !== 'silo_' + k) continue;
+    cap += DEPOT_SILO[Math.max(0, Math.min(2, (p.lvl || 1) - 1))];
+  }
+  return cap;
+}
+function sbDepotProduce(w, prod, ms, at) {
+  const d = sbDepot(w);
+  let t0 = at - ms, guard = 0;
+  while (t0 < at && guard++ < 200) {
+    const t1 = Math.min(at, d.nextShip);
+    const h = Math.max(0, t1 - t0) / 3600000;
+    for (const k of ['metal', 'energie', 'cristal']) {
+      const v = (prod[k] || 0) * h * (window.SBSkills ? SBSkills.prodMult(k) : 1);
+      if (v > 0) d[k] = Math.min(sbDepotCap(w, k), (d[k] || 0) + v);
+    }
+    if (t1 >= d.nextShip) { sbDepotShip(w, true, t1); }
+    t0 = t1;
+  }
+}
+// expédition : le dépôt rejoint le stock de l'empire (même au-delà du stockage, comme une cargaison livrée)
+function sbDepotShip(w, auto, when) {
+  const d = sbDepot(w);
+  const got = {};
+  for (const k of ['metal', 'energie', 'cristal']) {
+    const q = Math.floor(d[k] || 0);
+    if (q > 0 && G.res[k]) { G.res[k].v = (G.res[k].v || 0) + q; got[k] = q; }
+    d[k] = Math.max(0, (d[k] || 0) - q);
+  }
+  d.nextShip = (when || Date.now()) + DEPOT_SHIP_MS;
+  d.lastShip = { at: when || Date.now(), got, auto: !!auto };
+  const sum = Object.values(got).reduce((a, b) => a + b, 0);
+  if (sum > 0 && (!auto || Date.now() - (when || 0) < 120000)) {
+    try { toast(`◈ Convoi de ${w.name || 'la colonie'} arrivé : ${Object.entries(got).map(([k, q]) => fmt(q) + ' ' + (DEPOT_LB[k] || k)).join(' · ')}`); } catch (e) {}
+  }
+  return got;
+}
+function sbDepotShipNow(wid) {
+  const w = (G.worlds || []).find(x => x && x.id === wid);
+  if (!w) return;
+  const d = sbDepot(w);
+  const sum = Math.floor((d.metal || 0) + (d.energie || 0) + (d.cristal || 0));
+  if (sum <= 0) { toast('Le dépôt est vide'); return; }
+  const wait = (d.manualAt || 0) + DEPOT_MANUAL_CD - Date.now();
+  if (wait > 0) { toast(`Prochain convoi express dans ${formatTankerDuration(wait)}`); return; }
+  if ((G.fuel || 0) < DEPOT_MANUAL_FUEL) { toast(`Il faut ${DEPOT_MANUAL_FUEL} carburant pour un convoi express`); return; }
+  G.fuel -= DEPOT_MANUAL_FUEL;
+  d.manualAt = Date.now();
+  sbDepotShip(w, false);
+  try { saveGame(); } catch (e) {}
+  try { sbDepotRender(); } catch (e) {}
+  const sh = document.getElementById('sb-depot-sheet'); if (sh) { sh.remove(); sbDepotOpen(wid); }
+}
+function sbDepotLine(w) {
+  const d = sbDepot(w);
+  const tot = ['metal', 'energie', 'cristal'].reduce((n, k) => n + Math.floor(d[k] || 0), 0);
+  const cap = ['metal', 'energie', 'cristal'].reduce((n, k) => n + sbDepotCap(w, k), 0);
+  return { tot, cap, eta: Math.max(0, d.nextShip - Date.now()) };
+}
+// pastille sous le nom de la planète, sur une colonie
+function sbDepotRender() {
+  const w = (G.worlds || []).find(x => x && x.id === G.activeWorld && x.kind === 'colony');
+  let el = document.getElementById('sb-depot-chip');
+  if (!w) { if (el) el.remove(); return; }
+  const wp = document.getElementById('w-planet');
+  const host = wp && wp.parentNode;
+  if (!host) return;
+  if (!el) { el = document.createElement('button'); el.id = 'sb-depot-chip'; el.type = 'button'; el.onclick = () => sbDepotOpen(G.activeWorld); }
+  if (el.parentNode !== host || el.previousSibling !== wp) host.insertBefore(el, wp.nextSibling);
+  const L = sbDepotLine(w);
+  const full = L.tot >= L.cap * 0.98;
+  el.className = full ? 'full' : '';
+  el.innerHTML = `<span>Dépôt</span><b>${fmt(L.tot)} / ${fmt(L.cap)}</b><i>${full ? 'plein' : 'convoi dans ' + formatTankerDuration(L.eta)}</i>`;
+}
+function sbDepotOpen(wid) {
+  const w = (G.worlds || []).find(x => x && x.id === wid);
+  if (!w) return;
+  const d = sbDepot(w);
+  const row = (k, lb) => { const v = Math.floor(d[k] || 0), c = sbDepotCap(w, k); return `<div class="dp-r"><span>${lb}</span><div class="dp-bar"><i style="width:${Math.min(100, v / c * 100).toFixed(1)}%"></i></div><b>${fmt(v)} / ${fmt(c)}</b></div>`; };
+  const wait = Math.max(0, (d.manualAt || 0) + DEPOT_MANUAL_CD - Date.now());
+  const ov = document.createElement('div'); ov.id = 'sb-depot-sheet';
+  ov.innerHTML = `<div class="dp-card">
+    <div class="dp-k">Dépôt colonial · ${String(w.name || '').replace(/[<>&]/g, '')}</div>
+    <p>La production de la colonie s'accumule ici. Un convoi l'expédie vers l'empire toutes les 6 h. <b>Un raid ne pille que ce dépôt</b> (jusqu'à la moitié) : le stock de ta capitale ne craint rien.</p>
+    ${row('metal', 'Métal')}${row('energie', 'Énergie')}${row('cristal', 'Cristal')}
+    <div class="dp-n">Prochain convoi dans <b>${formatTankerDuration(Math.max(0, d.nextShip - Date.now()))}</b>. Plus de silos sur la colonie = un plus grand dépôt (mais plus de butin à défendre).</div>
+    ${d.lastShip ? `<div class="dp-n">Dernier convoi : ${Object.entries(d.lastShip.got || {}).map(([k, q]) => fmt(q) + ' ' + (DEPOT_LB[k] || k)).join(' · ') || 'vide'}</div>` : ''}
+    <button class="dp-go" ${wait ? 'disabled' : ''} onclick="sbDepotShipNow('${w.id}')">${wait ? 'Convoi express dans ' + formatTankerDuration(wait) : 'Expédier maintenant · ' + DEPOT_MANUAL_FUEL + ' carburant'}</button>
+    <button class="dp-x" onclick="document.getElementById('sb-depot-sheet').remove()">Fermer</button></div>`;
+  ov.addEventListener('click', e => { if (e.target === ov) ov.remove(); });
+  document.body.appendChild(ov);
+}
+(function () {
+  const st = document.createElement('style');
+  st.textContent = `
+  #sb-depot-chip { display: table; margin: 5px auto 0; padding: 5px 11px; border-radius: 14px; border: 1px solid rgba(255,176,102,.3); background: rgba(10,8,6,.72); color: #e8d6c0; font: inherit; font-size: 9.5px; letter-spacing: .1em; cursor: pointer; backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); }
+  #sb-depot-chip span { text-transform: uppercase; color: #b89a78; margin-right: 6px; letter-spacing: .16em; }
+  #sb-depot-chip b { font-family: 'JetBrains Mono', ui-monospace, monospace; font-weight: 600; color: #ffe2bd; }
+  #sb-depot-chip i { font-style: normal; color: #9aa8ae; margin-left: 7px; }
+  #sb-depot-chip.full { border-color: rgba(255,120,90,.6); }
+  #sb-depot-chip.full i { color: #ff9a7a; }
+  #sb-depot-sheet { position: fixed; inset: 0; z-index: 9500; background: rgba(2,6,12,.62); display: flex; align-items: flex-end; }
+  #sb-depot-sheet .dp-card { width: 100%; padding: 18px 16px calc(env(safe-area-inset-bottom,0px) + 18px); border-radius: 16px 16px 0 0; background: linear-gradient(#11100d,#0a0907); border-top: 1px solid rgba(255,176,102,.35); color: #e6e0d8; font-size: 13px; line-height: 1.5; }
+  #sb-depot-sheet .dp-k { font-size: 10px; letter-spacing: .18em; text-transform: uppercase; color: #ffb066; margin-bottom: 8px; }
+  #sb-depot-sheet p { margin: 0 0 12px; color: #cfc6ba; }
+  #sb-depot-sheet .dp-r { display: grid; grid-template-columns: 64px 1fr auto; gap: 10px; align-items: center; margin: 7px 0; font-size: 12px; }
+  #sb-depot-sheet .dp-r b { font-family: 'JetBrains Mono', ui-monospace, monospace; font-weight: 600; font-size: 11.5px; }
+  #sb-depot-sheet .dp-bar { height: 6px; border-radius: 3px; background: rgba(255,255,255,.08); overflow: hidden; }
+  #sb-depot-sheet .dp-bar i { display: block; height: 100%; background: linear-gradient(90deg,#c87a3a,#ffcf8a); }
+  #sb-depot-sheet .dp-n { margin-top: 10px; font-size: 12px; color: #a8a097; }
+  #sb-depot-sheet .dp-go { width: 100%; margin-top: 14px; padding: 13px; border-radius: 10px; border: 1px solid rgba(255,176,102,.6); background: rgba(255,176,102,.12); color: #ffcf8a; font: inherit; font-size: 11px; letter-spacing: .12em; text-transform: uppercase; }
+  #sb-depot-sheet .dp-go:disabled { opacity: .45; }
+  #sb-depot-sheet .dp-x { width: 100%; margin-top: 8px; padding: 12px; border-radius: 10px; border: 1px solid rgba(255,255,255,.12); background: none; color: #9aa8ae; font: inherit; }`;
+  document.head.appendChild(st);
+  setInterval(() => { try { sbDepotRender(); } catch (e) {} }, 1000);
+})();
 
 /* ═══════════ PATCH_2010_FLOTTES — flotte par planète et transferts (Adrien, 20/10) ═══════════
    Chaque planète a ses vaisseaux à quai (G.fleet.stationed, échangé avec la planète active) et sa file de chantier.
@@ -32996,31 +33139,36 @@ function _simSegment(ms, at, out) {
   // dévastation (après un raid perdu) : production réduite, guérison naturelle −1 %/h
   // PATCH_2010_AUDIT — plusieurs planètes : chacune guérit de sa propre dévastation, qui ne freine que sa propre production
   let devMult = 1, devCut = null;
-  if (window.SBAftermath && typeof SBAftermath.simSegment === 'function') {
-    if (typeof sbWithWorld === 'function' && Array.isArray(G.worlds) && G.worlds.length > 1) {
-      devCut = {};
-      for (const w of G.worlds) {
-        if (!w || !w.id) continue;
-        try {
-          const cut = sbWithWorld(w.id, () => {
-            const mult = SBAftermath.simSegment(hours);
-            if (!(mult < 1)) return null;
-            const o = {};
-            for (const p of (G.planet && G.planet.parcels) || []) {
-              if (!p || p.state !== 'built' || !p.building) continue;
-              for (const [k, v] of Object.entries(_mpTierProd(p))) o[k] = (o[k] || 0) + v * (p.damaged ? 0.5 : 1) * (1 - mult);
-            }
-            return o;
-          });
-          if (cut) for (const [k, v] of Object.entries(cut)) devCut[k] = (devCut[k] || 0) + v;
-        } catch (e) {}
-      }
-    } else devMult = SBAftermath.simSegment(hours);
-  }
+  const colProd = [];   // PATCH_2110_DEPOT : production horaire de chaque colonie (après dévastation), versée dans son dépôt
+  const _aft = window.SBAftermath && typeof SBAftermath.simSegment === 'function';
+  if (typeof sbWithWorld === 'function' && Array.isArray(G.worlds) && G.worlds.length > 1) {
+    devCut = {};
+    for (const w of G.worlds) {
+      if (!w || !w.id) continue;
+      try {
+        const r = sbWithWorld(w.id, () => {
+          const mult = _aft ? SBAftermath.simSegment(hours) : 1;
+          const base = {};
+          for (const p of (G.planet && G.planet.parcels) || []) {
+            if (!p || p.state !== 'built' || !p.building) continue;
+            for (const [k, v] of Object.entries(_mpTierProd(p))) base[k] = (base[k] || 0) + v * (p.damaged ? 0.5 : 1);
+          }
+          return { mult, base };
+        });
+        if (!r) continue;
+        if (r.mult < 1) for (const [k, v] of Object.entries(r.base)) devCut[k] = (devCut[k] || 0) + v * (1 - r.mult);
+        if (w.kind === 'colony') { const o = {}; for (const [k, v] of Object.entries(r.base)) o[k] = v * r.mult; colProd.push({ w, prod: o, base: r.base }); }
+      } catch (e) {}
+    }
+  } else if (_aft) devMult = SBAftermath.simSegment(hours);
+  const colSub = {};
+  for (const c of colProd) for (const [k, v] of Object.entries(c.prod)) colSub[k] = (colSub[k] || 0) + v;   // production des colonies (après dévastation)
   for (const [rk, r] of Object.entries(G.res || {})) {   // PATCH_1610_SKILLS : bonus des skills
-    const rate = devCut ? Math.max(0, r.rate - (devCut[rk] || 0)) : r.rate * devMult;
+    // empire = production totale − dévastation de chaque planète − ce que produisent les colonies (versé dans leur dépôt)
+    const rate = devCut ? Math.max(0, r.rate - (devCut[rk] || 0) - (colSub[rk] || 0)) : r.rate * devMult;
     if (rate > 0 && r.v < r.max) r.v = Math.min(r.max, r.v + rate * hours * (window.SBSkills ? SBSkills.prodMult(rk) : 1));
   }
+  for (const c of colProd) { try { sbDepotProduce(c.w, c.prod, ms, at); } catch (e) { console.warn('[dépôt]', e); } }
 
   // 2. Crédits (Comptoirs) et carburant (Raffineries) — taux horaires aussi
   if (typeof getCommerceCreditsRate === 'function') {

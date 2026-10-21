@@ -43,12 +43,13 @@ Deno.serve(async (req) => {
       // v20 (audit) : une erreur de lecture laisse le raid « resolving » (il sera repris), au lieu de l'annuler pour de bon
       const { data: dw0, error: e0 } = await admin.from('worlds').select('*').eq('user_id', raid.defender_id).maybeSingle();
       if (e0) throw e0;
-      // v18 (20/10) — raid sur une colonie : défense et bâtiments de la colonie, stock commun de l'empire
+      // v18 (20/10) — raid sur une colonie : défense et bâtiments de la colonie ; v23 : son dépôt
       let dw = dw0;
       if (dw0 && raid.defender_address && raid.defender_address !== dw0.address) {
         const { data: col, error: e1 } = await admin.from('colonies').select('*').eq('address', raid.defender_address).eq('user_id', raid.defender_id).maybeSingle();
         if (e1) throw e1;
-        dw = col ? { ...dw0, address: col.address, planet_name: col.name, level: col.level, defense: col.defense, buildings: col.buildings, shield_until: col.shield_until } : null;
+        // v23 (21/10) — dépôt colonial : un raid sur une colonie ne voit que son dépôt, pas le stock de l'empire
+        dw = col ? { ...dw0, address: col.address, planet_name: col.name, level: col.level, defense: col.defense, buildings: col.buildings, shield_until: col.shield_until, stocks: col.stocks || { metal: 0, energie: 0, cristal: 0 } } : null;
       }
       const result = dw
         ? resolveRaid(raid, dw)
