@@ -10217,7 +10217,7 @@ function mpEmbassyBlockHtml(p) {
   const _en = mpRelWith(addr, p.playerName, 'enemy'), _tr = mpRelWith(addr, p.playerName, 'trade');   // PATCH_2110_PAVILLONS
   if (!m && !k && !inc && !_en && !_tr) return '';
   const rows = [];
-  if (_en) rows.push(`<div style="font-size:12px;color:#ff4d4d;font-weight:600">⚔ Ennemi déclaré${_en.byMe ? ' (par toi)' : ''}</div><div style="font-size:11px;color:var(--mut);margin-top:2px">Pillage jusqu'à 40 % entre vous · pas de pacte possible · « Paix ? » des deux côtés pour en sortir</div>`);
+  if (_en) rows.push(`<div style="font-size:12px;color:#ff4d4d;font-weight:600">⚔ Ennemi déclaré${_en.byMe ? ' (par toi)' : ''}</div><div style="font-size:11px;color:var(--mut);margin-top:2px">Pillage +10 points entre vous · pas de pacte possible · « Paix ? » des deux côtés pour en sortir</div>`);
   if (_tr) rows.push(`<div style="font-size:12px;color:#ffc864">⚑ Accord commercial${_tr.until ? ' jusqu\'au ' + new Date(_tr.until).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' }) : ''}</div><div style="font-size:11px;color:var(--mut);margin-top:2px">Tes convois vers lui mieux protégés · canal ouvert</div>`);
   if (inc) rows.push(`<div style="font-size:12px;color:#e6f0ff">Son tanker ${_esc(inc.tanker || '')} est en orbite chez toi</div>`);
   if (m) {
@@ -38693,7 +38693,7 @@ const PLAYER_MESSAGE_FLAGS = [
   { id: 'why_probe', label: 'Tu m\'as sondé. Explique-toi.', desc: 'Message, sans effet',                                 color: '#9a8aff' },
   { id: 'warning',   label: 'Dernier avertissement.',  desc: '24 h : ton prochain raid sur lui pille +10 %',                   color: '#ff8a8a' },
   { id: 'respect',   label: 'Respect pour ta défense.',desc: 'Message d\'honneur, sans effet',                                color: '#cececd' },
-  { id: 'enemy',     label: 'Je te déclare ennemi.',   desc: 'Rivalité officielle : visible de tous, pillage 40 %, plus de pacte', color: '#ff4d4d' },
+  { id: 'enemy',     label: 'Je te déclare ennemi.',   desc: 'Rivalité officielle : visible de tous, pillage +10 points, plus de pacte', color: '#ff4d4d' },
 ];
 
 function openMessagePlayer(planetCoord) {
@@ -38742,7 +38742,7 @@ var MP_FLAG_KEY = { peace: 'paix', trade: 'commerce', alliance: 'alliance', why_
 // PATCH_2110_PAVILLONS — déclarer un ennemi se confirme
 async function _mpConfirmFlag(key, who) {
   if (key !== 'ennemi') return true;
-  return sbConfirmWarning('Déclarer ' + (who || 'ce commandant') + ' ennemi ?', 'La rivalité devient officielle : elle s\'affiche chez vous deux et une rumeur circule au comptoir.<br><br>Entre ennemis, un raid gagné pille jusqu\'à <b>40 %</b> (au lieu de 30). Tout pacte entre vous tombe, et aucun ne peut être signé tant que la rivalité dure.<br><br>Pour en sortir : un pavillon « Paix ? » auquel il répond « Paix ? ».', 'Déclarer ennemi');
+  return sbConfirmWarning('Déclarer ' + (who || 'ce commandant') + ' ennemi ?', 'La rivalité devient officielle : elle s\'affiche chez vous deux et une rumeur circule au comptoir.<br><br>Entre ennemis, un raid gagné pille <b>10 points de plus</b> : jusqu\'à 40 % d\'une capitale, 60 % d\'un dépôt colonial. Tout pacte entre vous tombe, et aucun ne peut être signé tant que la rivalité dure.<br><br>Pour en sortir : un pavillon « Paix ? » auquel il répond « Paix ? ».', 'Déclarer ennemi');
 }
 var MP_FLAG_BY_KEY = {};
 PLAYER_MESSAGE_FLAGS.forEach(f => { MP_FLAG_BY_KEY[MP_FLAG_KEY[f.id]] = f; });

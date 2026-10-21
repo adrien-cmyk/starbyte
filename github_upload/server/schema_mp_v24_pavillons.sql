@@ -63,23 +63,24 @@ language sql security definer set search_path = public as $$
   update public.mp_relations set ended_at = until where ended_at is null and until is not null and until < now();
 $$;
 
--- effets d'un pavillon, à l'insertion
+-- effets d'un pavillon, à l'insertion (un pavillon ne sert qu'à une seule paire : paired_at)
+alter table public.flags add column if not exists paired_at timestamptz;
 create or replace function public._mp_flag_effects() returns trigger
 language plpgsql security definer set search_path = public as $$
 declare a uuid := least(new.from_id, new.to_id); b uuid := greatest(new.from_id, new.to_id);
-        mutual boolean; fw public.worlds; tw public.worlds;
+        mutual boolean; fid uuid; fw public.worlds; tw public.worlds;
 begin
   perform public._mp_pair_lock(new.from_id, new.to_id);
   perform public._mp_expire_relations();
-  -- la même proposition de l'autre côté dans les 48 h, encore sans réponse (pas déjà « consommée » par un pavillon
-  -- identique de ma part), et hissée après la dernière déclaration d'hostilité entre nous
-  mutual := exists (select 1 from public.flags f where f.from_id = new.to_id and f.to_id = new.from_id
-                     and f.flag_key = new.flag_key and f.created_at > now() - interval '48 hours' and f.id <> new.id
-                     and not exists (select 1 from public.flags g where g.from_id = new.from_id and g.to_id = new.to_id
-                                      and g.flag_key = new.flag_key and g.id <> new.id and g.created_at >= f.created_at)
-                     and not exists (select 1 from public.flags e where e.flag_key = 'ennemi' and e.id <> new.id
-                                      and least(e.from_id, e.to_id) = a and greatest(e.from_id, e.to_id) = b
-                                      and e.created_at > f.created_at));
+  -- la proposition de l'autre (même clé, < 48 h) n'est une réponse que si elle n'a encore servi à aucune paire
+  -- (ni comme proposition ni comme réponse), et si elle est postérieure à la dernière déclaration d'hostilité entre nous
+  select f.id into fid from public.flags f where f.from_id = new.to_id and f.to_id = new.from_id
+     and f.flag_key = new.flag_key and f.created_at > now() - interval '48 hours' and f.id <> new.id and f.paired_at is null
+     and not exists (select 1 from public.flags e where e.flag_key = 'ennemi' and e.id <> new.id
+                      and least(e.from_id, e.to_id) = a and greatest(e.from_id, e.to_id) = b and e.created_at > f.created_at)
+   order by f.created_at desc limit 1;
+  mutual := fid is not null;
+  if mutual then update public.flags set paired_at = now() where id in (fid, new.id); end if;
   select * into fw from public.worlds where user_id = new.from_id;
   select * into tw from public.worlds where user_id = new.to_id;
 
@@ -340,3 +341,47 @@ begin
     returning * into r;
   return r;
 end $function$;
+
+-- ── garde du dépôt colonial ──
+-- 1) publication de la CAPITALE : on ne retire de worlds.stocks que le butin des raids sur la capitale (pas celui pris dans un dépôt colonial)
+create or replace function public._mp_worlds_clean() returns trigger
+language plpgsql as $$
+declare k text; pend bigint;
+begin
+  new.stocks := public._mp_clean_stocks(new.stocks);
+  if tg_op = 'UPDATE' and current_user <> 'postgres' and auth.uid() = new.user_id then
+    foreach k in array array['metal', 'energie', 'cristal'] loop
+      select coalesce(sum(public._mp_num(r.result -> 'loot' ->> k)), 0) into pend
+        from public.raids r where r.defender_id = new.user_id and r.status = 'resolved' and not r.defender_seen
+                              and r.defender_address = new.address;   -- capitale seulement
+      if pend > 0 then new.stocks := new.stocks || jsonb_build_object(k, greatest(0, public._mp_num(new.stocks ->> k) - pend)); end if;
+    end loop;
+  end if;
+  return new;
+end $$;
+
+-- 2) publication d'une COLONIE : même garde pour son dépôt (raid résolu sur cette adresse, pas encore intégré par le jeu)
+create or replace function public.mp_colony_publish(p_address text, p_name text, p_level int, p_defense int, p_buildings jsonb, p_stocks jsonb default null)
+returns void
+language plpgsql security definer set search_path = public as $$
+declare st jsonb := null; k text; pend bigint;
+begin
+  if jsonb_typeof(p_stocks) = 'object' then
+    st := '{}'::jsonb;
+    foreach k in array array['metal', 'energie', 'cristal'] loop
+      select coalesce(sum(public._mp_num(r.result -> 'loot' ->> k)), 0) into pend
+        from public.raids r where r.defender_id = auth.uid() and r.defender_address = p_address and r.status = 'resolved' and not r.defender_seen;
+      st := st || jsonb_build_object(k, greatest(0, least(10000000, public._mp_num(p_stocks ->> k)) - pend));
+    end loop;
+  end if;
+  update public.colonies set
+    name = left(coalesce(nullif(trim(p_name), ''), name), 40),
+    level = greatest(1, coalesce(p_level, 1)),
+    defense = greatest(0, coalesce(p_defense, 0)),
+    buildings = case when jsonb_typeof(p_buildings) = 'array' then p_buildings else buildings end,
+    stocks = coalesce(st, stocks),
+    updated_at = now(), last_seen = now()
+  where user_id = auth.uid() and address = p_address;
+end $$;
+revoke all on function public.mp_colony_publish(text, text, int, int, jsonb, jsonb) from public, anon;
+grant execute on function public.mp_colony_publish(text, text, int, int, jsonb, jsonb) to authenticated;
