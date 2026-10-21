@@ -571,7 +571,7 @@
       }
       const insp = (window.SBSystem && sys && (sys.known || sys.scanning)) ? _sigBtn(COL.cyan, 'Inspecter le système', `SBSystem.open('${esc(s.key)}')`, '', true) : '';
       const tag = (G.systemTags || {})[s.key];
-      const tagTxt = tag === 'star' ? ' · <span style="color:#ffc864">intéressant</span>' : tag === 'skip' ? ' · <span style="color:#8a96a0">sans intérêt</span>' : '';
+      const tagTxt = tag === 'star' ? ' · <span style="color:#ffc864">intéressant</span>' : tag === 'skip' ? ' · <span style="color:#ff4a3a">sans intérêt</span>' : '';
       const li = sys && sys.li;
       const title = li && li.port ? `${esc(li.port.name)}` : `Système ${esc(s.key)}`;
       const sub = li && li.port ? `<span class="mono">${esc(s.key)}</span> · ${esc(li.port.typeLabel || 'lieu caché')}` : (bits.join(' · ') || (li && (li.lane || li.echo || li.obs.length) ? 'Couloir de passage' : 'Balayé, rien de relevé.'));
@@ -841,6 +841,9 @@
       this.starMat = STAR_COLS.map((c) => { const m = new T.MeshBasicMaterial({ color: c }); m.userData.base = new T.Color(c); return m; });
       this.starHalo = STAR_COLS.map((c) => fade(new T.SpriteMaterial({ map: this.halo, color: c, opacity: 0.3, blending: T.AdditiveBlending })));
       this.dimStar = new T.MeshBasicMaterial({ color: 0x6c7a80 });
+      // 21/10 (Adrien) — système « sans intérêt » : soleil rouge no-go, lisible de loin (carte tactique)
+      this.noGoStar = new T.MeshBasicMaterial({ color: 0xff2a1e }); this.noGoStar.userData.base = new T.Color(0xff2a1e);
+      this.noGoHalo = fade(new T.SpriteMaterial({ map: this.halo, color: 0xff2a1e, opacity: 0.45, blending: T.AdditiveBlending }));
       this.fillMat = {
         known: fade(new T.MeshBasicMaterial({ color: 0x6fa6d6, opacity: 0.03, blending: T.AdditiveBlending })),
         scan: fade(new T.MeshBasicMaterial({ color: 0xe6f0ff, opacity: 0.03, blending: T.AdditiveBlending })),
@@ -1091,10 +1094,11 @@
           const ci2 = Math.floor(_mulberry32(_hashSeed('SM3:star:' + s.key))() * STAR_COLS.length);
           const known = s.known;
           const tag = (G.systemTags || {})[s.key];
-          const star = mark(new T.Mesh(Gm.sphere, known && tag !== 'skip' ? this.starMat[ci2] : this.dimStar));
-          star.scale.setScalar(known ? 2.1 : 1.3); star.position.y = 5; star.userData.star = true; star.userData.base = known ? 2.1 : 1.3; g.add(star);
+          const star = mark(new T.Mesh(Gm.sphere, tag === 'skip' ? this.noGoStar : known ? this.starMat[ci2] : this.dimStar));
+          const _sz = tag === 'skip' ? 2.7 : known ? 2.1 : 1.3;   // no-go : un peu plus gros, repérable d'un coup d'œil
+          star.scale.setScalar(_sz); star.position.y = 5; star.userData.star = true; star.userData.base = _sz; g.add(star);
           this.starMeshes.push({ mesh: star, cell: ci, halo: null });
-          const halo = new T.Sprite(this.starHalo[ci2]); halo.position.y = 5; halo.scale.setScalar(known ? 11 : 6); g.add(halo);
+          const halo = new T.Sprite(tag === 'skip' ? this.noGoHalo : this.starHalo[ci2]); halo.position.y = 5; halo.scale.setScalar(tag === 'skip' ? 15 : known ? 11 : 6); g.add(halo);
           this.starMeshes[this.starMeshes.length - 1].halo = halo;
           if (known) {
             const lab = this._label(s.key.split('-').slice(1).join('-'), '#9fb3bf', 0.27); lab.position.set(0, 1, 12); g.add(lab);
@@ -1381,6 +1385,8 @@
       this.starMat.forEach((m) => m.color.copy(m.userData.base).multiplyScalar(k));
       this.starHalo.forEach((m) => { m.opacity = (0.04 + 0.22 * far) * (1 - 0.85 * near); });
       this.dimStar.color.setRGB(0.42 * k, 0.48 * k, 0.5 * k);
+      this.noGoStar.color.copy(this.noGoStar.userData.base).multiplyScalar(Math.max(0.75, k));   // reste vif même de loin
+      this.noGoHalo.opacity = (0.18 + 0.27 * far) * (1 - 0.8 * near);
       for (const m of Object.values(this.TICK)) m.opacity = (m.userData.base || 1) * far * (1 - near);
       this.beaconMat.opacity = 0.35 + 0.65 * far;
       for (const m of Object.values(this.NEAR)) m.opacity = (m.userData.base == null ? 1 : m.userData.base) * near;
