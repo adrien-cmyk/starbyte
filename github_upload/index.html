@@ -9611,7 +9611,7 @@ function _mpApplyRaidAgainstHome(raid) {
     startedAt: Date.parse(raid.departed_at) || null, returnedAt: Date.parse(raid.resolved_at) || Date.now(), read: false,
     defense: {
       won: !won, attacker: raid.attacker_pseudo, attackerAddress: raid.attacker_address, fleetName: raid.fleet_name || '',
-      loot, damagedName, losses: defLosses, lootPct: Number(res.loot_pct) || 0.3,
+      loot, damagedName, losses: defLosses, lootPct: Number(res.loot_pct) || (_depW ? 0.5 : 0.3), lootBase: _depW ? 0.5 : 0.3,   // PATCH_2110_LOOTBASE : base 50 % (dépôt colonial) / 30 % (capitale)
       atk: combat && combat.phases && combat.phases.phase1 ? combat.phases.phase1.atkEffective : null,
       def: combat && combat.phases && combat.phases.phase1 ? combat.phases.phase1.defEffective : null,
       landed: !!(combat && combat.phases && combat.phases.phase2 && combat.phases.phase2.won),
@@ -11433,7 +11433,7 @@ function renderDefenseReportDetail(r) {
     <div class="dash-section-card" style="margin:0 16px 14px">
       <div style="font-size:10px;letter-spacing:.14em;color:var(--mut);text-transform:uppercase;margin-bottom:6px">Pillage</div>
       ${lootRows}
-      ${d.lootPct > 0.3 ? `<div style="font-size:10px;color:#ff8a8a;margin-top:6px">Pillage majoré : jusqu'à ${Math.round(d.lootPct * 100)} %${d.lootPct >= 0.5 ? ' (ennemis déclarés + dernier avertissement)' : ' (ennemis déclarés ou dernier avertissement)'}</div>` : ''}
+      ${(() => { const _b = d.lootBase || 0.3, _n = Math.round(((d.lootPct || _b) - _b) * 10); return _n > 0 ? `<div style="font-size:10px;color:#ff8a8a;margin-top:6px">Pillage majoré : jusqu'à ${Math.round(d.lootPct * 100)} %${_n >= 2 ? ' (ennemis déclarés + dernier avertissement)' : ' (ennemis déclarés ou dernier avertissement)'}</div>` : ''; })()}
       <div class="dash-stat-row"><span class="lbl">Bâtiment abîmé</span><span class="val" style="color:${d.damagedName ? 'var(--red)' : 'var(--mut)'}">${d.damagedName || 'aucun'}</span></div>
     </div>
     ${_defLossLines(d.losses).length ? `<div class="dash-section-card" style="margin:0 16px 14px">
