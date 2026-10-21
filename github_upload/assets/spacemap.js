@@ -240,6 +240,14 @@
     // 13/10 — tronçons repérés par mes balises (un convoi passé, et son cap) : les deux systèmes entrent sur la carte
     const spotted = (G.spottedLegs || []).filter(l => l && /^[A-Z]-[A-Z]-\d{4}$/.test(l.from) && /^[A-Z]-[A-Z]-\d{4}$/.test(l.to) && (now - (l.at || 0)) < 3 * 86400000);
     for (const l of spotted) { add(l.from, { known: true }); add(l.to, { known: true }); }
+    // 21/10 — commerce entre joueurs : route dorée vers chaque partenaire d'un accord commercial
+    const tradeLanes = [];
+    for (const r of (G.mpRelations || [])) {
+      if (!r || r.kind !== 'trade' || !(r.addresses || []).length) continue;
+      const k = String(r.addresses[0]).split('-').slice(0, 3).join('-');
+      if (!/^[A-Z]-[A-Z]-\d{4}$/.test(k)) continue;
+      add(k, { known: true }); tradeLanes.push({ pseudo: r.pseudo, sys: k });
+    }
 
     // ── Plateau : une case par objet ──
     const home = mySystemKey();
@@ -348,6 +356,12 @@
       if (fa === undefined || fb === undefined) continue;
       spottedPaths.push({ l, path: [fa, fb] });   // 14/10 : un cap relevé = un trait direct (pas de détour sur la grille)
     }
+    const tradePaths = [];
+    for (const t of tradeLanes) {
+      const a = cell['sys:' + home], b = cell['sys:' + t.sys];
+      if (a === undefined || b === undefined || a === b) continue;
+      tradePaths.push({ pseudo: t.pseudo, sys: t.sys, path: [a, b] });
+    }
     const partial = { cell, occ, routes, home };
     // ce que les lignes PNJ disent de chaque système (couloir, écho, lieu caché, convois observés)
     if (window.SBLines) for (const sx of Object.values(systems)) { try { sx.li = SBLines.infoFor(sx.key); } catch (e) { sx.li = null; } }
@@ -417,7 +431,7 @@
       flights.push({ kind: 'fleet', id: 'fl-' + f.id, fleetId: f.id, label: f.name || 'Flotte', from: back ? at : 0, to: back ? 0 : at, toCk: null, path,
         departedAt: back ? (a.returnDepartedAt || (a.returnsAt - a.travelMs)) : a.departedAt, arrivalAt: back ? a.returnsAt : a.arrivesAt, target: a.system, back });
     }
-    return { systems, flights, occ, cell, items, routes, spotted: spottedPaths, home, lit: litRing() };
+    return { systems, flights, occ, cell, items, routes, spotted: spottedPaths, trade: tradePaths, home, lit: litRing() };
   }
 
   // 13/10 — trajets possibles vers un système : voie directe (ligne droite) et mes routes qui y aboutissent.
@@ -455,6 +469,7 @@
     }
     for (const f of st.flights) o.push('F' + f.id + f.from + '>' + f.to);
     for (const sp of st.spotted || []) o.push('S' + sp.l.from + '>' + sp.l.to);
+    for (const tp of st.trade || []) o.push('T' + tp.sys + tp.pseudo);
     for (const f of st.flights) if (f.path) o.push('P' + f.id + f.path.length);
     for (const rt of st.routes || []) o.push('R' + rt.r.id + rt.r.color + (rt.r.avoid || []).join('/') + (rt.broken ? 'x' : '') + rt.path.join('.'));
     return st.lit + '|' + o.sort().join(',');
@@ -1227,6 +1242,15 @@
           const tag = this._label(String(i), rt.r.color, 0.24); tag.position.set(c.x - 9, 2.2, c.z - 7);
           this.routeGroup.add(tag);
         }
+      }
+      // 21/10 — routes commerciales (accord commercial en cours) : trait doré plein vers le partenaire
+      for (const tp of st.trade || []) {
+        const l = new T.Line(new T.BufferGeometry().setFromPoints(this._smooth(tp.path.map(i => CELLS[i])).map(q => new T.Vector3(q.x, 0.9, q.z))),
+          new T.LineBasicMaterial({ color: 0xffc864, transparent: true, opacity: 0.8, depthWrite: false }));
+        this.routeGroup.add(l);
+        const A = CELLS[tp.path[0]], B = CELLS[tp.path[1]];
+        const tag = this._label(tp.pseudo, '#ffc864', 0.22); tag.position.set((A.x + B.x) / 2, 2.2, (A.z + B.z) / 2 - 6);
+        this.routeGroup.add(tag);
       }
       // 13/10 — tronçons repérés par mes balises : un convoi est passé par là, cap sur le système suivant
       // un seul trait par paire de systèmes ; une flèche seulement si un seul sens a été vu

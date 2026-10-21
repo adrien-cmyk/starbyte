@@ -8319,7 +8319,7 @@ function totalDefense() {
 // Helper : soldats d'un type réservés à des flottes DÉPLOYÉES (à bord, ne défendent plus)
 // AUDIT_1110 — Réservations : les totaux (G.fleet.stationed, G.defense.units[k].qty) sont ce qu'on POSSÈDE ;
 // flottes, garnisons et missions tanker en RÉSERVENT une partie.
-var TANKER_BUSY_STATUSES = ['in_transit', 'docked', 'returning', 'exploring', 'orbital_relay', 'posted'];   // PATCH_1310_POSTES : + poste de route
+var TANKER_BUSY_STATUSES = ['in_transit', 'docked', 'returning', 'exploring', 'orbital_relay', 'posted', 'trade_wait'];   // PATCH_2110_COMMERCE : + livraison en attente de paiement   // PATCH_1310_POSTES : + poste de route
 function _tankerMissionTier(m) { return m.tier || m.tankerTier || 0; }
 // PATCH_2010_FLOTTES — chaque flotte, mission et garnison appartient à la planète d'où elle est partie
 function _sbMine(x) { return ((x && x.world) || 'home') === ((typeof G !== 'undefined' && G.activeWorld) || 'home'); }
@@ -8739,7 +8739,7 @@ var EXTRA_SAVE_KEYS = [
   'mpNeighbors',   // VOISINS_1310 — voisins déjà signalés
   'tuto',          // TUTO_1410 — premiers pas (étape, vu, terminé)
   'skillsLearned', 'research', '_skillsSeen', '_skillsMigrated',   // PATCH_1610_SKILLS
-  'mpRaidsApplied', 'mpRaidsReturned', 'mpPostsToClose', 'mpRelations',   // PATCH_2010_AUDIT — raids déjà intégrés (indépendant des rapports, qu'on peut supprimer)
+  'mpRaidsApplied', 'mpRaidsReturned', 'mpPostsToClose', 'mpRelations', 'mpTradeCaps',   // PATCH_2010_AUDIT — raids déjà intégrés (indépendant des rapports, qu'on peut supprimer)
   'worlds', 'activeWorld', 'colonyMissions', 'fleetTransfers',   // PATCH_2010_WORLDS — colonies (planètes inactives) et planète affichée
   '_linesCrown', 'crownSeen', '_linesSanct', 'sanctSeen', '_linesNoire', 'noireSeen', '_linesRefuge', '_linesRefuge2', 'refugeSeen', '_brest1',   // PATCH_1510_CROWN — lieu du secteur M devenu la Couronne, première arrivée vue
 ];
@@ -9821,6 +9821,7 @@ function mpIngestRelations(rows) {
     const before = new Set(prev.map(key)), after = new Set(rows.map(key));
     for (const r of rows) if (!before.has(key(r))) {
       toast(r.kind === 'enemy' ? (r.byMe ? `⚔ ${r.pseudo} est désormais ton ennemi déclaré` : `⚔ ${r.pseudo} t'a déclaré ennemi`) : `⚑ Accord commercial avec ${r.pseudo} · 7 jours`);
+      if (r.kind === 'trade') setTimeout(() => mpTradeOffer(r.pseudo), 1200);   // PATCH_2110_COMMERCE
     }
     for (const r of prev) if (!after.has(key(r))) {
       toast(r.kind === 'enemy' ? `☮ Paix conclue avec ${r.pseudo} : la rivalité est levée` : `Accord commercial avec ${r.pseudo} terminé`);
@@ -9834,6 +9835,200 @@ function mpRelBadge(address, pseudo) {
   const e = mpRelWith(address, pseudo, 'enemy'), t = mpRelWith(address, pseudo, 'trade');
   return (e ? ' <span style="color:#ff4d4d;font-weight:600">· Ennemi</span>' : '') + (t ? ' <span style="color:#ffc864">· Partenaire commercial</span>' : '');
 }
+// ═══ PATCH_2110_COMMERCE — commerce entre joueurs (serveur v25) ═══
+// Pendant un accord commercial, un commandant livre son surplus à son partenaire : le tanker part (convoi normal),
+// le jeu du partenaire achète ce qu'il peut payer au prix du milieu du marché, le tanker rentre avec les CG
+// et ce qui n'a pas été acheté. Aucun CG n'est créé : ils passent de l'acheteur au vendeur.
+var MP_TRADE_PRICE = { metal: 2.5, energie: 3.5, cristal: 8.5 };
+var MP_TRADE_CAP_DEFAULT = 2000;   // plafond d'achat par livraison (CG), réglable par partenaire
+var MP_TRADE_SURPLUS = 0.70;       // au-delà de 70 % des silos : surplus
+var _mpTradeBusy = new Set();
+function mpTradePrice(c) {
+  return Math.floor(['metal', 'energie', 'cristal'].reduce((s, k) => s + Math.max(0, Math.floor(Number(c && c[k]) || 0)) * MP_TRADE_PRICE[k], 0));
+}
+function mpTradeSurplus() {
+  const o = {};
+  for (const k of ['metal', 'energie', 'cristal']) { const r = G.res && G.res[k]; o[k] = r ? Math.max(0, Math.floor(r.v - r.max * MP_TRADE_SURPLUS)) : 0; }
+  return o;
+}
+function mpTradeCap(pseudo) {
+  const c = (G.mpTradeCaps || {})[pseudo];
+  return Number.isFinite(c) ? c : MP_TRADE_CAP_DEFAULT;
+}
+async function mpTradeSetCap(key) {
+  const tr = mpRelWith(key, key, 'trade'), pseudo = tr ? tr.pseudo : key;
+  if (typeof sbPrompt !== 'function') return;
+  const v = await sbPrompt({ title: 'Plafond d\'achat', body: `Combien de CG au plus par livraison de <strong>${_esc(pseudo)}</strong> ?<br><br>Au-delà, son tanker repart avec le reste de sa cale.`,
+    placeholder: String(mpTradeCap(pseudo)), confirmLabel: 'Valider', maxLength: 7 });
+  if (v == null) return;
+  const n = Math.max(0, Math.min(1000000, Math.floor(Number(String(v).replace(/[^\d]/g, '')) || 0)));
+  if (!G.mpTradeCaps) G.mpTradeCaps = {};
+  G.mpTradeCaps[pseudo] = n;
+  toast(`Plafond d'achat chez ${pseudo} : ${fmt(n)} CG par livraison`);
+  if (typeof saveGame === 'function') saveGame();
+  if (typeof refreshCurrentScreen === 'function') refreshCurrentScreen();
+}
+// Ouvre le tanker, cale déjà chargée du surplus (les ressources les plus chères d'abord)
+function mpTradeDeliver(key) {
+  const tr = mpRelWith(key, key, 'trade');
+  if (!tr || !(tr.addresses || []).length) { toast('Pas d\'accord commercial en cours avec ce commandant'); return; }
+  const addr = tr.addresses[0], pseudo = tr.pseudo;
+  if (typeof findPlanetByCoord === 'function' && !findPlanetByCoord(addr)) _mpMergeSender(addr, pseudo);
+  if (tankerAvailability(null) <= 0) { toast('Aucun tanker disponible'); return; }
+  openTankerCompose(addr);
+  const c = G.tankerComposing;
+  if (!c || c.destination !== addr) return;
+  c.trade = { pseudo, address: addr };
+  if (!c.realPlayer) c.realPlayer = { address: addr, pseudo };
+  _mpTradeFill(c);
+  if (typeof renderTankerCompose === 'function') renderTankerCompose();
+}
+function _mpTradeFill(c) {
+  const cap = (SHIP_TIERS.tanker[c.tankerSelected] || {}).cargo || 0;
+  const s = mpTradeSurplus();
+  let free = cap;
+  c.cargo.resources = { metal: 0, energie: 0, cristal: 0 };
+  for (const k of ['cristal', 'energie', 'metal']) { const q = Math.min(s[k], free); c.cargo.resources[k] = q; free -= q; }
+}
+// À la signature d'un accord : proposer tout de suite une livraison
+async function mpTradeOffer(pseudo) {
+  const s = mpTradeSurplus();
+  if (_mpCargoSum(s) <= 0 || tankerAvailability(null) <= 0 || typeof sbConfirm !== 'function') return;
+  const ok = await sbConfirm({ title: 'Accord commercial',
+    body: `Accord signé avec <strong>${_esc(pseudo)}</strong> pour 7 jours.<br><br>Ton surplus (au-delà de 70 % de tes silos) : ${_mpResLine(s)}.<br><br>Le livrer maintenant ? Il te paie au prix du milieu du marché (métal 2,5 · énergie 3,5 · cristal 8,5 CG), le tanker rentre avec les CG.`,
+    confirmLabel: 'Préparer le tanker', cancelLabel: 'Plus tard' });
+  if (ok) mpTradeDeliver(pseudo);
+}
+// Arrivée chez le partenaire : la livraison est inscrite, le tanker attend d'être payé
+function mpTradeArrival(mission) {
+  const f = typeof computeRouteLootFactor === 'function' ? computeRouteLootFactor(mission) : 1;
+  const res = (mission.cargo && mission.cargo.resources) || {};
+  mission.mpOffered = {};
+  for (const k of ['metal', 'energie', 'cristal']) mission.mpOffered[k] = Math.max(0, Math.floor((res[k] || 0) * f));
+  mission.status = 'trade_wait';
+  mission.tradeWaitSince = Date.now();
+  toast(`${mission.tankerName} chez ${mission.mpTrade.pseudo} · livraison proposée : ${_mpResLine(mission.mpOffered)}`);
+  if (typeof saveGame === 'function') saveGame();
+  mpTradeRegister(mission);
+}
+async function mpTradeRegister(mission) {
+  if (!mission || mission.mpTradeId || mission.status !== 'trade_wait' || _mpTradeBusy.has(mission.id)) return;
+  if (!window.SBMP || !window.SBMP.ready()) return;
+  _mpTradeBusy.add(mission.id);
+  try {
+    const d = await window.SBMP.tradeArrive(mission.mpTrade.address, mission.id, mission.tankerName, mission.mpOffered || {});
+    if (d && d.id) mission.mpTradeId = d.id;
+    if (typeof saveGame === 'function') saveGame();
+    setTimeout(() => { try { SBMP.pollTrade(true); } catch (e) {} }, 1500);
+  } catch (e) {
+    const msg = String(e && e.message || e);
+    if (/no_trade|target_unknown|target_self|trade_rate/.test(msg)) {
+      mpTradeReturn(mission, null, /no_trade/.test(msg) ? 'L\'accord commercial est terminé' : /trade_rate/.test(msg) ? '12 livraisons par jour au plus' : 'Ce commandant n\'est plus au registre');
+    } else console.warn('[commerce] inscription :', msg);
+  } finally { _mpTradeBusy.delete(mission.id); }
+}
+// Issue d'une livraison : le tanker rentre avec les CG et ce qui n'a pas été acheté
+function mpTradeReturn(m, d, why) {
+  if (!m || m.status !== 'trade_wait') return;
+  const sold = (d && d.status === 'settled') ? d.bought : { metal: 0, energie: 0, cristal: 0 };
+  const res = (m.cargo && m.cargo.resources) || {};
+  const back = {};
+  for (const k of ['metal', 'energie', 'cristal']) back[k] = Math.max(0, (res[k] || 0) - (sold[k] || 0));
+  if (m.cargo) m.cargo.resources = back;
+  m.mpTradeCG = (d && d.status === 'settled') ? d.paid_cg : 0;
+  m.mpTradeResult = { sold, paid: m.mpTradeCG, expired: !!(d && d.status === 'expired'), why: why || null };
+  const now = Date.now();
+  m.status = 'returning';
+  m.cancelledAt = now;
+  m.returnArrivalAt = now + Math.max(60000, (m.arrivalAt || now) - (m.departedAt || now));
+  const who = m.mpTrade.pseudo;
+  toast(why ? `${m.tankerName} : ${why} · retour avec la cale`
+    : d && d.status === 'expired' ? `${who} n'a pas répondu en 12 h : ${m.tankerName} rentre avec sa cale`
+    : _mpCargoSum(sold) > 0 ? `${who} a acheté ${_mpResLine(sold)} · +${fmt(m.mpTradeCG)} CG au retour de ${m.tankerName}`
+    : `${who} n'a rien pu acheter (CG, plafond ou silos) : ${m.tankerName} rentre avec sa cale`);
+  if (typeof startTankerCountdownTicker === 'function') startTankerCountdownTicker();
+  if (typeof saveGame === 'function') saveGame();
+  if (typeof refreshCurrentScreen === 'function') refreshCurrentScreen();
+}
+// Retour au port : les CG de la vente (appelé par handleTankerReturnFromCancellation)
+function mpTradeCashIn(m) {
+  if (!m || !m.mpTrade || !m.mpTradeResult || m.mpTradeCashed) return;
+  m.mpTradeCashed = true;
+  const r = m.mpTradeResult;
+  if (r.paid > 0) G.credits = (G.credits || 0) + r.paid;
+  const back = (m.cargo && m.cargo.resources) || {};
+  _mpDiploReport('trade_sold', { pseudo: m.mpTrade.pseudo, address: m.mpTrade.address, tanker: m.tankerName, sold: r.sold, paid: r.paid, back, expired: r.expired, why: r.why }, 'trs-' + m.id);
+}
+// Acheteur : ce que je peux payer (CG disponibles, plafond pour ce partenaire, place dans les silos)
+function _mpTradeWant(d) {
+  const budget = Math.max(0, Math.min(Math.floor(G.credits || 0), mpTradeCap(d.seller_pseudo)));
+  const want = {};
+  for (const k of ['metal', 'energie', 'cristal']) {
+    const r = G.res && G.res[k];
+    const room = r ? Math.max(0, Math.floor(r.max - r.v)) : 0;
+    want[k] = Math.min(d.cargo[k] || 0, room);
+  }
+  const cost = mpTradePrice(want);
+  if (cost > budget) {
+    const f = cost > 0 ? budget / cost : 0;
+    for (const k of ['metal', 'energie', 'cristal']) want[k] = Math.floor(want[k] * f);
+  }
+  return want;
+}
+async function _mpTradeBuy(d) {
+  const L = _mpLedger('trd:' + d.id);
+  if (L && L.settled) return;
+  if (_mpTradeBusy.has(d.id)) return;
+  _mpTradeBusy.add(d.id);
+  try {
+    const res = await window.SBMP.tradeSettle(d.id, _mpTradeWant(d));
+    if (res) _mpTradeApplyBuy(res);
+  } catch (e) { console.warn('[commerce] règlement :', String(e && e.message || e)); }
+  finally { _mpTradeBusy.delete(d.id); }
+}
+function _mpTradeApplyBuy(d) {
+  if (!d || d.status !== 'settled') return;
+  const key = 'trd:' + d.id;
+  const L = _mpLedger(key);
+  if (L && L.settled) { if (!d.buyer_applied) window.SBMP.tradeDone(d.id); return; }
+  if (d.buyer_applied) { _mpLedgerSet(key, { settled: true }); return; }
+  G.credits = Math.max(0, (G.credits || 0) - d.paid_cg);
+  _mpPay(d.bought, +1, true);
+  _mpLedgerSet(key, { settled: true });
+  _mpDiploReport('trade_bought', { pseudo: d.seller_pseudo, address: d.seller_address, tanker: d.tanker, offered: d.cargo, bought: d.bought, paid: d.paid_cg }, 'trb-' + d.id);
+  toast(_mpCargoSum(d.bought) > 0 ? `Livraison de ${d.seller_pseudo} : +${_mpResLine(d.bought)} · −${fmt(d.paid_cg)} CG` : `Livraison de ${d.seller_pseudo} : rien acheté (CG, plafond ou silos)`);
+  if (typeof saveGame === 'function') saveGame();
+  window.SBMP.tradeDone(d.id);
+  if (typeof refreshCurrentScreen === 'function') refreshCurrentScreen();
+}
+// Relève du registre (toutes les 20 s au plus, à chaque tour de veille)
+async function mpIngestTrade(rows, meId) {
+  for (const m of G.tankerMissions || []) if (m.status === 'trade_wait' && !m.mpTradeId) mpTradeRegister(m);
+  for (const d of rows) {
+    if (d.buyer_id === meId) {
+      if (d.status === 'waiting') await _mpTradeBuy(d);
+      else if (d.status === 'settled' && !d.buyer_applied) _mpTradeApplyBuy(d);
+    }
+    if (d.seller_id === meId && d.status !== 'waiting') {
+      const m = (G.tankerMissions || []).find(x => x.id === d.mission);
+      if (m && m.status === 'trade_wait') mpTradeReturn(m, d);
+      if (!m || m.status !== 'trade_wait') window.SBMP.tradeDone(d.id);
+    }
+  }
+}
+function mpTradeBlockHtml(addr, pseudo) {
+  const tr = mpRelWith(addr, pseudo, 'trade');
+  if (!tr) return '';
+  const pending = (G.tankerMissions || []).filter(m => m.mpTrade && m.mpTrade.pseudo === tr.pseudo && ['in_transit', 'trade_wait', 'returning'].includes(m.status));
+  const s = mpTradeSurplus();
+  return `<div style="margin-top:8px;font-size:11px;color:var(--mut);line-height:1.5">
+      Surplus livrable : ${_mpCargoSum(s) > 0 ? `<span style="color:#ffc864">${_mpResLine(s)}</span> (≈ ${fmt(mpTradePrice(s))} CG)` : 'aucun (rien au-delà de 70 % de tes silos)'}<br>
+      Tu achètes ses livraisons jusqu'à <span style="color:#e6f0ff">${fmt(mpTradeCap(tr.pseudo))} CG</span> chacune · <a onclick="mpTradeSetCap('${addr}')" style="color:#ffc864;text-decoration:underline;cursor:pointer">modifier</a>
+      ${pending.length ? `<br>${pending.map(m => `${m.tankerName} : ${m.status === 'in_transit' ? 'en route' : m.status === 'trade_wait' ? 'attend son paiement' : 'rentre'}`).join(' · ')}` : ''}
+    </div>
+    <div style="display:flex;margin-top:8px">${_mpDiploBtn('Livrer le surplus', `mpTradeDeliver('${addr}')`)}</div>`;
+}
+
 function _mpCargoSum(c) { return ['metal', 'energie', 'cristal'].reduce((s, k) => s + Math.max(0, Math.floor(Number(c && c[k]) || 0)), 0); }
 var _mpDiploBusy = new Set();
 var _mpOrbitRegistering = new Set();
@@ -9846,6 +10041,8 @@ var MP_DIPLO_TYPES = {
   pact_signed:    { title: 'PACTE SIGNÉ',         list: 'Pacte signé',         sub: 'pacte de non-agression actif', color: '#7ed080' },
   pact_broken:    { title: 'PACTE ROMPU',         list: 'Pacte rompu',         sub: 'les raids redeviennent possibles', color: '#ff8a8a' },
   pact_declined:  { title: 'PACTE DÉCLINÉ',       list: 'Pacte décliné',       sub: 'proposition refusée', color: '#cececd' },
+  trade_sold:     { title: 'LIVRAISON VENDUE',    list: 'Livraison commerciale', sub: 'surplus vendu à ton partenaire', color: '#ffc864' },   // PATCH_2110_COMMERCE
+  trade_bought:   { title: 'LIVRAISON REÇUE',     list: 'Livraison reçue',     sub: 'achat à ton partenaire', color: '#ffc864' },
   neighbor:       { title: 'SIGNAL CAPTÉ',        list: 'Commandant voisin',   sub: 'ajouté à ton carnet', color: '#5fffe8' },   // VOISINS_1310
 };
 function _mpDiploReport(type, d, key) {
@@ -10197,6 +10394,15 @@ function renderDiploReportDetail(r) {
     html += box(`Une signature de commandant se détache du bruit de fond : <strong>${d.pseudo}</strong>${d.planet ? `, sur ${d.planet}` : ''}, niveau estimé ~${d.level || 1}. C'est l'un de tes plus proches voisins.${addr}`)
       + `<div style="margin:0 16px 14px;font-size:12px;color:var(--mut);line-height:1.6">Depuis sa fiche (Carnet ou onglet Joueurs) : envoyer un tanker en ambassade, hisser un pavillon, proposer un pacte… ou préparer un raid.</div>`
       + `<div style="margin:0 16px 14px;display:flex">${_mpDiploBtn('Voir sa planète', `openPlanetDetail('${d.address}')`)}</div>`;
+  } else if (d.type === 'trade_sold') {   // PATCH_2110_COMMERCE
+    html += box(d.why ? `${d.tanker || 'Ton tanker'} n'a pas pu livrer <strong>${d.pseudo}</strong> : ${d.why}. Il est rentré avec sa cale.${addr}`
+      : d.expired ? `<strong>${d.pseudo}</strong> n'a pas répondu en 12 h : ${d.tanker || 'ton tanker'} est rentré avec sa cale.${addr}`
+      : _mpCargoSum(d.sold) > 0 ? `<strong>${d.pseudo}</strong> a acheté <span style="color:#ffc864">${_mpResLine(d.sold)}</span>.<br><br>${d.tanker || 'Ton tanker'} est rentré avec <strong style="color:#ffc864">+${fmt(d.paid || 0)} CG</strong>${_mpCargoSum(d.back) > 0 ? ` et le reste de la cale (${_mpResLine(d.back)})` : ''}.${addr}`
+      : `<strong>${d.pseudo}</strong> n'a rien pu acheter (CG, plafond ou silos pleins). ${d.tanker || 'Ton tanker'} est rentré avec sa cale.${addr}`);
+  } else if (d.type === 'trade_bought') {
+    html += box(_mpCargoSum(d.bought) > 0 ? `Le tanker ${d.tanker || ''} de <strong>${d.pseudo}</strong> a livré <span style="color:var(--green)">${_mpResLine(d.bought)}</span>, payés <strong style="color:#ffc864">${fmt(d.paid || 0)} CG</strong> au prix de l'accord.${_mpCargoSum(d.offered) > _mpCargoSum(d.bought) ? `<br><br>Proposé : ${_mpResLine(d.offered)}. Le reste repart avec lui (CG, plafond ou silos).` : ''}${addr}`
+      : `Le tanker ${d.tanker || ''} de <strong>${d.pseudo}</strong> proposait ${_mpResLine(d.offered)}, mais tu n'as rien pu acheter (CG, plafond ou silos pleins). Il repart avec sa cale.${addr}`)
+      + `<div style="margin:0 16px 14px;font-size:11px;color:var(--mut)">Plafond par livraison : ${fmt(mpTradeCap(d.pseudo))} CG${d.address ? ` · <a onclick="mpTradeSetCap('${d.address}')" style="color:#ffc864;text-decoration:underline;cursor:pointer">modifier</a>` : ''}</div>`;
   } else if (d.type === 'pact_declined') {
     html += box(`<strong>${d.pseudo}</strong> a décliné ton pacte de non-agression.${addr}`);
   } else if (d.type === 'cargo_accepted') {
@@ -10218,7 +10424,7 @@ function mpEmbassyBlockHtml(p) {
   if (!m && !k && !inc && !_en && !_tr) return '';
   const rows = [];
   if (_en) rows.push(`<div style="font-size:12px;color:#ff4d4d;font-weight:600">⚔ Ennemi déclaré${_en.byMe ? ' (par toi)' : ''}</div><div style="font-size:11px;color:var(--mut);margin-top:2px">Pillage +10 points entre vous · pas de pacte possible · « Paix ? » des deux côtés pour en sortir</div>`);
-  if (_tr) rows.push(`<div style="font-size:12px;color:#ffc864">⚑ Accord commercial${_tr.until ? ' jusqu\'au ' + new Date(_tr.until).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' }) : ''}</div><div style="font-size:11px;color:var(--mut);margin-top:2px">Tes convois vers lui mieux protégés · canal ouvert</div>`);
+  if (_tr) rows.push(`<div style="font-size:12px;color:#ffc864">⚑ Accord commercial${_tr.until ? ' jusqu\'au ' + new Date(_tr.until).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' }) : ''}</div><div style="font-size:11px;color:var(--mut);margin-top:2px">Tes convois vers lui mieux protégés · canal ouvert</div>` + mpTradeBlockHtml(addr, p.playerName));
   if (inc) rows.push(`<div style="font-size:12px;color:#e6f0ff">Son tanker ${_esc(inc.tanker || '')} est en orbite chez toi</div>`);
   if (m) {
     const res = (m.cargo && m.cargo.resources) || {};
@@ -12455,8 +12661,16 @@ function renderTankerMissionCard(mission, opts) {
   opts = opts || {};
   const m = mission;
   if (!m) return '';
-  const validStatuses = ['in_transit', 'returning', 'orbital_relay', 'exploring', 'docked'];
+  const validStatuses = ['in_transit', 'returning', 'orbital_relay', 'exploring', 'docked', 'trade_wait'];
   if (!validStatuses.includes(m.status)) return '';
+  if (m.status === 'trade_wait') {   // PATCH_2110_COMMERCE
+    const margin = opts.inline ? '0' : '0 16px 10px';
+    const left = Math.max(0, 12 * 3600e3 - (Date.now() - (m.tradeWaitSince || Date.now())));
+    return `<div style="border:1px solid rgba(255,200,100,.40);border-radius:8px;padding:12px 14px;margin:${margin};background:rgba(255,200,100,.05)">
+      <div style="display:flex;justify-content:space-between;gap:10px"><span style="font-size:13px;color:#ffc864;font-weight:600">${m.tankerName}</span><span style="font-size:9px;background:rgba(255,200,100,.18);color:#ffc864;padding:1px 6px;border-radius:3px;letter-spacing:.06em">LIVRAISON</span></div>
+      <div style="font-size:11px;color:var(--mut);margin-top:6px">Chez ${_esc(m.mpTrade.pseudo)} · ${_mpResLine(m.mpOffered || {})}<br>${m.mpTradeId ? 'attend son paiement' : 'inscription au registre…'} · retour sans réponse dans ${Math.ceil(left / 3600e3)} h au plus</div>
+    </div>`;
+  }
 
   const isReturning = m.status === 'returning';
   const isOrbital = m.status === 'orbital_relay';
@@ -25849,6 +26063,7 @@ function handleTankerReturnFromCancellation(missionId) {
   const m = G.tankerMissions[idx];
   if (m.status !== 'returning') return;
 
+  if (m.mpTrade) mpTradeCashIn(m);   // PATCH_2110_COMMERCE — CG de la vente
   // Restituer les ressources au stock (les soldats étaient "engagés", se libèrent automatiquement)
   let restituted = [];
   if (m.cargo?.resources) {
@@ -26385,6 +26600,19 @@ function renderTankerComposeIntent() {
   const c = G.tankerComposing;
   const used = computeComposeCargoUsed();
   const isEmpty = used === 0;
+  // PATCH_2110_COMMERCE — livraison commerciale : payée à l'arrivée, le tanker rentre avec les CG
+  if (c.trade) {
+    c.postArrival = 'orbit_relay';
+    const _px = mpTradePrice(c.cargo.resources);
+    list.innerHTML = `
+    <div style="padding:0 16px">
+      <div style="padding:10px 12px;background:rgba(255,200,100,.07);border:1px solid rgba(255,200,100,.5);border-radius:6px">
+        <div style="font-size:12px;color:#ffc864;font-weight:600">Livraison commerciale à ${_escapeHtml(c.trade.pseudo)}</div>
+        <div style="font-size:10px;color:var(--mut);margin-top:4px;line-height:1.5">Prix : métal 2,5 · énergie 3,5 · cristal 8,5 CG (milieu du marché). Cette cale vaut <span style="color:#ffc864">${fmt(_px)} CG</span>.<br>Il achète ce que ses CG, son plafond et ses silos permettent ; le tanker rentre avec les CG et le reste. Sans réponse en 12 h, il rentre avec toute la cale.</div>
+      </div>
+    </div>`;
+    return;
+  }
   // AMBASSADES_1210 — vers un vrai commandant : toujours une ambassade (le tanker attend sa réponse en orbite)
   if (c.realPlayer) {
     c.postArrival = 'orbit_relay';
@@ -26635,7 +26863,11 @@ function updateTankerComposeConfirmBtn() {
   // canLaunch toujours vrai désormais (un tanker peut partir vide en orbite-balise)
   btn.style.opacity = '1';
   btn.style.pointerEvents = 'auto';
-  if (c.realPlayer) {
+  if (c.trade) {
+    btn.textContent = used === 0 ? 'Cale vide' : `Livrer à ${c.trade.pseudo} · ${fmt(mpTradePrice(c.cargo.resources))} CG`;
+    if (used === 0) { btn.style.opacity = '.4'; btn.style.pointerEvents = 'none'; }
+    try { renderTankerComposeIntent(); } catch (e) {}
+  } else if (c.realPlayer) {
     btn.textContent = used === 0 ? 'Ouvrir l\'ambassade' : 'Ouvrir l\'ambassade et offrir la cale';
   } else if (used === 0) {
     btn.textContent = 'Lancer en orbite (cale vide)';
@@ -26649,6 +26881,7 @@ function confirmTankerComposition() {
   const c = G.tankerComposing;
   if (!c) return;
   const used = computeComposeCargoUsed();
+  if (c.trade && used === 0) { toast('Cale vide : rien à livrer'); return; }   // PATCH_2110_COMMERCE
   // Si cale vide, force orbite-balise (sécurité finale au cas où l'UI a glissé)
   if ((used === 0 || c.realPlayer) && c.postArrival !== 'orbit_relay') {
     c.postArrival = 'orbit_relay';
@@ -26689,6 +26922,7 @@ function confirmTankerComposition() {
     postArrival: c.postArrival,
     riskLossPct: 0,  // pas de risque sur planète verrouillée
     mpTarget: c.realPlayer ? { address: c.realPlayer.address, pseudo: c.realPlayer.pseudo } : null,   // AMBASSADES_1210
+    mpTrade: c.trade ? { address: c.trade.address, pseudo: c.trade.pseudo } : null,   // PATCH_2110_COMMERCE
   };
 
   // ─── Routes Duales : ajuster durée et tirer rencontre éventuelle ───
@@ -26744,6 +26978,7 @@ function pickTankerName() {
 // Si planète mortelle : cargo détruit, tanker rentre avec narration tragique.
 // Sinon : crée G.garrisons entry. Si orbit_relay → tanker reste. Sinon il rentre.
 function handleTankerDropoffArrival(mission) {
+  if (mission.mpTrade) { mpTradeArrival(mission); return; }   // PATCH_2110_COMMERCE — livraison commerciale
   if (mission.mpTarget) { mpOrbitArrival(mission); return; }   // AMBASSADES_1210 — chez un vrai commandant
   const ptype = PLANET_TYPES[mission.destinationPlanetType];
   const isDeadly = !ptype?.deployable;
