@@ -209,7 +209,7 @@
       const ALIEN = [0x2f7d74, 0x5a3f7c, 0x3e8f86, 0x6b4a8e];
       let k = 0;
       sc.traverse(o => {
-        if (!o.isInstancedMesh) return;
+        if (!o.isInstancedMesh || !o.material || !o.material.color || o.name === 'SB_LUM_POOLS') return;   // PATCH_2110 : ignore les halos de lumiere.js
         const isRock = o.material && o.material.color && o.material.color.getHex() === 0x44474d;
         const m4 = new T.Matrix4(), pos = new T.Vector3(), keep = [];
         for (let i = 0; i < o.count; i++) {

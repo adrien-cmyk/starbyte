@@ -29374,7 +29374,33 @@ function sbColonyTick() {
 }
 var _sbColonyLoadAt = Date.now();
 setInterval(() => { try { sbColonyTick(); } catch (e) { console.warn('[colonie]', e); } }, 5000);
+// PATCH_2110_COLONIE_NOM — nom d'une colonie : partout où il apparaît (planète, sélecteur, carte, registre)
+function sbRenameColony(id, raw) {
+  const w = (G.worlds || []).find(x => x && x.id === id);
+  if (!w || w.kind !== 'colony') return false;
+  const next = String(raw || '').trim().replace(/[<>&"`\\]/g, '').toUpperCase().slice(0, 24);
+  if (next.length < 2) { toast('Nom trop court'); return false; }
+  w.name = next;
+  if (id === G.activeWorld) { if (G.planet) G.planet.name = next; }
+  else if (w.data && w.data.planet) w.data.planet.name = next;
+  try { const p = sbFindPlanet(w.coord); if (p) p.customName = next; } catch (e) {}
+  try { saveGame(); } catch (e) {}
+  try { if (typeof refreshCurrentScreen === 'function') refreshCurrentScreen(); if (typeof renderPlanetMap === 'function') renderPlanetMap(); } catch (e) {}
+  return true;
+}
+async function sbAskColonyName(id, first) {
+  const w = (G.worlds || []).find(x => x && x.id === id);
+  if (!w) return;
+  const raw = await sbPrompt({
+    title: first ? 'Baptise ta colonie' : 'Renommer la colonie',
+    body: first ? `L'Arche s'est posée sur <strong>${w.name}</strong>. Donne un nom à ta nouvelle colonie : c'est ainsi que les autres commandants la verront.` : `Le nom de la colonie, vu par les autres commandants.`,
+    placeholder: w.name, initialValue: w.name, confirmLabel: first ? 'Baptiser' : 'Renommer', maxLength: 24,
+  });
+  if (raw === null || !String(raw).trim()) return;
+  if (sbRenameColony(id, raw)) toast(`◈ La colonie s'appelle désormais ${w.name}`);
+}
 async function sbColonyFounded(w) {
+  try { await sbAskColonyName(w.id, true); } catch (e) {}   // PATCH_2110_COLONIE_NOM : on la baptise d'abord
   if (typeof sbNotifPush === 'function') { try { sbNotifPush({ title: 'Colonie fondée', text: `${w.name} : l'Arche s'est posée.` }); } catch (e) {} }
   const go = await sbConfirmWarning('◈ ' + w.name + ' est fondée',
     `L'Arche s'est posée sur <strong>${w.name}</strong> (${w.coord}). Elle est devenue le Centre de commandement d'une nouvelle colonie.<br><br>Tout est à bâtir : les parcelles se gagnent au match-3, et la nouvelle antenne verra ce que la capitale ne voyait pas.<br><br>Le stock reste commun à tout l'empire. Change de planète en touchant son nom en haut de l'écran.`, 'Voir la colonie');
@@ -29393,7 +29419,7 @@ function sbOpenWorldPicker() {
     <button class="sbw-row${w.id === G.activeWorld ? ' on' : ''}" onclick="document.getElementById('sb-worlds').remove();sbSwitchWorld('${w.id}')">
       <b>${esc(w.id === 'home' ? ((w.id === G.activeWorld ? G.planet.name : w.name) || 'Capitale') : w.name)}</b>
       <span>${w.kind === 'capital' ? 'Capitale' : 'Colonie'}${w.coord ? ' · ' + esc(w.coord) : ''}</span>
-    </button>`).join('')}${(G.colonyMissions || []).map(m => `<div class="sbw-row off" style="cursor:pointer" onclick="document.getElementById('sb-worlds').remove();openArkMission('${m.id}')"><b>${esc(m.name)}</b><span>Arche en route · ${formatTankerDuration(Math.max(0, m.arriveAt - Date.now()))}</span></div>`).join('')}
+    </button>${w.kind === 'colony' ? `<button class="sbw-ren" onclick="event.stopPropagation();document.getElementById('sb-worlds').remove();sbAskColonyName('${w.id}')">Renommer ${esc(w.name)}</button>` : ''}`).join('')}${(G.colonyMissions || []).map(m => `<div class="sbw-row off" style="cursor:pointer" onclick="document.getElementById('sb-worlds').remove();openArkMission('${m.id}')"><b>${esc(m.name)}</b><span>Arche en route · ${formatTankerDuration(Math.max(0, m.arriveAt - Date.now()))}</span></div>`).join('')}
     <button class="sbw-x" onclick="document.getElementById('sb-worlds').remove()">Fermer</button></div>`;
   el.addEventListener('click', (e) => { if (e.target === el) el.remove(); });
   document.body.appendChild(el);
@@ -29411,6 +29437,7 @@ function sbOpenWorldPicker() {
     #sb-worlds .sbw-row span { font-size: 11px; color: #8aa0a6; }
     #sb-worlds .sbw-row.on { border-color: rgba(255,176,102,.6); background: rgba(255,176,102,.08); }
     #sb-worlds .sbw-row.off { opacity: .6; }
+    #sb-worlds .sbw-ren { display: block; width: 100%; margin: -2px 0 8px; padding: 7px 10px; background: none; border: 0; text-align: right; color: #ffb066; font-size: 10px; letter-spacing: .14em; text-transform: uppercase; cursor: pointer; }
     #sb-worlds .sbw-x { width: 100%; padding: 11px; margin-top: 4px; background: none; border: 1px solid rgba(255,255,255,.12); border-radius: 10px; color: #8aa0a6; }`;
   document.head.appendChild(st);
   document.addEventListener('click', (e) => {
@@ -32400,6 +32427,17 @@ function sbSwitchWorld(id) {
   sbWorldsInit();
   if (id === G.activeWorld || !sbWorld(id)) return false;
   _sbSwap(id);
+  // PATCH_2110_COLONIE_DESERT : capitale (jardin) ↔ colonie (désert) : la scène se reconstruit au rechargement
+  if (window.sbTerrainVariant && window.__sbTerrainLoaded && window.sbTerrainVariant() !== window.__sbTerrainLoaded) {
+    try { if (typeof saveGame === 'function') saveGame(); } catch (e) {}
+    const w = sbWorld(id), nm = (w && (w.kind === 'capital' ? (w.data && w.data.planet && w.data.planet.name) || G.planet.name : w.name)) || '';
+    const ov = document.createElement('div');
+    ov.style.cssText = 'position:fixed;inset:0;z-index:10060;background:#000;display:grid;place-items:center;opacity:0;transition:opacity .45s ease';
+    ov.innerHTML = '<div style="text-align:center;font:600 13px/1.4 -apple-system,system-ui,sans-serif;letter-spacing:.3em;color:#ffd9a8;text-transform:uppercase">Cap sur ' + String(G.planet && G.planet.name || nm).replace(/[<>&]/g, '') + '<div style="margin-top:10px;font:500 9px/1.4 \'SF Mono\',monospace;letter-spacing:.2em;color:rgba(214,226,240,.6)">Mise en orbite</div></div>';
+    document.body.appendChild(ov); requestAnimationFrame(() => { ov.style.opacity = '1'; });
+    setTimeout(() => location.reload(), 520);
+    return true;
+  }
   if (window.Planet3D && Planet3D.ready) { try { Planet3D._sig = ''; Planet3D.sync(true); } catch (e) {} }
   try { if (typeof renderPlanetMap === 'function') renderPlanetMap(); } catch (e) {}
   try { if (typeof refreshCurrentScreen === 'function') refreshCurrentScreen(); } catch (e) {}
@@ -46902,11 +46940,16 @@ var SBTuto = (function () {
     if (G.tuto) return G.tuto;
     // comptes déjà avancés : rien à apprendre ici (rejouable depuis le centre de commandement)
     const ps = PARCELS();
-    const veteran = antennaDone() || ps.some(q => q && (q.state === 'built' || q.state === 'building' || (q.successCount || 0) > 0 || q.state === 'resource'));
+    const veteran = (G.worlds || []).some(w => w && w.kind === 'colony') || antennaDone() || ps.some(q => q && (q.state === 'built' || q.state === 'building' || (q.successCount || 0) > 0 || q.state === 'resource'));
     G.tuto = veteran ? { done: true, legacy: true } : { step: 0, at: Date.now(), seen: {} };
     return G.tuto;   // pas de sauvegarde ici : au démarrage, elle se mêlerait à la réconciliation avec le cloud
   }
-  const active = () => { const s = st(); return !!(s && !s.done && !s.skipped); };
+  const active = () => {
+    const s = st();
+    // PATCH_2110_COLONIE_DESERT : un empire qui fonde des colonies n'est plus un nouveau joueur
+    if (s && !s.done && (G.worlds || []).some(w => w && w.kind === 'colony')) { s.done = true; s.legacy = true; try { const c = document.getElementById('sb-coach'); if (c) c.style.display = 'none'; } catch (e) {} }
+    return !!(s && !s.done && !s.skipped);
+  };
   // pendant l'antenne, avant la leçon de la mine : pas de « Construire » sur un gisement
   function gateBuild() { const s = st(); return active() && (s.step || 0) < 3 && !antennaDone(); }
   function recommend() { const s = st(); return active() && (s.step || 0) >= 3 && (s.step || 0) <= 4 && !PARCELS().some(q => q && q.building === 'mine') ? 'mine' : null; }
@@ -47497,7 +47540,29 @@ if (G.knownTargets && Array.isArray(G.tankerMissions)) {
 <!-- PATCH_2010_CIEL — la planète suit l\'heure réelle : nuit bleue / jour d\'aube chaude -->
 <script src="assets/sky.js?v=20261020-2330"></script>
 <!-- PATCH_2010_TERRAIN — planète-jardin continue : sol, eau, forêt et rails jointifs (assets/terrain.js ; variante désert archivée : terrain_desert.js, non chargée) -->
-<script src="assets/terrain.js?v=20261021-1130"></script>
+<script>
+/* PATCH_2110_COLONIE_DESERT — la capitale garde la planète-jardin (terrain.js), les colonies prennent la planète désertique (terrain_desert.js).
+   Les deux habillages modifient la même scène : on charge le bon au démarrage, et un changement de planète qui change d'habillage recharge la page. */
+(function () {
+  window.sbTerrainVariant = function () {
+    try { const w = (G.worlds || []).find(x => x && x.id === G.activeWorld); return w && w.kind === 'colony' ? 'desert' : 'jardin'; } catch (e) { return 'jardin'; }
+  };
+  const v = window.sbTerrainVariant();
+  window.__sbTerrainLoaded = v;
+  const sc = document.createElement('script');
+  sc.src = v === 'desert' ? 'assets/terrain_desert.js?v=20261021-1130' : 'assets/terrain.js?v=20261021-1130';
+  document.head.appendChild(sc);
+  // la partie du cloud peut arriver après le démarrage avec une autre planète affichée : on se recale une fois
+  setTimeout(function chk() {
+    try {
+      if (window.sbTerrainVariant() !== window.__sbTerrainLoaded && !sessionStorage.getItem('sbTerrainReload')) {
+        sessionStorage.setItem('sbTerrainReload', '1'); location.reload(); return;
+      }
+      sessionStorage.removeItem('sbTerrainReload');
+    } catch (e) {}
+  }, 12000);
+})();
+</script>
 <!-- PATCH_2010_FLUIDITE — ombres à la demande, 30 images/s au repos sur téléphone -->
 <script src="assets/fluid.js?v=20261021-1100"></script>
 <!-- PATCH_2010_LUMIERE — éclairage architectural des bâtiments : néons décoratifs éteints, projecteurs au sol la nuit (assets/lumiere.js) -->
