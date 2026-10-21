@@ -261,7 +261,7 @@
     // 21/10 (Adrien : « la route du Linceul a encore changé ») — positions FIGÉES : un système qui a reçu une case la garde
     // pour toujours (G.mapCells). Les nouveaux venus se placent autour ; une route qui s'allonge ajoute ses jalons sans
     // déplacer ceux qu'on connaît. Les cases des systèmes absents (rapports supprimés…) restent réservées.
-    if (!G.mapCells || G.mapCells.v !== 2 || G.mapCells.home !== home) G.mapCells = { v: 2, home, cells: {} };
+    if (!G.mapCells || G.mapCells.v !== 3 || G.mapCells.home !== home) G.mapCells = { v: 3, home, cells: {} };   // v3 (21/10 soir) : recalcul unique avec le tracé en ligne droite
     const MC = G.mapCells.cells;
     const fixed = new Set(), reserved = [];
     for (const [k, idx] of Object.entries(MC)) {
@@ -279,9 +279,8 @@
       } catch (e) {}
     }
     routeChains.sort((a, b) => b.length - a.length);   // la plus longue d'abord : les routes qui partagent des jalons suivent son tracé
-    const ends = new Set(routeChains.flatMap(ch => [ch[0], ch[ch.length - 1]]));
-    const mids = new Set(routeChains.flatMap(ch => ch.slice(1, -1)).filter(k => !ends.has(k) && k !== home));
-    // 19/10 — les routes se posent AVANT les autres systèmes : un nouveau venu ne déloge pas leurs jalons.
+    const onRoute = new Set(routeChains.flat().filter(k => k !== home));
+    const mids = onRoute;   // (compat) tous les systèmes d'une route se placent par la route, pas par leur secteur
     const placeSys = (k) => {
       if (cell['sys:' + k] !== undefined) return;
       const { cands, k: p } = primarySlot(k);
@@ -292,39 +291,46 @@
       occ.set(placed.idx, { kind: 'system', key: k });
       cell['sys:' + k] = placed.idx;
     };
-    for (const k of keys) if (ends.has(k) && !mids.has(k)) placeSys(k);
     const nearestFree = (x, z, minRing) => { let best = null, bd = Infinity;
       for (const c of CELLS) { if (c.ring > BOARD || c.ring < minRing || occ.has(c.idx)) continue; const d = Math.hypot(c.x - x, c.z - z); if (d < bd) { bd = d; best = c; } }
       return best; };
-    const moved = new Set();
+    const put = (k, c) => { occ.set(c.idx, { kind: 'system', key: k }); cell['sys:' + k] = c.idx; };
+    // 21/10 soir (Adrien : « la ligne actuelle est horrible ») — une route est une LIGNE DROITE sur la grille.
+    // La plus longue d'abord ; le lieu se place par son secteur, puis le départ connu à n+1 cases, dans le prolongement
+    // ma planète → lieu ; les jalons se posent à intervalles réguliers entre deux points déjà placés, dans l'ordre.
     for (const ch of routeChains) {
-      const n = ch.length - 1, kB = ch[n];
-      let ia = cell['sys:' + ch[0]], ib = cell['sys:' + kB];
-      if (ia === undefined || ib === undefined) continue;
-      const minRing = ia === 0 ? 2 : 1;   // l'anneau 1 autour de ma planète, c'est mon propre système
-      // un bout trop proche pour ses jalons s'écarte — une seule fois, et jamais s'il a déjà sa case pour toujours
-      if (kB !== home && !fixed.has(kB) && !moved.has(kB) && hexDist(CELLS[ia], CELLS[ib]) < n + 1) {
-        const A = CELLS[ia], B = CELLS[ib];
-        let dx = B.x - A.x, dz = B.z - A.z, L = Math.hypot(dx, dz);
-        if (L < 1) { const ang = _mulberry32(_hashSeed('SMr:' + kB))() * Math.PI * 2; dx = Math.cos(ang); dz = Math.sin(ang); L = 1; }
-        const far = nearestFree(A.x + dx / L * CELL * (n + 1.2), A.z + dz / L * CELL * (n + 1.2), minRing);
-        if (far) { occ.delete(ib); occ.set(far.idx, { kind: 'system', key: kB }); cell['sys:' + kB] = ib = far.idx; }
+      const n = ch.length - 1, kA = ch[0], kB = ch[n];
+      if (!systems[kB] && kB !== home) continue;
+      if (cell['sys:' + kB] === undefined) placeSys(kB);
+      const ib = cell['sys:' + kB];
+      if (ib === undefined) continue;
+      const minRing = kA === home || kB === home ? 2 : 1;
+      if (cell['sys:' + kA] === undefined && systems[kA]) {
+        const B = CELLS[ib], R = CELL * (n + 0.5);
+        let base = Math.atan2(B.z, B.x);
+        if (Math.hypot(B.x, B.z) < 1) base = _mulberry32(_hashSeed('SMr:' + kB))() * Math.PI * 2;
+        // dans le prolongement ma planète → lieu si la grille le permet, sinon on tourne (±30°, ±60°…) jusqu'à trouver la place
+        let c = null;
+        for (const dd of [0, 30, -30, 60, -60, 90, -90, 120, -120, 150, -150, 180]) {
+          const a = base + dd * Math.PI / 180, x = B.x + Math.cos(a) * R, z = B.z + Math.sin(a) * R;
+          let near = null, bd = Infinity; for (const q of CELLS) { const d = Math.hypot(q.x - x, q.z - z); if (d < bd) { bd = d; near = q; } }
+          if (!near || near.ring > BOARD - 1 || near.ring < minRing || bd > CELL) continue;
+          c = occ.has(near.idx) ? nearestFree(x, z, minRing) : near;
+          if (c) break;
+        }
+        if (!c) c = nearestFree(B.x + Math.cos(base) * R, B.z + Math.sin(base) * R, minRing);
+        if (c) put(kA, c);
       }
-      moved.add(kB);
-      // chaque jalon manquant se pose entre le jalon placé qui le précède et le suivant, à sa place dans l'ordre
       for (let i = 1; i < n; i++) {
         const k = ch[i];
-        if (!mids.has(k) || cell['sys:' + k] !== undefined || !systems[k]) continue;
+        if (cell['sys:' + k] !== undefined || !systems[k]) continue;
         let a = i - 1; while (a > 0 && cell['sys:' + ch[a]] === undefined) a--;
         let b = i + 1; while (b < n && cell['sys:' + ch[b]] === undefined) b++;
         const ca = cell['sys:' + ch[a]], cb = cell['sys:' + ch[b]];
         if (ca === undefined || cb === undefined) continue;
-        const path = hexPath(ca, cb, null) || [ca, cb];
-        const c0 = CELLS[path[Math.max(1, Math.min(path.length - 2, Math.round((i - a) * (path.length - 1) / (b - a))))]] || CELLS[path[0]];
-        const c = (c0 && !occ.has(c0.idx) && c0.ring >= minRing) ? c0 : (c0 ? nearestFree(c0.x, c0.z, minRing) : null);
-        if (!c) continue;
-        occ.set(c.idx, { kind: 'system', key: k });
-        cell['sys:' + k] = c.idx;
+        const A = CELLS[ca], B = CELLS[cb], t = (i - a) / (b - a);
+        const c = nearestFree(A.x + (B.x - A.x) * t, A.z + (B.z - A.z) * t, minRing);   // point de la ligne droite → case libre la plus proche
+        if (c) put(k, c);
       }
     }
     for (const k of keys) if (!mids.has(k) && cell['sys:' + k] === undefined) placeSys(k);
