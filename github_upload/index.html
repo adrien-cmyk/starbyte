@@ -8750,6 +8750,7 @@ function _deserializeSets(obj) {
 // (fonction-constante en var : lue par saveGame/loadGame, déclarée avant tout appel)
 var EXTRA_SAVE_KEYS = [
   'troopFamine', '_bioBuffer',   // PATCH_2210_VIVRES
+  '_fakePurged',   // PATCH_2210_UNIVERS_OUVERT
   'shipBuildTier',   // PATCH_2010_VAISSEAUX_T1 — tier choisi au chantier orbital
   'worldPillage', 'emptyRaidHeat',   // PATCH_2010_PILLAGE_VIDE — mondes vidés, fatigue des pillages
   'aftermath',   // APRÈS L'ATTAQUE (13/10) : indice de dévastation, fête, rapport en attente
@@ -9265,8 +9266,28 @@ function ensureHomeSystem() {
 }
 
 // Zone de test : pas de faux joueurs, tout joueur rencontré est une vraie personne
+// PATCH_2210_UNIVERS_OUVERT (22/10, Adrien : « libérer le plein potentiel de l'univers ») — tout l'amas A est désormais réel :
+// les nouveaux joueurs s'installent dans n'importe quel secteur, et nulle part on ne croise plus de faux joueurs inventés
 function mpIsTestZone(cluster, sector) {
-  return cluster === 'A' && ['M', 'N', 'O'].includes(sector);
+  return cluster === 'A' && /^[A-Z]$/.test(String(sector || ''));
+}
+// les systèmes déjà explorés hors de M, N, O gardaient des « joueurs » inventés (ZERATH, BERSEK89…) : on les remplace
+// par ce que l'univers réel met à cet endroit (planète libre ou commandant automate, même tirage pour tous)
+function sbPurgeFakePlayers() {
+  if (G._fakePurged || !G.knownSystems) return;
+  const FAKE = ['ZERATH', 'BERSEK89', 'LYS-ORBITAL', 'ANUBIS34', 'XERATH', 'KORVUS-9'];
+  for (const [k, sys] of Object.entries(G.knownSystems)) {
+    if (!sys || !Array.isArray(sys.planets) || !sys.planets.some(p => p && p.type === 'player' && !p.isBot && !p.isReal && !p.isMine && FAKE.includes(p.playerName))) continue;
+    const [cl, sec, num] = k.split('-');
+    let fresh = null;
+    try { fresh = generateDiscoveredSystem(sec, parseInt(num, 10), cl); } catch (e) { continue; }
+    sys.planets = sys.planets.map(p => {
+      if (!(p && p.type === 'player' && !p.isBot && !p.isReal && !p.isMine && FAKE.includes(p.playerName))) return p;
+      const n = (fresh || []).find(q => q.coord === p.coord);
+      return n ? Object.assign({}, n, { reportRead: true }) : p;
+    });
+  }
+  G._fakePurged = 1;
 }
 
 // Une sonde a révélé de vrais mondes dans un système : on les inscrit (remplace une planète inventée au même endroit)
@@ -48760,6 +48781,7 @@ if (_SAVE_LOADED_AT_BOOT) {
 }
 // MULTIJOUEUR v0 : après un déménagement, le nouveau système d'origine est créé ici
 if (_SAVE_LOADED_AT_BOOT) ensureHomeSystem();
+try { sbPurgeFakePlayers(); } catch (e) { console.warn('[univers] faux joueurs', e); }   // PATCH_2210_UNIVERS_OUVERT
 if (_SAVE_LOADED_AT_BOOT) { try { mpTidyPlayerReports(); } catch (e) {} }
 // Démarrer l'autosave et brancher les hooks (beforeunload, visibilitychange)
 initSaveHooks();
@@ -48921,9 +48943,9 @@ if (G.knownTargets && Array.isArray(G.tankerMissions)) {
 <!-- PERF_1310 — mesure des performances chez les joueurs + qualité 3D automatique (assets/perf.js) -->
 <script src="assets/perf.js?v=20261014-1540"></script>
 <!-- PATCH_1410_LIGNES — lignes PNJ à horaire sur les routes cachées (assets/lines.js) -->
-<script src="assets/lines.js?v=20261022-1400"></script>
+<script src="assets/lines.js?v=20261022-1420"></script>
 <!-- CLOUD — sauvegarde Supabase (source : sb-build/src/cloud.js) -->
-<script type="module" src="assets/cloud.js?v=20261022-1235"></script>
+<script type="module" src="assets/cloud.js?v=20261022-1420"></script>
 <!-- MATCH3 — Match-3 V2 (assets/match3.js, source src/match3.js + src/m3core.js) : remplace startM3 -->
 <script type="module" src="assets/match3.js?v=20261021-1500"></script>
 <!-- HOME V2 — « monde d'abord » : planète plein écran, ressources en ligne, Flotte / Défense / Prospection (assets/home.js) -->

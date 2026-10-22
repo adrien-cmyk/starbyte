@@ -54,7 +54,8 @@
   const VEYRA_DOCK_ID = 'dock-o3pz0b', LUCIOLES_DOCK_ID = 'dock-smt2z6', IVOIRE_DOCK_ID = 'dock-uzt7ha',
         AKHET_DOCK_ID = 'dock-xy2s3', ABIME_DOCK_ID = 'dock-wldphp', OBSIDIENNE_DOCK_ID = 'dock-3c8na';
   const STATION_PORTS = {
-    // 19/10 (Adrien) : une seule ligne par station (keep) — le Linceul garde ses deux lignes pour l'instant
+    // 19/10 (Adrien) : une seule ligne par station (keep)
+    // 22/10 (Adrien) : les stations au statut « impérial » ont DEUX lignes (pas de keep) — le Linceul est la première
     [CROWN_DOCK_ID]: { kinds: CROWN_KINDS, route: 'La Saigne de la Couronne', mood: 'grasse', flag: '_linesCrown', keep: [0] },
     [SANCT_DOCK_ID]: { kinds: ['pilgrim_stop', 'imperial_convoy'], route: 'La Vieille Voie du Linceul', mood: 'imperiale', flag: '_linesSanct' },
     // 16/10 : la Station O'Neill Série Noire, station furtive de la Confédération, est le lieu du secteur N ; ses lignes : convois armés et convois impériaux
