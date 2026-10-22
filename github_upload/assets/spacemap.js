@@ -278,6 +278,7 @@
     for (let i = 0; i < routeChains.length; i++) routeChains[i] = routeChains[i].filter(k => k === home || systems[k]);
     for (let i = routeChains.length - 1; i >= 0; i--) if (routeChains[i].length < 2) routeChains.splice(i, 1);
     window._smChains = routeChains.map(ch => ch.slice());
+    window._smKeys = Object.keys(systems);   // 22/10 — diagnostic de la carte (?diag=carte)
     if (false) {
     }
     // 22/10 (retours de Damien) — les AUTRES lignes connues (tronçons relevés par mes balises, échos de l'antenne) se tracent
@@ -297,9 +298,9 @@
         }
       } catch (e) { window._smLineErr = String(e && e.stack || e).slice(0, 400); }
     }
-    if (window.SBLines && !G.mapCells.l8) {
+    if (window.SBLines && !G.mapCells.l9) {   // l9 (22/10 après-midi) : carte dense de Damien — on retrace une fois avec la nouvelle pose
       for (const lc of lineChains) for (const q of lc.pts) delete G.mapCells.cells[q.k];
-      G.mapCells.l8 = 1; G.mapCells.dirs = {};
+      G.mapCells.l8 = G.mapCells.l9 = 1; G.mapCells.dirs = {};
     }
     if (!G.mapCells.dirs) G.mapCells.dirs = {};
     const MC = G.mapCells.cells;
@@ -373,6 +374,9 @@
     }
     // lignes connues : une droite qui arrive sur le lieu ; le jalon i est à (n − i) cases du lieu ; direction choisie une fois
     // (loin de ma planète et des autres lignes du même lieu), puis gardée
+    const cellNear = (x, z) => { let best = null, bd = Infinity; for (const c of CELLS) { if (c.ring > BOARD - 1 || c.ring < 2) continue; const d = Math.hypot(c.x - x, c.z - z); if (d < bd) { bd = d; best = c; } } return best; };
+    const keep = new Set([home, ...onRoute]);
+    for (const lc of lineChains) { keep.add(lc.port); for (const q of lc.pts) keep.add(q.k); }
     for (const lc of lineChains) {
       const todo = lc.pts.filter(q => cell['sys:' + q.k] === undefined);
       if (!todo.length) continue;
@@ -397,7 +401,10 @@
           const far = CELL * lc.n, ex = P.x + Math.cos(a) * far, ez = P.z + Math.sin(a) * far;
           const fit = Math.hypot(ex, ez) <= CELL * (BOARD - 1) ? 1 : 0.4;
           let gap = Math.PI; for (const v of avoid) { let d = Math.abs(((a - v) % (2 * Math.PI) + 3 * Math.PI) % (2 * Math.PI) - Math.PI); gap = Math.min(gap, d); }
-          const sc = gap * fit;
+          // cases du tracé déjà prises par une route, une autre ligne ou un lieu (on ne les déplace pas) : on les évite
+          let hard = 0;
+          for (let i = 1; i < lc.n; i++) { const c = cellNear(P.x + Math.cos(a) * CELL * i, P.z + Math.sin(a) * CELL * i); const o = c && occ.get(c.idx); if (!c || o && (o.kind !== 'system' || keep.has(o.key))) hard++; }
+          const sc = gap * fit / (1 + hard);
           if (sc > bs) { bs = sc; best = a; }
         }
         ang = G.mapCells.dirs[lc.id] = best;
@@ -407,6 +414,16 @@
         let x = P.x + Math.cos(ang) * R, z = P.z + Math.sin(ang) * R;
         const L = Math.hypot(x, z), lim = CELL * (BOARD - 1);
         if (L > lim) { x *= lim / L; z *= lim / L; }
+        // 22/10 (carte dense de Damien) — la case du tracé est prise par un système ordinaire : il cède sa place et se pose
+        // juste à côté ; seuls les routes, les lignes et les lieux tiennent leur case
+        const t = cellNear(x, z), o = t && occ.get(t.idx);
+        if (t && !o) { put(q.k, t); continue; }
+        if (t && o && o.kind === 'system' && !keep.has(o.key)) {
+          occ.delete(t.idx); delete cell['sys:' + o.key]; delete MC[o.key];
+          put(q.k, t);
+          const nb = nearestFree(t.x, t.z, 2); if (nb) put(o.key, nb);
+          continue;
+        }
         const c = nearestFree(x, z, 2);
         if (c) put(q.k, c);
       }

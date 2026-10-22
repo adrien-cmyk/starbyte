@@ -47941,6 +47941,45 @@ async function sbMapDiag() {
   }
   return txt;
 }
+// PATCH_2210_DIAG_CARTE — export complet de la carte (lien …/?diag=carte : bouton flottant, sans les cheats)
+// tout ce qu'il faut pour reconstruire la carte du joueur à l'identique : cases figées, tronçons, échos, systèmes affichés
+function sbMapExport() {
+  let d = {};
+  try { d = JSON.parse(JSON.stringify({ v: 2, at: new Date().toISOString(),
+    home: (typeof MY_ADDRESS !== 'undefined' && MY_ADDRESS) ? MY_ADDRESS.cluster + '-' + MY_ADDRESS.sector + '-' + MY_ADDRESS.system : null,
+    pseudo: (G.mpProfile && G.mpProfile.pseudo) || G.pseudo || null,
+    mapCells: G.mapCells || null, mapKeys: window._smKeys || [], chains: window._smChains || [], errs: [window._smRouteErr || null, window._smLineErr || null],
+    spottedLegs: G.spottedLegs || [], trafficEchoes: G.trafficEchoes || {}, hiddenPorts: G.hiddenPorts || {}, lineObs: Object.fromEntries(Object.entries(G.lineObs || {}).map(([k, o]) => [k, { n: o.n, last: o.last }])),
+    systemTags: G.systemTags || {}, mapSeen: Object.keys(G.mapSeen || {}),
+    routes: (G.routes || []).map(r => ({ id: r.id, name: r.name, portSys: r.portSys || null, dockId: r.dockId || null })),
+    opened: window.SBLines ? SBLines.openedRoutes() : [],
+    beacons: (G.probesPool || []).filter(b => b.tier === 'beacon').map(b => ({ id: b.id, state: b.state, sys: b.deployedSystem || null })),
+    tankers: (G.tankerMissions || []).filter(m => m.status !== 'returned').map(m => ({ id: m.id, kind: m.kind, status: m.status, portSys: m.portSys || null, target: m.targetCoords || null, via: m.via || null })),
+    fleets: ((G.fleet && G.fleet.prepared) || []).filter(f => f.ambush).map(f => ({ id: f.id, ambush: f.ambush })) })); } catch (e) { d = { err: String(e) }; }
+  const txt = JSON.stringify(d);
+  try {
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([txt], { type: 'application/json' }));
+    a.download = 'starbyte-carte-' + String(d.pseudo || d.home || 'joueur').replace(/[^\w-]+/g, '_') + '.json';
+    document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 2000);
+    toast('Fichier de la carte enregistré : envoie-le à Adrien');
+  } catch (e) { try { navigator.clipboard.writeText(txt); toast('Diagnostic copié : envoie-le à Adrien'); } catch (e2) {} }
+  return txt;
+}
+(function () {
+  try {
+    if (!/[?&]diag=carte\b/.test(location.search)) return;
+    const show = () => {
+      if (document.getElementById('sb-diag-btn')) return;
+      const b = document.createElement('button');
+      b.id = 'sb-diag-btn'; b.textContent = '📋 Diagnostic carte';
+      b.style.cssText = 'position:fixed;left:12px;bottom:calc(84px + env(safe-area-inset-bottom));z-index:10040;padding:9px 13px;border-radius:9px;border:1px solid #ff8a5a;background:rgba(10,14,20,.92);color:#ff8a5a;font:600 12px system-ui;letter-spacing:.03em';
+      b.onclick = () => sbMapExport();
+      document.body.appendChild(b);
+    };
+    if (document.body) show(); else document.addEventListener('DOMContentLoaded', show);
+  } catch (e) {}
+})();
 function cheatBuildAll() {
   // Construit TOUS les bâtiments disponibles (Mine, Centrale, Labo, Caserne, Chantier, Bunker + tous les Silos)
   // Débloque d'abord toutes les parcelles verrouillées pour avoir assez de place
@@ -48890,7 +48929,7 @@ if (G.knownTargets && Array.isArray(G.tankerMissions)) {
 <!-- HOME V2 — « monde d'abord » : planète plein écran, ressources en ligne, Flotte / Défense / Prospection (assets/home.js) -->
 <script type="module" src="assets/home.js?v=20261020-2150"></script>
 <!-- SPACE MAP v0 — carte du Centre de prospection (assets/spacemap.js, source src/spacemap.js) -->
-<script src="assets/spacemap.js?v=20261022-1330"></script>
+<script src="assets/spacemap.js?v=20261022-1350"></script>
 <!-- SPACE MAP niveau B — diorama 3D d'un système (assets/system3d.js, source src/system3d.js) -->
 <script type="module" src="assets/system3d.js?v=20261014-1440"></script>
 <!-- SHIP3D — fiches 3D : cuirassé KV-01, frégate SR-01, tanker TK-07, chantier orbital OS-01 (assets/ship3d.js, sur le moteur partagé window.SB3D) -->
