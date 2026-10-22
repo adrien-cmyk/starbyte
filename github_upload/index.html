@@ -8751,6 +8751,7 @@ function _deserializeSets(obj) {
 var EXTRA_SAVE_KEYS = [
   'troopFamine', '_bioBuffer',   // PATCH_2210_VIVRES
   '_fakePurged',   // PATCH_2210_UNIVERS_OUVERT
+  'imperialRep',   // PATCH_2210_EMPIRE
   'shipBuildTier',   // PATCH_2010_VAISSEAUX_T1 — tier choisi au chantier orbital
   'worldPillage', 'emptyRaidHeat',   // PATCH_2010_PILLAGE_VIDE — mondes vidés, fatigue des pillages
   'aftermath',   // APRÈS L'ATTAQUE (13/10) : indice de dévastation, fête, rapport en attente
@@ -9526,6 +9527,7 @@ function _mpFinishRaid(fleet, raid) {
   G.mpRaidsReturned.push(raid.id); if (G.mpRaidsReturned.length > 200) G.mpRaidsReturned.splice(0, G.mpRaidsReturned.length - 200);
   if (window.SBMP) window.SBMP.raidSeen(raid.id);
   if (raid.status === 'aborted' || !combat) { toast(`${fleet.name} rentre : la cible a quitté le registre`); return; }
+  try { sbEmpBountyCollected(res, raid.defender_pseudo); } catch (e) {}   // PATCH_2210_EMPIRE
   const labels = { crushing_victory: '⭐ Victoire écrasante', victory: 'Victoire', pyrrhic: 'Victoire à la Pyrrhus', defeat: 'Défaite', massacre: 'Massacre' };
   toast(`${fleet.name} : ${labels[combat.outcome] || 'Mission terminée'} sur ${target.name}`);
 }
@@ -9678,6 +9680,7 @@ function _mpApplyRaidAgainstHome(raid) {
     const _ph = combat && combat.phases && combat.phases.phase2;
     try { SBAftermath.onRaid({ defended: !won, landed: !!(_ph && _ph.won), groundHeld: !!(_ph && !_ph.won), reportId: G.reports[0] && G.reports[0].id }); } catch (e) { console.warn('[aftermath]', e); }
   }
+  try { sbEmpBountyPaid(res, raid.attacker_pseudo); } catch (e) {}   // PATCH_2210_EMPIRE
   const lootTxt = ['metal', 'energie', 'cristal'].filter(k => loot[k] > 0).map(k => `${fmt(loot[k])} ${tileInfo(k).label.toLowerCase()}`).join(' · ');
   toast(won
     ? `⚠ Raid de ${raid.attacker_pseudo} : ${lootTxt || 'rien'} pillé${damagedName ? ' · ' + damagedName + ' abîmé' : ''}`
@@ -12391,6 +12394,7 @@ function _mpRumorText(r) {
         : why === 'robbed' ? `${r.actor} a vendu une route à ${r.target || 'un capitaine'}… et l'attendait dessus. Le port a saisi sa caution.`
         : `${r.actor} a vendu une route à ${r.target || 'un capitaine'}, puis en a arraché les balises. Ne lui achète rien.`;
     }
+    case 'bounty_claimed': return `${r.actor} a touché la prime impériale sur la tête de ${r.target}${s}${r.payload && r.payload.bounty ? ' : ' + fmt(r.payload.bounty) + ' CG' : ''}. Les chasseurs de primes affûtent leurs canons.`;   // PATCH_2210_EMPIRE
     case 'route_sold': return `${r.actor} vend des cartes${r.target ? ` au comptoir de ${r.target}` : ''}. Vraies ou fausses, ça reste à voir.`;
     default: return '';
   }
@@ -38401,7 +38405,7 @@ function renderKnownPlayersView() {
   }
 
   if (playerPlanets.length === 0) {
-    return mpAllyCardHtml() + `
+    return mpAllyCardHtml() + sbEmpStatusHtml() + `
       <div style="padding:40px 24px;text-align:center;color:var(--mut);font-size:12px;line-height:1.7">
         <div style="font-size:32px;opacity:.4;margin-bottom:12px;display:flex;align-items:center;justify-content:center">${icon('shield', {size:32})}</div>
         <div style="font-style:italic">Aucun joueur connu.</div>
@@ -38422,7 +38426,7 @@ function renderKnownPlayersView() {
           ${icon('shield', {size:18})}
         </div>
         <div style="flex:1;min-width:0">
-          <div style="font-size:14px;color:#ff8a8a;font-weight:500;line-height:1.2">${_escapeHtml(p.playerName)}${mpAllyBadge(p.mpAddress || p.coord)}</div>
+          <div style="font-size:14px;color:#ff8a8a;font-weight:500;line-height:1.2">${_escapeHtml(p.playerName)}${mpAllyBadge(p.mpAddress || p.coord)}${sbWantedBadge(p.mpAddress || p.coord)}</div>
           <div style="font-size:10px;color:var(--mut);margin-top:3px;font-family:'SF Mono',monospace"><span onclick="event.stopPropagation();openPlanetOnMap('${p.coord}')" title="Voir sur la carte" style="color:var(--cyan);cursor:pointer;text-decoration:underline dotted;text-underline-offset:3px">${p.coord}</span> · ${_escapeHtml(planetName)} · ${lvl}</div>
         </div>
         <div style="flex-shrink:0;color:var(--mut)">${icon('chevronRight', {size:14})}</div>
@@ -38430,7 +38434,7 @@ function renderKnownPlayersView() {
     `;
   }).join('');
 
-  return mpAllyCardHtml() + `
+  return mpAllyCardHtml() + sbEmpStatusHtml() + `
     <div style="padding:8px 0 12px;font-size:10px;color:var(--mut);letter-spacing:.10em;text-transform:uppercase;text-align:center">
       ${playerPlanets.length} joueur${playerPlanets.length > 1 ? 's' : ''} connu${playerPlanets.length > 1 ? 's' : ''}
     </div>
@@ -46896,6 +46900,7 @@ function renderDockScreen() {
 
     <!-- MP : commandants à quai, marchés, rumeurs du comptoir -->
     ${stationUI(dock) ? crownBarHeader(dock) : ''}
+    ${typeof sbImperialDockHtml === 'function' ? sbImperialDockHtml(mission, dock) : ''}
     ${_renderDockPlayersSection(mission, dock)}
 
     <!-- D3 : Autres convois amarrés -->
@@ -47962,6 +47967,230 @@ async function sbMapDiag() {
   }
   return txt;
 }
+/* ═══════════════════════════════════════════════════════════════════════════
+   PATCH_2210_EMPIRE — RÉPUTATION IMPÉRIALE (22/10/2026, décisions d'Adrien ; GDD claude/starbyte_GDD_reputation_imperiale.md)
+   Piller les convois de l'Empire fait monter une réputation (−1 point par heure d'oubli).
+   Surveillé (25) : escortes +25 %. Recherché (80) : avis de recherche public et prime (registre v28).
+   Ennemi de l'Empire (200) : une expédition punitive part vers la capitale, 12 h de trajet, force annoncée.
+   Les pèlerins d'une station impériale comptent à peine : l'Empire se fout de ses sujets.
+   ═══════════════════════════════════════════════════════════════════════════ */
+var SB_EMP = { SURV: 25, WANTED: 80, ENEMY: 200, DECAY_PER_H: 1, AFTER_BOUNTY: 40, AFTER_EXP: 60, FINE: 40, RECALL: 100, EXP_MS: 12 * 3600e3 };
+var SB_EMP_TIERS = [
+  { key: 'libre', label: 'Inconnu de l\'Empire', color: 'var(--mut)', escort: 1 },
+  { key: 'surveille', label: 'Surveillé', color: '#ffc864', escort: 1.25 },
+  { key: 'recherche', label: 'Recherché', color: '#ff8a5a', escort: 1.5 },
+  { key: 'ennemi', label: 'Ennemi de l\'Empire', color: '#ff3a2a', escort: 2 },
+];
+function sbEmpire() {
+  if (!G.imperialRep || typeof G.imperialRep !== 'object') G.imperialRep = { rep: 0, at: Date.now(), tier: 0, pub: -1, pubAt: 0, exp: null };
+  return G.imperialRep;
+}
+function sbEmpRep() {
+  const e = sbEmpire(), now = Date.now();
+  const h = (now - (e.at || now)) / 3600e3;
+  if (h > 0) { e.rep = Math.max(0, (e.rep || 0) - h * SB_EMP.DECAY_PER_H); e.at = now; }
+  return e.rep;
+}
+function sbEmpTierOf(rep) { return rep >= SB_EMP.ENEMY ? 3 : rep >= SB_EMP.WANTED ? 2 : rep >= SB_EMP.SURV ? 1 : 0; }
+function sbEmpTier() { return sbEmpTierOf(sbEmpRep()); }
+function sbEmpEscort() { try { return SB_EMP_TIERS[sbEmpTier()].escort; } catch (e) { return 1; } }
+function sbEmpBounty(rep) { return Math.min(9000, 1000 + 20 * Math.round(rep || 0)); }
+// un abordage de convoi PNJ vient d'avoir lieu
+function sbEmpireOffense(kindKey, imperialStation, win, sys, portName) {
+  let pts = 0;
+  if (kindKey === 'imperial') pts = win ? 12 : 6;
+  else if (kindKey === 'pelerins' && imperialStation) pts = win ? 2 : 1;
+  if (!pts) return;
+  const e = sbEmpire();
+  sbEmpRep();
+  e.rep += pts;
+  if (portName) e.lastPort = portName;
+  sbEmpCheck();
+}
+// changement de palier : annonce, publication au registre, expédition punitive
+function sbEmpCheck(silent) {
+  const e = sbEmpire(), t = sbEmpTierOf(sbEmpRep());
+  const was = e.tier || 0;
+  if (t !== was) {
+    e.tier = t;
+    if (!silent && t > was) {
+      const msg = t === 1 ? '👁 L\'Empire t\'a remarqué : tu es Surveillé. Ses escortes se renforcent contre toi.'
+        : t === 2 ? `📜 Avis de recherche impérial : ta tête est mise à prix (${fmt(sbEmpBounty(e.rep))} CG). Les autres commandants le savent.`
+        : '⚔ Tu es Ennemi de l\'Empire.';
+      try { toast(msg, () => { try { goto('prospect'); setProspectTab('univers'); setUniverseTab('players'); } catch (x) {} }); } catch (err) {}
+    } else if (!silent && t < was) {
+      try { toast(t === 0 ? 'L\'Empire t\'a oublié.' : `Réputation impériale : ${SB_EMP_TIERS[t].label}`); } catch (err) {}
+    }
+  }
+  if (t >= 3 && !e.exp && !(e.expCooldown && Date.now() < e.expCooldown)) sbEmpLaunchExpedition();
+  sbEmpPublish();
+}
+async function sbEmpPublish(force) {
+  const e = sbEmpire(), t = sbEmpTierOf(sbEmpRep());
+  if (!force && e.pub === t && (t < 2 || Date.now() - (e.pubAt || 0) < 6 * 3600e3)) return;
+  if (!window.SBMP || !SBMP.ready || !SBMP.ready()) return;
+  try { await _mpRpc('mp_set_wanted', { p_level: t, p_rep: Math.round(e.rep) }); e.pub = t; e.pubAt = Date.now(); }
+  catch (err) { if (!/PGRST202|Could not find the function/.test(String(err && err.message || err))) console.warn('[empire] publication :', err); }
+}
+
+// ── l'expédition punitive ──
+function _sbEmpOrigin() {
+  const imp = Object.entries(G.hiddenPorts || {}).filter(([, p]) => p && window.SBLines && SBLines.isImperialDock && SBLines.isImperialDock(p.dockId));
+  if (imp.length) return { sys: imp[0][0], name: imp[0][1].name };
+  return { sys: null, name: 'les marges de l\'Empire' };
+}
+function sbEmpLaunchExpedition() {
+  const e = sbEmpire();
+  let def = 0;
+  try { def = (typeof sbWithWorld === 'function') ? sbWithWorld('home', () => totalDefense()) : totalDefense(); } catch (err) { def = 0; }
+  const o = _sbEmpOrigin(), now = Date.now();
+  e.exp = { id: 'imp-' + now.toString(36), startedAt: now, arrivesAt: now + SB_EMP.EXP_MS, power: Math.round(Math.max(40000, def * 2.5)), defAtLaunch: Math.round(def), fromSys: o.sys, fromName: o.name };
+  if (typeof saveGame === 'function') saveGame();
+  try {
+    sbConfirm({ title: 'EXPÉDITION PUNITIVE', variant: 'danger', confirmLabel: 'Voir la carte', cancelLabel: 'Fermer',
+      body: `L'Empire a assez compté tes pillages. Une flotte immense quitte ${_esc(o.name)} vers ta capitale.<br><br><b>Impact dans 12 h</b> · force estimée <b>${fmt(e.exp.power)}</b> (ta défense : ${fmt(e.exp.defAtLaunch)}).<br><br>Renforce ta défense, déploie tes flottes en orbite… ou paie l'amende dans une station impériale pour qu'elle fasse demi-tour.` })
+      .then(ok => { if (ok) { try { goto('prospect'); } catch (err) {} } });
+  } catch (err) {}
+  sbEmpBanner();
+}
+function sbEmpRecallCost() { return Math.round(sbEmpRep() * (sbEmpire().exp ? SB_EMP.RECALL : SB_EMP.FINE)); }
+async function sbEmpPayFine() {
+  const e = sbEmpire(), cost = sbEmpRecallCost();
+  if (cost <= 0) return;
+  if ((G.credits || 0) < cost) { toast(`L'Empire réclame ${fmt(cost)} CG`); return; }
+  const ok = await sbConfirm({ title: e.exp ? 'RAPPELER L\'EXPÉDITION' : 'PAYER L\'AMENDE', confirmLabel: `Payer ${fmt(cost)} CG`,
+    body: e.exp ? `L'expédition punitive fait demi-tour et ta réputation est effacée.` : `Ta réputation impériale est effacée : l'Empire passe l'éponge.` });
+  if (!ok || (G.credits || 0) < cost) return;
+  G.credits -= cost;
+  e.rep = 0; e.at = Date.now();
+  if (e.exp) { e.exp = null; e.expCooldown = Date.now() + 24 * 3600e3; }
+  sbEmpCheck(true);
+  toast('L\'Empire encaisse. Tu repars blanc comme neige.');
+  if (typeof saveGame === 'function') saveGame();
+  sbEmpBanner();
+  if (typeof refreshCurrentScreen === 'function') refreshCurrentScreen();
+}
+function sbEmpBanner() {
+  const e = sbEmpire(), x = e.exp;
+  let el = document.getElementById('sb-emp-incoming');
+  if (!x) { if (el) el.remove(); return; }
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'sb-emp-incoming';
+    el.style.cssText = 'position:fixed;left:50%;transform:translateX(-50%);top:calc(env(safe-area-inset-top, 0px) + 44px);z-index:9000;max-width:92vw;padding:8px 14px;border-radius:20px;background:rgba(70,6,6,.92);border:1px solid rgba(255,58,42,.75);color:#ffd6cf;font-size:12px;box-shadow:0 0 22px rgba(255,40,20,.45);cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis';
+    el.onclick = () => { try { goto('prospect'); } catch (err) {} };
+    document.body.appendChild(el);
+  }
+  const ms = Math.max(0, x.arrivesAt - Date.now()), h = Math.floor(ms / 3600e3), m = Math.ceil((ms % 3600e3) / 60000);
+  el.innerHTML = `⚔ Expédition punitive impériale · force <strong>${fmt(x.power)}</strong> · impact dans ${h ? h + ' h ' : ''}${m} min`;
+}
+function sbEmpTick() {
+  if (typeof G === 'undefined' || !G || !G.imperialRep) return;
+  const e = sbEmpire();
+  if (e.exp && Date.now() >= e.exp.arrivesAt) { try { sbEmpResolveExpedition(); } catch (err) { console.warn('[empire] expédition', err); } }
+  sbEmpBanner();
+  sbEmpCheck();
+}
+function sbEmpResolveExpedition() {
+  const e = sbEmpire(), x = e.exp;
+  if (!x) return;
+  if (window._sbResetting) return;
+  const home = (typeof mpMyAddressString === 'function') ? mpMyAddressString() : null;
+  let def = 0;
+  try { def = (typeof sbWithWorld === 'function') ? sbWithWorld('home', () => totalDefense()) : totalDefense(); } catch (err) {}
+  const rnd = () => 0.9 + Math.random() * 0.2;
+  const atkEff = Math.round(x.power * rnd()), defEff = Math.round(def * rnd());
+  const won = atkEff > defEff;
+  const loot = { metal: 0, energie: 0, cristal: 0 };
+  if (won) for (const k of Object.keys(loot)) loot[k] = Math.floor(((G.res[k] && G.res[k].v) || 0) * 0.5);
+  let dmg = null, dmg2 = null;
+  try {
+    const built = ((sbWithWorld ? sbWithWorld('home', () => G.planet.parcels) : G.planet.parcels) || []).filter(p => p && p.state === 'built' && p.building && !p.damaged).map(p => p.building);
+    if (won && built.length) { dmg = built[Math.floor(Math.random() * built.length)]; const rest = built.filter(b => b !== dmg); dmg2 = rest.length ? rest[Math.floor(Math.random() * rest.length)] : null; }
+  } catch (err) {}
+  const combat = { phases: {
+    phase1: { won, atkEffective: atkEff, defEffective: defEff },
+    phase2: won ? { won: true, atkEffective: Math.round(atkEff * 0.6), defEffective: Math.round(defEff * 0.3) } : undefined,
+  }, outcome: won ? 'victory' : 'defeat' };
+  const raid = { id: x.id, status: 'resolved', attacker_pseudo: 'l\'Empire', attacker_address: x.fromSys || '', defender_address: home, fleet_name: 'Expédition punitive',
+    departed_at: new Date(x.startedAt).toISOString(), resolved_at: new Date().toISOString(),
+    result: { outcome: won ? 'victory' : 'defeat', loot, loot_pct: 0.5, damaged_building: dmg, combat } };
+  const ok = mpApplyRaidAgainstMe(raid);
+  if (ok === false) return;   // pas intégré (restauration en cours) : on réessaiera
+  if (won && dmg2) {
+    try { const doIt = () => { const p = (G.planet.parcels || []).find(q => q && q.building === dmg2 && q.state === 'built' && !q.damaged); if (p) mpDamageParcel(p, 'l\'Empire'); };
+      if (typeof sbWithWorld === 'function') sbWithWorld('home', doIt); else doIt(); } catch (err) {}
+  }
+  e.exp = null; e.rep = Math.min(sbEmpRep(), SB_EMP.AFTER_EXP); e.at = Date.now(); e.expCooldown = Date.now() + 24 * 3600e3;
+  sbEmpCheck(true);
+  toast(won ? '⚔ L\'expédition punitive a écrasé ta défense. L\'Empire a fait passer son message.' : '🎉 Ta capitale a repoussé l\'expédition punitive de l\'Empire !');
+  if (typeof saveGame === 'function') saveGame();
+  sbEmpBanner();
+}
+// prime : touchée (attaquant) ou payée par ma tête (défenseur)
+function sbEmpBountyCollected(res, defPseudo) {
+  const b = Math.max(0, Math.floor(Number(res && res.bounty) || 0));
+  if (!b) return;
+  G.credits = (G.credits || 0) + b;
+  toast(`💰 Prime impériale touchée sur ${defPseudo || 'un recherché'} : +${fmt(b)} CG`);
+}
+function sbEmpBountyPaid(res, atkPseudo) {
+  const b = Math.max(0, Math.floor(Number(res && res.bounty) || 0));
+  if (!b) return;
+  const e = sbEmpire();
+  e.rep = Math.min(sbEmpRep(), SB_EMP.AFTER_BOUNTY); e.at = Date.now();
+  sbEmpCheck(true);
+  toast(`📜 ${atkPseudo || 'Un chasseur de primes'} a touché ta prime (${fmt(b)} CG). L'Empire relâche un peu son attention.`);
+}
+
+// ── l'avis de recherche (registre) ──
+var _sbWanted = { list: [], at: 0 };
+async function sbEmpPollWanted(force) {
+  if (!window.SBMP || !SBMP.ready || !SBMP.ready()) return;
+  if (!force && Date.now() - _sbWanted.at < 10 * 60000) return;
+  _sbWanted.at = Date.now();
+  try { const r = await _mpRpc('mp_wanted_list', {}); if (Array.isArray(r)) _sbWanted.list = r; } catch (err) {}
+}
+function sbWantedOf(addr) {
+  const k = String(addr || '').split('-').slice(0, 4).join('-');
+  return (_sbWanted.list || []).find(w => w.address === k) || null;
+}
+function sbWantedBadge(addr) {
+  const w = sbWantedOf(addr);
+  return w ? ` <span style="font-size:9px;color:#ff8a5a;border:1px solid rgba(255,138,90,.5);border-radius:3px;padding:1px 5px;letter-spacing:.06em;vertical-align:middle">RECHERCHÉ · ${fmt(w.bounty)} CG</span>` : '';
+}
+function sbEmpStatusHtml(atDock) {
+  const e = sbEmpire(), rep = sbEmpRep(), t = sbEmpTierOf(rep), T = SB_EMP_TIERS[t];
+  const me = (typeof mpMyAddressString === 'function') ? mpMyAddressString() : '';
+  const others = (_sbWanted.list || []).filter(w => w.address !== me);
+  if (!atDock && rep < 1 && !others.length && !e.exp) return '';
+  const next = t < 3 ? [SB_EMP.SURV, SB_EMP.WANTED, SB_EMP.ENEMY][t] : null;
+  const bar = Math.min(100, rep / SB_EMP.ENEMY * 100);
+  let html = `<div class="dash-section-card" style="margin:0 16px 14px;border-color:${t ? 'rgba(255,138,90,.35)' : 'var(--border)'}">
+    <div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px"><span style="font-size:10px;color:var(--mut);letter-spacing:.12em;text-transform:uppercase">Registre impérial</span><b style="font-size:12px;color:${T.color}">${T.label}</b></div>
+    <div style="height:6px;border-radius:3px;background:rgba(255,255,255,.08);overflow:hidden;margin:8px 0 4px"><div style="height:100%;width:${bar.toFixed(1)}%;background:${T.color === 'var(--mut)' ? '#5a6470' : T.color}"></div></div>
+    <div style="font-size:10px;color:var(--mut)">${Math.round(rep)} points${next ? ` · ${SB_EMP_TIERS[t + 1].label} à ${next}` : ''} · l'Empire oublie 1 point par heure</div>`;
+  if (t >= 1) html += `<div style="font-size:11px;color:#e6f0ff;margin-top:8px;line-height:1.5">${t === 1 ? 'On parle de toi ici. Ses escortes sont renforcées de 25 % contre toi.' : t === 2 ? `Ta tête est mise à prix : <b style="color:#ff8a5a">${fmt(sbEmpBounty(rep))} CG</b> pour le commandant qui te pillera. Escortes +50 %.` : 'Ennemi de l\'Empire. Escortes doublées.'}</div>`;
+  if (e.exp) html += `<div style="font-size:11px;color:#ff6a5a;margin-top:8px">⚔ Expédition punitive en route · force ${fmt(e.exp.power)} · impact ${new Date(e.exp.arrivesAt).toLocaleString('fr-FR', { weekday: 'short', hour: '2-digit', minute: '2-digit' })}</div>`;
+  if (atDock && rep >= 1) html += `<button onclick="sbEmpPayFine()" style="margin-top:10px;width:100%;padding:11px;border-radius:9px;border:1px solid rgba(255,200,100,.45);background:rgba(60,40,10,.5);color:#ffc864;font-size:11px;letter-spacing:.12em;text-transform:uppercase">${e.exp ? 'Rappeler l\'expédition' : 'Payer l\'amende'} · ${fmt(sbEmpRecallCost())} CG</button>`;
+  if (others.length) {
+    html += `<div style="font-size:10px;color:var(--mut);letter-spacing:.12em;text-transform:uppercase;margin:12px 0 6px">Avis de recherche</div>` + others.slice(0, 6).map(w =>
+      `<div style="display:flex;justify-content:space-between;gap:8px;padding:6px 0;border-top:1px solid var(--border);font-size:12px"><span style="color:#ff8a5a">${_esc(w.pseudo)} <span style="color:var(--mut);font-size:10px;font-family:var(--font-mono,monospace)">${_esc(w.address)}</span></span><b style="color:#ffc864;white-space:nowrap">${fmt(w.bounty)} CG</b></div>`).join('');
+    html += `<div style="font-size:10px;color:var(--mut);margin-top:6px;font-style:italic">Pille un recherché avec succès : l'Empire te verse la prime.</div>`;
+  }
+  return html + `</div>`;
+}
+function sbImperialDockHtml(mission, dock) {
+  if (!dock || !window.SBLines || !SBLines.isImperialDock || !SBLines.isImperialDock(dock.id)) return '';
+  sbEmpPollWanted();
+  const t = sbEmpTier();
+  const greet = t === 0 ? 'Les douaniers impériaux tamponnent tes papiers sans un regard.' : t === 1 ? 'Le barman baisse la voix : « On parle de toi ici, commandant. Fais attention. »'
+    : t === 2 ? 'Ton visage est placardé à l\'entrée du dock. Les gardes te suivent des yeux.' : 'Les gardes posent la main sur leur arme quand tu passes.';
+  return `<div style="margin-bottom:18px"><div style="font-size:12px;color:#e6f0ff;font-style:italic;line-height:1.6;padding:2px 2px 10px;font-family:'Charter','Iowan Old Style',Georgia,serif">${greet}</div>${sbEmpStatusHtml(true).replace('margin:0 16px 14px', 'margin:0 0 4px')}</div>`;
+}
+setInterval(() => { try { sbEmpTick(); sbEmpPollWanted(); } catch (e) {} }, 30000);
+setTimeout(() => { try { sbEmpTick(); sbEmpPollWanted(true); } catch (e) {} }, 8000);
+
 // PATCH_2210_DIAG_CARTE — export complet de la carte (lien …/?diag=carte : bouton flottant, sans les cheats)
 // tout ce qu'il faut pour reconstruire la carte du joueur à l'identique : cases figées, tronçons, échos, systèmes affichés
 function sbMapExport() {
@@ -48943,7 +49172,7 @@ if (G.knownTargets && Array.isArray(G.tankerMissions)) {
 <!-- PERF_1310 — mesure des performances chez les joueurs + qualité 3D automatique (assets/perf.js) -->
 <script src="assets/perf.js?v=20261014-1540"></script>
 <!-- PATCH_1410_LIGNES — lignes PNJ à horaire sur les routes cachées (assets/lines.js) -->
-<script src="assets/lines.js?v=20261022-1420"></script>
+<script src="assets/lines.js?v=20261022-1440"></script>
 <!-- CLOUD — sauvegarde Supabase (source : sb-build/src/cloud.js) -->
 <script type="module" src="assets/cloud.js?v=20261022-1420"></script>
 <!-- MATCH3 — Match-3 V2 (assets/match3.js, source src/match3.js + src/m3core.js) : remplace startM3 -->
@@ -48951,7 +49180,7 @@ if (G.knownTargets && Array.isArray(G.tankerMissions)) {
 <!-- HOME V2 — « monde d'abord » : planète plein écran, ressources en ligne, Flotte / Défense / Prospection (assets/home.js) -->
 <script type="module" src="assets/home.js?v=20261020-2150"></script>
 <!-- SPACE MAP v0 — carte du Centre de prospection (assets/spacemap.js, source src/spacemap.js) -->
-<script src="assets/spacemap.js?v=20261022-1350"></script>
+<script src="assets/spacemap.js?v=20261022-1440"></script>
 <!-- SPACE MAP niveau B — diorama 3D d'un système (assets/system3d.js, source src/system3d.js) -->
 <script type="module" src="assets/system3d.js?v=20261014-1440"></script>
 <!-- SHIP3D — fiches 3D : cuirassé KV-01, frégate SR-01, tanker TK-07, chantier orbital OS-01 (assets/ship3d.js, sur le moteur partagé window.SB3D) -->

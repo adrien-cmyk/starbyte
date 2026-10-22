@@ -57,7 +57,7 @@
     // 19/10 (Adrien) : une seule ligne par station (keep)
     // 22/10 (Adrien) : les stations au statut « impérial » ont DEUX lignes (pas de keep) — le Linceul est la première
     [CROWN_DOCK_ID]: { kinds: CROWN_KINDS, route: 'La Saigne de la Couronne', mood: 'grasse', flag: '_linesCrown', keep: [0] },
-    [SANCT_DOCK_ID]: { kinds: ['pilgrim_stop', 'imperial_convoy'], route: 'La Vieille Voie du Linceul', mood: 'imperiale', flag: '_linesSanct' },
+    [SANCT_DOCK_ID]: { kinds: ['pilgrim_stop', 'imperial_convoy'], route: 'La Vieille Voie du Linceul', mood: 'imperiale', flag: '_linesSanct', imperial: true },   // 22/10 : station impériale (deux lignes)
     // 16/10 : la Station O'Neill Série Noire, station furtive de la Confédération, est le lieu du secteur N ; ses lignes : convois armés et convois impériaux
     [NOIRE_DOCK_ID]: { kinds: ['derelict_carrier', 'imperial_convoy'], route: 'La Voie Noire', mood: 'noire', flag: '_linesNoire', keep: [0] },
     // 19/10 : le Refuge de Brest, halte des pèlerins dans le champ de glace ; une seule ligne, celle des pèlerins
@@ -83,6 +83,8 @@
     return (_farPorts = out);
   }
   function fixedPort(id) { const f = farPorts()[id]; return f ? f.sys : null; }
+  // 22/10 (réputation impériale) — station au statut impérial : deux lignes, l'Empire veille
+  function isImperialDock(id) { return !!(STATION_PORTS[id] && STATION_PORTS[id].imperial); }
 
   /* ── hachage déterministe (mêmes résultats sur tous les appareils) ── */
   function h32(s) { let h = 2166136261; s = String(s); for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619) >>> 0; } return h >>> 0; }
@@ -922,7 +924,8 @@
     if (!tiers) return 1;
     const T = cv.tier;
     const base = cv.escort === 'escorte lourde' ? tiers.cuirasse[T].def : cv.escort === 'escorte légère' ? tiers.fregate[T].def : tiers.tanker[T].def * 0.5;
-    return cv.ships * base * heatOf(lineId, t);
+    const emp = (cv.kindKey === 'imperial' && typeof sbEmpEscort === 'function') ? sbEmpEscort() : 1;   // 22/10 : l'Empire renforce ses escortes contre qui le pille
+    return cv.ships * base * heatOf(lineId, t) * emp;
   }
   function odds(f, cv, lineId, t) { const A = fleetAtk(f), E = escortOf(cv, lineId, t); return A > 0 ? A / (A + E) : 0; }
   function oddsLabel(p) { return p >= 0.7 ? 'chances favorables' : p >= 0.4 ? 'combat incertain' : p > 0 ? 'escorte trop forte' : 'aucun vaisseau armé'; }
@@ -980,6 +983,7 @@
       if (!G.lineHeat || typeof G.lineHeat !== 'object') G.lineHeat = {};
       G.lineHeat[line.id] = (G.lineHeat[line.id] || []).filter(x => t - x < HEAT_MS).concat([t]).slice(-6);
     }
+    try { if (typeof sbEmpireOffense === 'function') sbEmpireOffense(line.kind.key, isImperialDock(line.dockId), win, sys, portLabel(line)); } catch (e) { console.warn('[empire]', e); }   // 22/10
     if (JSON.stringify(before) !== JSON.stringify(f.composition || {})) a.npcFleetDirty = true;
     const lossLine = (typeof _mpLossLine === 'function') ? _mpLossLine(before, f.composition) : '';
     const type = !win ? 'robbed_fail' : sumRes(loot) > 0 ? 'robbed_ok' : 'robbed_empty';
@@ -1417,7 +1421,7 @@
     dockMarketHtml, sellHere, withdrawOffer, buyOffer, learnRoute, noteRobbery, tickMarket, fetchOffers, sellableRoutes,
     ORDER_MODES, ordersOf, ordersLabel, chooseOrders, setOrders, pushOrders, pushNpc, holdCap, holdUsed, holdAll, fleetAtk, odds, oddsLabel,
     robNpc, tailNpc, tickAmbushes, capLegs, salesOn, soldChain, routesOf, reportSheet, npcReportCan, npcReportAction, ambushTravel, ambushAt, pollSpied, autoPlayers,
-    WINDOW_MS, EPOCH, CROWN_DOCK_ID, SANCT_DOCK_ID, NOIRE_DOCK_ID, REFUGE_DOCK_ID, STATION_PORTS, fixedPort, FAR_STATIONS,
+    isImperialDock, WINDOW_MS, EPOCH, CROWN_DOCK_ID, SANCT_DOCK_ID, NOIRE_DOCK_ID, REFUGE_DOCK_ID, STATION_PORTS, fixedPort, FAR_STATIONS,
     _reset() { _net = null; },
   };
 })();

@@ -552,6 +552,14 @@
       flights.push({ kind: 'tanker', id: m.id, label: `Tanker → ${_td.label}`, shipName: m.tankerName || 'Tanker', destCoords: _td.coords, from: back ? at : 0, to: back ? 0 : at, toCk: back ? null : toCk, path,
         departedAt: back ? (m.returnDepartedAt || m.arrivalAt || m.departedAt) : m.departedAt, arrivalAt: back ? (m.returnArrivalAt || m.arrivalAt) : m.arrivalAt, target: tc, back });
     }
+    // 22/10 — expédition punitive impériale : de la station impériale (ou du bord de la carte) vers ma planète
+    if (G.imperialRep && G.imperialRep.exp && G.imperialRep.exp.arrivesAt > now) {
+      const x = G.imperialRep.exp;
+      let from = x.fromSys && cell['sys:' + x.fromSys] !== undefined ? cell['sys:' + x.fromSys] : undefined;
+      if (from === undefined || from === 0) { let best = null; for (const c of CELLS) if (c.ring === BOARD - 1 && (!best || c.idx % 97 === 13)) best = c; from = best ? best.idx : undefined; }
+      if (from !== undefined) flights.push({ kind: 'imperial', id: x.id, label: 'Expédition punitive impériale → ta capitale', shipName: 'Flotte du Trône', destCoords: '', from, to: 0, toCk: null, path: null,
+        departedAt: x.startedAt, arrivalAt: x.arrivesAt, target: home, back: false });
+    }
     // 15/10 (E6) — flottes qui gagnent leur embuscade ou en reviennent : par la route connue quand elles l'empruntent
     for (const f of ((G.fleet && G.fleet.prepared) || [])) {
       const a = f.ambush;
@@ -1323,7 +1331,7 @@
       // Vaisseaux en vol : fins, discrets ; ils filent vers le corps visé quand il est connu
       const wp = new T.Vector3();
       for (const f of st.flights) {
-        const c = f.kind === 'tanker' ? 0xffc864 : f.kind === 'fleet' ? 0xc9a8ff : (f.tier === 'radar' ? 0xe6f0ff : f.tier === 'medium' ? 0x9a8aff : 0x5fcc8a);
+        const c = f.kind === 'imperial' ? 0xff3a2a : f.kind === 'tanker' ? 0xffc864 : f.kind === 'fleet' ? 0xc9a8ff : (f.tier === 'radar' ? 0xe6f0ff : f.tier === 'medium' ? 0x9a8aff : 0x5fcc8a);
         const H = 9;
         const pos = (idx, ck) => {
           if (ck && this.bodies[ck]) { this.content.updateMatrixWorld(true); this.bodies[ck].getWorldPosition(wp); return new T.Vector3(wp.x, H, wp.z); }
