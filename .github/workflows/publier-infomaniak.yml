@@ -1,0 +1,42 @@
+# Publie le jeu (dossier github_upload/) sur https://play.starbyte.online, hébergé chez Infomaniak.
+# À chaque publication dans github_upload/, seuls les fichiers modifiés sont envoyés (FTPS).
+# Le dossier server/ (SQL, fonction des raids) n'est jamais envoyé.
+# Identifiants : secrets du dépôt INFOMANIAK_FTP_SERVER, INFOMANIAK_FTP_USER, INFOMANIAK_FTP_PASSWORD.
+name: Publier sur play.starbyte.online
+on:
+  push:
+    branches: [main]
+    paths: ['github_upload/**']
+  workflow_dispatch:
+concurrency:
+  group: publier-infomaniak
+  cancel-in-progress: false
+jobs:
+  publier:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Vérifier les identifiants
+        env:
+          S: ${{ secrets.INFOMANIAK_FTP_SERVER }}
+        run: |
+          if [ -z "$S" ]; then echo "::warning::Secrets Infomaniak absents : rien n'est publié."; echo "SKIP=1" >> "$GITHUB_ENV"; fi
+      - uses: actions/checkout@v4
+        if: env.SKIP != '1'
+        with:
+          sparse-checkout: github_upload
+          sparse-checkout-cone-mode: true
+      - name: Envoyer chez Infomaniak (fichiers modifiés seulement)
+        if: env.SKIP != '1'
+        uses: SamKirkland/FTP-Deploy-Action@v4.3.5
+        with:
+          server: ${{ secrets.INFOMANIAK_FTP_SERVER }}
+          username: ${{ secrets.INFOMANIAK_FTP_USER }}
+          password: ${{ secrets.INFOMANIAK_FTP_PASSWORD }}
+          protocol: ftps
+          local-dir: ./github_upload/
+          server-dir: ./
+          exclude: |
+            **/.git*
+            **/.git*/**
+            server/**
+          timeout: 600000
