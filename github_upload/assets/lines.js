@@ -41,6 +41,18 @@
   // quatrième lieu caché, second du secteur N, ajouté après les trois autres : leurs lignes et leurs positions ne bougent pas
   const REFUGE_DOCK_ID = 'dock-wc15ki';
   const EXTRA_PLACES = [REFUGE_DOCK_ID];
+  // 22/10 (Adrien) — six nouvelles stations, HORS de la zone de test : trois à un secteur (L, P), trois à deux (K, Q).
+  // Leur dock naît de leur indice (même identifiant pour tous) ; leur système est fixé ici (pas tiré dans M, N, O).
+  const FAR_STATIONS = [
+    { key: 'veyra',      hint: 'Sous le regard de Veyra',          sec: 'L' },
+    { key: 'lucioles',   hint: 'Sur les pentes des Lucioles',      sec: 'P' },
+    { key: 'ivoire',     hint: 'Dans la grille d’Ivoire',          sec: 'P' },
+    { key: 'akhet',      hint: 'Au pied du tombeau d’Akhet',       sec: 'K' },
+    { key: 'abime',      hint: 'Au fond de l’Abîme',               sec: 'K' },
+    { key: 'obsidienne', hint: 'Au creux de la Main d’Obsidienne', sec: 'Q' },
+  ];
+  const VEYRA_DOCK_ID = 'dock-o3pz0b', LUCIOLES_DOCK_ID = 'dock-smt2z6', IVOIRE_DOCK_ID = 'dock-uzt7ha',
+        AKHET_DOCK_ID = 'dock-xy2s3', ABIME_DOCK_ID = 'dock-wldphp', OBSIDIENNE_DOCK_ID = 'dock-3c8na';
   const STATION_PORTS = {
     // 19/10 (Adrien) : une seule ligne par station (keep) — le Linceul garde ses deux lignes pour l'instant
     [CROWN_DOCK_ID]: { kinds: CROWN_KINDS, route: 'La Saigne de la Couronne', mood: 'grasse', flag: '_linesCrown', keep: [0] },
@@ -49,7 +61,27 @@
     [NOIRE_DOCK_ID]: { kinds: ['derelict_carrier', 'imperial_convoy'], route: 'La Voie Noire', mood: 'noire', flag: '_linesNoire', keep: [0] },
     // 19/10 : le Refuge de Brest, halte des pèlerins dans le champ de glace ; une seule ligne, celle des pèlerins
     [REFUGE_DOCK_ID]: { kinds: ['pilgrim_stop', 'hidden_freeport'], route: 'La Piste des Glaces', mood: 'morte', flag: '_linesRefuge2', keep: [0] },
+    // 22/10 — les six stations lointaines : une ligne chacune
+    [VEYRA_DOCK_ID]:      { kinds: ['asteroid_bar'],      route: 'La Ligne du Regard',     mood: 'nerveuse',  flag: '_linesVeyra',      keep: [0] },
+    [LUCIOLES_DOCK_ID]:   { kinds: ['pilgrim_stop'],      route: 'La Sente des Lucioles',  mood: 'grasse',    flag: '_linesLucioles',   keep: [0] },
+    [IVOIRE_DOCK_ID]:     { kinds: ['hidden_freeport'],   route: 'La Voie des Sphères',    mood: 'grasse',    flag: '_linesIvoire',     keep: [0] },
+    [AKHET_DOCK_ID]:      { kinds: ['imperial_convoy'],   route: 'La Route des Gardiens',  mood: 'imperiale', flag: '_linesAkhet',      keep: [0] },
+    [ABIME_DOCK_ID]:      { kinds: ['derelict_carrier'],  route: 'La Fosse',               mood: 'noire',     flag: '_linesAbime',      keep: [0] },
+    [OBSIDIENNE_DOCK_ID]: { kinds: ['abandoned_station'], route: 'Le Chemin des Doigts',   mood: 'morte',     flag: '_linesObsidienne', keep: [0] },
   };
+  // système d'une station lointaine (sans passer par le réseau : sert aussi au registre des convois)
+  let _farPorts = null;
+  function farPorts() {
+    if (_farPorts) return _farPorts;
+    const out = {};
+    if (typeof _hashStringDeterministic !== 'function') return out;
+    for (const f of FAR_STATIONS) {
+      const id = 'dock-' + _hashStringDeterministic(f.hint).toString(36);
+      out[id] = { key: f.key, hint: f.hint, sys: `A-${f.sec}-${1000 + (h32('lieu6:' + id) % 9000)}` };
+    }
+    return (_farPorts = out);
+  }
+  function fixedPort(id) { const f = farPorts()[id]; return f ? f.sys : null; }
 
   /* ── hachage déterministe (mêmes résultats sur tous les appareils) ── */
   function h32(s) { let h = 2166136261; s = String(s); for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619) >>> 0; } return h >>> 0; }
@@ -80,6 +112,12 @@
       if (c) picked.push(c);
     }
     for (const id of EXTRA_PLACES) { const c = all.find(x => x.dock.id === id); if (c && !picked.includes(c)) picked.push(c); }   // 19/10 : lieux en plus, après les trois premiers
+    // 22/10 : les six stations lointaines, après tous les autres (leurs lignes ne déplacent rien)
+    for (const [id, f] of Object.entries(farPorts())) {
+      let dock = null;
+      try { dock = (typeof generateDockForRoute === 'function') ? generateDockForRoute({ destinationHint: f.hint }) : null; } catch (e) { dock = null; }
+      if (dock && dock.id === id && !picked.some(x => x.port === f.sys)) picked.push({ dock, hint: f.hint, port: f.sys });
+    }
     for (const { dock, hint, port } of picked) {
       const [cl, sec, num] = port.split('-');
       ports[port] = { sys: port, dockId: dock.id, name: dock.name, type: dock.type, typeLabel: dock.typeLabel || dock.sub || '', hint, lines: [] };
@@ -1299,7 +1337,11 @@
     const home = fresh || homes[echoes.length % homes.length]; if (!home) return;
     const sec = home.split('-')[1];
     const lines = network().lines;
-    const mine = lines.filter(l => l.sector === sec);
+    let mine = lines.filter(l => l.sector === sec);
+    // 22/10 — de temps en temps, l'antenne capte un trafic plus lointain : un secteur plus loin (1 écho sur 4), deux (1 sur 8)
+    const _gap = (x) => Math.abs(String(x).charCodeAt(0) - sec.charCodeAt(0));
+    const _far = echoes.length % 8 === 7 ? 2 : echoes.length % 4 === 3 ? 1 : 0;
+    if (_far) { const far = lines.filter(l => _gap(l.sector) === _far); if (far.length) mine = far; }
     const pool = mine.length ? mine : lines;
     if (!pool.length) return;
     // une ligne différente à chaque écho, choisie pour ce joueur ; un jalon loin du port (début de piste)
@@ -1367,7 +1409,7 @@
     dockMarketHtml, sellHere, withdrawOffer, buyOffer, learnRoute, noteRobbery, tickMarket, fetchOffers, sellableRoutes,
     ORDER_MODES, ordersOf, ordersLabel, chooseOrders, setOrders, pushOrders, pushNpc, holdCap, holdUsed, holdAll, fleetAtk, odds, oddsLabel,
     robNpc, tailNpc, tickAmbushes, capLegs, salesOn, soldChain, routesOf, reportSheet, npcReportCan, npcReportAction, ambushTravel, ambushAt, pollSpied, autoPlayers,
-    WINDOW_MS, EPOCH, CROWN_DOCK_ID, SANCT_DOCK_ID, NOIRE_DOCK_ID, REFUGE_DOCK_ID, STATION_PORTS,
+    WINDOW_MS, EPOCH, CROWN_DOCK_ID, SANCT_DOCK_ID, NOIRE_DOCK_ID, REFUGE_DOCK_ID, STATION_PORTS, fixedPort, FAR_STATIONS,
     _reset() { _net = null; },
   };
 })();

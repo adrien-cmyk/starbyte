@@ -5880,6 +5880,19 @@ svg.map {
   <!-- PATCH_1910_REFUGE_CHEATS -->
   <button onclick="cheatCrownRoute(false, REFUGE_DOCK_ID)">🗺 Révéler la route du Refuge de Brest</button>
   <button onclick="cheatCrownDock(REFUGE_DOCK_ID)">⚓ Tanker amarré au Refuge de Brest (arrivée)</button>
+  <!-- PATCH_2210_STATIONS6 -->
+  <button onclick="cheatCrownRoute(false, VEYRA_DOCK_ID)">🗺 Révéler la route · L'Œil de Veyra</button>
+  <button onclick="cheatCrownDock(VEYRA_DOCK_ID)">⚓ Tanker amarré · L'Œil de Veyra</button>
+  <button onclick="cheatCrownRoute(false, LUCIOLES_DOCK_ID)">🗺 Révéler la route · Le Mont des Lucioles</button>
+  <button onclick="cheatCrownDock(LUCIOLES_DOCK_ID)">⚓ Tanker amarré · Le Mont des Lucioles</button>
+  <button onclick="cheatCrownRoute(false, IVOIRE_DOCK_ID)">🗺 Révéler la route · La Grille d'Ivoire</button>
+  <button onclick="cheatCrownDock(IVOIRE_DOCK_ID)">⚓ Tanker amarré · La Grille d'Ivoire</button>
+  <button onclick="cheatCrownRoute(false, AKHET_DOCK_ID)">🗺 Révéler la route · Le Tombeau d'Akhet</button>
+  <button onclick="cheatCrownDock(AKHET_DOCK_ID)">⚓ Tanker amarré · Le Tombeau d'Akhet</button>
+  <button onclick="cheatCrownRoute(false, ABIME_DOCK_ID)">🗺 Révéler la route · La Dent de l'Abîme</button>
+  <button onclick="cheatCrownDock(ABIME_DOCK_ID)">⚓ Tanker amarré · La Dent de l'Abîme</button>
+  <button onclick="cheatCrownRoute(false, OBSIDIENNE_DOCK_ID)">🗺 Révéler la route · La Main d'Obsidienne</button>
+  <button onclick="cheatCrownDock(OBSIDIENNE_DOCK_ID)">⚓ Tanker amarré · La Main d'Obsidienne</button>
   <button onclick="G.refugeSeen = 0; saveGame(); toast('La prochaine ouverture du dock du Refuge rejoue l\'arrivée')">🎬 Revoir l'arrivée au Refuge</button>
   <div class="cheat-divider"></div>
   <div class="cheat-label">Ressources</div>
@@ -8748,7 +8761,8 @@ var EXTRA_SAVE_KEYS = [
   'skillsLearned', 'research', '_skillsSeen', '_skillsMigrated',   // PATCH_1610_SKILLS
   'mpRaidsApplied', 'mpRaidsReturned', 'mpPostsToClose', 'mpRelations', 'mpTradeCaps', 'mpAlliance', 'mpAllianceTags', 'mpAllyUnread', 'mpGarHosted',   // PATCH_2010_AUDIT — raids déjà intégrés (indépendant des rapports, qu'on peut supprimer)
   'worlds', 'activeWorld', 'colonyMissions', 'fleetTransfers',   // PATCH_2010_WORLDS — colonies (planètes inactives) et planète affichée
-  '_linesCrown', 'crownSeen', '_linesSanct', 'sanctSeen', '_linesNoire', 'noireSeen', '_linesRefuge', '_linesRefuge2', 'refugeSeen', '_brest1',   // PATCH_1510_CROWN — lieu du secteur M devenu la Couronne, première arrivée vue
+  '_linesCrown', 'crownSeen', '_linesSanct', 'sanctSeen', '_linesNoire', 'noireSeen', '_linesRefuge', '_linesRefuge2', 'refugeSeen', '_brest1',
+  '_linesVeyra', 'veyraSeen', '_linesLucioles', 'luciolesSeen', '_linesIvoire', 'ivoireSeen', '_linesAkhet', 'akhetSeen', '_linesAbime', 'abimeSeen', '_linesObsidienne', 'obsidienneSeen',   // PATCH_2210_STATIONS6   // PATCH_1510_CROWN — lieu du secteur M devenu la Couronne, première arrivée vue
 ];
 
 // Sauvegarde G complet dans localStorage. Appelé fréquemment, doit être rapide.
@@ -11157,6 +11171,7 @@ function mpBeaconList() {
 function mpDockSystem(dock) {
   const key = String((dock && (dock.id || dock.name)) || '');
   if (!key) return null;
+  if (window.SBLines && SBLines.fixedPort) { const f = SBLines.fixedPort(key); if (f) return f; }   // PATCH_2210_STATIONS6 — stations lointaines
   let h = 2166136261;
   for (let i = 0; i < key.length; i++) { h ^= key.charCodeAt(i); h = Math.imul(h, 16777619) >>> 0; }
   return `A-${'MNO'[h % 3]}-${1000 + (Math.floor(h / 3) % 9000)}`;
@@ -29418,7 +29433,7 @@ function cheatCrownDock(id) {
   const m = launchTankerOnRoute(route.id, 't1', { metal: 0, energie: 0, cristal: 0 });
   if (!m) { toast('Le tanker n\'a pas pu partir'); return; }
   m.arrivalAt = Date.now() - 1000;
-  if (id === SANCT_DOCK_ID) G.sanctSeen = 0; else if (id === NOIRE_DOCK_ID) G.noireSeen = 0; else if (id === REFUGE_DOCK_ID) G.refugeSeen = 0; else G.crownSeen = 0;
+  { const _U = typeof stationUI === 'function' ? stationUI(id) : null; if (_U && _U.seen) G[_U.seen] = 0; else G.crownSeen = 0; }   // PATCH_2210_STATIONS6
   if (typeof tickTankerMissions === 'function') tickTankerMissions();
   if (typeof saveGame === 'function') saveGame();
   if (m.status === 'docked') { toggleCheatPanel(); openDockFromFleet(m.id); }
@@ -42951,7 +42966,47 @@ function sbMigrateBrest() {
   (G.routes || []).forEach(fix); (G.tankerMissions || []).forEach(fix);
   if (found) { const sys = sbBrestPortSys(); if (sys) { try { SBLines.discoverPort(sys, Date.now()); } catch (e) {} } }
 }
-var STATION_DOCKS = { [CROWN_DOCK_ID]: CROWN_DOCK, [SANCT_DOCK_ID]: SANCT_DOCK, [NOIRE_DOCK_ID]: NOIRE_DOCK, [REFUGE_DOCK_ID]: REFUGE_DOCK };
+// PATCH_2210_STATIONS6 — six stations lointaines, hors de la zone de test (L, P à un secteur ; K, Q à deux)
+var VEYRA_DOCK_ID = 'dock-o3pz0b', LUCIOLES_DOCK_ID = 'dock-smt2z6', IVOIRE_DOCK_ID = 'dock-uzt7ha',
+    AKHET_DOCK_ID = 'dock-xy2s3', ABIME_DOCK_ID = 'dock-wldphp', OBSIDIENNE_DOCK_ID = 'dock-3c8na';
+var VEYRA_DOCK = {
+  name: 'L\'Œil de Veyra', type: 'asteroid_bar', typeLabel: 'Station-œil', sub: 'sphère de céramique · 600 m',
+  accent: '#e8c27a', station: 'veyra',
+  ambience: 'Une sphère de céramique veinée d\'ambre, et dans sa face un œil immense dont l\'iris tourne lentement quand un vaisseau approche. Personne ne sait ce qu\'il regarde. On sait seulement qu\'il ne cligne jamais.',
+  detail: 'Derrière la pupille, on devine la lumière chaude du bar : un comptoir, des étagères éclairées, des tables qui donnent sur le vide. On y vient pour voir, et pour être vu.',
+};
+var LUCIOLES_DOCK = {
+  name: 'Le Mont des Lucioles', type: 'pilgrim_stop', typeLabel: 'Montagne habitée', sub: 'roche et cristal · 2,1 km',
+  accent: '#b48cff', station: 'lucioles',
+  ambience: 'Une montagne entière flotte dans le noir, couverte de lichen qui luit comme un essaim de lucioles. Des cristaux violets percent ses flancs, et quatorze chapeaux de pierre portent chacun leur petite ville.',
+  detail: 'Le hangar s\'ouvre dans la roche, sous les chapeaux. Pèlerins, mineurs de cristal et marchands de lumière s\'y croisent dans une odeur de pierre mouillée. On dit que le lichen se souvient de chaque visage.',
+};
+var IVOIRE_DOCK = {
+  name: 'La Grille d\'Ivoire', type: 'hidden_freeport', typeLabel: 'Treillis de sphères', sub: 'réseau cristallin · 1,2 km',
+  accent: '#e6d29a', station: 'ivoire',
+  ambience: 'Un cube parfait de sphères d\'ivoire, de chrome et d\'or, reliées par des poutres qui chantent quand la lumière les traverse. Au centre, le cœur : une sphère plus grande, et dans sa face un portail bleu qui ne s\'éteint jamais.',
+  detail: 'Dans le cœur, la salle des échanges : des marchands venus de partout, des comptes tenus à la virgule, des contrats signés sous le portail. Ici tout est en ordre, et tout a un prix.',
+};
+var AKHET_DOCK = {
+  name: 'Le Tombeau d\'Akhet', type: 'derelict_carrier', typeLabel: 'Pyramide orbitale', sub: 'obsidienne et or · 1,25 km de haut',
+  accent: '#e8a24a', station: 'akhet',
+  ambience: 'Une pyramide d\'obsidienne posée sur le vide, ses arêtes d\'or allumées par une éclipse qui ne finit jamais. Deux gardiens à tête de chacal veillent sur le portail. Les pilotes coupent la radio en approchant, sans savoir pourquoi.',
+  detail: 'Le portail ouvre sur une salle immense, une colonnade et un mur de lumière au fond. On y parle à voix basse. Ceux qui y commercent ne disent jamais pour qui.',
+};
+var ABIME_DOCK = {
+  name: 'La Dent de l\'Abîme', type: 'derelict_carrier', typeLabel: 'Station-croc', sub: 'émail bleu nuit · 2,6 km',
+  accent: '#6fd6d0', station: 'abime',
+  ambience: 'Une dent de deux kilomètres et demi, émail bleu nuit fendu de lumière, qui dérive dans un océan d\'étoiles. Autour d\'elle, des méduses de lumière montent sans bruit. On dit que la bête qui l\'a perdue rôde encore.',
+  detail: 'Dans la halle, sous la racine, des galeries s\'enfoncent dans l\'émail. Récupérateurs, chasseurs d\'épaves et équipages sans nom s\'y retrouvent. Ici on parle de profondeur comme d\'autres parlent d\'or.',
+};
+var OBSIDIENNE_DOCK = {
+  name: 'La Main d\'Obsidienne', type: 'abandoned_station', typeLabel: 'Main de chrome noir', sub: 'chrome irisé · 1,4 km',
+  accent: '#c08cff', station: 'obsidienne',
+  ambience: 'Une main ouverte, immense, en chrome noir irisé, dont le bout des doigts brûle d\'un cristal violet. Ses capsules de verre fumé abritent des salles où personne ne se souvient d\'être entré. Elle semble attendre qu\'on y dépose quelque chose.',
+  detail: 'Au creux de la paume, une lumière douce et des salles habitées derrière le verre. On y troque ce qu\'on ne vend nulle part ailleurs. Certains repartent les mains vides, et le regrettent toute leur vie.',
+};
+var STATION_DOCKS = { [CROWN_DOCK_ID]: CROWN_DOCK, [SANCT_DOCK_ID]: SANCT_DOCK, [NOIRE_DOCK_ID]: NOIRE_DOCK, [REFUGE_DOCK_ID]: REFUGE_DOCK,
+  [VEYRA_DOCK_ID]: VEYRA_DOCK, [LUCIOLES_DOCK_ID]: LUCIOLES_DOCK, [IVOIRE_DOCK_ID]: IVOIRE_DOCK, [AKHET_DOCK_ID]: AKHET_DOCK, [ABIME_DOCK_ID]: ABIME_DOCK, [OBSIDIENNE_DOCK_ID]: OBSIDIENNE_DOCK };
 function _crownDock(d) { return (d && STATION_DOCKS[d.id]) ? Object.assign(d, STATION_DOCKS[d.id]) : d; }
 
 // ─── Registre des docks de l'univers (canon 18/05) ───
@@ -46419,6 +46474,31 @@ var STATION_UI = {
     sub: 'station-mammouth · champ de glace', long: true, chips: { dock: 'Le dock', bar: 'La ville', port: 'Le Refuge' }, crewAt: 'dans la ville suspendue', place: 'la ville suspendue', seen: 'refugeSeen',
     intro: 'Des éclats de glace, puis deux défenses immenses qui sortent du brouillard. Les yeux de la bête s\'allument : le Refuge de Brest t\'a vu venir.', enter: 'ENTRER AU REFUGE',
     hall: { t: 'La ville suspendue', s: 'Sous le ventre de la bête, entre les tours renversées et les lanternes. Ceux qui sont à quai, les marchés, ce qui se raconte autour du feu.', i: 'VOIR LA VILLE ↑' } },
+  // PATCH_2210_STATIONS6
+  veyra: { id: 'dock-o3pz0b', profile: 'veyra', url: 'assets/3d/sb_vy01.glb?v=20261022', kicker: 'STATION-ŒIL', title: 'L\'ŒIL DE VEYRA',
+    sub: 'sphère de céramique · secteur L', long: true, chips: { dock: 'Le dock', bar: 'Le bar', port: 'L\'Œil' }, crewAt: 'au bar', place: 'le bar', seen: 'veyraSeen',
+    intro: 'Une sphère pâle sort du noir. L\'iris tourne lentement, se resserre, et te fixe : l\'Œil de Veyra t\'a vu venir.', enter: 'ENTRER DANS L\'ŒIL',
+    hall: { t: 'Le bar derrière la pupille', s: 'Au cœur de l\'œil, derrière l\'iris. Ceux qui sont à quai, les marchés, ce qui se dit quand on croit que personne ne regarde.', i: 'VOIR LE BAR ↑' } },
+  lucioles: { id: 'dock-smt2z6', profile: 'lucioles', url: 'assets/3d/sb_ml01.glb?v=20261022', kicker: 'MONTAGNE HABITÉE', title: 'LE MONT DES LUCIOLES',
+    sub: 'roche et cristal · secteur P', long: true, chips: { dock: 'Le dock', bar: 'Le hangar', port: 'Le Mont' }, crewAt: 'au hangar', place: 'le hangar', seen: 'luciolesSeen',
+    intro: 'D\'abord une lueur verte, comme un essaim. Puis la montagne entière, ses cristaux, ses chapeaux de pierre : le Mont des Lucioles s\'allume pour toi.', enter: 'ENTRER AU HANGAR',
+    hall: { t: 'Le hangar de la montagne', s: 'Creusé dans la roche, sous les chapeaux. Ceux qui sont à quai, les marchés, ce que racontent les pèlerins.', i: 'VOIR LE HANGAR ↑' } },
+  ivoire: { id: 'dock-uzt7ha', profile: 'ivoire', url: 'assets/3d/sb_gi01.glb?v=20261022', kicker: 'TREILLIS DE SPHÈRES', title: 'LA GRILLE D\'IVOIRE',
+    sub: 'réseau cristallin · secteur P', long: true, chips: { dock: 'Le dock', bar: 'Le cœur', port: 'La Grille' }, crewAt: 'au cœur', place: 'le cœur', seen: 'ivoireSeen',
+    intro: 'Des sphères d\'ivoire et d\'or, alignées au cordeau. Au centre, un portail bleu s\'ouvre : la Grille d\'Ivoire t\'accepte.', enter: 'ENTRER AU CŒUR',
+    hall: { t: 'Le cœur de la Grille', s: 'Sous le portail bleu, la salle des échanges. Ceux qui sont à quai, les marchés, les contrats qui se signent.', i: 'VOIR LE CŒUR ↑' } },
+  akhet: { id: 'dock-xy2s3', profile: 'akhet', url: 'assets/3d/sb_pk01.glb?v=20261022', kicker: 'PYRAMIDE ORBITALE', title: 'LE TOMBEAU D\'AKHET',
+    sub: 'obsidienne et or · secteur K', long: true, chips: { dock: 'Le dock', bar: 'Le portail', port: 'Le Tombeau' }, crewAt: 'sous le portail', place: 'le portail', seen: 'akhetSeen',
+    intro: 'L\'éclipse se lève derrière la pointe. Les arêtes d\'or s\'allument une à une, les gardiens n\'ont pas bougé : le Tombeau d\'Akhet t\'attendait.', enter: 'FRANCHIR LE PORTAIL',
+    hall: { t: 'La salle du portail', s: 'Entre les colonnes, devant le mur de lumière. Ceux qui sont à quai, les marchés, ce qu\'on n\'ose dire qu\'ici.', i: 'VOIR LE PORTAIL ↑' } },
+  abime: { id: 'dock-wldphp', profile: 'abime', url: 'assets/3d/sb_da01.glb?v=20261022', kicker: 'STATION-CROC', title: 'LA DENT DE L\'ABÎME',
+    sub: 'émail bleu nuit · secteur K', long: true, chips: { dock: 'Le dock', bar: 'La halle', port: 'La Dent' }, crewAt: 'dans la halle', place: 'la halle', seen: 'abimeSeen',
+    intro: 'Des méduses de lumière remontent du fond. Puis l\'émail bleu nuit, fendu de clarté : la Dent de l\'Abîme sort de l\'océan d\'étoiles.', enter: 'ENTRER DANS LA DENT',
+    hall: { t: 'La halle sous la racine', s: 'Dans l\'émail, au bout des galeries. Ceux qui sont à quai, les marchés, les récits des grandes profondeurs.', i: 'VOIR LA HALLE ↑' } },
+  obsidienne: { id: 'dock-3c8na', profile: 'obsidienne', url: 'assets/3d/sb_mo01.glb?v=20261022', kicker: 'MAIN DE CHROME NOIR', title: 'LA MAIN D\'OBSIDIENNE',
+    sub: 'chrome irisé · secteur Q', long: true, chips: { dock: 'Le dock', bar: 'La paume', port: 'La Main' }, crewAt: 'au creux de la paume', place: 'la paume', seen: 'obsidienneSeen',
+    intro: 'Cinq lueurs violettes dans le noir, puis la main entière, ouverte, irisée : la Main d\'Obsidienne se tend vers toi.', enter: 'ENTRER DANS LA PAUME',
+    hall: { t: 'Le creux de la paume', s: 'Derrière le verre fumé des capsules. Ceux qui sont à quai, les marchés, ce qu\'on troque ici et nulle part ailleurs.', i: 'VOIR LA PAUME ↑' } },
 };
 // une station en 3D pour ce dock (objet dock ou identifiant) ?
 function stationUI(d) {
