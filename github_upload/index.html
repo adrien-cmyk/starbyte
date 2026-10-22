@@ -7773,12 +7773,13 @@ const DEFENSE_UNITS = {
     atkPerUnit: 50,      // passe 2.4 — bonus d'attaque en flotte (1/4 de def)
     transportable: true, // embarquable dans un Tanker
     soldierWeight: 80,   // passe 3.2 — équipement léger, prend 80 unités de fret
+    ration: 1,           // PATCH_2210_VIVRES — biomasse mangée par jour
     cost: { metal: 100 },
     repairCost: { metal: 30 }, // par unité endommagée
     scrapReturn: { metal: 30 }, // récupéré à la casse
     duration: 120, // ⚡ V0.5 : 2 min par garde (rythme moyen, ancien : 6s proto)
     requires: 'caserne',
-    desc: 'Unité d\'infanterie de base. Robuste, peu coûteuse. Embarquable (80 fret/u).',
+    desc: 'Unité d\'infanterie de base. Robuste, peu coûteuse. Embarquable (80 fret/u). Mange 1 biomasse par jour.',
   },
   lourd: {
     key: 'lourd',
@@ -7789,6 +7790,7 @@ const DEFENSE_UNITS = {
     atkPerUnit: 250,     // passe 2.4 — bonus d'attaque en flotte (~1/3 de def)
     transportable: true, // embarquable dans un Tanker
     soldierWeight: 200,  // passe 3.2 — armure renforcée + arsenal, prend 200 unités de fret
+    ration: 3,           // PATCH_2210_VIVRES — biomasse mangée par jour
     cost: { metal: 250, energie: 50 },
     repairCost: { metal: 75, energie: 15 },
     scrapReturn: { metal: 75 },
@@ -7796,7 +7798,7 @@ const DEFENSE_UNITS = {
     requires: 'turret', // Bunker requis (clé interne 'turret' = Bunker)
     locked: false, // débloqué dès qu'un Bunker existe
     lockedReason: 'Bunker requis',
-    desc: 'Infanterie blindée. Encaisse les raids massifs. Embarquable (200 fret/u).',
+    desc: 'Infanterie blindée. Encaisse les raids massifs. Embarquable (200 fret/u). Mange 3 biomasse par jour.',
   },
   tourelle: {
     key: 'tourelle',
@@ -8324,6 +8326,7 @@ function totalDefense() {
     total += groundUnits * DEFENSE_UNITS[key].defPerUnit;
     _soldierDef += groundUnits * DEFENSE_UNITS[key].defPerUnit;   // PATCH_1610_SKILLS
   }
+  if (G.troopFamine && _soldierDef > 0) { total -= _soldierDef * (1 - SB_FAMINE_MULT); _soldierDef *= SB_FAMINE_MULT; }   // PATCH_2210_VIVRES : troupes affamées
   // Défense passive des bâtiments (Caserne, Bunker)
   for (const p of G.planet.parcels) {
     if (p.state !== 'built' || !p.building) continue;
@@ -8746,6 +8749,7 @@ function _deserializeSets(obj) {
 // AUDIT_1110 — état de progression hors du cœur historique de la sauvegarde
 // (fonction-constante en var : lue par saveGame/loadGame, déclarée avant tout appel)
 var EXTRA_SAVE_KEYS = [
+  'troopFamine', '_bioBuffer',   // PATCH_2210_VIVRES
   'shipBuildTier',   // PATCH_2010_VAISSEAUX_T1 — tier choisi au chantier orbital
   'worldPillage', 'emptyRaidHeat',   // PATCH_2010_PILLAGE_VIDE — mondes vidés, fatigue des pillages
   'aftermath',   // APRÈS L'ATTAQUE (13/10) : indice de dévastation, fête, rapport en attente
@@ -13057,6 +13061,12 @@ function renderResourcesScreen() {
     const resIcon = PNG_ILLUSTRATIONS[pngKey]
       ? `<img src="${PNG_ILLUSTRATIONS[pngKey]}" alt="${t.label}" style="width:32px;height:32px;display:block;flex-shrink:0">`
       : `<span style="font-size:22px">${t.emoji}</span>`;
+    if (key === 'biomass' && typeof sbRationPerDay === 'function') {   // PATCH_2210_VIVRES
+      const pd = sbRationPerDay();
+      info = (G.troopFamine ? '<span style="color:var(--amber)">⚠ Stock vide : tes troupes ont faim (défense des soldats −25 %).</span> ' : '')
+        + (pd > 0 ? `Tes troupes mangent ${fmt(pd)} biomasse par jour${r.v > 0 ? (r.v >= pd * 2 ? ` (réserve pour ${Math.floor(r.v / pd)} jours)` : ` (réserve pour ${formatTime(Math.round(r.v / pd * 86400))})`) : ''}. ` : 'Nourrit tes troupes : garde 1 / jour, soldat lourd 3 / jour, les 10 premières rations offertes par la caserne. ')
+        + 'Se récolte au match-3.';
+    }
     return `
       <div class="res-detail-card">
         <div class="res-detail-head" style="display:flex;align-items:center;gap:10px">
@@ -33891,6 +33901,31 @@ function simulateTo(now) {
   return out;
 }
 
+// PATCH_2210_VIVRES (22/10, décision d'Adrien : « plus on a de troupes plus il faut de biomasse »)
+// Chaque soldat mange de la biomasse chaque jour (garde 1, lourd 3), toutes planètes et flottes comprises.
+// Les vivres de la caserne nourrissent gratuitement les 10 premières rations. Plus de biomasse → troupes affamées (défense des soldats ×0,75).
+var SB_FREE_RATIONS = 10, SB_FAMINE_MULT = 0.75;
+function sbTroopRations() {
+  let n = 0;
+  const add = d => { const u = d && d.units; if (!u) return; for (const [k, x] of Object.entries(u)) n += (x && x.qty || 0) * ((DEFENSE_UNITS[k] && DEFENSE_UNITS[k].ration) || 0); };
+  add(G.defense);
+  for (const w of (G.worlds || [])) if (w && w.id !== (G.activeWorld || 'home') && w.data) add(w.data.defense);
+  return n;
+}
+function sbRationPerDay() { return Math.max(0, sbTroopRations() - SB_FREE_RATIONS); }
+function _sbFeedTroops(hours) {
+  const r = G.res && G.res.biomass; if (!r) return;
+  const perDay = sbRationPerDay();
+  if (perDay <= 0) { G._bioBuffer = 0; if (G.troopFamine) { G.troopFamine = false; try { toast('Troupes nourries — défense rétablie'); } catch (e) {} } return; }
+  G._bioBuffer = (G._bioBuffer || 0) + perDay * hours / 24;
+  const whole = Math.floor(G._bioBuffer);
+  if (whole < 1) { if (G.troopFamine && r.v >= 1) G.troopFamine = false; return; }
+  G._bioBuffer -= whole;
+  const was = !!G.troopFamine;
+  if (r.v >= whole) { r.v -= whole; G.troopFamine = false; }
+  else { r.v = 0; G.troopFamine = true; }
+  if (was !== G.troopFamine) { try { toast(G.troopFamine ? 'Plus de biomasse : tes troupes ont faim (défense des soldats −25 %)' : 'Troupes nourries — défense rétablie'); } catch (e) {} }
+}
 function _simSegment(ms, at, out) {
   // 1. Ressources — taux HORAIRES (décision d'Adrien 10/10 : « +40/h » veut dire 40 par heure)
   const hours = Math.max(0, ms) / 3600000;
@@ -33927,6 +33962,7 @@ function _simSegment(ms, at, out) {
     if (rate > 0 && r.v < r.max) r.v = Math.min(r.max, r.v + rate * hours * (window.SBSkills ? SBSkills.prodMult(rk) : 1));
   }
   for (const c of colProd) { try { sbDepotProduce(c.w, c.prod, ms, at); } catch (e) { console.warn('[dépôt]', e); } }
+  try { _sbFeedTroops(hours); } catch (e) { console.warn('[vivres]', e); }   // PATCH_2210_VIVRES
 
   // 2. Crédits (Comptoirs) et carburant (Raffineries) — taux horaires aussi
   if (typeof getCommerceCreditsRate === 'function') {
@@ -39552,6 +39588,12 @@ function renderDefenseScreen() {
   defIcon.style.color = status.color;
   document.getElementById('def-status-total').innerHTML = `<span style="color:${status.color}">${fmt(total)}</span> défense · ${totalUnits} unités${window.SBSkills && SBSkills.defTag ? SBSkills.defTag() : ''}`;
   document.getElementById('def-status-sub').innerHTML = `<span style="color:${status.color}">${status.label}</span>`;
+  {   // PATCH_2210_VIVRES : ration de biomasse des troupes
+    const _rt = sbTroopRations(), _pd = sbRationPerDay(), _bio = Math.floor((G.res.biomass && G.res.biomass.v) || 0);
+    if (_rt > 0) document.getElementById('def-status-sub').innerHTML += G.troopFamine
+      ? `<br><span style="color:var(--amber)">⚠ Troupes affamées · défense des soldats −25 % · récolte de la biomasse au match-3</span>`
+      : `<br><span style="color:#7ed080">Vivres : ${_pd > 0 ? `−${fmt(_pd)} biomasse / jour (${fmt(_bio)} en stock${_bio < _pd * 2 ? ', <span style="color:var(--amber)">bientôt vide</span>' : ''})` : `nourries par la caserne (${_rt}/${SB_FREE_RATIONS} rations gratuites)`}</span>`;
+  }
 
   // Badge sur l'onglet Garnison = nombre d'unités
   const garrBadge = document.getElementById('defense-tab-garrison-badge');
