@@ -48816,7 +48816,7 @@ if (G.knownTargets && Array.isArray(G.tankerMissions)) {
 <!-- PATCH_1410_LIGNES — lignes PNJ à horaire sur les routes cachées (assets/lines.js) -->
 <script src="assets/lines.js?v=20261022-1047"></script>
 <!-- CLOUD — sauvegarde Supabase (source : sb-build/src/cloud.js) -->
-<script type="module" src="assets/cloud.js?v=20261021-1859"></script>
+<script type="module" src="assets/cloud.js?v=20261022-1235"></script>
 <!-- MATCH3 — Match-3 V2 (assets/match3.js, source src/match3.js + src/m3core.js) : remplace startM3 -->
 <script type="module" src="assets/match3.js?v=20261021-1500"></script>
 <!-- HOME V2 — « monde d'abord » : planète plein écran, ressources en ligne, Flotte / Défense / Prospection (assets/home.js) -->
@@ -48834,7 +48834,7 @@ if (G.knownTargets && Array.isArray(G.tankerMissions)) {
   'use strict';
   const standalone = () => (window.matchMedia && matchMedia('(display-mode: standalone)').matches) || navigator.standalone === true;
   if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) {
-    addEventListener('load', () => { navigator.serviceWorker.register('sw.js').catch(e => console.warn('[app] service worker', e)); });
+    addEventListener('load', () => { navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).catch(e => console.warn('[app] service worker', e)); });
   }
   if (standalone() && navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
   try { document.documentElement.classList.toggle('sb-app', standalone()); } catch (e) {}
@@ -48983,11 +48983,11 @@ if (G.knownTargets && Array.isArray(G.tankerMissions)) {
     if (window.SBCloud && SBCloud.restoreFlow) return SBCloud.restoreFlow();
     if (btn.dataset.wait) return;
     btn.dataset.wait = '1';
-    const label = btn.innerHTML; btn.innerHTML = 'Connexion au cloud…'; btn.style.opacity = '.7';
+    const label = btn.innerHTML; btn.innerHTML = 'Préparation du jeu… (premier lancement : jusqu\'à une minute)'; btn.style.opacity = '.7';
     const t0 = Date.now();
     const iv = setInterval(() => {
       if (window.SBCloud && SBCloud.restoreFlow) { clearInterval(iv); btn.innerHTML = label; btn.style.opacity = ''; delete btn.dataset.wait; SBCloud.restoreFlow(); }
-      else if (Date.now() - t0 > 90000) { clearInterval(iv); btn.innerHTML = label; btn.style.opacity = ''; delete btn.dataset.wait; if (typeof toast === 'function') toast('Le cloud ne répond pas : vérifie ta connexion et réessaie'); }
+      else if (Date.now() - t0 > 180000) { clearInterval(iv); btn.innerHTML = label; btn.style.opacity = ''; delete btn.dataset.wait; if (typeof toast === 'function') toast('Le cloud ne répond pas : vérifie ta connexion et réessaie'); }
     }, 400);
   };
   window.SBApp = { standalone, show, download, _state: () => st };

@@ -3,7 +3,7 @@
    - fichiers versionnés (?v=…) : cache d'abord (une nouvelle version = une nouvelle adresse)
    - modèles 3D, textures, images non versionnés : cache immédiat + rafraîchissement en arrière-plan
    - rien d'autre que ce site (registre Supabase, polices…) ne passe par ici */
-const CACHE = 'starbyte-v1';
+const CACHE = 'starbyte-v2';   // v2 : purge des réponses « page en construction » mises en cache à la place des scripts
 self.addEventListener('install', (e) => { self.skipWaiting(); });
 self.addEventListener('activate', (e) => {
   e.waitUntil((async () => {
@@ -40,9 +40,13 @@ self.addEventListener('fetch', (e) => {
   }
   e.respondWith((async () => {
     const cache = await caches.open(CACHE);
-    const hit = await cache.match(req);
+    let hit = await cache.match(req);
+    if (hit && /text\/html/i.test(hit.headers.get('content-type') || '') && !/\.html?$/i.test(url.pathname)) { await cache.delete(req); hit = null; }
     const versioned = /[?&]v=/.test(url.search);
-    const refresh = () => fetch(req).then((res) => { if (res && res.status === 200 && res.type === 'basic') putClean(cache, req, res.clone()).catch(() => {}); return res; }).catch(() => null);
+    // une page HTML renvoyée à la place d'un script, d'un modèle 3D ou d'une image (page d'attente de l'hébergeur,
+    // erreur déguisée en 200) ne doit jamais être gardée : elle casserait le jeu jusqu'à la prochaine version
+    const wrongType = (res) => /text\/html/i.test(res.headers.get('content-type') || '') && !/\.html?$/i.test(url.pathname);
+    const refresh = () => fetch(req).then((res) => { if (res && res.status === 200 && res.type === 'basic' && !wrongType(res)) putClean(cache, req, res.clone()).catch(() => {}); return res; }).catch(() => null);
     if (hit) { if (!versioned) e.waitUntil(refresh()); return hit; }
     const res = await refresh();
     return res || Response.error();
