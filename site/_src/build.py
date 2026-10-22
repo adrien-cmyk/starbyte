@@ -2,7 +2,8 @@ import re,sys
 src=open('src/index.src.html',encoding='utf8').read()
 logo=open('src/logo.svg').read().replace('<svg ','<svg aria-hidden="true" focusable="false" ')
 viewer=open('src/viewer.js').read().replace('export class','class')
-src=src.replace('{{LOGO}}',logo).replace('/*VIEWER*/',viewer)
+heart='<svg class="heart" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21s-7.5-4.6-9.6-9.3C.9 8.2 3 4.5 6.6 4.5c2.2 0 3.6 1.3 4.4 2.6.8-1.3 2.2-2.6 4.4-2.6 3.6 0 5.7 3.7 4.2 7.2C19.5 16.4 12 21 12 21z"/></svg>'
+src=src.replace('{{HEART}}',heart).replace('{{LOGO}}',logo).replace('/*VIEWER*/',viewer)
 # artifact body (no skeleton)
 open('index.artifact.html','w').write(src)
 # deploy version: full document
