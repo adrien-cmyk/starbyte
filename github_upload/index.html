@@ -4534,7 +4534,7 @@ svg.map {
 
       <!-- CLOUD — reprendre une partie liée à un email sur un nouvel appareil -->
       <button
-        onclick="window.SBCloud ? SBCloud.restoreFlow() : toast('Connexion au cloud en cours, réessaie dans un instant')"
+        onclick="sbRestoreWhenReady(this)"
         style="display:block;margin:26px auto 0;padding:10px 14px;background:none;border:none;color:#5fa8e8;font-family:inherit;font-size:11px;letter-spacing:.08em;text-transform:uppercase;cursor:pointer">
         J'ai déjà une partie
       </button>
@@ -48977,6 +48977,19 @@ if (G.knownTargets && Array.isArray(G.tankerMissions)) {
     } catch (e) {}
   }
   window.SBMove = { show: moveSheet };
+  // PATCH_2210_RESTAURER : « J'ai déjà une partie » attend tout seul que la connexion au cloud soit prête
+  // (au tout premier lancement de l'app, la 3D se télécharge d'abord et le module cloud arrive après)
+  window.sbRestoreWhenReady = function (btn) {
+    if (window.SBCloud && SBCloud.restoreFlow) return SBCloud.restoreFlow();
+    if (btn.dataset.wait) return;
+    btn.dataset.wait = '1';
+    const label = btn.innerHTML; btn.innerHTML = 'Connexion au cloud…'; btn.style.opacity = '.7';
+    const t0 = Date.now();
+    const iv = setInterval(() => {
+      if (window.SBCloud && SBCloud.restoreFlow) { clearInterval(iv); btn.innerHTML = label; btn.style.opacity = ''; delete btn.dataset.wait; SBCloud.restoreFlow(); }
+      else if (Date.now() - t0 > 90000) { clearInterval(iv); btn.innerHTML = label; btn.style.opacity = ''; delete btn.dataset.wait; if (typeof toast === 'function') toast('Le cloud ne répond pas : vérifie ta connexion et réessaie'); }
+    }, 400);
+  };
   window.SBApp = { standalone, show, download, _state: () => st };
 })();
 </script>
