@@ -15,3 +15,13 @@ open('dist_index.html','w').write(doc)
 loc=doc.replace('https://cdn.jsdelivr.net/npm/three@0.169.0/','./_three/')
 open('_local.html','w').write(loc)
 print(len(doc))
+
+# page Soutenir : reprend la feuille de style de l'accueil
+raw=open('src/index.src.html',encoding='utf8').read()
+style=raw[raw.index('<style>'):raw.index('</style>')+8]
+sp=open('src/soutenir.src.html',encoding='utf8').read().replace('{{STYLE}}',style).replace('{{HEART}}',heart).replace('{{LOGO}}',logo)
+i=sp.index('<nav class="nav"')
+doc2='<!doctype html>\n<html lang="fr">\n<head>\n<meta charset="utf-8">\n<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">\n'+sp[:i]+'\n</head>\n<body>\n'+sp[i:]+'\n</body>\n</html>\n'
+open('dist_soutenir.html','w').write(doc2)
+open('soutenir.html','w').write(doc2)
+print('soutenir', len(doc2))

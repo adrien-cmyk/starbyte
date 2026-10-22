@@ -536,15 +536,9 @@ footer .base{font:500 12px/1 var(--f-data);letter-spacing:.18em;color:var(--mute
         <h2 class="h3" id="projet-t">Un univers imaginé par un indépendant.</h2>
         <p class="lede">Je m'appelle Adrien, je suis designer et je développe Starbyte. J'y rassemble mon goût pour les images, les mondes de science-fiction et les jeux que l'on retrouve avec plaisir. Le projet grandit au fil du développement et de vos retours.</p>
         <p class="sign"><b>Adrien Thétaz</b>, designer MPA · ART MAKES (HI)STORY</p>
-        <div data-needs="soutien" hidden style="display:flex;flex-direction:column;gap:12px;border-top:1px solid var(--seam);padding-top:20px;margin-top:6px">
-          <h3 style="font-size:20px">Aide Starbyte à grandir.</h3>
-          <p>Si tu apprécies le jeu et que tu souhaites encourager son développement, tu peux contribuer librement. Ce soutien aide à financer l'hébergement, les outils de création et le temps consacré à Starbyte.</p>
-          <p class="cap">Cette contribution soutient le développement de Starbyte et n'apporte aucun avantage de jeu. Paiement sécurisé par Stripe.</p>
-          <div class="give">
-            <a class="btn btn-play js-soutien" href="#" target="_blank" rel="noopener">Soutenir Starbyte {{HEART}}</a>
-            <figure class="qr"><img src="img/soutien-qr.webp" alt="QR code vers la page de soutien Stripe de Starbyte" loading="lazy" width="904" height="1096"><figcaption class="cap">Ou scanne avec ton téléphone.</figcaption></figure>
-          </div>
-          <p style="color:var(--ink)">À votre bon cœur. Merci de faire partie de l'aventure.</p>
+        <div data-needs="soutien" hidden style="display:flex;flex-direction:column;gap:14px;border-top:1px solid var(--seam);padding-top:20px;margin-top:6px">
+          <p>Starbyte est né d'années de science-fiction et de souvenirs de joueur. Découvre son histoire, et comment l'aider à grandir.</p>
+          <div><a class="btn btn-play js-soutien" href="soutenir.html">Soutenir Starbyte {{HEART}}</a></div>
         </div>
       </div>
     </div>
@@ -652,13 +646,13 @@ footer .base{font:500 12px/1 var(--f-data);letter-spacing:.18em;color:var(--mute
 
 <script>
 /* Réglages du site. Laisser vide tant que le service n'existe pas : les liens correspondants restent masqués. */
-window.STARBYTE = { soutien: 'https://buy.stripe.com/bJe00c0or4Jm7zJ2p82Ry02', contact: 'form' };
+window.STARBYTE = { soutien: 'soutenir.html', contact: 'form' };
 (function () {
   var C = window.STARBYTE;
   [['soutien', '.js-soutien'], ['contact', '.js-contact']].forEach(function (k) {
     if (!C[k[0]]) return;
     document.querySelectorAll('[data-needs="' + k[0] + '"]').forEach(function (e) { e.hidden = false; });
-    document.querySelectorAll(k[1]).forEach(function (a) { if (C[k[0]] === 'form') { a.href = '#aide'; a.setAttribute('data-support', ''); } else { a.href = C[k[0]]; a.target = '_blank'; a.rel = 'noopener'; } });
+    document.querySelectorAll(k[1]).forEach(function (a) { if (C[k[0]] === 'form') { a.href = '#aide'; a.setAttribute('data-support', ''); } else { a.href = C[k[0]]; if (/^https?:/.test(C[k[0]])) { a.target = '_blank'; a.rel = 'noopener'; } else { a.removeAttribute('target'); } } });
   });
   var dn = document.getElementById('daynight'), r = document.getElementById('dn-range');
   if (dn && r) r.addEventListener('input', function () { dn.style.setProperty('--x', r.value + '%'); });
