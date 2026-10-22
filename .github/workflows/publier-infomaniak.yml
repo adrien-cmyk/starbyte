@@ -46,12 +46,12 @@ jobs:
           cat > /tmp/rc <<RC
           set ftp:ssl-force true
           set ftp:ssl-protect-data true
-          set ftp:ssl-reuse-session true
           set ftp:passive-mode true
           open -u "$FTP_USER","$FTP_PASS" ftp://$FTP_HOST
           RC
           lftp -c "source /tmp/rc; pwd; cls -1 --sort=name ./" > /tmp/ls.txt 2>&1 || true
-          lftp -c "source /tmp/rc; cls -1 ./sites ./web ./www ./public_html" >> /tmp/ls.txt 2>&1 || true
+          lftp -c "source /tmp/rc; rm -r -f up" >> /tmp/ls.txt 2>&1 || true
+          lftp -c "source /tmp/rc; cat .htaccess" >> /tmp/ls.txt 2>&1 || true
           echo "::notice title=Racine FTP::$(head -60 /tmp/ls.txt | tr '\n' '|')"
           echo "STOP=1" >> "$GITHUB_ENV"
       - name: Calculer ce qui a changé
@@ -64,7 +64,6 @@ jobs:
           cat > /tmp/lftprc <<RC
           set ftp:ssl-force true
           set ftp:ssl-protect-data true
-          set ftp:ssl-reuse-session true
           set ssl:verify-certificate true
           set ftp:passive-mode true
           set net:max-retries 3
@@ -88,6 +87,6 @@ jobs:
           set -e
           # index.html en dernier : quand la page change, tous les fichiers qu'elle appelle sont déjà là
           if [ -f /tmp/up/index.html ]; then mv /tmp/up/index.html /tmp/index.html; fi
-          lftp -c "source /tmp/lftprc; mirror -R --parallel=4 --no-perms /tmp/up ./"
+          lftp -c "source /tmp/lftprc; mirror -R --parallel=4 --no-perms /tmp/up ."   # « . » sans barre : sinon lftp crée un dossier up/
           if [ -f /tmp/index.html ]; then lftp -c "source /tmp/lftprc; put -O ./ /tmp/index.html"; fi
           echo "Publié."
