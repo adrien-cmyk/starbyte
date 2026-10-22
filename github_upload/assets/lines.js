@@ -223,6 +223,13 @@
       G.spottedLegs = G.spottedLegs.filter(l => !l.npc || n.byId[l.lineId]);
       G._linesNet = 4;
     }
+    // 22/10 (Damien : « sur certaines balises que des pèlerins ») — des tronçons relevés avant le 15/10 gardaient l'ancien nom
+    // du convoi ; un tronçon porte toujours le nom des convois de SA ligne
+    if (!G._linesLabels) {
+      const n = network();
+      for (const l of G.spottedLegs) if (l && l.npc && n.byId[l.lineId] && !/^Carte/.test(l.pseudo || '')) l.pseudo = n.byId[l.lineId].kind.label + (/\(filé\)/.test(l.pseudo || '') ? ' (filé)' : '');
+      G._linesLabels = 1;
+    }
     migrateCrown();
     if (!G._linesRoutes) { G._linesRoutes = 1; for (const k of Object.keys(G.hiddenPorts)) { try { ensureRoute(k); } catch (e) {} } }
   }
