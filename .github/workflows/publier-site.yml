@@ -55,8 +55,8 @@ jobs:
       - name: Diagnostic (contenu du serveur)
         if: env.SKIP != '1' && inputs.diagnostic
         run: |
-          lftp -c "source /tmp/lftprc; pwd; cls -1 --sort=name ./" > /tmp/ls.txt 2>&1 || true
-          echo "::notice title=Racine FTP du site::$(head -60 /tmp/ls.txt | tr '\n' '|')"
+          lftp -c "source /tmp/lftprc; pwd; cls -1 --sort=name ./; cls -1 img/ 3d/; cat index.html" > /tmp/ls.txt 2>&1 || true
+          echo "::notice title=Racine FTP du site::$(head -80 /tmp/ls.txt | cut -c1-120 | tr '\n' '|')"
           echo "STOP=1" >> "$GITHUB_ENV"
       - name: Calculer ce qui a changé
         if: env.SKIP != '1' && env.STOP != '1'
@@ -71,6 +71,7 @@ jobs:
           fi
           awk 'NR==FNR { seen[$2]=$1; next } seen[$2] != $1 { print $2 }' /tmp/remote.manifest /tmp/local.manifest > /tmp/changed
           echo "Fichiers à envoyer : $(wc -l < /tmp/changed)"
+          echo "::notice title=Calcul::local $(wc -l < /tmp/local.manifest) · serveur $(wc -l < /tmp/remote.manifest) · à envoyer $(wc -l < /tmp/changed) · $(head -5 /tmp/changed | tr '\n' ' ')"
           head -60 /tmp/changed
           mkdir -p /tmp/up
           while IFS= read -r f; do mkdir -p "/tmp/up/$(dirname "$f")"; cp "$f" "/tmp/up/$f"; done < /tmp/changed
@@ -81,6 +82,8 @@ jobs:
           set -e
           # index.html en dernier : quand la page change, les images et modèles qu'elle appelle sont déjà là
           if [ -f /tmp/up/index.html ]; then mv /tmp/up/index.html /tmp/index.html; fi
-          lftp -c "source /tmp/lftprc; mirror -R --parallel=4 --no-perms /tmp/up ."
+          find /tmp/up -type f | wc -l > /tmp/n
+          lftp -c "source /tmp/lftprc; mirror -R --parallel=4 --no-perms --verbose=1 /tmp/up ." > /tmp/mirror.log 2>&1 || { echo "::error title=Envoi::$(tail -20 /tmp/mirror.log | tr '\n' '|')"; exit 1; }
           if [ -f /tmp/index.html ]; then lftp -c "source /tmp/lftprc; put -O ./ /tmp/index.html"; fi
+          echo "::notice title=Envoi::$(cat /tmp/n) fichiers préparés · $(tail -8 /tmp/mirror.log | tr '\n' '|')"
           echo "Site publié sur starbyte.online."
