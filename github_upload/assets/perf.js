@@ -266,6 +266,8 @@
       standalone: !!(window.navigator.standalone || (window.matchMedia && matchMedia('(display-mode: standalone)').matches)),
       tz,
       ctxLost: st.ctxLost || 0,
+      host: location.hostname.replace(/\.github\.io$/, '.gh'),   // PATCH_2210_ERREURS
+      err: (window.__sbErrs || []).join(' | ').slice(0, 240) || undefined,
     };
   }
 

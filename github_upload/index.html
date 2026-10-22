@@ -8,6 +8,15 @@
 <meta name="theme-color" content="#040605">
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <title>Starbyte</title>
+<script>/* PATCH_2210_ERREURS — les dernières erreurs du jeu partent avec le relevé de performance (perf_samples.device.err) */
+window.__sbErrs = [];
+(function () {
+  const add = (m) => { try { m = String(m || '').replace(/https?:\/\/[^/]+\//g, '').slice(0, 160); if (!m || window.__sbErrs.includes(m)) return; window.__sbErrs.push(m); if (window.__sbErrs.length > 4) window.__sbErrs.shift(); } catch (e) {} };
+  addEventListener('error', (e) => { if (e && e.message) add(e.message + ' @' + (e.filename || '').split('/').pop() + ':' + (e.lineno || '') + ':' + (e.colno || '')); }, true);
+  addEventListener('unhandledrejection', (e) => { const r = e && e.reason; add('promesse: ' + (r && (r.message || r)) + (r && r.stack ? ' @' + String(r.stack).split('\n')[1] : '')); });
+  const cw = console.warn; console.warn = function () { try { const t = [...arguments].map(x => x && x.message ? x.message : String(x)).join(' '); if (/\[(SpaceMap|carte|SBMap|System3D)\]/i.test(t)) add('warn: ' + t); } catch (e) {} return cw.apply(this, arguments); };
+})();
+</script>
 <!-- PATCH_2210_PWA : jeu installable sur l'écran d'accueil -->
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="assets/app/apple-touch-icon.png">
@@ -49170,7 +49179,7 @@ if (G.knownTargets && Array.isArray(G.tankerMissions)) {
 <script src="assets/arche_launch.js?v=20261021-1105"></script>
 <script src="assets/lumiere.js?v=20261020-2350"></script>
 <!-- PERF_1310 — mesure des performances chez les joueurs + qualité 3D automatique (assets/perf.js) -->
-<script src="assets/perf.js?v=20261014-1540"></script>
+<script src="assets/perf.js?v=20261022-2000"></script>
 <!-- PATCH_1410_LIGNES — lignes PNJ à horaire sur les routes cachées (assets/lines.js) -->
 <script src="assets/lines.js?v=20261022-1440"></script>
 <!-- CLOUD — sauvegarde Supabase (source : sb-build/src/cloud.js) -->
