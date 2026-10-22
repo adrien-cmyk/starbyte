@@ -1,42 +1,75 @@
 # Publie le jeu (dossier github_upload/) sur https://play.starbyte.online, hébergé chez Infomaniak.
-# À chaque publication dans github_upload/, seuls les fichiers modifiés sont envoyés (FTPS).
+# Envoi en FTPS (chiffré) avec lftp. Seuls les fichiers modifiés partent : le serveur garde la liste
+# des empreintes (.deploy-manifest) de la dernière publication, on compare, on n'envoie que la différence.
 # Le dossier server/ (SQL, fonction des raids) n'est jamais envoyé.
-# Identifiants : secrets du dépôt INFOMANIAK_FTP_SERVER, INFOMANIAK_FTP_USER, INFOMANIAK_FTP_PASSWORD.
+# Identifiants : secrets INFOMANIAK_FTP_SERVER, INFOMANIAK_FTP_USER, INFOMANIAK_FTP_PASSWORD.
 name: Publier sur play.starbyte.online
 on:
   push:
     branches: [main]
     paths: ['github_upload/**']
   workflow_dispatch:
+    inputs:
+      tout:
+        description: 'Tout renvoyer (ignorer la liste du serveur)'
+        type: boolean
+        default: false
 concurrency:
   group: publier-infomaniak
   cancel-in-progress: false
 jobs:
   publier:
     runs-on: ubuntu-latest
+    env:
+      FTP_HOST: ${{ secrets.INFOMANIAK_FTP_SERVER }}
+      FTP_USER: ${{ secrets.INFOMANIAK_FTP_USER }}
+      FTP_PASS: ${{ secrets.INFOMANIAK_FTP_PASSWORD }}
     steps:
       - name: Vérifier les identifiants
-        env:
-          S: ${{ secrets.INFOMANIAK_FTP_SERVER }}
         run: |
-          if [ -z "$S" ]; then echo "::warning::Secrets Infomaniak absents : rien n'est publié."; echo "SKIP=1" >> "$GITHUB_ENV"; fi
+          if [ -z "$FTP_HOST" ]; then echo "::warning::Secrets Infomaniak absents : rien n'est publié."; echo "SKIP=1" >> "$GITHUB_ENV"; fi
       - uses: actions/checkout@v4
         if: env.SKIP != '1'
         with:
           sparse-checkout: github_upload
           sparse-checkout-cone-mode: true
-      - name: Envoyer chez Infomaniak (fichiers modifiés seulement)
+      - name: Installer lftp
         if: env.SKIP != '1'
-        uses: SamKirkland/FTP-Deploy-Action@v4.3.5
-        with:
-          server: ${{ secrets.INFOMANIAK_FTP_SERVER }}
-          username: ${{ secrets.INFOMANIAK_FTP_USER }}
-          password: ${{ secrets.INFOMANIAK_FTP_PASSWORD }}
-          protocol: ftps
-          local-dir: ./github_upload/
-          server-dir: ./
-          exclude: |
-            **/.git*
-            **/.git*/**
-            server/**
-          timeout: 600000
+        run: sudo apt-get install -y -qq lftp >/dev/null
+      - name: Calculer ce qui a changé
+        if: env.SKIP != '1'
+        run: |
+          set -e
+          cd github_upload
+          rm -rf server
+          find . -type f ! -name '.deploy-manifest' -print0 | sort -z | xargs -0 sha256sum > /tmp/local.manifest
+          cat > /tmp/lftprc <<RC
+          set ftp:ssl-force true
+          set ftp:ssl-protect-data true
+          set ftp:ssl-reuse-session true
+          set ssl:verify-certificate true
+          set ftp:passive-mode true
+          set net:max-retries 3
+          set net:timeout 30
+          open -u "$FTP_USER","$FTP_PASS" ftp://$FTP_HOST
+          RC
+          : > /tmp/remote.manifest
+          if [ "${{ inputs.tout }}" != "true" ]; then
+            lftp -c "source /tmp/lftprc; get -O /tmp .deploy-manifest" 2>/dev/null && mv /tmp/.deploy-manifest /tmp/remote.manifest || echo "Pas de liste sur le serveur : envoi complet."
+          fi
+          # fichiers dont l'empreinte a changé ou qui sont nouveaux
+          awk 'NR==FNR { seen[$2]=$1; next } seen[$2] != $1 { print $2 }' /tmp/remote.manifest /tmp/local.manifest > /tmp/changed
+          echo "Fichiers à envoyer : $(wc -l < /tmp/changed)"
+          head -50 /tmp/changed
+          mkdir -p /tmp/up
+          while IFS= read -r f; do mkdir -p "/tmp/up/$(dirname "$f")"; cp "$f" "/tmp/up/$f"; done < /tmp/changed
+          cp /tmp/local.manifest /tmp/up/.deploy-manifest
+      - name: Envoyer chez Infomaniak
+        if: env.SKIP != '1'
+        run: |
+          set -e
+          # index.html en dernier : quand la page change, tous les fichiers qu'elle appelle sont déjà là
+          if [ -f /tmp/up/index.html ]; then mv /tmp/up/index.html /tmp/index.html; fi
+          lftp -c "source /tmp/lftprc; mirror -R --parallel=4 --no-perms /tmp/up ./"
+          if [ -f /tmp/index.html ]; then lftp -c "source /tmp/lftprc; put -O ./ /tmp/index.html"; fi
+          echo "Publié."
