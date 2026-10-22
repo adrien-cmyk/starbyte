@@ -48920,6 +48920,63 @@ if (G.knownTargets && Array.isArray(G.tankerMissions)) {
     document.body.appendChild(ov);
   }
   try { if (standalone()) { const b = document.getElementById('welcome-app'); if (b) b.style.display = 'none'; } } catch (e) {}
+
+  // ── PATCH_2210_DEMENAGE — Starbyte quitte github.io pour play.starbyte.online ──
+  // Une partie est attachée à son adresse : on la fait suivre par l'email (code à 6 chiffres, valable aussi dans l'app).
+  const NEW_HOME = 'https://play.starbyte.online/';
+  const OLD = /github\.io$/.test(location.hostname);
+  function moveSheet() {
+    if (document.getElementById('sb-move')) return;
+    const C = window.SBCloud;
+    const linked = !!(C && C.isLinked && C.isLinked());
+    const email = linked && C.user && C.user.email;
+    const ov = document.createElement('div'); ov.id = 'sb-move';
+    ov.style.cssText = 'position:fixed;inset:0;z-index:9800;background:rgba(0,0,0,.72);display:flex;align-items:flex-end;justify-content:center';
+    const dot = (n, on) => `<b style="flex-shrink:0;width:28px;height:28px;border-radius:50%;display:grid;place-items:center;font-size:13px;${on ? 'background:rgba(126,208,128,.2);border:1px solid rgba(126,208,128,.7);color:#bff0c0' : 'background:rgba(185,164,255,.16);border:1px solid rgba(185,164,255,.5);color:#efeaff'}">${on ? '✓' : n}</b>`;
+    const row = (n, on, html) => `<div style="display:flex;gap:12px;align-items:flex-start;padding:11px 0;border-bottom:1px solid rgba(255,255,255,.07)">${dot(n, on)}<div style="font-size:14px;line-height:1.5;color:#e8e2ff">${html}</div></div>`;
+    ov.innerHTML = `<div style="width:100%;max-width:480px;background:linear-gradient(#120e24,#08070f);border-top:1px solid rgba(185,164,255,.4);border-radius:18px 18px 0 0;padding:20px 18px calc(env(safe-area-inset-bottom,0px) + 20px);font-family:'Space Grotesk',system-ui,sans-serif">
+      <div style="display:flex;gap:12px;align-items:center;margin-bottom:8px"><img src="assets/app/icon-192.png" alt="" style="width:52px;height:52px;border-radius:12px">
+        <div><div style="font-size:17px;font-weight:600;color:#fff">Starbyte déménage</div><div style="font-size:12px;color:rgba(232,226,255,.65)">Nouvelle adresse : play.starbyte.online · avec son app</div></div></div>
+      <div style="font-size:13px;line-height:1.5;color:rgba(232,226,255,.8);margin:4px 0 6px">Ta partie te suit : planète, flotte, ressources, tout. Deux gestes :</div>
+      ${row(1, linked, linked ? `Partie sécurisée avec <b>${email}</b>` : `<b>Sécurise ta partie avec ton email</b><br><span style="font-size:12px;color:rgba(232,226,255,.6)">tu recevras un code à 6 chiffres</span>`)}
+      ${row(2, false, `Ouvre <b>play.starbyte.online</b> et touche <b>« J'ai déjà une partie »</b>${linked ? ` avec ${email}` : ''}<br><span style="font-size:12px;color:rgba(232,226,255,.6)">puis « Télécharger l'app » pour l'avoir sur ton écran d'accueil</span>`)}
+      <button data-a="go" style="margin-top:16px;width:100%;padding:13px;border-radius:10px;border:1px solid rgba(185,164,255,.7);background:rgba(185,164,255,.18);color:#fff;font:inherit;font-size:12px;letter-spacing:.12em;text-transform:uppercase;cursor:pointer">${linked ? 'Ouvrir play.starbyte.online' : 'Sécuriser ma partie'}</button>
+      <button data-a="later" style="margin-top:8px;width:100%;padding:11px;border-radius:10px;border:1px solid rgba(255,255,255,.14);background:transparent;color:rgba(232,226,255,.6);font:inherit;font-size:11px;letter-spacing:.12em;text-transform:uppercase;cursor:pointer">Plus tard</button></div>`;
+    ov.addEventListener('click', async (e) => {
+      const a = e.target.closest && e.target.closest('[data-a]'); if (!a && e.target !== ov) return;
+      if (!a || a.dataset.a === 'later') { ov.remove(); try { sessionStorage.setItem('sb_move_later', '1'); } catch (er) {} return; }
+      if (!linked) { ov.remove(); try { await C.linkFlow(); } catch (er) {} setTimeout(() => { if (C.isLinked && C.isLinked()) moveSheet(); }, 400); return; }
+      try { C.flush && C.flush(); } catch (er) {}
+      setTimeout(() => { location.href = NEW_HOME + '?from=github'; }, 900);   // laisse partir la dernière sauvegarde
+    });
+    document.body.appendChild(ov);
+  }
+  if (OLD) {
+    setInterval(() => {
+      try {
+        if (document.getElementById('sb-move') || sessionStorage.getItem('sb_move_later')) return;
+        const C = window.SBCloud; if (!C || C.status !== 'ok') return;
+        const scr = document.getElementById('scr-planet'); if (!scr || scr.classList.contains('hidden')) return;
+        if (window.SBTuto && SBTuto.active && SBTuto.active()) return;
+        if (document.querySelector('#sb-sheet, #sb-away, .w-sheet.on, #mp-choose, #scr-m3:not(.hidden)') || window.__sbCinema) return;
+        moveSheet();
+      } catch (e) {}
+    }, 4000);
+  }
+  // nouvelle adresse : à l'écran d'accueil, rappeler comment récupérer sa partie
+  if (!OLD) {
+    try {
+      const btn = [...document.querySelectorAll('#scr-welcome button, button')].find(b => /déjà une partie/i.test(b.textContent));
+      if (btn && !document.getElementById('sb-move-hint')) {
+        const h = document.createElement('div'); h.id = 'sb-move-hint';
+        h.style.cssText = 'margin:22px auto 0;max-width:300px;text-align:center;font-size:12px;line-height:1.5;color:#d9ceff;padding:10px 12px;border:1px solid rgba(185,164,255,.35);border-radius:10px;background:rgba(185,164,255,.07)';
+        h.innerHTML = 'Tu jouais déjà à Starbyte ?<br>Touche <b>« J\'ai déjà une partie »</b> et entre ton email : tu retrouves tout.';
+        btn.parentNode.insertBefore(h, btn);
+        btn.style.marginTop = '8px';
+      }
+    } catch (e) {}
+  }
+  window.SBMove = { show: moveSheet };
   window.SBApp = { standalone, show, download, _state: () => st };
 })();
 </script>
