@@ -238,7 +238,7 @@
     for (const sx of Object.values(systems)) if (sx.known && !G.mapSeen[sx.key]) G.mapSeen[sx.key] = Date.now();
 
     // 13/10 — tronçons repérés par mes balises (un convoi passé, et son cap) : les deux systèmes entrent sur la carte
-    const spotted = (G.spottedLegs || []).filter(l => l && /^[A-Z]-[A-Z]-\d{4}$/.test(l.from) && /^[A-Z]-[A-Z]-\d{4}$/.test(l.to) && (now - (l.at || 0)) < 3 * 86400000);
+    const spotted = (G.spottedLegs || []).filter(l => l && /^[A-Z]-[A-Z]-\d{4}$/.test(l.from) && /^[A-Z]-[A-Z]-\d{4}$/.test(l.to) && (l.npc || (now - (l.at || 0)) < 3 * 86400000));   // 22/10 : un tronçon de ligne PNJ est un fait du réseau, il ne s'efface plus au bout de 3 jours
     for (const l of spotted) { add(l.from, { known: true }); add(l.to, { known: true }); }
     // 21/10 — commerce entre joueurs : route dorée vers chaque partenaire d'un accord commercial
     const tradeLanes = [];
@@ -262,14 +262,6 @@
     // pour toujours (G.mapCells). Les nouveaux venus se placent autour ; une route qui s'allonge ajoute ses jalons sans
     // déplacer ceux qu'on connaît. Les cases des systèmes absents (rapports supprimés…) restent réservées.
     if (!G.mapCells || G.mapCells.v !== 7 || G.mapCells.home !== home) G.mapCells = { v: 7, home, cells: {} };   // v6 (22/10) : recalcul unique — les positions ne se figent qu'une fois les lignes chargées
-    const MC = G.mapCells.cells;
-    const fixed = new Set(), reserved = [];
-    for (const [k, idx] of Object.entries(MC)) {
-      const c = CELLS[idx];
-      if (k === home || !c || c.ring < 1 || c.ring > BOARD || occ.has(idx)) { delete MC[k]; continue; }
-      if (systems[k]) { occ.set(idx, { kind: 'system', key: k }); cell['sys:' + k] = idx; fixed.add(k); }
-      else { occ.set(idx, { kind: 'reserved', key: k }); reserved.push(idx); }
-    }
     // 15/10 — les jalons d'une route connue sont posés LE LONG de la route, entre ses points déjà placés.
     const routeChains = [];
     if (window.SBLines) {
@@ -287,6 +279,36 @@
     for (let i = routeChains.length - 1; i >= 0; i--) if (routeChains[i].length < 2) routeChains.splice(i, 1);
     window._smChains = routeChains.map(ch => ch.slice());
     if (false) {
+    }
+    // 22/10 (retours de Damien) — les AUTRES lignes connues (tronçons relevés par mes balises, échos de l'antenne) se tracent
+    // elles aussi en ligne droite, chacune convergeant vers son lieu caché (connu, ou à l'endroit où il apparaîtra) :
+    // on voit d'où viennent les convois et où ils vont. Une fois, on libère les cases de ces jalons posés au hasard (l8).
+    const lineChains = [];
+    if (window.SBLines && SBLines.network) {
+      try {
+        const net = SBLines.network(), onR = new Set(routeChains.flat());
+        for (const line of net.lines) {
+          const kn = new Set();
+          for (const l of spotted) if (l.npc && l.lineId === line.id) { kn.add(l.from); kn.add(l.to); }
+          for (const [k, e] of Object.entries(G.trafficEchoes || {})) if (e && e.lineId === line.id) kn.add(k);
+          const pts = [];
+          line.chain.forEach((k, i) => { if (kn.has(k) && systems[k] && k !== home && !onR.has(k)) pts.push({ k, i }); });
+          if (pts.length) lineChains.push({ id: line.id, port: line.port, n: line.chain.length, pts });
+        }
+      } catch (e) { window._smLineErr = String(e && e.stack || e).slice(0, 400); }
+    }
+    if (window.SBLines && !G.mapCells.l8) {
+      for (const lc of lineChains) for (const q of lc.pts) delete G.mapCells.cells[q.k];
+      G.mapCells.l8 = 1; G.mapCells.dirs = {};
+    }
+    if (!G.mapCells.dirs) G.mapCells.dirs = {};
+    const MC = G.mapCells.cells;
+    const fixed = new Set(), reserved = [];
+    for (const [k, idx] of Object.entries(MC)) {
+      const c = CELLS[idx];
+      if (k === home || !c || c.ring < 1 || c.ring > BOARD || occ.has(idx)) { delete MC[k]; continue; }
+      if (systems[k]) { occ.set(idx, { kind: 'system', key: k }); cell['sys:' + k] = idx; fixed.add(k); }
+      else { occ.set(idx, { kind: 'reserved', key: k }); reserved.push(idx); }
     }
     routeChains.sort((a, b) => b.length - a.length);   // la plus longue d'abord : les routes qui partagent des jalons suivent son tracé
     const onRoute = new Set(routeChains.flat().filter(k => k !== home));
@@ -349,6 +371,46 @@
         if (c) put(k, c);
       }
     }
+    // lignes connues : une droite qui arrive sur le lieu ; le jalon i est à (n − i) cases du lieu ; direction choisie une fois
+    // (loin de ma planète et des autres lignes du même lieu), puis gardée
+    for (const lc of lineChains) {
+      const todo = lc.pts.filter(q => cell['sys:' + q.k] === undefined);
+      if (!todo.length) continue;
+      if (cell['sys:' + lc.port] === undefined && systems[lc.port]) placeSys(lc.port);
+      let P = cell['sys:' + lc.port] !== undefined ? CELLS[cell['sys:' + lc.port]] : null;
+      if (!P) { const ps = primarySlot(lc.port); P = ps.cands[ps.k % ps.cands.length]; }
+      if (!P) continue;
+      let ang = G.mapCells.dirs[lc.id];
+      // jalons d'une ligne dont la fin est déjà une route tracée : ils prolongent la route, dans son axe
+      for (const ch of routeChains) if (ch[ch.length - 1] === lc.port && cell['sys:' + ch[0]] !== undefined && SBLines.network().byId[lc.id] && SBLines.network().byId[lc.id].chain.includes(ch[0])) {
+        const c = CELLS[cell['sys:' + ch[0]]]; ang = Math.atan2(c.z - P.z, c.x - P.x);
+      }
+      if (typeof ang !== 'number') {
+        const avoid = [];
+        if (Math.hypot(P.x, P.z) > 1) avoid.push(Math.atan2(-P.z, -P.x));   // vers ma planète
+        for (const ch of routeChains) if (ch[ch.length - 1] === lc.port && cell['sys:' + ch[0]] !== undefined) { const c = CELLS[cell['sys:' + ch[0]]]; avoid.push(Math.atan2(c.z - P.z, c.x - P.x)); }
+        for (const [id, a] of Object.entries(G.mapCells.dirs)) if (id !== lc.id && id.split('-').slice(0, 2).join('-') === lc.id.split('-').slice(0, 2).join('-')) avoid.push(a);
+        let best = null, bs = -1;
+        const a0 = _mulberry32(_hashSeed('SMl:' + lc.id))() * Math.PI * 2;
+        for (let s = 0; s < 12; s++) {
+          const a = a0 + s * Math.PI / 6;
+          const far = CELL * lc.n, ex = P.x + Math.cos(a) * far, ez = P.z + Math.sin(a) * far;
+          const fit = Math.hypot(ex, ez) <= CELL * (BOARD - 1) ? 1 : 0.4;
+          let gap = Math.PI; for (const v of avoid) { let d = Math.abs(((a - v) % (2 * Math.PI) + 3 * Math.PI) % (2 * Math.PI) - Math.PI); gap = Math.min(gap, d); }
+          const sc = gap * fit;
+          if (sc > bs) { bs = sc; best = a; }
+        }
+        ang = G.mapCells.dirs[lc.id] = best;
+      }
+      for (const q of todo) {
+        const R = CELL * (lc.n - q.i);
+        let x = P.x + Math.cos(ang) * R, z = P.z + Math.sin(ang) * R;
+        const L = Math.hypot(x, z), lim = CELL * (BOARD - 1);
+        if (L > lim) { x *= lim / L; z *= lim / L; }
+        const c = nearestFree(x, z, 2);
+        if (c) put(q.k, c);
+      }
+    }
     for (const k of keys) if (!mids.has(k) && cell['sys:' + k] === undefined) placeSys(k);
     for (const k of mids) if (cell['sys:' + k] === undefined && systems[k]) {   // jalon d'une route dont un bout manque
       const c = freeAround(CELLS[0], 2, BOARD, occ, k)[0]; if (c) { occ.set(c.idx, { kind: 'system', key: k }); cell['sys:' + k] = c.idx; }
@@ -399,6 +461,15 @@
       const fa = cell['sys:' + l.from], fb = cell['sys:' + l.to];
       if (fa === undefined || fb === undefined) continue;
       spottedPaths.push({ l, path: [fa, fb] });   // 14/10 : un cap relevé = un trait direct (pas de détour sur la grille)
+    }
+    // 22/10 — une ligne connue en partie, dont le lieu est sur la carte : un pointillé très pâle de son dernier jalon connu au lieu
+    const lineHints = [];
+    for (const lc of lineChains) {
+      const pc = cell['sys:' + lc.port];
+      if (pc === undefined) continue;
+      const last = lc.pts.filter(q => cell['sys:' + q.k] !== undefined).sort((x, y) => y.i - x.i)[0];
+      if (!last || last.i === lc.n - 1 && spotted.some(l => l.npc && l.lineId === lc.id && (l.from === last.k || l.to === last.k) && (l.from === lc.port || l.to === lc.port))) continue;
+      lineHints.push({ id: lc.id, path: [cell['sys:' + last.k], pc], gap: lc.n - last.i - 1 });
     }
     const tradePaths = [];
     for (const t of tradeLanes) {
@@ -453,7 +524,11 @@
       let path = null;
       if (m.ownRouteId) { const pl = planFrom(partial, sysKey); const r = pl && pl.routes.find(x => x.id === m.ownRouteId); if (r) path = back ? r.cells.slice().reverse() : r.cells; }
       if (m.portSys && window.SBLines) {   // le tanker gagne le début connu de la ligne, puis la suit jusqu'au lieu
-        const cells = [0].concat(SBLines.knownChain(m.portSys).map(k => cell['sys:' + k]).filter(i => i !== undefined));
+        // 22/10 (Damien : « pourquoi le tanker fait un détour pareil ? ») — il rejoint la route au jalon le plus proche de chez moi
+        const ch = SBLines.knownChain(m.portSys).map(k => cell['sys:' + k]).filter(i => i !== undefined && i !== 0);
+        let j = 0, bd = Infinity;
+        for (let i = 0; i < ch.length - 1; i++) { const d = Math.hypot(CELLS[ch[i]].x, CELLS[ch[i]].z); if (d < bd) { bd = d; j = i; } }
+        const cells = [0].concat(ch.slice(j));
         if (cells.length > 2) path = back ? cells.slice().reverse() : cells;
       }
       const _td = (m.mpTarget && m.mpTarget.pseudo) ? { label: m.mpTarget.pseudo, coords: tc } : (m.dock && m.dock.name) ? { label: m.dock.name, coords: sysKey } : m.targetLabel ? { label: m.targetLabel, coords: sysKey } : (typeof sbDestLabel === 'function' ? sbDestLabel(tc) : { label: tc, coords: '' });
@@ -471,14 +546,17 @@
       if (Array.isArray(a.routeChain)) {
         const ch = a.routeChain, j = ch.indexOf(a.system);
         if (j >= 0) {
-          const cells = [0].concat(ch.slice(0, j + 1).map(k => cell['sys:' + k]).filter(i => i !== undefined && i !== 0));
+          const seg = ch.slice(0, j + 1).map(k => cell['sys:' + k]).filter(i => i !== undefined && i !== 0);
+          let s0 = 0, bd = Infinity;   // 22/10 : la flotte rejoint la route au jalon le plus proche, pas à son début
+          for (let i = 0; i < seg.length; i++) { const d = Math.hypot(CELLS[seg[i]].x, CELLS[seg[i]].z); if (d < bd) { bd = d; s0 = i; } }
+          const cells = [0].concat(seg.slice(s0));
           if (cells.length > 2) path = back ? cells.slice().reverse() : cells;
         }
       }
       flights.push({ kind: 'fleet', id: 'fl-' + f.id, fleetId: f.id, label: f.name || 'Flotte', from: back ? at : 0, to: back ? 0 : at, toCk: null, path,
         departedAt: back ? (a.returnDepartedAt || (a.returnsAt - a.travelMs)) : a.departedAt, arrivalAt: back ? a.returnsAt : a.arrivesAt, target: a.system, back });
     }
-    return { systems, flights, occ, cell, items, routes, spotted: spottedPaths, trade: tradePaths, home, lit: litRing() };
+    return { systems, flights, occ, cell, items, routes, spotted: spottedPaths, trade: tradePaths, hints: lineHints, home, lit: litRing() };
   }
 
   // 13/10 — trajets possibles vers un système : voie directe (ligne droite) et mes routes qui y aboutissent.
@@ -517,6 +595,7 @@
     for (const f of st.flights) o.push('F' + f.id + f.from + '>' + f.to);
     for (const sp of st.spotted || []) o.push('S' + sp.l.from + '>' + sp.l.to);
     for (const tp of st.trade || []) o.push('T' + tp.sys + tp.pseudo);
+    for (const h of st.hints || []) o.push('H' + h.id + h.path.join('>'));
     for (const f of st.flights) if (f.path) o.push('P' + f.id + f.path.length);
     for (const rt of st.routes || []) o.push('R' + rt.r.id + rt.r.color + (rt.r.avoid || []).join('/') + (rt.broken ? 'x' : '') + rt.path.join('.'));
     return st.lit + '|' + o.sort().join(',');
@@ -1295,6 +1374,13 @@
           this.routeGroup.add(tag);
         }
       }
+      for (const h of st.hints || []) {
+        const A = CELLS[h.path[0]], B = CELLS[h.path[1]];
+        const l = new T.Line(new T.BufferGeometry().setFromPoints([new T.Vector3(A.x, 0.75, A.z), new T.Vector3(B.x, 0.75, B.z)]),
+          new T.LineDashedMaterial({ color: 0xff8a5a, dashSize: 1.5, gapSize: 6, transparent: true, opacity: 0.28, depthWrite: false }));
+        l.computeLineDistances(); this.routeGroup.add(l);
+        if (h.gap > 0) { const tag = this._label(h.gap > 1 ? h.gap + ' jalons ?' : '1 jalon ?', '#ff8a5a', 0.2); tag.position.set((A.x + B.x) / 2, 2.2, (A.z + B.z) / 2 - 5); this.routeGroup.add(tag); }
+      }
       // 21/10 — routes commerciales (accord commercial en cours) : trait doré plein vers le partenaire
       for (const tp of st.trade || []) {
         const l = new T.Line(new T.BufferGeometry().setFromPoints(this._smooth(tp.path.map(i => CELLS[i])).map(q => new T.Vector3(q.x, 0.9, q.z))),
@@ -1307,11 +1393,23 @@
       // 13/10 — tronçons repérés par mes balises : un convoi est passé par là, cap sur le système suivant
       // un seul trait par paire de systèmes ; une flèche seulement si un seul sens a été vu
       const pairs = new Map();
-      for (const sp of st.spotted || []) {
-        if (sp.path.length < 2) continue;
+      // 22/10 (retours de Damien) — un tronçon de ligne PNJ pointe toujours vers son lieu caché (sens aller), même relevé au retour ;
+      // ceux qui doublent une route déjà tracée ne sont plus redessinés en pointillé
+      const onRouteSeg = new Set();
+      for (const rt of st.routes || []) if (rt.line && !rt.broken) for (let i = 0; i < rt.path.length - 1; i++) { const x = rt.path[i], y = rt.path[i + 1]; onRouteSeg.add(x < y ? x + ':' + y : y + ':' + x); }
+      const net = window.SBLines && SBLines.network ? SBLines.network() : null;
+      for (const sp0 of st.spotted || []) {
+        if (sp0.path.length < 2) continue;
+        let sp = sp0, npcDir = false;
+        if (sp0.l.npc && net && net.byId[sp0.l.lineId]) {
+          const ln = net.byId[sp0.l.lineId], ix = (k) => k === ln.port ? ln.chain.length : ln.chain.indexOf(k);
+          const fi = ix(sp0.l.from), ti = ix(sp0.l.to);
+          if (fi >= 0 && ti >= 0) { npcDir = true; if (fi > ti) sp = { l: sp0.l, path: sp0.path.slice().reverse() }; }
+        }
         const a0 = sp.path[0], b0 = sp.path[sp.path.length - 1], key = a0 < b0 ? a0 + ':' + b0 : b0 + ':' + a0;
+        if (sp.l.npc && onRouteSeg.has(key)) continue;
         const e = pairs.get(key);
-        if (e) { if (e.sp.path[0] !== a0) e.both = true; } else pairs.set(key, { sp, both: false });
+        if (e) { if (!npcDir && !e.npcDir && e.sp.path[0] !== a0) e.both = true; } else pairs.set(key, { sp, both: false, npcDir });
       }
       for (const { sp, both } of pairs.values()) {
         const l = new T.Line(new T.BufferGeometry().setFromPoints(this._smooth(sp.path.map(i => CELLS[i])).map(q => new T.Vector3(q.x, 0.8, q.z))),
