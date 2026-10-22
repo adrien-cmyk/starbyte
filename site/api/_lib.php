@@ -5,6 +5,7 @@
 
 error_reporting(0);
 ini_set('display_errors', '0');
+date_default_timezone_set('Europe/Zurich');
 
 const SB_DATA = __DIR__ . '/_data';
 const SB_ORIGINS = ['https://starbyte.online', 'https://www.starbyte.online', 'https://play.starbyte.online'];
@@ -78,4 +79,53 @@ function sb_body(int $maxBytes = 20000): array {
 function sb_clean(string $s, int $max): string {
     $s = preg_replace('/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/u', '', $s) ?? '';
     return trim(mb_substr($s, 0, $max));
+}
+
+/**
+ * Envoi authentifié par SMTP (recommandé par Infomaniak : mail() y est désactivé par défaut et non authentifié).
+ * Renvoie true si le serveur a accepté le message, sinon un texte d'erreur (jamais le mot de passe).
+ */
+function sb_smtp_send(array $cfg, string $to, string $subject, string $body, array $headers) {
+    $host = $cfg['smtp_host'] ?? 'mail.infomaniak.com';
+    $port = (int)($cfg['smtp_port'] ?? 465);
+    $user = $cfg['smtp_user'] ?? SB_SUPPORT_EMAIL;
+    $pass = base64_decode($cfg['smtp_pass_b64'] ?? '', true);
+    if ($pass === false || $pass === '') return 'no_password';
+    $scheme = $port === 465 ? 'ssl://' : 'tcp://';
+    $ctx = stream_context_create(['ssl' => ['verify_peer' => true, 'verify_peer_name' => true, 'peer_name' => $host]]);
+    $fp = @stream_socket_client($scheme . $host . ':' . $port, $errno, $errstr, 15, STREAM_CLIENT_CONNECT, $ctx);
+    if (!$fp) return 'connect: ' . $errstr;
+    stream_set_timeout($fp, 20);
+    $read = function () use ($fp) {
+        $out = '';
+        while (($line = fgets($fp, 1024)) !== false) { $out .= $line; if (strlen($line) < 4 || $line[3] === ' ') break; }
+        return $out;
+    };
+    $cmd = function (string $c, array $ok) use ($fp, $read) {
+        if ($c !== '') fwrite($fp, $c . "\r\n");
+        $r = $read();
+        return in_array((int)substr($r, 0, 3), $ok, true) ? true : trim(substr($r, 0, 120));
+    };
+    $ehlo = 'EHLO starbyte.online';
+    foreach ([['', [220]], [$ehlo, [250]]] as [$c, $ok]) { $r = $cmd($c, $ok); if ($r !== true) { fclose($fp); return 'hello: ' . $r; } }
+    if ($port === 587) {
+        $r = $cmd('STARTTLS', [220]);
+        if ($r !== true || !stream_socket_enable_crypto($fp, true, STREAM_CRYPTO_METHOD_TLS_CLIENT)) { fclose($fp); return 'starttls'; }
+        $r = $cmd($ehlo, [250]); if ($r !== true) { fclose($fp); return 'hello2: ' . $r; }
+    }
+    $steps = [
+        ['AUTH LOGIN', [334]], [base64_encode($user), [334]], [base64_encode($pass), [235]],
+        ['MAIL FROM:<' . $user . '>', [250]], ['RCPT TO:<' . $to . '>', [250, 251]], ['DATA', [354]],
+    ];
+    foreach ($steps as $i => [$c, $ok]) {
+        $r = $cmd($c, $ok);
+        if ($r !== true) { fclose($fp); return ($i <= 2 ? 'auth' : 'envelope') . ': ' . $r; }
+    }
+    $msgId = '<' . bin2hex(random_bytes(12)) . '@starbyte.online>';
+    $all = array_merge(['Date: ' . date('r'), 'To: <' . $to . '>', 'Subject: ' . $subject, 'Message-ID: ' . $msgId], $headers);
+    $data = implode("\r\n", $all) . "\r\n\r\n" . preg_replace('/^\./m', '..', str_replace(["\r\n", "\n"], ["\n", "\r\n"], $body));
+    $r = $cmd($data . "\r\n.", [250]);
+    @$cmd('QUIT', [221]);
+    fclose($fp);
+    return $r === true ? true : 'data: ' . $r;
 }

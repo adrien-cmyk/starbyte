@@ -63,7 +63,15 @@ if ($att) {
     $msg = chunk_split(base64_encode($body));
 }
 
-$sent = @mail(SB_SUPPORT_EMAIL, $enc($subject), $msg, implode("\r\n", $headers), '-f' . $from);
-if (!$sent) { sb_log('contact mail_failed'); sb_json(502, ['error' => 'send']); }
+$cfg = sb_config();
+if (!empty($cfg['smtp_pass_b64'])) {
+    $res = sb_smtp_send($cfg, SB_SUPPORT_EMAIL, $enc($subject), $msg, $headers);
+    if ($res !== true) { sb_log('contact smtp_failed ' . $res); sb_json(502, ['error' => 'send']); }
+} elseif (function_exists('mail')) {
+    if (!@mail(SB_SUPPORT_EMAIL, $enc($subject), $msg, implode("\r\n", $headers))) { sb_log('contact mail_failed'); sb_json(502, ['error' => 'send']); }
+} else {
+    sb_log('contact not_configured (ni SMTP ni mail())');
+    sb_json(503, ['error' => 'send']);
+}
 sb_log('contact sent cat=' . $cat);
 sb_json(200, ['ok' => true]);

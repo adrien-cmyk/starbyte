@@ -30,6 +30,7 @@ jobs:
       FTP_PASS: ${{ secrets.INFOMANIAK_SITE_FTP_PASSWORD }}
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
       CHAT_MODEL: ${{ vars.STARBYTE_CHAT_MODEL }}
+      SMTP_PASSWORD: ${{ secrets.INFOMANIAK_SMTP_PASSWORD }}
     steps:
       - name: Vérifier les identifiants
         run: |
@@ -65,7 +66,7 @@ jobs:
           {
             t "lib bloqué" "$U/_lib.php"
             t "contact email invalide" -X POST -H 'Content-Type: application/json' -H 'Origin: https://starbyte.online' --data '{"email":"x","message":"test"}' "$U/contact.php"
-            t "contact envoi réel" -X POST -H 'Content-Type: application/json' -H 'Origin: https://starbyte.online' --data '{"category":"autre","captain":"Diagnostic","email":"empire@starbyte.online","message":"Message de test envoyé par le diagnostic de publication. Tu peux le supprimer."}' "$U/contact.php"
+            sleep 3; t "contact envoi réel" -X POST -H 'Content-Type: application/json' -H 'Origin: https://starbyte.online' --data '{"category":"autre","captain":"Diagnostic","email":"empire@starbyte.online","message":"Message de test envoyé par le diagnostic de publication. Tu peux le supprimer."}' "$U/contact.php"
             t "chat" -X POST -H 'Content-Type: application/json' -H 'Origin: https://starbyte.online' --data '{"messages":[{"role":"user","content":"À quoi sert la biomasse ?"}]}' "$U/chat.php"
             curl -sS -m 20 -I "$U/contact.php" 2>&1 | grep -i -E '^(server|x-powered-by)' | tr '\n' ' '; echo
           } > /tmp/live.txt 2>&1
@@ -101,17 +102,16 @@ jobs:
           find /tmp/up -type f | wc -l > /tmp/n
           lftp -c "source /tmp/lftprc; mirror -R --parallel=4 --no-perms --verbose=1 /tmp/up ." > /tmp/mirror.log 2>&1 || { echo "::error title=Envoi::$(tail -20 /tmp/mirror.log | tr '\n' '|')"; exit 1; }
           if [ -f /tmp/index.html ]; then lftp -c "source /tmp/lftprc; put -O ./ /tmp/index.html"; fi
-          # Configuration du chat : écrite à chaque publication depuis les secrets, jamais dans le repo
-          if [ -n "$ANTHROPIC_API_KEY" ]; then
-            if ! printf '%s' "$ANTHROPIC_API_KEY" | grep -Eq '^[A-Za-z0-9_-]+$'; then echo "::error::ANTHROPIC_API_KEY contient des caractères inattendus"; exit 1; fi
-            MODEL="${CHAT_MODEL:-claude-haiku-5-5}"
-            printf '%s' "$MODEL" | grep -Eq '^[a-z0-9.-]+$' || MODEL=claude-haiku-5-5
-            printf "<?php\nreturn ['anthropic_key' => '%s', 'model' => '%s', 'per_hour' => 30, 'per_day' => 2000];\n" "$ANTHROPIC_API_KEY" "$MODEL" > /tmp/_config.php
-            lftp -c "source /tmp/lftprc; mkdir -p api; put -O api/ /tmp/_config.php"
-            rm -f /tmp/_config.php
-            echo "::notice title=Chat::configuration envoyée (modèle $MODEL)"
-          else
-            echo "::warning title=Chat::secret ANTHROPIC_API_KEY absent, l'Assistance de bord répondra « indisponible »."
-          fi
+          # Configuration du chat et du formulaire : écrite à chaque publication depuis les secrets, jamais dans le repo
+          if [ -n "$ANTHROPIC_API_KEY" ] && ! printf '%s' "$ANTHROPIC_API_KEY" | grep -Eq '^[A-Za-z0-9_-]+$'; then echo "::error::ANTHROPIC_API_KEY contient des caractères inattendus"; exit 1; fi
+          MODEL="${CHAT_MODEL:-claude-haiku-5-5}"
+          printf '%s' "$MODEL" | grep -Eq '^[a-z0-9.-]+$' || MODEL=claude-haiku-5-5
+          SMTP_B64=""
+          if [ -n "$SMTP_PASSWORD" ]; then SMTP_B64=$(printf '%s' "$SMTP_PASSWORD" | base64 -w0); fi
+          printf "<?php\nreturn ['anthropic_key' => '%s', 'model' => '%s', 'per_hour' => 30, 'per_day' => 2000, 'smtp_user' => 'empire@starbyte.online', 'smtp_pass_b64' => '%s'];\n" "$ANTHROPIC_API_KEY" "$MODEL" "$SMTP_B64" > /tmp/_config.php
+          lftp -c "source /tmp/lftprc; mkdir -p api; put -O api/ /tmp/_config.php"
+          rm -f /tmp/_config.php
+          [ -n "$ANTHROPIC_API_KEY" ] && echo "::notice title=Chat::configuration envoyée (modèle $MODEL)" || echo "::warning title=Chat::secret ANTHROPIC_API_KEY absent, l'Assistance de bord répondra « indisponible »."
+          [ -n "$SMTP_PASSWORD" ] && echo "::notice title=Formulaire::envoi authentifié configuré (empire@starbyte.online)" || echo "::warning title=Formulaire::secret INFOMANIAK_SMTP_PASSWORD absent, le formulaire de support ne peut pas envoyer."
           echo "::notice title=Envoi::$(cat /tmp/n) fichiers préparés · $(tail -8 /tmp/mirror.log | tr '\n' '|')"
           echo "Site publié sur starbyte.online."
