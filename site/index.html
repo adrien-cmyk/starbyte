@@ -798,6 +798,81 @@ function starfield(n, r) {
   return new THREE.Points(g, new THREE.PointsMaterial({ size: 1.6, sizeAttenuation: false, vertexColors: true, transparent: true, opacity: 0.9, depthWrite: false }));
 }
 
+
+// ---------- Effets de vol (inspirés des fiches vaisseaux du jeu) ----------
+const FX_T = { value: 0 };
+const FX_COL = {
+  blue:   { core: new THREE.Color(0xe6f3ff), mid: new THREE.Color(0x6fa8ff), edge: new THREE.Color(0x2a5cff) },
+  orange: { core: new THREE.Color(0xfff2d8), mid: new THREE.Color(0xffa060), edge: new THREE.Color(0xff5a1a) },
+};
+function shockMaterial(gain) {
+  return new THREE.ShaderMaterial({
+    transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
+    uniforms: { uTime: FX_T, uGain: { value: gain } },
+    vertexShader: 'varying vec3 vP; varying vec3 vN; varying vec3 vV; void main(){ vP = position; vec4 mv = modelViewMatrix*vec4(position,1.0); vN = normalize(normalMatrix*normal); vV = normalize(-mv.xyz); gl_Position = projectionMatrix*mv; }',
+    fragmentShader: `uniform float uTime, uGain; varying vec3 vP; varying vec3 vN; varying vec3 vV;
+      float h(vec2 p){ return fract(sin(dot(p, vec2(12.9898,78.233)))*43758.5453); }
+      float n(vec2 p){ vec2 i=floor(p), f=fract(p); f=f*f*(3.0-2.0*f); return mix(mix(h(i),h(i+vec2(1,0)),f.x),mix(h(i+vec2(0,1)),h(i+vec2(1,1)),f.x),f.y); }
+      void main(){
+        float z = vP.z;                                   // +1 = proue, -1 = poupe (sphère unité)
+        float fres = pow(1.0 - abs(dot(normalize(vN), normalize(vV))), 2.2);
+        float nose = smoothstep(0.2, 1.0, z);
+        float ang = atan(vP.y, vP.x);
+        float streak = n(vec2(ang*6.0, z*3.0 + uTime*2.2));
+        float front = smoothstep(-0.1, 0.95, z);           // l'onde de choc vit à l'avant, s'efface vers le milieu
+        float inten = (pow(fres, 1.6) * front + smoothstep(0.82, 1.0, z) * 0.7) * (0.55 + 0.6*streak);
+        vec3 hot = vec3(0.9,0.95,1.0), blue = vec3(0.35,0.55,1.0), vio = vec3(0.58,0.22,1.0);
+        vec3 col = mix(mix(blue, hot, nose), vio, smoothstep(0.2, -0.8, z));
+        float a = uGain * inten;
+        gl_FragColor = vec4(col*a, a);
+      }`
+  });
+}
+function plumeMaterial(pal, gain) {
+  return new THREE.ShaderMaterial({
+    transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
+    uniforms: { uTime: FX_T, uGain: { value: gain }, uCore: { value: pal.core }, uMid: { value: pal.mid }, uEdge: { value: pal.edge }, uSeed: { value: Math.random()*10.0 } },
+    vertexShader: 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix*modelViewMatrix*vec4(position,1.0); }',
+    fragmentShader: `uniform float uTime, uGain, uSeed; uniform vec3 uCore, uMid, uEdge; varying vec2 vUv;
+      void main(){
+        float t = vUv.y;                                  // 0 = tuyère, 1 = bout de la traînée
+        float r = abs(vUv.x - 0.5) * 2.0;                 // 0 = axe, 1 = bord
+        float flick = 0.85 + 0.15*sin(uTime*23.0 + uSeed) * sin(uTime*7.0 + uSeed*3.0);
+        float body = smoothstep(0.0, 0.07, t) * (1.0 - smoothstep(0.0, 1.0, t)) * (1.0 - smoothstep(0.15 + 0.6*t, 1.0, r));
+        vec3 col = mix(mix(uCore, uMid, smoothstep(0.0, 0.25, t + r*0.3)), uEdge, smoothstep(0.3, 0.9, t + r*0.2));
+        float a = uGain * body * flick;
+        gl_FragColor = vec4(col*a, a);
+      }`
+  });
+}
+function glowSprite(color, size) {
+  const c = document.createElement('canvas'); c.width = c.height = 256;
+  const g = c.getContext('2d'), r = g.createRadialGradient(128,128,0,128,128,128);
+  r.addColorStop(0, 'rgba(255,255,255,1)'); r.addColorStop(0.08, 'rgba(255,246,232,0.95)');
+  r.addColorStop(0.25, 'rgba(214,190,255,0.35)'); r.addColorStop(0.6, 'rgba(128,84,217,0.08)'); r.addColorStop(1, 'rgba(0,0,0,0)');
+  g.fillStyle = r; g.fillRect(0,0,256,256);
+  const tex = new THREE.CanvasTexture(c); tex.colorSpace = THREE.SRGBColorSpace;
+  const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, color, blending: THREE.AdditiveBlending, depthWrite: false, transparent: true }));
+  sp.scale.setScalar(size); return sp;
+}
+function flightFx(L, w, hgt, pal) {
+  const g = new THREE.Group();
+  const sph = new THREE.SphereGeometry(1, 48, 24);
+  const outer = new THREE.Mesh(sph, shockMaterial(0.5));
+  outer.scale.set(w*0.78, hgt*0.85, L*0.66); outer.position.z = L*0.06;
+  const inner = new THREE.Mesh(sph, shockMaterial(0.25));
+  inner.scale.set(w*0.66, hgt*0.72, L*0.6); inner.position.z = L*0.08;
+  g.add(outer, inner);
+  // traînée : deux plans croisés (lisibles sous tous les angles), pointe vers l'arrière
+  const len = L*1.15, wid = Math.max(w, hgt)*0.85;
+  const pg = new THREE.PlaneGeometry(wid, len); pg.translate(0, -len/2, 0); pg.rotateX(Math.PI/2);  // s'étire vers -z
+  for (let i = 0; i < 2; i++) { const m = new THREE.Mesh(pg, plumeMaterial(pal, 0.9)); m.rotation.z = i*Math.PI/2; m.position.z = -L*0.48; g.add(m); }
+  const tail = new THREE.PlaneGeometry(wid*2.2, len*2.4); tail.translate(0, -len*1.2, 0); tail.rotateX(Math.PI/2);
+  for (let i = 0; i < 2; i++) { const m = new THREE.Mesh(tail, plumeMaterial({ core: pal.mid, mid: pal.edge, edge: new THREE.Color(0x3a1f7a) }, 0.25)); m.rotation.z = i*Math.PI/2; m.position.z = -L*0.5; g.add(m); }
+  g.traverse(o => { if (o.isMesh) { o.renderOrder = 2; o.frustumCulled = false; } });
+  return g;
+}
+
 class Viewer {
   constructor(host, opts = {}) {
     this.o = Object.assign({ bloom: 0.55, rotate: 0.35, view: [1, 0.32, 1.15], fit: 0.82, stars: true, zoom: false, exposure: 1.0, offsetX: 0 }, opts);
@@ -858,7 +933,9 @@ class Viewer {
     const t = performance.now() / 1000;
     if (this.o.sway) { this.pivot.rotation.y = Math.sin(t * 0.18) * this.o.sway; this.pivot.position.y = Math.sin(t * 0.35) * this.radius * 0.015; }
     if (this.planet) this.planet.rotation.y = t * 0.004;
-    if (this.fleet && this.o.sway) this.fleet.children.forEach(h => { h.position.y += Math.sin(t * 0.5 + h.userData.bob) * 0.0015 * this.radius / 40; });
+    FX_T.value = t;
+    if (this.fleet && this.o.sway) this.fleet.children.forEach(h => { if (!h.userData.follow) h.position.y += Math.sin(t * 0.5 + h.userData.bob) * 0.0015 * this.radius / 40; });
+    if (this.fleet) this.fleet.children.forEach(h => { const f = h.userData.follow; if (f) h.position.copy(f.position); });
     if (this.clouds) this.clouds.rotation.y = t * 0.006;
     this.controls.update(); this.composer.render();
   }
@@ -913,6 +990,28 @@ class Viewer {
     this.key.position.copy(sun).multiplyScalar(10);
     cam.far = Math.max(cam.far, (p.z + p.size * 2) * r * 3); cam.updateProjectionMatrix();
   }
+  placeBacklight() {
+    const b = this.o.backlight; if (!b) return;
+    const r = this.radius, cam = this.camera, tgt = this.controls.target;
+    const fwd = tgt.clone().sub(cam.position).normalize();
+    const right = fwd.clone().cross(cam.up).normalize();
+    const up = right.clone().cross(fwd).normalize();
+    // soleil derrière la flotte, légèrement au-dessus et à droite : il découpe les coques
+    const dir = fwd.clone().multiplyScalar(1).addScaledVector(up, b.up ?? 0.28).addScaledVector(right, b.right ?? 0.22).normalize();
+    if (!this.backLight) {
+      this.backLight = new THREE.DirectionalLight(0xfff0dc, b.power ?? 6.0);
+      this.rimLight = new THREE.DirectionalLight(0xb48cff, (b.power ?? 6.0) * 0.45);
+      this.scene.add(this.backLight, this.backLight.target, this.rimLight, this.rimLight.target);
+      this.sun = glowSprite(0xffffff, 1); this.sun.renderOrder = -1; this.scene.add(this.sun);
+      this.key.intensity = 0.9;            // face au soleil, les flancs restent sombres : silhouettes
+    }
+    this.backLight.position.copy(tgt).addScaledVector(dir, r * 10); this.backLight.target.position.copy(tgt);
+    const dir2 = dir.clone().addScaledVector(right, -0.6).normalize();
+    this.rimLight.position.copy(tgt).addScaledVector(dir2, r * 10); this.rimLight.target.position.copy(tgt);
+    const dist = cam.position.distanceTo(tgt) * 6;
+    this.sun.position.copy(cam.position).addScaledVector(dir, dist);
+    this.sun.scale.setScalar(dist * (b.size ?? 0.55));
+  }
   place() {
     const fov = this.camera.fov * Math.PI / 180;
     const fitH = this.radius / Math.sin(fov / 2);
@@ -927,6 +1026,7 @@ class Viewer {
     if (this.stars) this.stars.scale.setScalar(Math.max(1, d * 8 / 1500));
     this.controls.update();
     this.placePlanet();
+    this.placeBacklight();
   }
   async show(url, view) {
     const token = (this._tok = Symbol());
@@ -966,7 +1066,8 @@ class Viewer {
     const norm = new Map();
     for (const [u, src] of byUrl) {
       const box = new THREE.Box3().setFromObject(src);
-      norm.set(u, { ctr: box.getCenter(new THREE.Vector3()), len: box.max.z - box.min.z });
+      const sz = box.getSize(new THREE.Vector3());
+      norm.set(u, { ctr: box.getCenter(new THREE.Vector3()), len: sz.z, rw: sz.x / sz.z, rh: sz.y / sz.z });
     }
     for (const it of items) {
       const n = norm.get(it.url);
@@ -980,8 +1081,14 @@ class Viewer {
       holder.rotation.y = it.yaw || 0;
       holder.userData.bob = Math.random() * Math.PI * 2;
       fleet.add(holder);
+      if (this.o.fx) {
+        const fx = flightFx(it.len, it.len * n.rw, it.len * n.rh, FX_COL[it.fx || 'blue']);
+        fx.position.copy(holder.position); fx.rotation.copy(holder.rotation);
+        fx.userData.follow = holder;
+        fleet.add(fx);
+      }
     }
-    const box = new THREE.Box3().setFromObject(fleet);
+    const box = new THREE.Box3(); fleet.children.forEach(c => { if (!c.userData.follow) box.expandByObject(c); });
     fleet.position.sub(box.getCenter(new THREE.Vector3()));
     this.pivot.add(fleet);
     this.fleet = fleet;
@@ -1036,8 +1143,9 @@ const stage = document.getElementById('hero-stage');
 if (webgl) {
   try {
     const wide = matchMedia('(min-width: 821px)').matches;
-    const FLEET = [{"url": "3d/sb_kv01_lod.glb", "len": 10, "pos": [0, 0, 0]}, {"url": "3d/sb_kv01_lod.glb", "len": 10, "pos": [-7, -1.5, -6]}, {"url": "3d/sb_kv01_lod.glb", "len": 10, "pos": [6.5, 1, -7]}, {"url": "3d/sb_sr01_lod.glb", "len": 3.4, "pos": [-3.5, 2.2, 6]}, {"url": "3d/sb_sr01_lod.glb", "len": 3.4, "pos": [3.5, 2, 5.5]}, {"url": "3d/sb_sr01_lod.glb", "len": 3.4, "pos": [-11, 0.5, -1]}, {"url": "3d/sb_sr01_lod.glb", "len": 3.4, "pos": [10.5, -0.5, -2]}, {"url": "3d/sb_sr01_lod.glb", "len": 3.4, "pos": [0, -3, 3]}, {"url": "3d/sb_sr01_lod.glb", "len": 3.4, "pos": [-4, -2.5, -13]}, {"url": "3d/sb_sr01_lod.glb", "len": 3.4, "pos": [5, 2.8, -14]}, {"url": "3d/sb_tk07_lod.glb", "len": 3.8, "pos": [-1.5, 0.5, -17]}, {"url": "3d/sb_tk07_lod.glb", "len": 3.8, "pos": [2.5, -1.5, -19]}, {"url": "3d/sb_tk07_lod.glb", "len": 3.8, "pos": [-4.5, 1.5, -20]}, {"url": "3d/sb_tk07_lod.glb", "len": 3.8, "pos": [1, 2.5, -22]}];
-    const hv = new Viewer(stage, { rotate: 0, sway: calm ? 0 : 0.035, bloom: 0.5, view: [1.0, 0.55, -0.85], fit: wide ? 0.58 : 0.78, offsetX: wide ? -0.5 : 0.08,
+    const FLEET = [{"url": "3d/sb_kv01_lod.glb", "len": 10, "pos": [0, 0, 0]}, {"url": "3d/sb_kv01_lod.glb", "len": 10, "pos": [-7, -1.5, -6]}, {"url": "3d/sb_kv01_lod.glb", "len": 10, "pos": [6.5, 1, -7]}, {"url": "3d/sb_sr01_lod.glb", "len": 3.4, "pos": [-3.5, 2.2, 6]}, {"url": "3d/sb_sr01_lod.glb", "len": 3.4, "pos": [3.5, 2, 5.5]}, {"url": "3d/sb_sr01_lod.glb", "len": 3.4, "pos": [-11, 0.5, -1]}, {"url": "3d/sb_sr01_lod.glb", "len": 3.4, "pos": [10.5, -0.5, -2]}, {"url": "3d/sb_sr01_lod.glb", "len": 3.4, "pos": [0, -3, 3]}, {"url": "3d/sb_sr01_lod.glb", "len": 3.4, "pos": [-4, -2.5, -13]}, {"url": "3d/sb_sr01_lod.glb", "len": 3.4, "pos": [5, 2.8, -14]}, {"url": "3d/sb_tk07_lod.glb", "len": 3.8, "pos": [-1, 0.5, -15], "fx": "orange"}];
+    const hv = new Viewer(stage, { rotate: 0, sway: calm ? 0 : 0.035, fx: true, bloom: 0.5, view: [1.0, 0.55, -0.85], fit: wide ? 0.58 : 0.78, offsetX: wide ? -0.5 : 0.08,
+      backlight: wide ? { power: 7, up: 0.16, right: 0.3, size: 0.3 } : { power: 7, up: 0.06, right: 0.1, size: 0.26 },
       planet: wide ? { size: 5, x: 1.3, y: -5.7, z: 4, sx: 0.6, sy: 0.5, sz: 0.25 } : { size: 5, x: 0.2, y: -6.4, z: 4, sx: 0.6, sy: 0.5, sz: 0.25 } });
     hv.controls.enabled = false; hv.renderer.domElement.style.touchAction = 'auto';
     hv.addPlanet({ albedo: '3d/kerath_albedo.jpg', lights: '3d/kerath_lights.jpg', clouds: '3d/kerath_clouds.jpg' });
