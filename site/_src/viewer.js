@@ -90,6 +90,7 @@ export class Viewer {
     const t = performance.now() / 1000;
     if (this.o.sway) { this.pivot.rotation.y = Math.sin(t * 0.18) * this.o.sway; this.pivot.position.y = Math.sin(t * 0.35) * this.radius * 0.015; }
     if (this.planet) this.planet.rotation.y = t * 0.004;
+    if (this.fleet && this.o.sway) this.fleet.children.forEach(h => { h.position.y += Math.sin(t * 0.5 + h.userData.bob) * 0.0015 * this.radius / 40; });
     if (this.clouds) this.clouds.rotation.y = t * 0.006;
     this.controls.update(); this.composer.render();
   }
@@ -104,7 +105,7 @@ export class Viewer {
     const mat = new THREE.ShaderMaterial({
       uniforms: { uDay: { value: alb }, uNight: { value: lit }, uSun: sunDir },
       vertexShader: 'varying vec2 vUv; varying vec3 vWN; void main(){ vUv = uv; vWN = normalize(mat3(modelMatrix)*normal); gl_Position = projectionMatrix*modelViewMatrix*vec4(position,1.0); }',
-      fragmentShader: 'uniform sampler2D uDay; uniform sampler2D uNight; uniform vec3 uSun; varying vec2 vUv; varying vec3 vWN; void main(){ float d = dot(normalize(vWN), uSun); float day = smoothstep(-0.08, 0.35, d); vec3 c = texture2D(uDay, vUv).rgb * (0.02 + 1.15*day); float night = smoothstep(0.02, -0.22, d); c += texture2D(uNight, vUv).rgb * vec3(1.0,0.72,0.5) * night * 1.4; c += vec3(0.5,0.33,0.85) * 0.05 * (1.0-day); gl_FragColor = vec4(c, 1.0); }'
+      fragmentShader: 'uniform sampler2D uDay; uniform sampler2D uNight; uniform vec3 uSun; varying vec2 vUv; varying vec3 vWN; void main(){ float d = dot(normalize(vWN), uSun); float day = smoothstep(-0.08, 0.35, d); vec3 c = texture2D(uDay, vUv).rgb * (0.02 + 1.15*day); float night = smoothstep(0.02, -0.22, d); c += texture2D(uNight, vUv).rgb * vec3(1.0,0.72,0.5) * night * 0.55; c += vec3(0.5,0.33,0.85) * 0.05 * (1.0-day); gl_FragColor = vec4(c, 1.0); }'
     });
     mat.toneMapped = true;
     const planet = new THREE.Mesh(g, mat);
@@ -181,6 +182,48 @@ export class Viewer {
     this.frame();
     this.host.classList.add('is-ready');
     return m;
+  }
+  // Flotte : plusieurs modèles en formation. items = [{ url, len, pos:[x,y,z], yaw }], len = longueur voulue (axe z du modèle)
+  async showFleet(items, view) {
+    const token = (this._tok = Symbol());
+    this.host.classList.add('is-loading');
+    let srcs;
+    try { srcs = await Promise.all([...new Set(items.map(i => i.url))].map(u => loadGLB(u).then(s => [u, s]))); }
+    catch (e) { this.host.classList.remove('is-loading'); this.host.classList.add('is-error'); throw e; }
+    if (token !== this._tok) return;
+    const byUrl = new Map(srcs);
+    if (view) this.o.view = view;
+    this.pivot.clear();
+    const fleet = new THREE.Group();
+    const norm = new Map();
+    for (const [u, src] of byUrl) {
+      const box = new THREE.Box3().setFromObject(src);
+      norm.set(u, { ctr: box.getCenter(new THREE.Vector3()), len: box.max.z - box.min.z });
+    }
+    for (const it of items) {
+      const n = norm.get(it.url);
+      const m = byUrl.get(it.url).clone(true);
+      const lights = []; m.traverse(o => { if (o.isLight) lights.push(o); });
+      lights.forEach(l => l.parent && l.parent.remove(l));
+      m.position.sub(n.ctr);
+      const holder = new THREE.Group(); holder.add(m);
+      holder.scale.setScalar(it.len / n.len);
+      holder.position.set(...it.pos);
+      holder.rotation.y = it.yaw || 0;
+      holder.userData.bob = Math.random() * Math.PI * 2;
+      fleet.add(holder);
+    }
+    const box = new THREE.Box3().setFromObject(fleet);
+    fleet.position.sub(box.getCenter(new THREE.Vector3()));
+    this.pivot.add(fleet);
+    this.fleet = fleet;
+    this.model = fleet;
+    this.radius = box.getBoundingSphere(new THREE.Sphere()).radius;
+    this.place();
+    this.host.classList.remove('is-loading', 'is-error');
+    this.frame();
+    this.host.classList.add('is-ready');
+    return fleet;
   }
   zoomBy(k) { const c = this.controls, off = this.camera.position.clone().sub(c.target); off.multiplyScalar(k); const l = off.length(); if (l < c.minDistance || l > c.maxDistance) return; this.camera.position.copy(c.target).add(off); }
 }
