@@ -8,6 +8,12 @@
 <meta name="theme-color" content="#040605">
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <title>Starbyte</title>
+<!-- PATCH_2210_PWA : jeu installable sur l'écran d'accueil -->
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="assets/app/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="192x192" href="assets/app/icon-192.png">
+<meta name="apple-mobile-web-app-title" content="Starbyte">
+<meta name="mobile-web-app-capable" content="yes">
 <!-- Aperçu de partage (WhatsApp, iMessage, réseaux) -->
 <meta name="description" content="Rejoins l'histoire : mine ta planète en match-3, bâtis ta colonie et lance ta flotte à travers la galaxie.">
 <meta property="og:type" content="website">
@@ -48736,6 +48742,81 @@ if (G.knownTargets && Array.isArray(G.tankerMissions)) {
 <!-- SHIP3D — fiches 3D : cuirassé KV-01, frégate SR-01, tanker TK-07, chantier orbital OS-01 (assets/ship3d.js, sur le moteur partagé window.SB3D) -->
 <script src="assets/aftermath.js?v=20261021-1850"></script>
 <script src="assets/fete_caserne.js?v=20261021-1800"></script>
+<script>
+/* ═══════════ PATCH_2210_PWA — installation sur l'écran d'accueil + cache hors ligne ═══════════ */
+(function () {
+  'use strict';
+  const standalone = () => (window.matchMedia && matchMedia('(display-mode: standalone)').matches) || navigator.standalone === true;
+  if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) {
+    addEventListener('load', () => { navigator.serviceWorker.register('sw.js').catch(e => console.warn('[app] service worker', e)); });
+  }
+  if (standalone() && navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
+  try { document.documentElement.classList.toggle('sb-app', standalone()); } catch (e) {}
+
+  // ── invitation à installer : après 2 sessions, au plus tous les 3 jours, jamais pendant le didacticiel ──
+  const KEY = 'sb_install_v1';
+  let st = {}; try { st = JSON.parse(localStorage.getItem(KEY) || '{}'); } catch (e) {}
+  const save = () => { try { localStorage.setItem(KEY, JSON.stringify(st)); } catch (e) {} };
+  st.sessions = (st.sessions || 0) + 1; save();
+  let deferred = null;
+  addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); deferred = e; });
+  addEventListener('appinstalled', () => { st.installed = Date.now(); save(); hide(); });
+  const ios = /iPhone|iPad|iPod/.test(navigator.userAgent) && !window.MSStream;
+  const css = document.createElement('style');
+  css.textContent = `
+  #sb-install{position:fixed;left:12px;right:12px;bottom:calc(env(safe-area-inset-bottom,0px) + 118px);z-index:40;padding:13px 14px 12px;border-radius:14px;
+    background:rgba(10,8,22,.94);border:1px solid rgba(185,164,255,.45);box-shadow:0 10px 30px rgba(0,0,0,.5);color:#e8e2ff;
+    font-family:'Space Grotesk',system-ui,sans-serif;backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);touch-action:pan-y;user-select:none;-webkit-user-select:none}
+  #sb-install .h{display:flex;gap:12px;align-items:center}
+  #sb-install img{width:46px;height:46px;border-radius:11px;flex-shrink:0}
+  #sb-install .t{font-size:15px;font-weight:600;color:#fff}
+  #sb-install .s{font-size:12px;color:rgba(232,226,255,.7);line-height:1.45;margin-top:2px}
+  #sb-install .st{margin-top:10px;font-size:12.5px;line-height:1.6;color:#e8e2ff}
+  #sb-install .st b{color:#fff}
+  #sb-install .st svg{width:16px;height:16px;vertical-align:-3px;margin:0 2px}
+  #sb-install .a{display:flex;gap:8px;margin-top:10px}
+  #sb-install button{flex:1;padding:10px;border-radius:9px;font:inherit;font-size:11px;letter-spacing:.12em;text-transform:uppercase;cursor:pointer}
+  #sb-install .go{border:1px solid rgba(185,164,255,.7);background:rgba(185,164,255,.16);color:#efeaff}
+  #sb-install .no{border:1px solid rgba(255,255,255,.16);background:transparent;color:rgba(232,226,255,.65)}`;
+  document.head.appendChild(css);
+  const SHARE = '<svg viewBox="0 0 24 24" fill="none" stroke="#7fb4ff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12M8 7l4-4 4 4"/><path d="M6 11v8a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2v-8"/></svg>';
+  function hide(later) {
+    const el = document.getElementById('sb-install'); if (el) el.remove();
+    if (later) { st.lastAsk = Date.now(); st.asks = (st.asks || 0) + 1; save(); }
+  }
+  function show() {
+    if (document.getElementById('sb-install')) return;
+    const el = document.createElement('div'); el.id = 'sb-install'; el.dataset.base = 'translateX(X)';
+    const body = deferred
+      ? `<div class="a"><button class="no">Plus tard</button><button class="go">Installer</button></div>`
+      : `<div class="st">Touche ${SHARE} <b>Partager</b> (ou <b>•••</b> puis <b>Partager</b>), puis <b>« Sur l'écran d'accueil »</b>.</div><div class="a"><button class="no">Plus tard</button></div>`;
+    el.innerHTML = `<div class="h"><img src="assets/app/icon-192.png" alt=""><div><div class="t">Installe Starbyte</div>
+      <div class="s">Plein écran, démarrage plus rapide, ta planète à portée de pouce.</div></div></div>${body}`;
+    document.body.appendChild(el);
+    el.querySelector('.no').onclick = () => hide(true);
+    const go = el.querySelector('.go');
+    if (go) go.onclick = async () => { try { deferred.prompt(); const r = await deferred.userChoice; if (r && r.outcome === 'accepted') { st.installed = Date.now(); save(); } } catch (e) {} deferred = null; hide(true); };
+    if (typeof sbSwipeAway === 'function') sbSwipeAway(el, () => hide(true), null);
+  }
+  function eligible() {
+    if (standalone() || st.installed) return false;
+    if (!/starbyte\.online$/.test(location.hostname) && !/[?&]install=1/.test(location.search)) return false;   // l'invitation attend l'adresse définitive (play.starbyte.online)
+    if (!(ios || deferred)) return false;
+    if (ios && !/Safari/.test(navigator.userAgent)) return false;          // Chrome iOS : pas d'ajout à l'écran d'accueil fiable
+    if ((st.sessions || 0) < 2 || (st.asks || 0) >= 4) return false;
+    if (st.lastAsk && Date.now() - st.lastAsk < 3 * 86400000) return false;
+    if (window.SBTuto && SBTuto.active && SBTuto.active()) return false;
+    const scr = document.getElementById('scr-planet');
+    if (!scr || scr.classList.contains('hidden')) return false;
+    if (document.querySelector('#sb-sheet, #sb-away, .w-sheet.on, .w-card.on, #mp-choose, #scr-m3:not(.hidden)') || window.__sbCinema) return false;
+    return true;
+  }
+  let shown = false;
+  setTimeout(() => { const t = setInterval(() => { if (shown) return clearInterval(t); if (eligible()) { shown = true; show(); } }, 3000); }, 45000);
+  window.SBApp = { standalone, show, _state: () => st };
+})();
+</script>
+
 <script>
 /* ═══════════ PATCH_2110_TOUCHER — retours d'Adrien du 21/10 (iPhone) ═══════════ */
 (function () {

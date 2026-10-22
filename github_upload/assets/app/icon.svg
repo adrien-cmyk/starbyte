@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <defs>
+    <radialGradient id="bg" cx="50%" cy="46%" r="72%">
+      <stop offset="0" stop-color="#2a1748"/>
+      <stop offset=".45" stop-color="#120a22"/>
+      <stop offset="1" stop-color="#040605"/>
+    </radialGradient>
+    <radialGradient id="halo" cx="50%" cy="50%" r="50%">
+      <stop offset="0" stop-color="#b9a4ff" stop-opacity=".55"/>
+      <stop offset=".5" stop-color="#6a4bd8" stop-opacity=".18"/>
+      <stop offset="1" stop-color="#6a4bd8" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="glow" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="1.1"/></filter>
+  </defs>
+  <rect width="1024" height="1024" fill="url(#bg)"/>
+  <g fill="#fff" opacity=".75">
+    <circle cx="180" cy="210" r="3"/><circle cx="820" cy="170" r="2.5"/><circle cx="870" cy="640" r="3"/><circle cx="140" cy="760" r="2"/>
+    <circle cx="300" cy="880" r="2.5"/><circle cx="700" cy="860" r="2"/><circle cx="560" cy="120" r="2"/><circle cx="95" cy="470" r="2"/>
+    <circle cx="930" cy="380" r="2"/><circle cx="380" cy="300" r="1.6"/><circle cx="690" cy="300" r="1.6"/>
+  </g>
+  <circle cx="512" cy="512" r="400" fill="url(#halo)"/>
+  <!-- étoile du logo Starbyte (polygone de starbyte-logo.svg, centré) -->
+  <g transform="translate(512 512) scale(13.2) translate(-176.7 -26.65)">
+    <polygon fill="#c9b8ff" filter="url(#glow)" points="176.6 34 190 31.4 180.5 28.5 175.4 27.8 173.3 28.9 175 27.4 177.9 25.7 183.3 15.3 172 22.9 163.4 0 165.3 22.7 166.7 23.4 167.6 27.3 171 29.5 170.8 33.7 173.8 35.8 174.4 41.2 186.3 53.3 176.6 34"/>
+    <polygon fill="#ffffff" points="176.6 34 190 31.4 180.5 28.5 175.4 27.8 173.3 28.9 175 27.4 177.9 25.7 183.3 15.3 172 22.9 163.4 0 165.3 22.7 166.7 23.4 167.6 27.3 171 29.5 170.8 33.7 173.8 35.8 174.4 41.2 186.3 53.3 176.6 34"/>
+  </g>
+</svg>
