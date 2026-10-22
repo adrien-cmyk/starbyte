@@ -7270,7 +7270,7 @@ function makeInitialParcel(i) {
     state: 'locked',
     building: null,
     n: 'Zone non cartographiée',
-    sub: 'Lance une sonde depuis le chantier naval pour révéler.',
+    sub: 'S’ouvre quand ta planète monte de niveau : construis des bâtiments de familles différentes.',
     lvl: null,
     max: 3,
     prod: null,
@@ -8056,7 +8056,7 @@ const TECH_TREE = [
       { id: 'mine-t2', kind: 'building', name: 'Mine renforcée', sub: 'Production de métal ×4. Match-3 plus rentables.', flow: '→ requis pour construire les Silos métalliques', requires: 'metal:1000 + énergie:200', buildingKey: 'mine', tier: 2 },
       { id: 'mine-t3', kind: 'building', name: 'Extracteur lourd', sub: 'Production de métal ×16.', flow: '→ permet l\'auto-suffisance en métal en endgame', requires: 'metal:5000 + énergie:1000 + cristal:200', buildingKey: 'mine', tier: 3 },
       { id: 'silo-metal', kind: 'building', name: 'Silo Métal', sub: 'Augmente la capacité de stockage métal de +5000.', flow: '→ requis avant que tes stocks ne se remplissent', requires: 'metal:600', buildingKey: 'silo_metal', tier: 1 },
-      { id: 'silo-biomass', kind: 'building', name: 'Silo Biomasse', sub: 'Stockage de biomasse (ressource organique).', flow: '→ pour planètes vivantes uniquement', requires: 'metal:500 + biomasse:100', buildingKey: 'silo_biomass', tier: 1 },
+      { id: 'silo-biomass', kind: 'building', name: 'Silo Biomasse', sub: 'Stockage de biomasse (ressource organique).', flow: '→ augmente ta capacité de biomasse', requires: 'metal:500 + énergie:200', buildingKey: 'silo_biomass', tier: 1 },
     ],
   },
   {
@@ -31031,7 +31031,10 @@ function renderInfoCard(i) {
       ghostHandler = `toast('Plus aucune ressource exploitable')`;
     }
   } else if (stKey === 'locked') {
-    primaryHandler = `tryProbeFromMap(${i})`;
+    // PATCH_2210_REGLES : c'est le niveau de planète qui ouvre les zones, pas une sonde
+    subOverride = sbLockedHint(i);
+    primaryLabel = 'Comment l’ouvrir';
+    primaryHandler = `toast(sbLockedHint(${i}))`;
     ghostLabel = null;
   } else if (stKey === 'depleted') {
     const _rh = window.SBSkills && SBSkills.rehabBtn ? SBSkills.rehabBtn(i) : null;   // PATCH_1910_REHAB
@@ -31150,6 +31153,17 @@ function startM3FromInfo(idx, context) {
   startM3(idx, context);
 }
 
+// PATCH_2210_REGLES : texte vrai pour une zone verrouillée (cf. UNLOCK_AT + fin de chantier : 1 famille nouvelle = +1 niveau)
+function sbLockedHint(idx) {
+  const lv = (G.planet && G.planet.level) || 0;
+  const need = +(Object.keys(UNLOCK_AT).find(k => UNLOCK_AT[k].includes(idx)) || 0);
+  const fam = (G.planet && G.planet.families) || new Set();
+  const left = [...new Set(Object.values(BUILDINGS).map(b => b.family).filter(Boolean))].filter(f => !(fam.has ? fam.has(f) : [].concat(fam).includes(f)));
+  const ex = left.slice(0, 3).join(', ');
+  if (!need) return 'Zone verrouillée : elle s’ouvre quand ta planète monte de niveau.';
+  const n = Math.max(1, need - lv);
+  return `S’ouvre au niveau de planète ${need} (tu es au niveau ${lv}). Construis des bâtiments de ${n > 1 ? n + ' nouvelles familles' : '1 nouvelle famille'} pour y arriver` + (ex ? ` (par ex. ${ex}).` : '.');
+}
 function tryProbeFromMap(idx) {
   // Si pas de chantier construit
   const hasShipyard = G.planet.parcels.some(p => p.building === 'shipyard');
@@ -48789,7 +48803,7 @@ var BUILDING_GUIDE = {
   silo_metal: { lead: 'Plus de place pour ton métal.', how: 'Augmente ta capacité de métal de +5000. Au plafond, la production et les gains de match-3 sont perdus.', unlocks: ['Des stocks assez grands pour les gros chantiers'], tip: 'Quand ta jauge de métal plafonne, c\'est le moment.' },
   silo_energie: { lead: 'Plus de place pour ton énergie.', how: 'Augmente ta capacité d\'énergie de +5000. Au plafond, l\'énergie produite se perd.', unlocks: ['Des réserves pour les missions et la raffinerie'], tip: 'Utile dès que tu as plusieurs centrales.' },
   silo_cristal: { lead: 'Plus de place pour ton cristal.', how: 'Augmente ta capacité de cristal de +2000.', unlocks: ['Des réserves pour les sondes en série et les tiers 3'], tip: 'Le cristal est rare : ne le laisse pas déborder.' },
-  silo_biomass: { lead: 'Stockage de biomasse (ressource organique).', how: 'Augmente ta capacité de biomasse de +5000.', unlocks: ['Des réserves de biomasse'], tip: 'Seulement sur les planètes vivantes.' },
+  silo_biomass: { lead: 'Stockage de biomasse (ressource organique).', how: 'Augmente ta capacité de biomasse de +5000.', unlocks: ['Des réserves de biomasse'], tip: 'Coûte 500 métal et 200 énergie. Se construit sur n’importe quelle planète.' },
   silo_artefact: { lead: 'Le coffre sécurisé des artefacts.', how: 'Augmente ta capacité d\'artefacts de +50.', unlocks: ['De la place pour les artefacts rares'], tip: 'Pour plus tard, quand l\'exploration rapporte des artefacts.' },
 };
 function closeSbSheet() { const e = document.getElementById('sb-sheet'); if (e) e.remove(); if (window.SBTuto) setTimeout(() => SBTuto.tick(), 50); }
