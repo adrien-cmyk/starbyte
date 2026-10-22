@@ -26,16 +26,22 @@ function sb_json(int $code, array $body): void {
 }
 
 function sb_cors(): void {
+    if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'POST' && ($_SERVER['REQUEST_METHOD'] ?? '') !== 'OPTIONS') sb_json(405, ['error' => 'method']);
+    // Les navigateurs envoient toujours l'origine d'une requête POST : sans origine du site, la requête ne vient pas de nos pages.
     $o = $_SERVER['HTTP_ORIGIN'] ?? '';
-    if ($o !== '') {
-        if (!in_array($o, SB_ORIGINS, true)) sb_json(403, ['error' => 'origin']);
-        header('Access-Control-Allow-Origin: ' . $o);
-        header('Vary: Origin');
-        header('Access-Control-Allow-Methods: POST, OPTIONS');
-        header('Access-Control-Allow-Headers: Content-Type');
+    if ($o === '') {
+        $ref = $_SERVER['HTTP_REFERER'] ?? '';
+        $p = $ref !== '' ? parse_url($ref) : null;
+        if ($p && !empty($p['scheme']) && !empty($p['host'])) $o = $p['scheme'] . '://' . $p['host'];
     }
+    if (!in_array($o, SB_ORIGINS, true)) sb_json(403, ['error' => 'origin']);
+    header('Access-Control-Allow-Origin: ' . $o);
+    header('Vary: Origin');
+    header('Access-Control-Allow-Methods: POST, OPTIONS');
+    header('Access-Control-Allow-Headers: Content-Type');
     if (($_SERVER['REQUEST_METHOD'] ?? '') === 'OPTIONS') { http_response_code(204); exit; }
-    if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'POST') sb_json(405, ['error' => 'method']);
+    $ct = strtolower($_SERVER['CONTENT_TYPE'] ?? '');
+    if (strpos($ct, 'application/json') !== 0) sb_json(415, ['error' => 'content_type']);
 }
 
 function sb_ip(): string {
