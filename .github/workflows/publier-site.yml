@@ -28,6 +28,8 @@ jobs:
       FTP_HOST: ${{ secrets.INFOMANIAK_SITE_FTP_SERVER }}
       FTP_USER: ${{ secrets.INFOMANIAK_SITE_FTP_USER }}
       FTP_PASS: ${{ secrets.INFOMANIAK_SITE_FTP_PASSWORD }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      CHAT_MODEL: ${{ vars.STARBYTE_CHAT_MODEL }}
     steps:
       - name: Vérifier les identifiants
         run: |
@@ -86,5 +88,17 @@ jobs:
           find /tmp/up -type f | wc -l > /tmp/n
           lftp -c "source /tmp/lftprc; mirror -R --parallel=4 --no-perms --verbose=1 /tmp/up ." > /tmp/mirror.log 2>&1 || { echo "::error title=Envoi::$(tail -20 /tmp/mirror.log | tr '\n' '|')"; exit 1; }
           if [ -f /tmp/index.html ]; then lftp -c "source /tmp/lftprc; put -O ./ /tmp/index.html"; fi
+          # Configuration du chat : écrite à chaque publication depuis les secrets, jamais dans le repo
+          if [ -n "$ANTHROPIC_API_KEY" ]; then
+            if ! printf '%s' "$ANTHROPIC_API_KEY" | grep -Eq '^[A-Za-z0-9_-]+$'; then echo "::error::ANTHROPIC_API_KEY contient des caractères inattendus"; exit 1; fi
+            MODEL="${CHAT_MODEL:-claude-haiku-5-5}"
+            printf '%s' "$MODEL" | grep -Eq '^[a-z0-9.-]+$' || MODEL=claude-haiku-5-5
+            printf "<?php\nreturn ['anthropic_key' => '%s', 'model' => '%s', 'per_hour' => 30, 'per_day' => 2000];\n" "$ANTHROPIC_API_KEY" "$MODEL" > /tmp/_config.php
+            lftp -c "source /tmp/lftprc; mkdir -p api; put -O api/ /tmp/_config.php"
+            rm -f /tmp/_config.php
+            echo "::notice title=Chat::configuration envoyée (modèle $MODEL)"
+          else
+            echo "::warning title=Chat::secret ANTHROPIC_API_KEY absent, l'Assistance de bord répondra « indisponible »."
+          fi
           echo "::notice title=Envoi::$(cat /tmp/n) fichiers préparés · $(tail -8 /tmp/mirror.log | tr '\n' '|')"
           echo "Site publié sur starbyte.online."

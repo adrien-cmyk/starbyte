@@ -1,0 +1,9 @@
+# Seuls chat.php et contact.php sont accessibles depuis le web.
+Options -Indexes
+<FilesMatch "^(?!chat\.php$|contact\.php$).*$">
+  Require all denied
+</FilesMatch>
+<IfModule mod_headers.c>
+  Header set X-Content-Type-Options "nosniff"
+  Header set Cache-Control "no-store"
+</IfModule>

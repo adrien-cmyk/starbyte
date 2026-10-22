@@ -284,6 +284,58 @@ footer .base{font:500 12px/1 var(--f-data);letter-spacing:.18em;color:var(--mute
 .modal .close{flex:none;width:46px;height:46px;border-radius:50%;border:1px solid var(--seam);background:var(--panel);color:var(--ink);font:400 22px/1 var(--f-ui);cursor:pointer}
 .modal .vbox{flex:1;aspect-ratio:auto;max-width:var(--wrap);width:100%;margin:0 auto;min-height:0}
 .modal .vbox .poster{object-fit:contain}
+
+/* Assistance de bord (chat) et formulaire de support */
+.ab-btn{position:fixed;z-index:70;right:max(16px,env(safe-area-inset-right,0px));bottom:calc(16px + env(safe-area-inset-bottom,0px));display:inline-flex;align-items:center;gap:10px;min-height:52px;padding:0 20px 0 16px;border-radius:999px;border:1px solid color-mix(in srgb,var(--violet) 60%,var(--seam));background:var(--panel);color:var(--ink);font:600 16px/1 var(--f-ui);cursor:pointer;box-shadow:0 8px 30px color-mix(in srgb,var(--bg) 70%,transparent)}
+.ab-btn:hover{border-color:var(--violet)}
+.ab-btn .dot{width:10px;height:10px;border-radius:50%;background:var(--violet);box-shadow:0 0 0 4px color-mix(in srgb,var(--violet) 25%,transparent)}
+.ab{position:fixed;z-index:75;right:max(16px,env(safe-area-inset-right,0px));bottom:calc(16px + env(safe-area-inset-bottom,0px));width:min(400px,calc(100vw - 32px));height:min(620px,calc(100dvh - 120px));display:flex;flex-direction:column;background:var(--panel);border:1px solid var(--seam);border-radius:14px;overflow:hidden;box-shadow:0 18px 60px color-mix(in srgb,var(--bg) 80%,transparent)}
+.ab header{display:flex;align-items:center;gap:12px;padding:14px 14px 12px 16px;border-bottom:1px solid var(--seam)}
+.ab header div{flex:1;min-width:0}
+.ab header b{display:block;font:600 17px/1.2 var(--f-ui)}
+.ab header small{display:block;font:400 13px/1.3 var(--f-ui);color:var(--dim)}
+.ab .x{width:40px;height:40px;border-radius:50%;border:1px solid var(--seam);background:transparent;color:var(--ink);font:400 20px/1 var(--f-ui);cursor:pointer;flex:none}
+.ab-log{flex:1;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:10px;overscroll-behavior:contain}
+.ab-m{max-width:88%;padding:10px 13px;border-radius:12px;font-size:15.5px;line-height:1.5;white-space:pre-wrap;overflow-wrap:anywhere}
+.ab-m.bot{align-self:flex-start;background:var(--bg);border:1px solid var(--seam);color:var(--ink);border-bottom-left-radius:4px}
+.ab-m.me{align-self:flex-end;background:color-mix(in srgb,var(--violet) 32%,var(--panel));color:var(--ink);border-bottom-right-radius:4px}
+.ab-m.err{border-color:color-mix(in srgb,var(--red) 60%,var(--seam))}
+.ab-m .act{margin-top:10px;display:flex}
+.ab-m .act button{min-height:40px;padding:0 14px;border-radius:8px;border:1px solid var(--red);background:transparent;color:var(--ink);font:600 14px/1 var(--f-ui);cursor:pointer}
+.ab-typing{align-self:flex-start;display:flex;gap:5px;padding:12px 14px;border-radius:12px;background:var(--bg);border:1px solid var(--seam)}
+.ab-typing i{width:7px;height:7px;border-radius:50%;background:var(--mute);animation:abd 1.2s infinite}
+.ab-typing i:nth-child(2){animation-delay:.15s}.ab-typing i:nth-child(3){animation-delay:.3s}
+@keyframes abd{0%,60%,100%{opacity:.25}30%{opacity:1}}
+.ab-sug{display:flex;flex-wrap:wrap;gap:6px;padding:0 16px 10px}
+.ab-sug button{min-height:36px;padding:0 12px;border-radius:999px;border:1px solid var(--seam);background:transparent;color:var(--mute);font:500 14px/1 var(--f-ui);cursor:pointer}
+.ab-sug button:hover{color:var(--ink);border-color:var(--violet)}
+.ab form{display:flex;gap:8px;padding:12px;border-top:1px solid var(--seam);align-items:flex-end}
+.ab textarea{flex:1;min-height:44px;max-height:120px;resize:none;border-radius:10px;border:1px solid var(--seam);background:var(--bg);color:var(--ink);font:400 16px/1.4 var(--f-ui);padding:11px 12px}
+.ab textarea:focus{outline:none;border-color:var(--violet)}
+.ab form .btn{min-height:44px;padding:0 16px;font-size:15px}
+.ab .foot{padding:0 14px 10px;font:400 12px/1.4 var(--f-ui);color:var(--dim)}
+.ab .foot button{background:none;border:0;padding:0;color:var(--mute);text-decoration:underline;font:inherit;cursor:pointer}
+@media (max-width:520px){.ab{right:0;left:0;bottom:0;width:100%;height:calc(100dvh - env(safe-area-inset-top,0px) - 56px);border-radius:14px 14px 0 0;padding-bottom:env(safe-area-inset-bottom,0px)}}
+
+.sup{position:fixed;inset:0;z-index:90;background:color-mix(in srgb,var(--bg) 88%,transparent);display:flex;align-items:center;justify-content:center;padding:calc(env(safe-area-inset-top,0px) + 16px) max(16px,env(safe-area-inset-right,0px)) calc(env(safe-area-inset-bottom,0px) + 16px) max(16px,env(safe-area-inset-left,0px))}
+.sup form{width:min(560px,100%);max-height:100%;overflow-y:auto;background:var(--panel);border:1px solid var(--seam);border-radius:14px;padding:24px;display:flex;flex-direction:column;gap:14px}
+.sup .row{display:flex;flex-direction:column;gap:6px}
+.sup label,.sup legend{font:500 15px/1.3 var(--f-ui);color:var(--ink)}
+.sup input[type=text],.sup input[type=email],.sup select,.sup textarea{width:100%;min-height:46px;border-radius:10px;border:1px solid var(--seam);background:var(--bg);color:var(--ink);font:400 16px/1.4 var(--f-ui);padding:10px 12px}
+.sup textarea{min-height:120px;resize:vertical}
+.sup input:focus,.sup select:focus,.sup textarea:focus{outline:none;border-color:var(--violet)}
+.sup .chk{display:flex;gap:10px;align-items:flex-start;font-size:15px;color:var(--mute)}
+.sup .chk input{width:20px;height:20px;margin-top:2px;accent-color:var(--violet)}
+.sup .hp{position:absolute;left:-9999px;width:1px;height:1px;overflow:hidden}
+.sup .status{font-size:15px;min-height:1.4em}
+.sup .status.ok{color:var(--cristal)}.sup .status.ko{color:#ff7d93}
+.sup .btns{display:flex;flex-wrap:wrap;gap:10px;justify-content:flex-end}
+.sup .note{font-size:13px;color:var(--dim)}
+
+.give{display:flex;align-items:center;gap:24px;flex-wrap:wrap}
+.give .qr{display:flex;flex-direction:column;gap:8px;width:150px}
+.give .qr img{width:150px;height:auto;border-radius:10px;border:1px solid var(--seam)}
+@media (max-width:860px), (pointer:coarse){.give .qr{display:none}}
 </style>
 
 
@@ -492,7 +544,16 @@ footer .base{font:500 12px/1 var(--f-data);letter-spacing:.18em;color:var(--mute
         <h2 class="h3" id="projet-t">Un univers imaginé par un indépendant.</h2>
         <p class="lede">Je m'appelle Adrien, je suis designer et je développe Starbyte. J'y rassemble mon goût pour les images, les mondes de science-fiction et les jeux que l'on retrouve avec plaisir. Le projet grandit au fil du développement et de vos retours.</p>
         <p class="sign"><b>Adrien Thétaz</b>, designer MPA · ART MAKES (HI)STORY</p>
-        <div data-needs="soutien" hidden><a class="btn btn-ghost js-soutien" href="#" target="_blank" rel="noopener">Soutenir Starbyte <svg class="heart" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21s-7.5-4.6-9.6-9.3C.9 8.2 3 4.5 6.6 4.5c2.2 0 3.6 1.3 4.4 2.6.8-1.3 2.2-2.6 4.4-2.6 3.6 0 5.7 3.7 4.2 7.2C19.5 16.4 12 21 12 21z"/></svg></a></div>
+        <div data-needs="soutien" hidden style="display:flex;flex-direction:column;gap:12px;border-top:1px solid var(--seam);padding-top:20px;margin-top:6px">
+          <h3 style="font-size:20px">Aide Starbyte à grandir.</h3>
+          <p>Si tu apprécies le jeu et que tu souhaites encourager son développement, tu peux contribuer librement. Ce soutien aide à financer l'hébergement, les outils de création et le temps consacré à Starbyte.</p>
+          <p class="cap">Cette contribution soutient le développement de Starbyte et n'apporte aucun avantage de jeu. Paiement sécurisé par Stripe.</p>
+          <div class="give">
+            <a class="btn btn-play js-soutien" href="#" target="_blank" rel="noopener">Soutenir Starbyte <svg class="heart" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21s-7.5-4.6-9.6-9.3C.9 8.2 3 4.5 6.6 4.5c2.2 0 3.6 1.3 4.4 2.6.8-1.3 2.2-2.6 4.4-2.6 3.6 0 5.7 3.7 4.2 7.2C19.5 16.4 12 21 12 21z"/></svg></a>
+            <figure class="qr"><img src="img/soutien-qr.webp" alt="QR code vers la page de soutien Stripe de Starbyte" loading="lazy" width="904" height="1096"><figcaption class="cap">Ou scanne avec ton téléphone.</figcaption></figure>
+          </div>
+          <p style="color:var(--ink)">À votre bon cœur. Merci de faire partie de l'aventure.</p>
+        </div>
       </div>
     </div>
   </section>
@@ -546,6 +607,46 @@ footer .base{font:500 12px/1 var(--f-data);letter-spacing:.18em;color:var(--mute
   </div>
 </footer>
 
+
+<button class="ab-btn" id="ab-open" type="button" aria-controls="ab" aria-expanded="false"><span class="dot" aria-hidden="true"></span>Besoin d'aide ?</button>
+<section class="ab" id="ab" hidden aria-label="Assistance de bord">
+  <header>
+    <div><b>Assistance de bord</b><small>Assistant IA de Starbyte</small></div>
+    <button class="x" type="button" id="ab-close" aria-label="Fermer l'assistance">×</button>
+  </header>
+  <div class="ab-log" id="ab-log" aria-live="polite"></div>
+  <div class="ab-sug" id="ab-sug">
+    <button type="button" data-q="Comment commencer ?">Commencer</button>
+    <button type="button" data-q="Comment installer le jeu sur mon téléphone ?">Installer le jeu</button>
+    <button type="button" data-q="Comment retrouver ma partie ?">Retrouver ma partie</button>
+    <button type="button" data-q="À quoi servent la biomasse et les artefacts ?">Biomasse et artefacts</button>
+    <button type="button" data-support>Signaler un problème</button>
+  </div>
+  <form id="ab-form">
+    <label for="ab-input" class="hp" style="position:absolute;left:-9999px">Ta question</label>
+    <textarea id="ab-input" rows="1" maxlength="800" placeholder="Pose ta question…" autocomplete="off"></textarea>
+    <button class="btn btn-play" type="submit">Envoyer</button>
+  </form>
+  <p class="foot">Réponses générées par une IA, elles peuvent se tromper. <button type="button" data-support>Contacter le support</button></p>
+</section>
+
+<div class="sup" id="sup" hidden role="dialog" aria-modal="true" aria-labelledby="sup-t">
+  <form id="sup-form" novalidate>
+    <h2 class="h3" id="sup-t" style="font-size:26px">Signaler un problème</h2>
+    <p style="color:var(--mute)">Explique ce qui s'est passé et ce que tu essayais de faire. Une capture d'écran peut aider.</p>
+    <div class="row"><label for="sup-cat">Que se passe-t-il ?</label>
+      <select id="sup-cat" name="category"><option value="partie">Partie introuvable</option><option value="affichage">Problème d'affichage</option><option value="bug">Bug de jeu</option><option value="autre" selected>Autre question</option></select></div>
+    <div class="row"><label for="sup-cap">Nom de capitaine, si tu en as un</label><input id="sup-cap" name="captain" type="text" maxlength="60" autocomplete="nickname"></div>
+    <div class="row"><label for="sup-mail">Adresse e-mail pour te répondre</label><input id="sup-mail" name="email" type="email" maxlength="160" autocomplete="email" required></div>
+    <div class="row"><label for="sup-msg">Décris le problème</label><textarea id="sup-msg" name="message" maxlength="4000" required></textarea></div>
+    <div class="row"><label for="sup-img">Ajouter une capture — facultatif</label><input id="sup-img" type="file" accept="image/png,image/jpeg,image/webp"></div>
+    <label class="chk" id="sup-convo-row" hidden><input type="checkbox" id="sup-convo" checked> Joindre ma conversation avec l'Assistance de bord</label>
+    <div class="hp" aria-hidden="true"><label for="sup-site">Ne pas remplir</label><input id="sup-site" type="text" tabindex="-1" autocomplete="off"></div>
+    <p class="status" id="sup-status" role="status"></p>
+    <div class="btns"><button class="btn btn-ghost" type="button" id="sup-cancel">Fermer</button><button class="btn btn-play" type="submit" id="sup-send">Envoyer mon message</button></div>
+    <p class="note">Ton message est envoyé à l'équipe de Starbyte, qui te répondra par e-mail.</p>
+  </form>
+</div>
 <div class="modal" id="modal" hidden role="dialog" aria-modal="true" aria-labelledby="m-title">
   <div class="top">
     <div><p class="label" id="m-kick"></p><h3 id="m-title"></h3><p id="m-intro"></p></div>
@@ -559,16 +660,114 @@ footer .base{font:500 12px/1 var(--f-data);letter-spacing:.18em;color:var(--mute
 
 <script>
 /* Réglages du site. Laisser vide tant que le service n'existe pas : les liens correspondants restent masqués. */
-window.STARBYTE = { soutien: '', contact: '' };
+window.STARBYTE = { soutien: 'https://buy.stripe.com/bJe00c0or4Jm7zJ2p82Ry02', contact: 'form' };
 (function () {
   var C = window.STARBYTE;
   [['soutien', '.js-soutien'], ['contact', '.js-contact']].forEach(function (k) {
     if (!C[k[0]]) return;
     document.querySelectorAll('[data-needs="' + k[0] + '"]').forEach(function (e) { e.hidden = false; });
-    document.querySelectorAll(k[1]).forEach(function (a) { a.href = C[k[0]]; });
+    document.querySelectorAll(k[1]).forEach(function (a) { if (C[k[0]] === 'form') { a.href = '#aide'; a.setAttribute('data-support', ''); } else { a.href = C[k[0]]; a.target = '_blank'; a.rel = 'noopener'; } });
   });
   var dn = document.getElementById('daynight'), r = document.getElementById('dn-range');
   if (dn && r) r.addEventListener('input', function () { dn.style.setProperty('--x', r.value + '%'); });
+})();
+</script>
+
+<script>
+/* Assistance de bord + formulaire de support. Indépendant de la 3D : fonctionne même si le CDN est bloqué. */
+(function () {
+  var API = 'api/';
+  var openBtn = document.getElementById('ab-open'), box = document.getElementById('ab'), log = document.getElementById('ab-log');
+  var form = document.getElementById('ab-form'), input = document.getElementById('ab-input'), sug = document.getElementById('ab-sug');
+  var history = [], busy = false, greeted = false;
+  var GREET = 'Bonjour, capitaine. Je peux t’aider à commencer, installer le jeu, retrouver ta partie ou comprendre une mécanique. Que souhaites-tu savoir ?';
+  function el(tag, cls, text) { var e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
+  function scroll() { log.scrollTop = log.scrollHeight; }
+  function bubble(role, text, opts) {
+    var b = el('div', 'ab-m ' + (role === 'user' ? 'me' : 'bot') + (opts && opts.err ? ' err' : ''), text);
+    if (opts && opts.support) { var a = el('div', 'act'); var btn = el('button', '', 'Contacter le support'); btn.type = 'button'; btn.setAttribute('data-support', ''); a.appendChild(btn); b.appendChild(a); }
+    log.appendChild(b); scroll(); return b;
+  }
+  function open() {
+    box.hidden = false; openBtn.hidden = true; openBtn.setAttribute('aria-expanded', 'true');
+    if (!greeted) { bubble('assistant', GREET); greeted = true; }
+    setTimeout(function () { input.focus(); }, 50);
+  }
+  function close() { box.hidden = true; openBtn.hidden = false; openBtn.setAttribute('aria-expanded', 'false'); openBtn.focus(); }
+  openBtn.addEventListener('click', open);
+  document.getElementById('ab-close').addEventListener('click', close);
+  addEventListener('keydown', function (e) { if (e.key === 'Escape' && !box.hidden && document.getElementById('sup').hidden) close(); });
+
+  function send(q) {
+    q = (q || '').trim(); if (!q || busy) return;
+    busy = true; sug.hidden = true;
+    bubble('user', q); history.push({ role: 'user', content: q });
+    var t = el('div', 'ab-typing'); t.setAttribute('aria-label', 'L’assistance écrit'); t.innerHTML = '<i></i><i></i><i></i>'; log.appendChild(t); scroll();
+    var ctl = new AbortController(); var timer = setTimeout(function () { ctl.abort(); }, 45000);
+    fetch(API + 'chat.php', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ messages: history.slice(-8) }), signal: ctl.signal })
+      .then(function (r) { return r.json().catch(function () { return { error: 'bad' }; }).then(function (d) { d._s = r.status; return d; }); })
+      .then(function (d) {
+        t.remove();
+        if (d && d.reply) {
+          var txt = d.reply, sup = /\[SUPPORT\]/.test(txt);
+          txt = txt.replace(/\s*\[SUPPORT\]\s*/g, ' ').trim();
+          history.push({ role: 'assistant', content: txt });
+          bubble('assistant', txt, { support: sup });
+        } else {
+          history.pop();
+          var m = d && d.error === 'rate_limit' ? 'Tu as posé beaucoup de questions en peu de temps. Réessaie dans un moment, ou consulte la FAQ.'
+            : 'L’assistant est momentanément indisponible. Tu peux consulter la FAQ ou contacter le support.';
+          bubble('assistant', m, { err: true, support: true });
+        }
+      })
+      .catch(function () { t.remove(); history.pop(); bubble('assistant', 'L’assistant est momentanément indisponible. Tu peux consulter la FAQ ou contacter le support.', { err: true, support: true }); })
+      .then(function () { clearTimeout(timer); busy = false; });
+  }
+  form.addEventListener('submit', function (e) { e.preventDefault(); var q = input.value; input.value = ''; input.style.height = ''; send(q); });
+  input.addEventListener('keydown', function (e) { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); form.requestSubmit(); } });
+  input.addEventListener('input', function () { input.style.height = 'auto'; input.style.height = Math.min(input.scrollHeight, 120) + 'px'; });
+  sug.addEventListener('click', function (e) { var b = e.target.closest('button[data-q]'); if (b) send(b.getAttribute('data-q')); });
+
+  // --- Formulaire de support ---
+  var sup = document.getElementById('sup'), sf = document.getElementById('sup-form'), st = document.getElementById('sup-status');
+  var send2 = document.getElementById('sup-send'), convoRow = document.getElementById('sup-convo-row'), lastFocus = null;
+  function openSup() {
+    lastFocus = document.activeElement;
+    convoRow.hidden = history.length === 0;
+    st.textContent = ''; st.className = 'status'; send2.disabled = false;
+    sup.hidden = false; document.body.style.overflow = 'hidden';
+    document.getElementById('sup-cat').focus();
+  }
+  function closeSup() { sup.hidden = true; document.body.style.overflow = ''; if (lastFocus && lastFocus.focus) lastFocus.focus(); }
+  document.addEventListener('click', function (e) { var b = e.target.closest('[data-support]'); if (b) { e.preventDefault(); openSup(); } });
+  document.getElementById('sup-cancel').addEventListener('click', closeSup);
+  addEventListener('keydown', function (e) { if (e.key === 'Escape' && !sup.hidden) closeSup(); });
+  function readImage(file) {
+    return new Promise(function (res) {
+      if (!file) return res('');
+      if (file.size > 3 * 1024 * 1024) return res('TOO_BIG');
+      var fr = new FileReader(); fr.onload = function () { res(String(fr.result)); }; fr.onerror = function () { res(''); }; fr.readAsDataURL(file);
+    });
+  }
+  sf.addEventListener('submit', function (e) {
+    e.preventDefault();
+    var mail = document.getElementById('sup-mail'), msg = document.getElementById('sup-msg');
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(mail.value.trim())) { st.className = 'status ko'; st.textContent = 'Indique une adresse e-mail valide pour qu’on puisse te répondre.'; mail.focus(); return; }
+    if (msg.value.trim().length < 5) { st.className = 'status ko'; st.textContent = 'Décris le problème en quelques mots.'; msg.focus(); return; }
+    send2.disabled = true; st.className = 'status'; st.textContent = 'Envoi en cours…';
+    readImage(document.getElementById('sup-img').files[0]).then(function (img) {
+      if (img === 'TOO_BIG') { send2.disabled = false; st.className = 'status ko'; st.textContent = 'La capture dépasse 3 Mo. Choisis une image plus légère.'; return; }
+      var convo = (!convoRow.hidden && document.getElementById('sup-convo').checked) ? history.map(function (m) { return (m.role === 'user' ? 'Joueur : ' : 'Assistance : ') + m.content; }).join('\n\n') : '';
+      var body = { category: document.getElementById('sup-cat').value, captain: document.getElementById('sup-cap').value, email: mail.value.trim(), message: msg.value,
+        image: img, conversation: convo, device: navigator.userAgent, site: document.getElementById('sup-site').value };
+      return fetch(API + 'contact.php', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+        .then(function (r) { return r.json().catch(function () { return {}; }); })
+        .then(function (d) {
+          if (d && d.ok) { st.className = 'status ok'; st.textContent = 'Ton message a bien été envoyé. Merci pour ton retour.'; sf.reset(); }
+          else { send2.disabled = false; st.className = 'status ko'; st.textContent = d && d.error === 'rate_limit' ? 'Trop de messages envoyés en peu de temps. Réessaie plus tard.' : 'Ton message n’a pas pu être envoyé. Réessaie dans un instant.'; }
+        });
+    }).catch(function () { send2.disabled = false; st.className = 'status ko'; st.textContent = 'Ton message n’a pas pu être envoyé. Réessaie dans un instant.'; });
+  });
 })();
 </script>
 <script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.169.0/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.169.0/examples/jsm/"}}</script>
