@@ -4539,6 +4539,12 @@ svg.map {
         J'ai déjà une partie
       </button>
 
+      <!-- PATCH_2210_PWA : télécharger l'app (écran d'accueil du téléphone) -->
+      <button id="welcome-app" onclick="window.SBApp && SBApp.download()"
+        style="display:flex;align-items:center;justify-content:center;gap:8px;margin:10px auto 0;padding:10px 16px;background:rgba(185,164,255,.10);border:1px solid rgba(185,164,255,.45);border-radius:20px;color:#d9ceff;font-family:inherit;font-size:11px;letter-spacing:.10em;text-transform:uppercase;cursor:pointer">
+        <img src="assets/app/icon-192.png" alt="" style="width:20px;height:20px;border-radius:5px">Télécharger l'app
+      </button>
+
     </div>
 
     <div style="flex:0 0 auto;text-align:center;font-size:9px;letter-spacing:.08em;color:rgba(220,228,240,.55);margin-top:12px">© Adrien Thétaz - 2026</div>
@@ -48868,9 +48874,9 @@ if (G.knownTargets && Array.isArray(G.tankerMissions)) {
     if (document.getElementById('sb-install')) return;
     const el = document.createElement('div'); el.id = 'sb-install'; el.dataset.base = 'translateX(X)';
     const body = deferred
-      ? `<div class="a"><button class="no">Plus tard</button><button class="go">Installer</button></div>`
+      ? `<div class="a"><button class="no">Plus tard</button><button class="go">Télécharger</button></div>`
       : `<div class="st">Touche ${SHARE} <b>Partager</b> (ou <b>•••</b> puis <b>Partager</b>), puis <b>« Sur l'écran d'accueil »</b>.</div><div class="a"><button class="no">Plus tard</button></div>`;
-    el.innerHTML = `<div class="h"><img src="assets/app/icon-192.png" alt=""><div><div class="t">Installe Starbyte</div>
+    el.innerHTML = `<div class="h"><img src="assets/app/icon-192.png" alt=""><div><div class="t">Télécharger l'app Starbyte</div>
       <div class="s">Plein écran, démarrage plus rapide, ta planète à portée de pouce.</div></div></div>${body}`;
     document.body.appendChild(el);
     el.querySelector('.no').onclick = () => hide(true);
@@ -48893,7 +48899,28 @@ if (G.knownTargets && Array.isArray(G.tankerMissions)) {
   }
   let shown = false;
   setTimeout(() => { const t = setInterval(() => { if (shown) return clearInterval(t); if (eligible()) { shown = true; show(); } }, 3000); }, 45000);
-  window.SBApp = { standalone, show, _state: () => st };
+  // bouton « Télécharger l'app » de l'écran d'accueil : Android = vraie installation ; iPhone = les 3 gestes, illustrés
+  async function download() {
+    if (standalone()) { if (typeof toast === 'function') toast('Starbyte est déjà installé sur ce téléphone'); return; }
+    if (deferred) { try { deferred.prompt(); const r = await deferred.userChoice; if (r && r.outcome === 'accepted') { st.installed = Date.now(); save(); } } catch (e) {} deferred = null; return; }
+    document.getElementById('sb-dl')?.remove();
+    const ov = document.createElement('div'); ov.id = 'sb-dl';
+    ov.style.cssText = 'position:fixed;inset:0;z-index:9800;background:rgba(0,0,0,.7);display:flex;align-items:flex-end;justify-content:center';
+    const step = (n, html) => `<div style="display:flex;gap:12px;align-items:center;padding:11px 0;border-bottom:1px solid rgba(255,255,255,.07)"><b style="flex-shrink:0;width:28px;height:28px;border-radius:50%;display:grid;place-items:center;background:rgba(185,164,255,.16);border:1px solid rgba(185,164,255,.5);color:#efeaff;font-size:13px">${n}</b><div style="font-size:14px;line-height:1.45;color:#e8e2ff">${html}</div></div>`;
+    const big = SHARE.replace('<svg ', '<svg style="width:22px;height:22px;vertical-align:-5px" ');
+    ov.innerHTML = `<div style="width:100%;max-width:480px;background:linear-gradient(#120e24,#08070f);border-top:1px solid rgba(185,164,255,.4);border-radius:18px 18px 0 0;padding:20px 18px calc(env(safe-area-inset-bottom,0px) + 20px);font-family:'Space Grotesk',system-ui,sans-serif">
+      <div style="display:flex;gap:12px;align-items:center;margin-bottom:6px"><img src="assets/app/icon-192.png" alt="" style="width:52px;height:52px;border-radius:12px">
+        <div><div style="font-size:17px;font-weight:600;color:#fff">Télécharger l'app Starbyte</div><div style="font-size:12px;color:rgba(232,226,255,.65)">Gratuit · plein écran · démarrage rapide</div></div></div>
+      ${ios ? step(1, `Touche ${big} <b>Partager</b> dans la barre de Safari<br><span style="font-size:12px;color:rgba(232,226,255,.6)">(ou <b>•••</b> en bas à droite, puis <b>Partager</b>)</span>`)
+            + step(2, `Choisis <b>« Sur l'écran d'accueil »</b><br><span style="font-size:12px;color:rgba(232,226,255,.6)">(fais défiler la liste si besoin)</span>`)
+            + step(3, `Touche <b>Ajouter</b> : l'icône Starbyte apparaît avec tes apps`)
+          : step(1, `Ouvre le menu <b>⋮</b> du navigateur`) + step(2, `Choisis <b>« Installer l'application »</b> ou <b>« Ajouter à l'écran d'accueil »</b>`)}
+      <button style="margin-top:16px;width:100%;padding:13px;border-radius:10px;border:1px solid rgba(185,164,255,.6);background:rgba(185,164,255,.14);color:#efeaff;font:inherit;font-size:12px;letter-spacing:.12em;text-transform:uppercase;cursor:pointer">J'ai compris</button></div>`;
+    ov.addEventListener('click', (e) => { if (e.target === ov || e.target.tagName === 'BUTTON') ov.remove(); });
+    document.body.appendChild(ov);
+  }
+  try { if (standalone()) { const b = document.getElementById('welcome-app'); if (b) b.style.display = 'none'; } } catch (e) {}
+  window.SBApp = { standalone, show, download, _state: () => st };
 })();
 </script>
 
