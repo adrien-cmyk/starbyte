@@ -1,34 +1,9 @@
-# Starbyte — V0.5 (beta)
+# Starbyte
 
-Jeu mobile combinant match-3 et gestion planétaire.
+Jeu mobile (web app) : match-3 hexagonal et empire galactique persistant. © Adrien Thétaz.
 
-🎮 **Jouer en ligne** : https://[ton-username].github.io/starbyte/
-
-## C'est quoi ?
-
-Tu arrives sur une planète neutre. Tu joues au match-3 pour extraire des ressources, terraformer des parcelles, construire des bâtiments, déployer des sondes et bientôt — pirater les routes commerciales d'autres joueurs.
-
-## Versions
-
-- **V0.5 (mai 2026)** — Version beta livrée à 10 testeurs
-  - Match-3 thématique (Laboratoire, Centrale énergétique)
-  - Carnet du capitaine + cartes de routes
-  - Centre de Prospection avec 4 tiers de sondes (Radar, Légère, Moyenne, Furtive)
-  - Système militaire complet (Caserne, Chantier orbital, flotte composée)
-  - Tankers logistiques + routes commerciales
-  - 🆕 **Balises de surveillance** (Phase 4 P1)
-
-## Comment ça marche techniquement
-
-- HTML/JS pur, pas de backend
-- Sauvegarde locale (localStorage)
-- Optimisé pour iPhone Safari
-
-## Crédits
-
-Game design, art direction, code : Adrien
-Co-développement : Claude (Anthropic)
-
----
-
-*Starbyte est un projet expérimental en développement actif.*
+- **Jouer** : https://play.starbyte.online
+- **Le jeu** : dossier `github_upload/` (page `index.html`, `assets/`, `tiles/`, `illustrations/`, `sw.js`, `manifest.webmanifest`).
+- **Serveur** : `github_upload/server/` (scripts SQL Supabase, fonction `resolve-raids`) — jamais publié sur le site.
+- **Publication** : chaque modification poussée dans `github_upload/` part automatiquement chez Infomaniak
+  (`.github/workflows/publier-infomaniak.yml`, FTPS, fichiers modifiés seulement).

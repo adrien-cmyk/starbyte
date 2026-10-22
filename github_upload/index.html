@@ -41469,9 +41469,34 @@ const SECRET_TAP_COUNT_NEEDED = 5;
 const SECRET_TAP_WINDOW_MS = 3000;
 let _secretTapTimestamps = [];
 
+// PATCH_2210_CHEATS — le panneau de triche n'existe que pour Adrien (son commandant au registre, ou son email,
+// comparé par empreinte : l'adresse n'apparaît pas dans le code) et pour les tests en local. Pour tout autre
+// joueur, taper sur le nom de la planète ne fait plus rien et un ancien mode développeur est ignoré.
+const SB_DEV_PSEUDOS = ['hadrien'];
+const SB_DEV_EMAIL_SHA = 'c8bdf9434f4c2dda2d7376b468cbe2b9503d3228abeb7ff91a806c4cb7584aa4';
+let _sbDevEmailOk = false;
+function _sbDevAllowed() {
+  if (/^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname)) return true;
+  try { const p = window.SBMP && SBMP.world && SBMP.world.pseudo; if (p && SB_DEV_PSEUDOS.includes(String(p).toLowerCase())) return true; } catch (e) {}
+  return _sbDevEmailOk;
+}
+(function _sbDevEmailCheck(n) {
+  try {
+    const u = window.SBCloud && SBCloud.user;
+    if (u && u.email && window.crypto && crypto.subtle) {
+      crypto.subtle.digest('SHA-256', new TextEncoder().encode(String(u.email).trim().toLowerCase())).then(b => {
+        _sbDevEmailOk = [...new Uint8Array(b)].map(x => x.toString(16).padStart(2, '0')).join('') === SB_DEV_EMAIL_SHA;
+        if (typeof _applyDevModeUI === 'function') _applyDevModeUI();
+      });
+      return;
+    }
+  } catch (e) {}
+  if (n < 120) setTimeout(() => _sbDevEmailCheck(n + 1), 2000);
+})(0);
+setInterval(() => { try { if (typeof _applyDevModeUI === 'function') _applyDevModeUI(); } catch (e) {} }, 5000);
 function _isDevMode() {
   try {
-    return localStorage.getItem(SECRET_TAP_KEY) === 'true';
+    return localStorage.getItem(SECRET_TAP_KEY) === 'true' && _sbDevAllowed();
   } catch (e) {
     return false;
   }
@@ -41499,6 +41524,7 @@ function _applyDevModeUI() {
 
 // Appelée par le onclick du nom de planète
 function _secretTap() {
+  if (!_sbDevAllowed()) return;   // PATCH_2210_CHEATS
   const now = Date.now();
   // Garder seulement les taps dans la fenêtre récente
   _secretTapTimestamps = _secretTapTimestamps.filter(t => (now - t) < SECRET_TAP_WINDOW_MS);
