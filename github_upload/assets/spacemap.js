@@ -261,7 +261,7 @@
     // 21/10 (Adrien : « la route du Linceul a encore changé ») — positions FIGÉES : un système qui a reçu une case la garde
     // pour toujours (G.mapCells). Les nouveaux venus se placent autour ; une route qui s'allonge ajoute ses jalons sans
     // déplacer ceux qu'on connaît. Les cases des systèmes absents (rapports supprimés…) restent réservées.
-    if (!G.mapCells || G.mapCells.v !== 4 || G.mapCells.home !== home) G.mapCells = { v: 4, home, cells: {} };   // v4 (22/10) : recalcul unique — routes en ligne droite depuis mon côté
+    if (!G.mapCells || G.mapCells.v !== 5 || G.mapCells.home !== home) G.mapCells = { v: 5, home, cells: {} };   // v5 (22/10) : recalcul unique — routes en ligne droite, sur le flanc si le lieu est tout près
     const MC = G.mapCells.cells;
     const fixed = new Set(), reserved = [];
     for (const [k, idx] of Object.entries(MC)) {
@@ -315,9 +315,12 @@
         let base = Math.atan2(-B.z, -B.x);
         if (dB < 1) base = _mulberry32(_hashSeed('SMr:' + kB))() * Math.PI * 2;
         let c = null;
-        for (const dd of [0, 30, -30, 60, -60, 90, -90, 120, -120, 150, -150, 180]) {
+        const Rf = CELL * (n + 0.5), room = dB - CELL * 2 >= Rf * 0.8;
+        // lieu trop près de moi pour y loger la ligne de mon côté : elle passe sur le flanc (trajet en triangle, sans repli)
+        const order = room ? [0, 30, -30, 60, -60, 90, -90, 120, -120, 150, -150, 180] : [90, -90, 60, -60, 120, -120, 30, -30, 150, -150, 180, 0];
+        for (const dd of order) {
           const a = base + dd * Math.PI / 180;
-          const R = dd === 0 ? Math.max(CELL, Math.min(CELL * (n + 0.5), dB - CELL * 2)) : CELL * (n + 0.5);
+          const R = dd === 0 && room ? Math.min(Rf, dB - CELL * 2) : Rf;
           const x = B.x + Math.cos(a) * R, z = B.z + Math.sin(a) * R;
           let near = null, bd = Infinity; for (const q of CELLS) { const d = Math.hypot(q.x - x, q.z - z); if (d < bd) { bd = d; near = q; } }
           if (!near || near.ring > BOARD - 1 || near.ring < minRing || bd > CELL) continue;
