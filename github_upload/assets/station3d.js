@@ -243,6 +243,510 @@ const PROFILES = {
     // sans l'occlusion ambiante de la vitrine (trop lourde sur mobile) : un peu moins de lumière d'ambiance pour garder l'ivoire sombre
     night: { light: 0.85, hull: 0.78, envScene: 0.55 },
   },
+  // 22/10 — veyra (station lointaine, vitrine validée par Adrien)
+  // 22/10 — L'Œil de Veyra (ex « Station Oculaire », planche « OCULAR STATION ») : sphère de céramique marbrée de 600 m,
+  // veines d'or, iris de métal bleu-vert ; le bar et les quais vivent derrière la pupille. Vitrine validée par Adrien :
+  // nuit bleu nuit et sarcelle, poches dorées, étoile pâle derrière la sphère, champ de débris sombres.
+  veyra: {
+    S: 1 / 60, near: 0.03, half: [7.0, 8.0], minFit: 10, bg: 0x03070c, haze: 0x101c2c, fog: [4.5, 22],
+    sun: [-0.55, 0.58, -0.60], core: [-0.45, 0.40, -0.80], camDir: [0.42, 0.20, 0.88], introDir: [0.95, 0.55, -0.20],
+    // céramique marbrée satinée, laiton poli, métaux sombres brillants (rugosité, métal)
+    GLOSS: {
+      M_OC_IVORY: [0.36, 0.0], M_OC_IVORY2: [0.40, 0.0], M_OC_BRASS: [0.26, 0.92], M_OC_GUNMETAL: [0.30, 0.85], M_OC_DARK: [0.36, 0.55],
+      M_OC_STEEL: [0.30, 0.85], M_OC_INNER: [0.6, 0.3], M_OC_FLOOR: [0.45, 0.3], M_OC_WOOD: [0.42, 0.0], M_OC_VEIN2: [0.5, 0.2],
+    },
+    GLOW: { M_OC_VEIN: 1.25, M_OC_WIN: 1.7, M_OC_WARM: 1.15, M_OC_BEACON: 3.0, M_OC_NAV_R: 2.5, M_OC_NAV_G: 2.5 },
+    GLOW_COLOR: { M_OC_VEIN: 0xffa040, M_OC_WIN: 0xffb466, M_OC_WARM: 0xffc488, M_OC_BEACON: 0xfff0e0, M_OC_NAV_R: 0xff2010, M_OC_NAV_G: 0x30ff60 },
+    LOOK: {   // céramique : grands panneaux, patine, coulures ; métaux usés
+      M_OC_IVORY:    { cell: [14.0, 9.0], seam: .14, depth: .08, tint: .07, rough: .10, grime: .42, wear: .25 },
+      M_OC_IVORY2:   { cell: [14.0, 9.0], seam: .14, depth: .08, tint: .08, rough: .10, grime: .48, wear: .25 },
+      M_OC_GUNMETAL: { cell: [6.0, 4.0], seam: .14, depth: .30, tint: .08, rough: .12, grime: .25, wear: .40 },
+      M_OC_DARK:     { cell: [8.0, 5.0], seam: .16, depth: .14, tint: .12, rough: .14, grime: .18, wear: .25 },
+      M_OC_BRASS:    { cell: [5.0, 4.0], seam: .10, depth: .08, tint: .08, rough: .10, grime: .32, wear: .55 },
+    },
+    // comme la vitrine : tout en double face (l'intérieur se voit par la pupille) ; iris de métal bleu-vert très brillant ; vitres fumées
+    fix: (mat) => {
+      if (mat.userData.vy) return; mat.userData.vy = 1;
+      mat.side = 2;
+      const IRIS = { M_OC_IRIS: [0x0b3d4c, 0x000000, 0.0], M_OC_IRIS3: [0x16697a, 0x000000, 0.0], M_OC_IRIS2: [0x4c6436, 0x7a9440, 0.10] }[mat.name];
+      if (IRIS) { mat.color.set(IRIS[0]); mat.emissive.set(IRIS[1]); mat.emissiveIntensity = IRIS[2]; mat.roughness = 0.14; mat.metalness = 0.75; }
+      // sans l'occlusion ambiante de la vitrine (trop lourde sur mobile), l'intérieur s'éclaircissait : sols et parois intérieures assombris
+      if (mat.name === 'M_OC_FLOOR') { mat.color.multiplyScalar(0.08); mat.roughness = 0.7; mat.metalness = 0.1; }
+      if (mat.name === 'M_OC_INNER') mat.color.multiplyScalar(0.4);
+      if (mat.name === 'M_OC_WOOD') mat.color.multiplyScalar(0.75);
+      if (mat.name === 'M_OC_GLASS') { mat.transparent = true; mat.opacity = 0.35; mat.roughness = 0.05; mat.depthWrite = false; mat.color.set(0x2a3448); }
+    },
+    glass: [.16, .2, .28], rockLift: null, nav: (n) => n.startsWith('M_OC_NAV') || n === 'M_OC_BEACON', beacon: '', navPulse: [1.2, 2.5, 1.1],
+    breathe: { M_OC_VEIN: [1.15, 0.25, 0.5] },   // les veines d'or respirent lentement
+    cloud: { dust: [0x05080d, 0x070b12, 0x0a0e16], gas: [0x1c3448, 0x24405a, 0x1a2c40, 0x2e2c26], glow: [0x6cc4d8, 0xffc070, 0x8fd0e0],
+             nearSize: [9, 12], farSize: [30, 36], nearR: [14, 16], farR: [40, 40], nearY: [-8, 12], farY: [-24, 34], w: 0.010 },
+    sky: { a: '.08, .20, .30', b: '.10, .30, .34', c: '.30, .22, .11', base: '.010, .008, .020', fil: '.49, .73, .81', glow: '1.25, 1.0, .69' },
+    sunStops: [
+      [34,  [[0, 'rgba(255,255,255,1)'], [.35, 'rgba(236,244,255,1)'], [.5, 'rgba(190,215,240,.6)'], [1, 'rgba(150,185,220,0)']], .9, 1],
+      [300, [[0, 'rgba(220,232,255,.85)'], [.12, 'rgba(150,185,255,.40)'], [.4, 'rgba(60,110,200,.10)'], [1, 'rgba(30,60,120,0)']], .85, 1],
+      [1000, [[0, 'rgba(180,210,235,.24)'], [.3, 'rgba(80,120,160,.08)'], [1, 'rgba(30,50,80,0)']], .8, 1],
+      [760, [[0, 'rgba(210,225,255,.7)'], [.25, 'rgba(120,160,230,.22)'], [1, 'rgba(60,90,160,0)']], .4, 0.03],
+    ],
+    key: [0xfff0dc, 2.6, 40, 7, 90], fill: [0x6c9cc8, 0.55], rim: [0xb8d8ff, 0.3], hemi: [0x22344a, 0x0e0a08],
+    // bras d'amarrage (X ±360), mâts (Z ±410), la pupille (trois fois : c'est la grande porte), le moyeu arrière
+    tips: [[360, 10, 0], [-360, 10, 0], [0, 10, 410], [0, 10, -410], [0, -300, 0], [0, -300, 0], [0, -300, 0], [0, 380, 0]].map(t => t.concat([0])),
+    lane: { n: 36, nLite: 16, out: [12, 20], spread: 4, lift: [4, 2], size: [0.12, 0.35] },
+    orbit: { n: 18, nLite: 8, r: [7.5, 4], y: 8, size: [0.10, 0.22] },
+    target: [0, 0.1, 0], minDist: 6.4,
+    lights: (L, hv, P) => {   // l'intérieur s'allume : bar, pont d'amarrage, hangar, cabines ; la lumière sort par la pupille
+      const bar = L(0xffb066, 2.6, 5.0, P(0, -40, 160));
+      L(0xffb066, 1.6, 5.0, P(0, -60, 60));
+      L(0xff9a50, 1.4, 4.5, P(0, -40, -100));   // le fond (plus doux que la vitrine : sans occlusion, il blanchissait)
+      L(0xffc080, 1.6, 3.5, P(0, 150, 0));
+      L(0xffb066, 0.8, 2.4, P(0, -310, 40));     // halo chaud devant la pupille
+      L(0xffa040, 0.8, 2.2, P(0, 330, 0));       // moyeu arrière
+      hv(P(0, -285, 10), 2.2, 0xffb466, 0.25);
+      return bar;
+    },
+    // « le bar » : l'intérieur chaud derrière l'iris, vu par la pupille
+    barShot: { t: [0, -60, 40], p: [150, -680, 250] }, barAt: [0, -420, 140], barMax: 14,
+    // « le dock » : le bras d'amarrage est (X +345), ton tanker à quai au bout du bras
+    dockShot: { t: [380, 10, 0], p: [640, -330, 170] }, dockMax: 10,
+    tankerAt: { pos: [428, 10, -20], rotZ: 90, scale: 4 },
+    // champ de débris sombres qui dérivent (roche et ferraille, pas de glace ici)
+    ice: { n: 420, nLite: 160, big: 36, color: 0x2e2a28, emissive: 0x000000 },
+    night: { bloom: [0.6, 0.45, 1.0], envScene: 0.55 },
+  },
+  // 22/10 — lucioles (station lointaine, vitrine validée par Adrien)
+  // 22/10 — Le Mont des Lucioles (ex « Montagne Fluorescente », planche « FLUORESCENT MOUNTAIN ») : rocher cristallin de 2 km,
+  // lichen vert fluorescent, cristaux violets, cités en chapeaux de champignon, hangar creusé dans la roche, neuf quais.
+  // Vitrine validée par Adrien : nébuleuse violette et vert d'eau, étoile pâle derrière le pic, éclats de cristal qui dérivent.
+  // Repère Blender (m) sans recentrage : la montagne monte de Z 0 à 1 815 m, la cible est remontée d'autant (Y scène 4,5).
+  lucioles: {
+    S: 0.005, near: 0.03, half: [6.6, 6.2], minFit: 10, bg: 0x05040a, haze: 0x1d1430, fog: [4.5, 22],
+    sun: [-0.55, 0.58, -0.60], core: [-0.45, 0.40, -0.80], camDir: [0.48, 0.22, 0.85], introDir: [0.95, 0.55, -0.20],
+    // roche mate, ponts et laiton métalliques satinés (rugosité, métal)
+    GLOSS: {
+      M_FM_ROCK: [0.82, 0.0], M_FM_ROCK2: [0.70, 0.05], M_FM_DECK: [0.42, 0.6], M_FM_DECK2: [0.38, 0.65], M_FM_BRASS: [0.30, 0.9],
+      M_FM_DARK: [0.6, 0.4], M_FM_RIM: [0.22, 0.15],
+    },
+    // fluorescence vive mais contenue (le bloom démarre à 1)
+    GLOW: { M_FM_GLOW: 0.62, M_FM_GILL: 0.6, M_FM_GILL2: 0.45, M_FM_WIN: 1.6, M_FM_HANGAR: 1.25, M_FM_BEACON: 3.0, M_FM_NAV_R: 2.5, M_FM_NAV_G: 2.5 },
+    GLOW_COLOR: { M_FM_GLOW: 0x5dff4a, M_FM_GILL: 0x6dff5a, M_FM_GILL2: 0x8a3cff, M_FM_WIN: 0xffb060, M_FM_HANGAR: 0xffd29a,
+      M_FM_BEACON: 0xfff0e0, M_FM_NAV_R: 0xff2010, M_FM_NAV_G: 0x30ff60 },
+    LOOK: {   // ponts métalliques à joints, patine ; laiton usé
+      M_FM_DECK:  { cell: [9.0, 6.0], seam: .18, depth: .20, tint: .10, rough: .12, grime: .30, wear: .35 },
+      M_FM_DECK2: { cell: [7.0, 5.0], seam: .16, depth: .18, tint: .08, rough: .10, grime: .28, wear: .40 },
+      M_FM_BRASS: { cell: [6.0, 4.0], seam: .12, depth: .10, tint: .08, rough: .10, grime: .30, wear: .50 },
+    },
+    // comme la vitrine : double face ; cristaux brillants à lueur intérieure violette ; roche un peu assombrie ; vitres fumées
+    fix: (mat) => {
+      if (mat.userData.ml) return; mat.userData.ml = 1;
+      mat.side = 2;
+      if (mat.name === 'M_FM_ROCK') mat.color.multiplyScalar(0.9);
+      const CR = { M_FM_CRYSTAL: [0x5a1fd8, 0x6a22f0, 0.38], M_FM_CRYSTAL2: [0x8a5cf0, 0x8a48ff, 0.6], M_FM_RIM: [0x7a48c8, 0x6a28e0, 0.35] }[mat.name];
+      if (CR) { mat.color.set(CR[0]).multiplyScalar(0.75); mat.emissive.set(CR[1]); mat.emissiveIntensity = CR[2]; mat.roughness = mat.name === 'M_FM_RIM' ? 0.25 : 0.12; mat.metalness = 0.1; }
+      if (mat.name === 'M_FM_GLASS') { mat.transparent = true; mat.opacity = 0.55; mat.roughness = 0.05; mat.depthWrite = false; mat.color.set(0x2a3448); }
+    },
+    glass: [.16, .2, .28], rockLift: null, nav: (n) => n.startsWith('M_FM_NAV') || n === 'M_FM_BEACON', beacon: '', navPulse: [1.2, 2.5, 1.1],
+    breathe: { M_FM_GLOW: [0.6, 0.14, 0.55] },   // le lichen respire lentement
+    cloud: { dust: [0x08060f, 0x0b0814, 0x0d0a18], gas: [0x3a2458, 0x2c1c4a, 0x1f3a3a, 0x452a66], glow: [0x9a6cff, 0x7cff8a, 0xb48cff],
+             nearSize: [9, 12], farSize: [30, 36], nearR: [14, 16], farR: [40, 40], nearY: [-3.6, 12], farY: [-19.6, 34], w: 0.010 },
+    sky: { a: '.24, .12, .40', b: '.10, .30, .24', c: '.36, .20, .52', base: '.010, .008, .020', fil: '.45, .81, .49', glow: '.88, .75, 1.19' },
+    sunStops: [
+      [34,  [[0, 'rgba(255,255,255,1)'], [.35, 'rgba(236,244,255,1)'], [.5, 'rgba(190,215,240,.6)'], [1, 'rgba(150,185,220,0)']], .9, 1],
+      [300, [[0, 'rgba(220,232,255,.85)'], [.12, 'rgba(150,185,255,.40)'], [.4, 'rgba(60,110,200,.10)'], [1, 'rgba(30,60,120,0)']], .85, 1],
+      [1000, [[0, 'rgba(180,210,235,.24)'], [.3, 'rgba(80,120,160,.08)'], [1, 'rgba(30,50,80,0)']], .8, 1],
+      [760, [[0, 'rgba(210,225,255,.7)'], [.25, 'rgba(120,160,230,.22)'], [1, 'rgba(60,90,160,0)']], .4, 0.03],
+    ],
+    key: [0xf0e8ff, 2.4, 40, 10, 90], fill: [0x9a7cd8, 0.55], rim: [0xb8c4ff, 0.3], hemi: [0x2c2248, 0x0a1210],
+    // les neuf quais (ouest, est, sud, nord) et la bouche du hangar (deux fois : c'est la grande porte)
+    tips: [[-1020, 470, 700], [-1070, 170, 560], [-1020, -130, 640], [1020, 440, 660], [1020, 90, 520], [1020, -150, 600],
+      [-290, -930, 640], [-250, 910, 800], [100, 900, 520], [-205, -650, 760], [-205, -650, 700]].map(t => t.concat([0])),
+    lane: { n: 36, nLite: 16, out: [12, 20], spread: 4, lift: [4, 2], size: [0.12, 0.35] },
+    orbit: { n: 18, nLite: 8, r: [7, 4], y: 7, size: [0.10, 0.22] },
+    target: [0, 4.5, 0], minDist: 2.2,
+    lights: (L, hv, P) => {
+      L(0xffc080, 2.6, 3.4, P(-205, -700, 760));       // bouche du hangar
+      L(0xffb070, 1.4, 2.2, P(680, -420, 630));        // alcôve droite
+      for (const [x, y, z] of [[-620, 70, 1000], [-320, -310, 880], [100, -560, 900], [700, 40, 800], [350, 540, 1180], [90, 640, 930], [420, -480, 1020], [-440, 480, 980]])
+        L(0x6dff5a, 0.35, 1.6, P(x, y, z));             // lueur verte sous les chapeaux (un peu moins que la vitrine : sans occlusion, le vert débordait)
+      L(0x8a3cff, 1.6, 4.0, P(80, -60, 150));          // cristaux du dessous
+      L(0x8a3cff, 1.2, 3.0, P(40, 30, 1600));          // couronne du pic
+      hv(P(-205, -640, 760), 1.4, 0xffb060, 0);
+      hv(P(80, -40, 40), 1.8, 0x9b55ff, 0.4);
+      return null;   // pas de lueur à baisser de près : le hangar garde sa chaleur
+    },
+    // « le hangar » : la bouche creusée dans la roche (X −560..+150, Z 640–880), ses lueurs chaudes
+    barShot: { t: [-205, -480, 740], p: [100, -1750, 950] }, barAt: [-205, -600, 760], barMax: 10,
+    // « le dock » : le quai est du milieu (pont à Z 520, feux verts au bout, X 1 050), ton tanker amarré en bout de quai
+    dockShot: { t: [1000, 100, 540], p: [1500, -450, 800] }, dockMax: 9,
+    tankerAt: { pos: [1135, 100, 490], rotZ: 90, scale: 6 },
+    // éclats de cristal violet qui dérivent autour du rocher
+    ice: { n: 420, nLite: 160, big: 36, color: 0x7048c8, emissive: 0x3a1488 },
+    night: { bloom: [0.6, 0.45, 1.0], envScene: 0.5 },
+  },
+  // 22/10 — ivoire (station lointaine, vitrine validée par Adrien)
+  // 22/10 — La Grille d'Ivoire (ex « Le Réseau Cristallin », planche « CRYSTAL LATTICE ») : treillis cubique de 1,25 km,
+  // 13 sphères d'ivoire habitées, chrome poli et or ; un cœur (sphère r 270) au portail bleu derrière l'anneau-porte avant.
+  // Vitrine validée par Adrien : joaillerie spatiale dans une nébuleuse bleu nuit voilée d'or, étoile blanc-or haut derrière.
+  // Portée sans GTAO ni MeshPhysical (mobile) : chrome / or / verre réglés dans fix, salles dorées derrière les verrières (shader),
+  // reflets du chrome sur un petit studio de joaillier (nébuleuse + 4 panneaux) cuit une fois en PMREM.
+  ivoire: {
+    S: 0.004, near: 0.03, half: [5.0, 5.4], minFit: 7, bg: 0x03070c, haze: 0x0a1430, fog: [4.5, 22],
+    sun: [-0.62, 0.48, -0.62], core: [-0.45, 0.40, -0.80], camDir: [0.48, 0.26, 0.84], introDir: [0.95, 0.55, -0.20],
+    GLOSS: { M_LT_IVORY: [0.34, 0.0], M_LT_IVORY2: [0.40, 0.0] },
+    GLOW: { M_LT_GLOW: 1.2, M_LT_LAMP: 0.65, M_LT_BLUE: 2.4, M_LT_BEACON: 3.0 },
+    GLOW_COLOR: { M_LT_GLOW: 0xffc26a, M_LT_LAMP: 0xdce8ff, M_LT_BLUE: 0x5aa0ff, M_LT_BEACON: 0xffffff },
+    LOOK: {
+      M_LT_IVORY:  { cell: [11.0, 7.0], seam: .14, depth: .08, tint: .07, rough: .10, grime: .30, wear: .25 },
+      M_LT_IVORY2: { cell: [11.0, 7.0], seam: .14, depth: .08, tint: .08, rough: .10, grime: .36, wear: .25 },
+    },
+    // chrome, or, laque bleu nuit, verrières : les matières « physiques » de la vitrine, sur MeshStandard
+    fix: (mat) => {
+      if (mat.userData.gi) return; mat.userData.gi = 1;
+      const PH = { M_LT_STEEL: [0xb8bcc6, 0.2, 1.0], M_LT_GOLD: [0xdaa54e, 0.2, 1.0], M_LT_DARK: [0x0b0e14, 0.28, 0.7], M_LT_GLASS: [0x0a1426, 0.06, 0.3] }[mat.name];
+      if (!PH) return;
+      mat.color.set(PH[0]); mat.roughness = PH[1]; mat.metalness = PH[2]; mat.side = 2;
+      if (mat.name !== 'M_LT_GLASS') return;
+      // verrières : on devine derrière le verre des étages éclairés, des cloisons et de rares fenêtres chaudes (parallaxe 25 m)
+      mat.transparent = true; mat.opacity = 0.5; mat.depthWrite = false;
+      mat.onBeforeCompile = (sh) => {
+        sh.uniforms.uRoomCol = { value: new window.SB3D.THREE.Color(0xffd49a) }; sh.uniforms.uRoomK = { value: 0.32 };
+        sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nvarying vec3 vOP; varying vec3 vWP;')
+          .replace('#include <begin_vertex>', '#include <begin_vertex>\nvOP = position; vWP = (modelMatrix * vec4(position, 1.0)).xyz;');
+        sh.fragmentShader = sh.fragmentShader.replace('#include <common>', `#include <common>
+          varying vec3 vOP; varying vec3 vWP; uniform vec3 uRoomCol; uniform float uRoomK;
+          float rh(vec3 p){ return fract(sin(dot(p, vec3(12.9898, 78.233, 37.719))) * 43758.5453); }
+          vec3 roomAt(vec3 q){
+            float fl = smoothstep(.90, .985, fract(q.y / 12.0));
+            float wall = smoothstep(.95, 1.0, fract((q.x + q.z * .7) / 14.0));
+            vec3 cell = floor(q / vec3(9.0, 12.0, 9.0));
+            float win = step(.86, rh(cell)) * (1.0 - fl) * smoothstep(.2, .6, fract(q.y / 12.0));
+            float blk = .35 + .65 * rh(floor(q / 60.0));
+            return (uRoomCol * (.18 + fl * .9 + wall * .2) + vec3(1.0, .86, .66) * win * .7) * blk;
+          }`).replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
+          { vec3 q = vOP + normalize(vWP - cameraPosition) * 25.0;
+            float face = pow(abs(dot(normalize(normal), normalize(vViewPosition))), 2.2);
+            totalEmissiveRadiance += roomAt(q) * uRoomK * face; }`);
+      };
+      mat.customProgramCacheKey = () => 'ivoire-room-' + mat.name;
+    },
+    glass: [.02, .03, .05], rockLift: null, nav: (n) => n === 'M_LT_BEACON', beacon: '', navPulse: [1.2, 2.5, 1.1],
+    breathe: { M_LT_GLOW: [1.2, 0.12, 0.6], M_LT_LAMP: [0.65, 0.065, 0.6] },   // les feux respirent à peine
+    cloud: { dust: [0x040814, 0x060a1a, 0x08101e], gas: [0x16285a, 0x1a3470, 0x22306a, 0x142450], glow: [0xffd08a, 0x9fc4ff, 0xffe2b0],
+             nearSize: [9, 12], farSize: [30, 36], nearR: [14, 16], farR: [40, 40], nearY: [-8, 12], farY: [-24, 34], w: 0.010 },
+    // nébuleuse bleu nuit -> bleu roi, voiles et filaments d'or pâle
+    sky: { a: '.06, .12, .34', b: '.08, .20, .44', c: '.40, .30, .16', base: '.010, .008, .020', fil: '.94, .83, .62', glow: '1.27, 1.2, 1.5' },
+    sunStops: [
+      [34,  [[0, 'rgba(255,255,255,1)'], [.35, 'rgba(255,246,228,1)'], [.5, 'rgba(255,220,170,.6)'], [1, 'rgba(240,190,130,0)']], .9, 1],
+      [300, [[0, 'rgba(255,238,210,.85)'], [.12, 'rgba(255,200,140,.40)'], [.4, 'rgba(160,120,200,.10)'], [1, 'rgba(30,60,120,0)']], .85, 1],
+      [1000, [[0, 'rgba(180,210,235,.24)'], [.3, 'rgba(80,120,160,.08)'], [1, 'rgba(30,50,80,0)']], .8, 1],
+      [760, [[0, 'rgba(210,225,255,.7)'], [.25, 'rgba(120,160,230,.22)'], [1, 'rgba(60,90,160,0)']], .4, 0.03],
+    ],
+    key: [0xfff1dc, 3.0, 40, 5.5, 90], fill: [0x6c8ad8, 0.75], rim: [0xb8ccff, 0.0], hemi: [0x24345a, 0x080a12],
+    // quais : anneaux-portes avant / arrière (faces Y), sphères d'angle, sphères de face, pointes des mâts
+    tips: [[0, -600, 0], [0, -600, 60], [0, 600, 0], [0, 600, -60], [612, -600, 600], [-612, -600, 600], [612, 600, -600], [-612, 600, -600],
+      [612, -600, -600], [-612, 600, 600], [825, 0, 0], [-825, 0, 0], [625, -600, 1003], [-625, 600, 1003]].map(t => t.concat([0])),
+    lane: { n: 40, nLite: 18, out: [12, 20], spread: 4, lift: [4, 2], size: [0.06, 0.18] },
+    orbit: { n: 18, nLite: 8, r: [6.0, 4.0], y: 7, size: [0.06, 0.14] },
+    target: [0, -0.5, 0], minDist: 3.2,
+    lights: (L, hv, P) => {
+      const gate = L(0x6aa8ff, 2.2, 2.2, P(0, -330, 0));   // portail du cœur : lueur bleue sur l'anneau-porte
+      L(0xffc27a, 1.2, 1.6, P(0, -150, 0));
+      L(0x6aa8ff, 1.0, 1.6, P(0, 330, 0));                  // l'anneau-porte arrière (le dock) n'est pas dans le noir
+      hv(P(0, -275, 0), 1.6, 0x7ab4ff, 0.35);
+      for (const sx of [-1, 1]) for (const sy of [-1, 1]) for (const sz of [-1, 1]) hv(P(sx * 625, sy * 600, sz * (sz > 0 ? 1018 : 1038)), 0.16, 0xffd9a0, 0.8 + Math.random());   // pointes d'antennes
+      for (const sz of [-1, 1]) hv(P(0, 0, sz * 760), 0.2, 0xffe0b0, 1.1);
+      // la vitrine éclaire aussi de face (appoint chaud) et par l'arrière (liseré froid) ; reflets du chrome : un studio de joaillier
+      const station = gate.parent, scene = station.parent, T = window.SB3D.THREE;
+      const dl = (c, i, x, y, z) => { const l = new T.DirectionalLight(c, i); l.position.set(x, y, z); scene.add(l); };
+      dl(0xfff0e0, 0.55, 14, 6, 16); dl(0xb8ccff, 0.9, -12, 4, -10);
+      const envScene = new T.Scene(); envScene.background = new T.Color(0x070b18);
+      const sph = new T.Mesh(new T.SphereGeometry(100, 24, 12), new T.MeshBasicMaterial({ side: 1, vertexColors: true }));
+      { const p = sph.geometry.attributes.position, col = [], c = new T.Color(); const core = new T.Vector3(-0.45, 0.40, -0.80).normalize(), v = new T.Vector3();
+        for (let i = 0; i < p.count; i++) { v.fromBufferAttribute(p, i).normalize(); const k = Math.max(0, v.dot(core));
+          c.setRGB(.03 + .10 * k * k, .05 + .12 * k * k, .12 + .22 * k * k).lerp(new T.Color(.30, .24, .14), .4 * Math.pow(Math.max(0, -v.y), 2)); col.push(c.r, c.g, c.b); }
+        sph.geometry.setAttribute('color', new T.Float32BufferAttribute(col, 3)); }
+      envScene.add(sph);
+      const box = (w, h, col, k, x, y, z) => { const m = new T.Mesh(new T.PlaneGeometry(w, h), new T.MeshBasicMaterial({ color: new T.Color(col).multiplyScalar(k), side: 2 })); m.position.set(x, y, z); m.lookAt(0, 0, 0); envScene.add(m); };
+      box(60, 17, 0xfff4e0, 3.6, -47, 60, -33); box(17, 73, 0xa8c4ff, 3.5, 73, 7, 27); box(47, 13, 0x90b4ff, 2.6, 13, -60, 53); box(33, 33, 0xffffff, 2.2, -20, 20, 80);
+      const ENV_K = { M_LT_STEEL: 0.95, M_LT_GOLD: 1.3, M_LT_DARK: 0.55, M_LT_GLASS: 1.6 };
+      const once = new T.Mesh(new T.PlaneGeometry(0.001, 0.001), new T.MeshBasicMaterial({ visible: true, transparent: true, opacity: 0, depthWrite: false }));
+      once.frustumCulled = false;
+      once.onBeforeRender = (renderer) => {
+        if (once.userData.done) return; once.userData.done = 1;
+        setTimeout(() => {   // hors du rendu en cours : le PMREM ne se cuit qu'une fois
+          const pm = new T.PMREMGenerator(renderer), old = scene.environment;
+          const env = pm.fromScene(envScene, 0.02, 1, 400).texture; pm.dispose();
+          scene.environment = env;   // l'ivoire en boit un peu (night.envScene) ; chrome, or, laque et verre ont leur propre dose (vitrine)
+          station.traverse(o => { if (o.isMesh && o.material) for (const m of [].concat(o.material)) if (ENV_K[m.name]) { m.envMap = env; m.envMapIntensity = ENV_K[m.name]; m.needsUpdate = true; } });
+          envScene.traverse(o => { if (o.geometry) o.geometry.dispose(); if (o.material) o.material.dispose(); });
+          if (old) old.dispose();
+        }, 0);
+      };
+      station.add(once);
+      return gate;
+    },
+    // « le cœur » : à travers l'anneau-porte avant, la sphère centrale et son portail bleu
+    barShot: { t: [0, -260, 0], p: [150, -1700, 130] }, barAt: [0, -330, 0], barMax: 8,
+    // « le dock » : l'anneau-porte arrière, ton tanker engagé dans l'anneau
+    dockShot: { t: [0, 660, 0], p: [520, 1900, 240] }, dockMax: 8,
+    tankerAt: { pos: [0, 790, -40], rotZ: 0, scale: 7 },
+    night: { bloom: [0.6, 0.45, 1.0], envScene: 0.8 },
+  },
+  // 22/10 — akhet (station lointaine, vitrine validée par Adrien)
+  // 22/10 — Le Tombeau d'Akhet (ex « La Pyramide », planche « PYRAMID — Orbital Station ») : nécropole de basalte noir de 1,25 km,
+  // veines d'or, coiffe et cristal au sommet, jupe d'anneaux lumineux sous la base, portail creux des gardiens à tête de chacal.
+  // Vitrine validée par Adrien : « très intimidante » — contre-plongée, contre-jour d'une éclipse rouge-or derrière l'apex,
+  // l'or qui respire (deux battements toutes les 4 s), faisceau d'énergie sous le cœur, débris de basalte.
+  // Portée sans GTAO ni MeshPhysical (mobile) : obsidienne et or réglés dans fix ; disque noir, rais, faisceau et battement
+  // posés depuis lights (objets ajoutés à la station, animés par onBeforeRender) ; reflets : petit studio cuit une fois en PMREM.
+  akhet: {
+    S: 0.005, near: 0.03, half: [5.7, 5.2], minFit: 7, bg: 0x050203, haze: 0x0d0607, fog: [4.5, 22],
+    sun: [-0.36, 0.55, -0.76], core: [-0.36, 0.50, -0.78], camDir: [0.42, -0.36, 0.83], introDir: [0.10, -0.80, 0.60],
+    GLOSS: { M_PY_STONE: [0.42, 0.10], M_PY_STONE2: [0.46, 0.10], M_PY_STONE3: [0.38, 0.12] },
+    GLOW: { M_PY_GLOW: 2.0, M_PY_HALL: 1.5, M_PY_CRYSTAL: 2.6, M_PY_BEACON: 3.5 },
+    GLOW_COLOR: { M_PY_GLOW: 0xffa646, M_PY_HALL: 0xffbb6a, M_PY_CRYSTAL: 0xffb45a, M_PY_BEACON: 0xfff0d6 },
+    LOOK: {   // basalte : blocs en relief (géométrie) + patine, coulures, usure d'arête
+      M_PY_STONE:  { cell: [9.0, 6.0], seam: .12, depth: .10, tint: .14, rough: .12, grime: .40, wear: .30 },
+      M_PY_STONE2: { cell: [9.0, 6.0], seam: .12, depth: .10, tint: .14, rough: .12, grime: .46, wear: .25 },
+      M_PY_STONE3: { cell: [7.0, 5.0], seam: .12, depth: .10, tint: .12, rough: .10, grime: .36, wear: .35 },
+    },
+    // obsidienne vernie (le corps), or poli (corniches, colliers) ; basalte un peu assombri
+    fix: (mat) => {
+      if (mat.userData.pk) return; mat.userData.pk = 1;
+      if (/^M_PY_STONE/.test(mat.name)) mat.color.multiplyScalar(0.8);
+      if (mat.name === 'M_PY_DARK') { mat.color.set(0x08080b); mat.roughness = 0.2; mat.metalness = 0.55; }
+      if (mat.name === 'M_PY_GOLD') { mat.color.set(0xc8913c); mat.roughness = 0.24; mat.metalness = 1.0; }
+    },
+    glass: [.02, .02, .02], rockLift: null, nav: () => false, beacon: '', navPulse: [1, 0, 1],
+    cloud: { dust: [0x070405, 0x0a0506, 0x0c0606], gas: [0x3a1410, 0x2c120e, 0x4a1c10, 0x261010], glow: [0xff9a50, 0xffb070, 0xe06a3a],
+             nearSize: [9, 12], farSize: [30, 36], nearR: [14, 16], farR: [40, 40], nearY: [-10, 12], farY: [-26, 30], w: 0.010 },
+    // nébuleuse sang -> rouille, voiles brun sombre, filaments d'or
+    sky: { a: '.16, .037, .025', b: '.21, .08, .031', c: '.074, .031, .037', base: '.008, .004, .004', fil: '.88, .55, .26', glow: '1.25, .56, .25' },
+    // éclipse : anneau de couronne rouge-or (le disque noir et les rais sont posés dans lights) + grande lueur
+    sunStops: [
+      [400, [[0, 'rgba(255,120,50,0)'], [.11, 'rgba(255,120,50,0)'], [.125, 'rgba(255,220,170,1)'], [.15, 'rgba(255,170,90,.7)'], [.22, 'rgba(255,120,50,.30)'], [.5, 'rgba(160,40,20,.08)'], [1, 'rgba(80,10,10,0)']], .95, 1],
+      [1400, [[0, 'rgba(255,110,50,.16)'], [.25, 'rgba(160,40,20,.07)'], [1, 'rgba(60,10,10,0)']], .9, 1],
+    ],
+    // contre-jour de l'éclipse : les arêtes s'allument, les faces restent noires
+    key: [0xffb27a, 3.2, 40, 7.5, 90], fill: [0x8a3a24, 0.55], rim: [0x9aa6c0, 0.0], hemi: [0x2a1a18, 0x060304],
+    // quais : parvis du portail, nacelles d'angle sous la jupe, pointes des obélisques
+    tips: [[0, -841, 420], [0, -841, 560], [-60, -841, 600], [682, -642, 118], [-682, -642, 118], [682, 642, 118], [-682, 642, 118],
+      [620, -580, 1000], [-620, -580, 1000], [620, 580, 1000], [-620, 580, 1000], [785, 70, 200], [-785, 70, 200]].map(t => t.concat([0])),
+    lane: { n: 40, nLite: 18, out: [12, 20], spread: 4, lift: [4, 2], size: [0.05, 0.16] },
+    orbit: { n: 18, nLite: 8, r: [6.2, 4.0], y: 7.5, size: [0.05, 0.12] },
+    target: [0, 2.7, 0], minDist: 3.6,
+    ice: { n: 420, nLite: 160, big: 36, color: 0x1c1614, emissive: 0x000000 },   // débris de basalte
+    lights: (L, hv, P) => {
+      const hall = L(0xffb060, 2.2, 2.6, P(0, -560, 560));   // salle du portail : la lumière déborde sur le parvis et les gardiens
+      L(0xffa040, 1.6, 1.4, P(0, -820, 470));
+      L(0xff9a40, 3.0, 3.4, P(0, 0, -40));                    // cœur du dessous
+      L(0xffc070, 2.0, 2.0, P(0, 0, 1112));                   // cristal sous la coiffe
+      hv(P(0, 0, 10), 1.5, 0xffa040, 0.9);                    // orbe du dessous
+      hv(P(0, 0, 1112), 0.9, 0xffc070, 0.5);                  // cristal
+      hv(P(0, 0, 1252), 0.35, 0xfff0d0, 1.6);                 // apex
+      for (const [x, y] of [[620, 580], [-620, 580], [620, -580], [-620, -580]]) hv(P(x, y, 1000), 0.18, 0xffd090, 1.2);   // pointes d'obélisques
+      const station = hall.parent, scene = station.parent, T = window.SB3D.THREE;
+      const front = new T.DirectionalLight(0x9aa6c0, 0.6); front.position.set(12, 3, 14); scene.add(front);   // juste de quoi lire les blocs
+      // éclipse : disque noir devant la couronne, rais fins qui tournent très lentement
+      const sunPos = new T.Vector3(-0.36, 0.55, -0.76).normalize().multiplyScalar(1100);
+      const cv = (draw) => { const c = document.createElement('canvas'); c.width = c.height = 512; draw(c.getContext('2d')); const t = new T.CanvasTexture(c); t.colorSpace = T.SRGBColorSpace; return t; };
+      const disk = new T.Sprite(new T.SpriteMaterial({ map: cv(g => { const r = g.createRadialGradient(256, 256, 0, 256, 256, 256);
+        r.addColorStop(0, 'rgba(1,0,0,1)'); r.addColorStop(.86, 'rgba(1,0,0,1)'); r.addColorStop(1, 'rgba(1,0,0,0)'); g.fillStyle = r; g.fillRect(0, 0, 512, 512); }),
+        depthWrite: false, transparent: true, fog: false }));
+      disk.scale.set(96, 96, 1); disk.position.copy(sunPos); disk.renderOrder = -2; station.add(disk);
+      const rays = new T.Sprite(new T.SpriteMaterial({ map: cv(g => { g.translate(256, 256); g.globalCompositeOperation = 'lighter';
+        for (let i = 0; i < 26; i++) { const a = Math.random() * Math.PI * 2, Ln = 120 + Math.random() * 130, w = 1 + Math.random() * 3;
+          const gr = g.createLinearGradient(0, 0, Math.cos(a) * Ln, Math.sin(a) * Ln);
+          gr.addColorStop(0, 'rgba(255,170,90,0)'); gr.addColorStop(.25, 'rgba(255,170,90,.35)'); gr.addColorStop(1, 'rgba(255,120,60,0)');
+          g.strokeStyle = gr; g.lineWidth = w; g.beginPath(); g.moveTo(Math.cos(a) * 30, Math.sin(a) * 30); g.lineTo(Math.cos(a) * Ln, Math.sin(a) * Ln); g.stroke(); } }),
+        blending: T.AdditiveBlending, depthWrite: false, transparent: true, opacity: .42, fog: false }));
+      rays.scale.set(560, 560, 1); rays.position.copy(sunPos); rays.renderOrder = -1; station.add(rays);
+      // faisceau d'énergie sous le cœur : cône additif qui se dissout vers le bas
+      const BT = { value: 0 };
+      const beam = new T.Mesh(new T.CylinderGeometry(0.12, 1.1, 6.0, 32, 1, true), new T.ShaderMaterial({
+        transparent: true, depthWrite: false, blending: T.AdditiveBlending, side: 2, uniforms: { uT: BT },
+        vertexShader: `varying vec2 vUv; varying vec3 vN; varying vec3 vV; void main(){ vUv = uv; vN = normalize(normalMatrix * normal);
+          vec4 mv = modelViewMatrix * vec4(position, 1.0); vV = normalize(-mv.xyz); gl_Position = projectionMatrix * mv; }`,
+        fragmentShader: `uniform float uT; varying vec2 vUv; varying vec3 vN; varying vec3 vV;
+          void main(){ float f = pow(abs(dot(vN, vV)), 1.6); float h = vUv.y; float puls = .75 + .25 * sin(h * 24.0 + uT * 2.2);
+            float a = f * pow(h, 2.4) * puls * .42; gl_FragColor = vec4(vec3(1.0, .62, .26) * a, a); }` }));
+      beam.position.copy(P(0, 0, -570)); beam.frustumCulled = false; station.add(beam);
+      // l'or respire : deux battements rapprochés toutes les 4 s (veines, cristal, feux des nacelles)
+      const beat = [], GL = { M_PY_GLOW: 2.0, M_PY_CRYSTAL: 2.6 };
+      station.traverse(o => { if (!o.isMesh || !o.material) return; for (const m of [].concat(o.material)) if ((GL[m.name] || m.name === 'M_PY_BEACON') && !beat.includes(m)) beat.push(m); });
+      const t0 = performance.now();
+      beam.onBeforeRender = () => {
+        const t = (performance.now() - t0) / 1000, ph = (t % 4.0) / 4.0;
+        const b = Math.exp(-Math.pow((ph - .08) / .035, 2)) + .7 * Math.exp(-Math.pow((ph - .2) / .04, 2));
+        BT.value = t; rays.material.rotation = t * 0.004;
+        for (const m of beat) m.emissiveIntensity = m.name === 'M_PY_BEACON' ? 2.0 + 4.0 * b : GL[m.name] * (0.8 + 0.45 * b);
+      };
+      // reflets de l'obsidienne : une bande chaude haute (l'éclipse), un liseré froid latéral, une lueur d'or par en dessous
+      const envScene = new T.Scene(); envScene.background = new T.Color(0x0a0405);
+      const box = (w, h, col, k, x, y, z) => { const m = new T.Mesh(new T.PlaneGeometry(w, h), new T.MeshBasicMaterial({ color: new T.Color(col).multiplyScalar(k), side: 2 })); m.position.set(x, y, z); m.lookAt(0, 0, 0); envScene.add(m); };
+      box(88, 18, 0xffb070, 5.0, -24, 80, -56); box(18, 88, 0x8090b0, 2.0, 88, 16, 24); box(64, 24, 0xff9040, 2.4, 0, -80, 24); box(32, 32, 0xd8c8b0, 1.2, -32, 16, 96);
+      const ENV_K = { M_PY_GOLD: 1.25, M_PY_DARK: 0.45 };
+      let baked = false;
+      disk.onBeforeRender = (renderer) => {
+        if (baked) return; baked = true;
+        setTimeout(() => {   // hors du rendu en cours : le PMREM ne se cuit qu'une fois
+          const pm = new T.PMREMGenerator(renderer), old = scene.environment;
+          const env = pm.fromScene(envScene, 0.02, 1, 400).texture; pm.dispose();
+          scene.environment = env;   // le basalte n'en boit qu'un peu (night.envScene) ; l'obsidienne et l'or ont leur propre reflet, plein
+          station.traverse(o => { if (o.isMesh && o.material) for (const m of [].concat(o.material)) if (ENV_K[m.name]) { m.envMap = env; m.envMapIntensity = ENV_K[m.name]; m.needsUpdate = true; } });
+          envScene.traverse(o => { if (o.geometry) o.geometry.dispose(); if (o.material) o.material.dispose(); });
+          if (old) old.dispose();
+        }, 0);
+      };
+      return hall;
+    },
+    // « la salle des gardiens » : le portail creux vu du parvis, en contre-plongée, le mur du fond lumineux
+    barShot: { t: [0, -560, 570], p: [230, -1820, 300] }, barAt: [0, -560, 560], barMax: 9,
+    // « le dock » : une nacelle d'angle sous la jupe, ton tanker en attente
+    dockShot: { t: [740, -720, 110], p: [1500, -1650, -260] }, dockMax: 9,
+    tankerAt: { pos: [960, -960, 30], rotZ: 45, scale: 9 },
+    night: { bloom: [0.75, 0.5, 0.95], envScene: 0.3 },
+  },
+  // 22/10 — obsidienne (station lointaine, vitrine validée par Adrien)
+  // 22/10 — La Main d'Obsidienne (ex « La Main », reliquaire des Anciens) : une main de 1 450 m en chrome noir irisé, 220 capsules habitées,
+  // vitrine validée par Adrien ; nuit violette, étoile froide derrière les doigts, reflets de studio de joaillier dans le chrome
+  obsidienne: {
+    S: 0.005, near: 0.03, half: [4.1, 4.9], minFit: 7, bg: 0x03070c, haze: 0x120f24, fog: [4.5, 22], cy: 3.5,
+    sun: [-0.50, 0.62, -0.60], core: [-0.45, 0.40, -0.80], camDir: [0.38, 0.0, 0.93], introDir: [0.95, 0.55, -0.20],
+    GLOSS: {}, LOOK: {},
+    // chrome noir irisé, nervures chromées, verre fumé à intérieur habité (matériaux physiques : irisation, vernis)
+    phys: {
+      M_AH_SKIN:   { color: 0x14121c, rough: 0.15, metal: 1.0, env: 1.5, irid: 1.0, iridIor: 1.6, iridRange: [180, 620], coat: 0.6 },
+      M_AH_RIB:    { color: 0xb8b6c4, rough: 0.10, metal: 1.0, env: 1.35, irid: 0.35, iridIor: 1.5, iridRange: [250, 500] },
+      M_AH_RIB2:   { color: 0x8a6cc8, rough: 0.12, metal: 1.0, env: 1.3, irid: 0.6, iridIor: 1.5, iridRange: [300, 700] },
+      M_AH_GLASS:  { color: 0x0b0a10, rough: 0.06, metal: 0.8, env: 1.05, irid: 0.7, iridIor: 1.35, iridRange: [200, 520], coat: 1.0, room: [0xd8d2ff, 0.34] },
+      M_AH_GLASS2: { color: 0x150c28, rough: 0.06, metal: 0.8, env: 1.05, irid: 0.9, iridIor: 1.35, iridRange: [250, 650], coat: 1.0, room: [0xb48cff, 0.4] },
+      M_AH_LENS:   { color: 0x15141c, rough: 0.03, metal: 0.2, env: 2.0, irid: 0.4, iridIor: 1.3, iridRange: [200, 400], coat: 1.0, opacity: 0.32 },
+      M_AH_DARK:   { color: 0x06060a, rough: 0.35, metal: 0.8, env: 0.8 },
+    },
+    // reflets du chrome : la nébuleuse + quatre grands panneaux lumineux (studio de joaillier dans l'espace) [largeur, hauteur, couleur, intensité, position]
+    studio: [[900, 260, 0xf4f0ff, 6.0, [-700, 900, -500]], [260, 1100, 0xb8a8ff, 3.5, [1100, 100, 400]], [700, 200, 0x90b4ff, 2.6, [200, -900, 800]], [500, 500, 0xffffff, 2.2, [-300, 300, 1200]]],
+    GLOW: { M_AH_INNER: 0.16, M_AH_COLUMN: 1.7, M_AH_WIN: 1.1, M_AH_TIP: 2.4, M_AH_BEACON: 3.0 },
+    GLOW_COLOR: { M_AH_INNER: 0xcfc8ff, M_AH_COLUMN: 0xeef0ff, M_AH_WIN: 0xfff0dc, M_AH_TIP: 0xa070ff, M_AH_BEACON: 0xffffff },
+    glass: [.02, .02, .03], rockLift: null, nav: (n) => n === 'M_AH_BEACON', beacon: '', navPulse: [1.2, 2.5, 1.1],
+    breathe: { M_AH_TIP: [2.0, 0.6, 0.7] },   // les pointes des doigts respirent
+    cloud: { dust: [0x06050c, 0x080714, 0x0a0918], gas: [0x2a2050, 0x1c2a52, 0x382a62, 0x1a2244], glow: [0xa890ff, 0x8fb4ff, 0xd0b8ff],
+             nearSize: [9, 12], farSize: [30, 36], nearR: [14, 16], farR: [40, 40], nearY: [-8, 12], farY: [-24, 34], w: 0.010 },
+    sky: { a: '.12, .10, .30', b: '.08, .16, .36', c: '.32, .20, .52', base: '.010, .008, .020', fil: '.75, .73, .94', glow: '1.27, 1.20, 1.50' },
+    sunStops: [
+      [34,  [[0, 'rgba(255,255,255,1)'], [.35, 'rgba(236,244,255,1)'], [.5, 'rgba(190,215,240,.6)'], [1, 'rgba(150,185,220,0)']], .9, 1],
+      [300, [[0, 'rgba(220,232,255,.85)'], [.12, 'rgba(150,185,255,.40)'], [.4, 'rgba(60,110,200,.10)'], [1, 'rgba(30,60,120,0)']], .85, 1],
+      [1000, [[0, 'rgba(180,210,235,.24)'], [.3, 'rgba(80,120,160,.08)'], [1, 'rgba(30,50,80,0)']], .8, 1],
+      [760, [[0, 'rgba(210,225,255,.7)'], [.25, 'rgba(120,160,230,.22)'], [1, 'rgba(60,90,160,0)']], .4, 0.03],
+    ],
+    key: [0xf2eeff, 2.8, 40, 6, 90], fill: [0x7a6cd8, 0.7], rim: [0xc8b8ff, 0.9], hemi: [0x2a2450, 0x08060e],
+    // points d'amarrage : la paume, les quatre arches du poignet, le dos de la main, le bout des doigts
+    tips: [[0, -420, 650], [0, -380, 170], [0, 380, 170], [380, 0, 170], [-380, 0, 170], [0, 380, 600], [60, 300, 1500], [-200, 500, 1520], [300, -300, 1050]].map(t => t.concat([0])),
+    lane: { n: 36, nLite: 16, out: [12, 20], spread: 4, lift: [4, 2], size: [0.12, 0.35] },
+    orbit: { n: 18, nLite: 8, r: [5.5, 4], y: 7, size: [0.10, 0.22] },
+    target: [0, 3.5, 0], minDist: 2.6,
+    lights: (L, hv, P) => {
+      L(0xd8d0ff, 1.2, 1.6, P(0, 260, 600));                                   // œuf du dos
+      for (const [x, y] of [[0, -320], [0, 320], [320, 0], [-320, 0]]) L(0xeee8ff, 0.8, 1.3, P(x, y, 160));   // arches du poignet
+      L(0xa070ff, 1.4, 2.4, P(-200, 450, 1500));                               // pointes des doigts
+      L(0xe0dcff, 1.0, 2.0, P(0, 0, -60));                                     // poignet ouvert
+      return L(0xe8e4ff, 1.0, 1.8, P(0, -120, 650));                           // salle de la paume
+    },
+    // « la paume » : le grand hublot et ses colonnes de lumière, les capsules habitées tout autour
+    barShot: { t: [0, -150, 700], p: [430, -1250, 640] }, barAt: [0, -200, 650], barMax: 8,
+    // « le dock » : une arche du poignet, ton tanker à quai devant
+    dockShot: { t: [40, -440, 245], p: [330, -1290, 255] }, dockMax: 8,
+    tankerAt: { pos: [50, -470, 150], rotZ: 90, scale: 5 },
+    // éclats de chrome noir qui dérivent autour de la main
+    ice: { n: 420, nLite: 160, big: 36, color: 0x241c3a, emissive: 0x000000, rough: 0.15, metal: 0.9, env: 1.2,
+           bigR: [22, 34], smallR: [8, 26], bigY: 26, smallY: 18, bigS: [0.4, 1.2], smallS: [0.02, 0.25] },
+    night: { bloom: [0.6, 0.45, 1.0] },
+  },
+  // 22/10 — abime (station lointaine, vitrine validée par Adrien)
+  // 22/10 — La Dent de l'Abîme (ex « Dent de Requin », classe Mégalodon) : une dent d'émail bleu nuit de 2,6 km dans un océan stellaire,
+  // vitrine validée par Adrien ; brume bleu-vert, lumière tombant d'une « surface » ridée, caustiques, bulles, plancton et méduses
+  abime: {
+    S: 0.005, near: 0.03, half: [7.0, 8.4], minFit: 16, bg: 0x010407, haze: 0x0b3540, fog: [0, 30], fogK: 0.7,
+    sun: [-0.28, 0.90, 0.33], core: [-0.20, 0.85, 0.30], camDir: [0.36, -0.20, 0.91], introDir: [0.18, -0.95, 0.26],
+    // émail bleu nuit satiné (pas de surbrillance : la dent est trop grande pour briller comme un vaisseau) ; roche mate
+    GLOSS: {
+      M_ST_ENAMEL: [0.46, 0.22], M_ST_ENAMEL2: [0.44, 0.22], M_ST_ENAMEL3: [0.50, 0.2], M_ST_EDGE: [0.42, 0.3], M_ST_GROUT: [0.8, 0.0],
+      M_ST_ROCK: [0.95, 0.0], M_ST_ROCK2: [0.95, 0.0], M_ST_ROCK_DARK: [1.0, 0.0],
+      M_ST_STEEL: [0.62, 0.45], M_ST_GUNMETAL: [0.62, 0.55], M_ST_DARK: [0.85, 0.15], M_ST_BRASS: [0.55, 0.6], M_ST_FRAME: [0.5, 0.6],
+    },
+    GLOW: { M_ST_WIN: 1.6, M_ST_AMBER: 2.0, M_ST_BEACON: 3.0, M_ST_NAV: 2.5, M_ST_VEIN: 0.9 },
+    GLOW_COLOR: { M_ST_WIN: 0xffa850, M_ST_AMBER: 0xff9a3a, M_ST_BEACON: 0xd8ecff, M_ST_NAV: 0xff2a14, M_ST_VEIN: 0x3e9cff },
+    // émail : variations douces par plaque, sans faux joints (les plaques sont de la vraie géométrie) ; roche : patine
+    LOOK: {
+      M_ST_ENAMEL:   { cell: [60.0, 40.0], seam: .0, depth: .0, tint: .10, rough: .10, grime: .18, wear: .12 },
+      M_ST_ENAMEL2:  { cell: [60.0, 40.0], seam: .0, depth: .0, tint: .10, rough: .10, grime: .18, wear: .12 },
+      M_ST_ENAMEL3:  { cell: [60.0, 40.0], seam: .0, depth: .0, tint: .10, rough: .10, grime: .18, wear: .12 },
+      M_ST_EDGE:     { cell: [30.0, 20.0], seam: .0, depth: .0, tint: .08, rough: .10, grime: .10, wear: .30 },
+      M_ST_ROCK:     { cell: [60.0, 40.0], seam: .0, depth: .0, tint: .22, rough: .05, grime: .40, wear: .55 },
+      M_ST_ROCK2:    { cell: [60.0, 40.0], seam: .0, depth: .0, tint: .22, rough: .05, grime: .40, wear: .55 },
+      M_ST_STEEL:    { cell: [6.0, 4.0], seam: .14, depth: .12, tint: .08, rough: .10, grime: .26, wear: .45 },
+      M_ST_GUNMETAL: { cell: [8.0, 5.0], seam: .16, depth: .35, tint: .08, rough: .12, grime: .22, wear: .45 },
+      M_ST_DARK:     { cell: [16.0, 9.0], seam: .20, depth: .14, tint: .14, rough: .14, grime: .14, wear: .20 },
+      M_ST_FRAME:    { cell: [10.0, 6.0], seam: .12, depth: .10, tint: .06, rough: .08, grime: .12, wear: .40 },
+    },
+    // émail bleu nuit qui se lit encore à contre-jour ; reflets un peu plus présents que sur les coques des autres stations
+    fix: (mat) => {
+      if (mat.userData.da) return; mat.userData.da = 1;
+      const k = { M_ST_ROCK: 1.0, M_ST_ROCK2: 0.95, M_ST_ENAMEL: 1.6, M_ST_ENAMEL2: 1.6, M_ST_ENAMEL3: 1.6, M_ST_EDGE: 1.4 }[mat.name];   // un peu moins que la vitrine : sans son occlusion ambiante, la roche pâlissait
+      if (k) mat.color.multiplyScalar(k);
+      if (/^M_ST_/.test(mat.name) && mat.envMapIntensity !== undefined && !/_(WIN|AMBER|BEACON|NAV|VEIN)$/.test(mat.name)) mat.envMapIntensity = 0.30;
+    },
+    caustics: { color: '.25, .7, .72', k: 0.2, scale: 0.035 },   // le réseau de lumière des vagues glisse sur la coque
+    glass: [.02, .03, .045], rockLift: null, nav: (n) => n === 'M_ST_NAV', beacon: '', navPulse: [1.2, 2.6, 1.1],
+    breathe: { M_ST_VEIN: [0.75, 0.3, 0.45], M_ST_BEACON: [3.0, 1.0, 0.8] },   // les fissures respirent
+    cloud: { dust: [0x020a0d, 0x041014, 0x05141a], gas: [0x0e3a44, 0x114a52, 0x0f3a4a, 0x16505a], glow: [0x3fd0d8, 0x6ae0e0, 0x4ab0e0],
+             nearSize: [12, 16], farSize: [38, 44], nearR: [19, 20], farR: [50, 45], nearY: [-12, 14], farY: [-30, 40], w: 0.010 },
+    sky: { a: '.03, .12, .17', b: '.04, .18, .24', c: '.08, .12, .26', base: '.002, .006, .010', fil: '.31, .69, .84', glow: '.375, .775, 1.0',
+      // l'océan de l'espace : la « surface » est au-dessus, lumineuse et ridée ; en dessous, l'abîme
+      extra: `{ float up = max(d.y, 0.0);
+        col += vec3(.04, .20, .24) * pow(up, 1.4) * .55;
+        vec2 sp = d.xz / (d.y + .35) * 3.0; float rip = 0.0; vec2 ii = sp;
+        for (int k = 0; k < 4; k++) { float tt = 1.7 * (1.0 - 3.5 / float(k + 1)); ii = sp + vec2(cos(tt - ii.x) + sin(tt + ii.y), sin(tt - ii.y) + cos(tt + ii.x));
+          rip += 1.0 / length(vec2(sp.x / (sin(ii.x + tt) / .006), sp.y / (cos(ii.y + tt) / .006))); }
+        rip = pow(abs(1.17 - pow(rip / 4.0, 1.4)), 8.0);
+        col += vec3(.30, .75, .80) * clamp(rip, 0.0, 1.0) * pow(up, 3.0) * .35;
+        col *= mix(1.0, .35, smoothstep(0.0, -.85, d.y)); }` },
+    sunStops: [
+      [34,  [[0, 'rgba(255,255,255,1)'], [.35, 'rgba(236,244,255,1)'], [.5, 'rgba(190,215,240,.6)'], [1, 'rgba(150,185,220,0)']], .9, 1],
+      [300, [[0, 'rgba(220,232,255,.85)'], [.12, 'rgba(150,185,255,.40)'], [.4, 'rgba(60,110,200,.10)'], [1, 'rgba(30,60,120,0)']], .85, 1],
+      [1000, [[0, 'rgba(180,210,235,.24)'], [.3, 'rgba(80,120,160,.08)'], [1, 'rgba(30,50,80,0)']], .8, 1],
+      [760, [[0, 'rgba(210,225,255,.7)'], [.25, 'rgba(120,160,230,.22)'], [1, 'rgba(60,90,160,0)']], .4, 0.03],
+    ],
+    key: [0xc8f2f0, 3.0, 40, 17, 90], fill: [0x2f8fa8, 0.55], rim: [0x7fc0ff, 0.6], hemi: [0x245a64, 0x03080c],
+    // bouts des bras d'amarrage des tranchants, la halle, la ville sur la racine, la pointe
+    tips: [[675, 0, -439], [775, 0, -259], [-615, 0, -236], [-700, 0, -125], [955, 0, 55], [1175, 0, 209], [-1150, 0, 398], [1215, 0, 399], [1240, 0, 631],
+      [-1235, 0, 638], [-1100, 0, 340], [-1150, 0, 455], [0, -450, 700], [-300, -380, 420], [0, 0, 1200], [-560, 0, 1200], [560, 0, 1200]].map(t => t.concat([0])),
+    lane: { n: 46, nLite: 20, out: [12, 20], spread: 4, lift: [4, 2], size: [0.12, 0.35] },
+    orbit: { n: 18, nLite: 8, r: [9, 5], y: 11, size: [0.10, 0.22] },
+    target: [0, 0.3, 0], minDist: 2.2,
+    lights: (L, hv, P) => {   // nappes de lumière chaude rasante : elles révèlent la structure sans éblouir
+      L(0xffb060, 2.2, 2.4, P(80, -170, 640));       // dans la caverne de la halle
+      L(0xffa850, 1.5, 3.0, P(-330, -360, 420));     // galeries
+      L(0xffa850, 1.3, 3.0, P(-230, -340, 110));
+      L(0xffb060, 1.6, 3.4, P(0, -60, 1180));        // la ville sur la racine
+      L(0x8cc8ff, 2.2, 2.6, P(0, -60, -1330));       // le feu de la pointe
+      L(0x3e9cff, 1.1, 4.0, P(-150, -420, -350));    // reflet bleu des fissures
+      L(0x3e9cff, 1.0, 4.0, P(150, 420, -150));
+      hv(P(0, 0, -1296), 0.9, 0xbfe2ff, 0.5);
+      hv(P(-1050, 20, 1330), 0.35, 0xd8ecff, 0.8);
+      hv(P(1050, 30, 1330), 0.35, 0xd8ecff, 0.7);
+      return L(0xffa850, 2.6, 3.8, P(0, -430, 680)); // la grande halle vitrée
+    },
+    // « la halle » : la halle à bout arrondi et cadre bleu, ses galeries en dessous
+    barShot: { t: [-80, -400, 560], p: [450, -1850, 300] }, barAt: [0, -430, 680], barMax: 12,
+    // « le dock » : un bras d'amarrage du tranchant est, ton tanker à quai
+    dockShot: { t: [1150, -60, 220], p: [1750, -1000, 380] }, dockMax: 12,
+    tankerAt: { pos: [1180, -230, 200], rotZ: 0, scale: 6 },
+    // éclats de roche arrachés à la racine : ils remontent lentement, comme dans l'eau
+    ice: { n: 300, nLite: 120, big: 24, color: 0x2c2620, emissive: 0x000000, rough: 0.95, metal: 0.0, env: 0.25, det: 1,
+           bigR: [28, 40], smallR: [10, 30], bigY: 30, smallY: 24, bigS: [0.5, 1.4], smallS: [0.03, 0.3], rise: 16 },
+    aqua: { motes: 900, rays: 9, bubbles: 260, jellies: 7, jellyR: [17, 14], jellyS: [0.5, 0.7] },   // méduses un peu plus loin et plus petites qu'en vitrine : sur mobile, elles ne doivent pas masquer la halle
+    night: { exposure: 1.12, envScene: 0.30, light: 0.85 },   // three récent : scene.environmentIntensity remplace l'envMapIntensity 0,30 de la vitrine
+  },
+
 };
 
 function mount(container, opts = {}) {
@@ -349,6 +853,7 @@ function mount(container, opts = {}) {
         col += vec3(${PR.sky.fil}) * pow(mass * g, 2.0) * (.14 + 1.5 * glow) * .32;
         col += vec3(${PR.sky.glow}) * glow * .08;
         col *= 1.0 - .94 * lanes * (.45 + .55 * mass);
+        ${PR.sky.extra || ''}
         gl_FragColor = vec4(col, 1.0);
       }`
   })));
@@ -379,6 +884,16 @@ function mount(container, opts = {}) {
   const skyRT = new THREE.WebGLCubeRenderTarget(LITE ? 384 : MOBILE ? 512 : 768, { type: THREE.HalfFloatType, generateMipmaps: false });
   new THREE.CubeCamera(1, 3000, skyRT).update(renderer, skyScene);
   bgScene.background = skyRT.texture;
+  // 22/10 — reflets en studio (optionnel) : grands panneaux lumineux autour de la nébuleuse, vus seulement par les reflets (chrome de la Main)
+  let studioEnv = null;
+  if (PR.studio) {
+    const pg = new THREE.PlaneGeometry(1, 1);
+    for (const [w, h, col, k, pos] of PR.studio) {
+      const pm = new THREE.Mesh(pg, new THREE.MeshBasicMaterial({ color: new THREE.Color(col).multiplyScalar(k), side: THREE.DoubleSide }));
+      pm.scale.set(w, h, 1); pm.position.set(...pos); pm.lookAt(0, 0, 0); skyScene.add(pm);
+    }
+    studioEnv = pmrem.fromScene(skyScene, 0.015, 1, 4000).texture; scene.environment = studioEnv;
+  }
   skyScene.traverse(o => { if (o.material) o.material.dispose(); if (o.geometry) o.geometry.dispose(); });
   function starField(count, radius, size) {
     const g = new THREE.BufferGeometry();
@@ -427,18 +942,32 @@ function mount(container, opts = {}) {
   function glowLight(color, intensity, dist, x, y, z) { const l = new THREE.PointLight(color, intensity * NT.glow, dist, 1.8); l.position.set(x, y, z); station.add(l); return l; }
 
   /* ── lookdev procédural (sans UV) : panneaux triplanaires, joints, patine, coulures, usure d'arête ── */
+  const CAU = PR.caustics && !LITE ? PR.caustics : null, CAUSTIC_T = { value: 0 };   // 22/10 — caustiques optionnelles (océan stellaire)
   function premium(mat, p) {
     mat.onBeforeCompile = (sh) => {
       sh.uniforms.uCell = { value: new THREE.Vector2(...p.cell) };
       sh.uniforms.uLook = { value: new THREE.Vector4(p.seam, p.depth, p.tint, p.rough) };
       sh.uniforms.uLook2 = { value: new THREE.Vector2(p.grime, p.wear) };
+      if (CAU) sh.uniforms.uCT = CAUSTIC_T;
       sh.vertexShader = sh.vertexShader
         .replace('#include <common>', '#include <common>\nvarying vec3 vOP; varying vec3 vON;')
         .replace('#include <begin_vertex>', '#include <begin_vertex>\nvOP = position; vON = normal;');
-      sh.fragmentShader = sh.fragmentShader
+      sh.fragmentShader = (CAU ? sh.fragmentShader.replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
+          {   // 22/10 — caustiques (optionnel) : le réseau de lumière des vagues glisse sur les faces tournées vers le haut
+            float face = .25 + .75 * smoothstep(-.2, .9, normalize(vON).y);
+            vec3 an = abs(normalize(vON)); an /= (an.x + an.y + an.z);
+            float cs = an.y * caust(vOP.xz * ${CAU.scale.toFixed(4)}, uCT * .6) + an.z * caust(vOP.xy * ${CAU.scale.toFixed(4)} + 7.0, uCT * .6) + an.x * caust(vOP.zy * ${CAU.scale.toFixed(4)} + 3.0, uCT * .6);
+            totalEmissiveRadiance += vec3(${CAU.color}) * cs * face * ${CAU.k.toFixed(3)};
+          }`) : sh.fragmentShader)
         .replace('#include <common>', `#include <common>
           varying vec3 vOP; varying vec3 vON;
           uniform vec2 uCell; uniform vec4 uLook; uniform vec2 uLook2;
+          ${CAU ? `uniform float uCT;
+          float caust(vec2 p, float t){
+            float a = sin(p.x + 1.6 * sin(p.y * 1.3 + t * .9) + t * .3);
+            float b = sin(p.y * 1.1 + 1.6 * sin(p.x * 1.7 - t * .7) - t * .2);
+            float c = sin((p.x + p.y) * .8 + 1.4 * sin(p.x * .9 - p.y * 1.2 + t * .5));
+            return clamp(pow(1.0 - abs(a), 16.0) + pow(1.0 - abs(b), 16.0) + .6 * pow(1.0 - abs(c), 20.0), 0.0, 1.0); }` : ''}
           float hh(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
           float vn(vec3 x){ vec3 i=floor(x), f=fract(x); f=f*f*(3.0-2.0*f);
             float a=hh(i.xy+i.z*17.0), b=hh(i.xy+vec2(1,0)+i.z*17.0), c=hh(i.xy+vec2(0,1)+i.z*17.0), d=hh(i.xy+vec2(1,1)+i.z*17.0);
@@ -495,6 +1024,50 @@ function mount(container, opts = {}) {
           }`);
     };
     mat.customProgramCacheKey = () => (opts.profile || 'crown') + '-premium-' + mat.name;
+  }
+
+  /* ── 22/10 — matériaux physiques (optionnel, PR.phys) : chrome irisé, vernis, verre fumé ; salles habitées derrière le verre ── */
+  function rooms(mat, [col, k]) {   // sans géométrie : planchers lumineux, cloisons, fenêtres chaudes, lus 25 m derrière le verre (parallaxe)
+    mat.onBeforeCompile = (sh) => {
+      sh.uniforms.uRoomCol = { value: new THREE.Color(col) }; sh.uniforms.uRoomK = { value: k };
+      sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nvarying vec3 vOP; varying vec3 vWP;')
+        .replace('#include <begin_vertex>', '#include <begin_vertex>\nvOP = position; vWP = (modelMatrix * vec4(position, 1.0)).xyz;');
+      sh.fragmentShader = sh.fragmentShader.replace('#include <common>', `#include <common>
+        varying vec3 vOP; varying vec3 vWP; uniform vec3 uRoomCol; uniform float uRoomK;
+        float rh(vec3 p){ return fract(sin(dot(p, vec3(12.9898, 78.233, 37.719))) * 43758.5453); }
+        vec3 roomAt(vec3 q){
+          float fl = smoothstep(.90, .985, fract(q.y / 12.0));
+          float wall = smoothstep(.95, 1.0, fract((q.x + q.z * .7) / 14.0));
+          vec3 cell = floor(q / vec3(9.0, 12.0, 9.0));
+          float win = step(.86, rh(cell)) * (1.0 - fl) * smoothstep(.2, .6, fract(q.y / 12.0));
+          float blk = .35 + .65 * rh(floor(q / 60.0));
+          return (uRoomCol * (.18 + fl * .9 + wall * .2) + vec3(1.0, .86, .66) * win * .7) * blk;
+        }`)
+        .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
+        {
+          vec3 vd = normalize(vWP - cameraPosition);
+          float face = pow(abs(dot(normalize(normal), normalize(vViewPosition))), 2.2);
+          totalEmissiveRadiance += roomAt(vOP + vd * 25.0) * uRoomK * face;
+        }`);
+    };
+    mat.customProgramCacheKey = () => (opts.profile || 'crown') + '-room-' + mat.name;
+  }
+  function physSwap(root) {
+    const cache = {};
+    const swap = (mat) => {
+      const p = PR.phys[mat.name]; if (!p) return mat;
+      if (cache[mat.name]) return cache[mat.name];
+      const q = new THREE.MeshPhysicalMaterial({ name: mat.name, color: p.color, roughness: p.rough, metalness: p.metal, envMapIntensity: p.env,
+        iridescence: p.irid || 0, iridescenceIOR: p.iridIor || 1.3, iridescenceThicknessRange: p.iridRange || [100, 400],
+        clearcoat: LITE ? 0 : (p.coat || 0), clearcoatRoughness: 0.04, side: THREE.DoubleSide });
+      if (p.opacity) { q.transparent = true; q.opacity = p.opacity; q.depthWrite = false; }
+      if (p.room) rooms(q, p.room);
+      // three récent : avec scene.environment seule, l'intensité par matériau est ignorée ; on lui donne la carte pour que envMapIntensity compte
+      if (scene.environment) q.envMap = scene.environment;
+      q.userData.phys = 1; q.userData.ng = 1;
+      mat.dispose(); return (cache[mat.name] = q);
+    };
+    root.traverse(o => { if (o.isMesh) o.material = Array.isArray(o.material) ? o.material.map(swap) : swap(o.material); });
   }
 
   /* ── halos ── */
@@ -568,7 +1141,7 @@ function mount(container, opts = {}) {
     TRAFFIC.forEach((s, i) => {
       if (s.kind === 'orbit') {
         const a = s.ph + t * s.w;
-        _p.set(Math.cos(a) * s.r, s.y + Math.sin(t * .2 + s.ph) * .1, Math.sin(a) * s.r);
+        _p.set(Math.cos(a) * s.r, (PR.cy || 0) + s.y + Math.sin(t * .2 + s.ph) * .1, Math.sin(a) * s.r);
         _d.set(-Math.sin(a), 0, Math.cos(a)).multiplyScalar(Math.sign(s.w));
       } else {
         s.t += dt / s.dur;
@@ -589,6 +1162,8 @@ function mount(container, opts = {}) {
 
   /* ── nuages galactiques autour de la station : bancs de gaz et volutes proches qui dérivent ── */
   const cloudGroup = new THREE.Group();
+  const CY = PR.cy || 0;   // 22/10 — hauteur du centre de la station (scène) : nuages, débris, océan et ronde centrés dessus (optionnel)
+  cloudGroup.position.y = CY;
   scene.add(cloudGroup);
   for (let i = 0; i < (LITE ? 16 : 30); i++) {
     const near = i < (LITE ? 9 : 18), t = rand();
@@ -622,29 +1197,128 @@ function mount(container, opts = {}) {
   let iceMesh = null;
   const ICE = [];
   if (PR.ice) {
-    const IC = PR.ice, n = LITE ? IC.nLite : IC.n;
-    const g = new THREE.IcosahedronGeometry(1, 0), pa = g.attributes.position;
+    // 22/10 — réglages optionnels (débris de roche, éclats de chrome…) : détail, matière, rayons, tailles, remontée
+    const IC = Object.assign({ det: 0, rough: 0.34, metal: 0.0, env: 1.0, bigR: [30, 40], smallR: [11, 30], bigY: 30, smallY: 22, bigS: [0.6, 1.6], smallS: [0.03, 0.35] }, PR.ice), n = LITE ? IC.nLite : IC.n;
+    const g = new THREE.IcosahedronGeometry(1, IC.det), pa = g.attributes.position;
     for (let i = 0; i < pa.count; i++) { const k = 0.7 + rand() * 0.6; pa.setXYZ(i, pa.getX(i) * k, pa.getY(i) * k * 0.8, pa.getZ(i) * k * 1.3); }
     g.computeVertexNormals();
-    iceMesh = new THREE.InstancedMesh(g, new THREE.MeshStandardMaterial({ color: IC.color, emissive: IC.emissive, roughness: 0.34, metalness: 0.0, envMapIntensity: 1.0, flatShading: true }), n);
+    iceMesh = new THREE.InstancedMesh(g, new THREE.MeshStandardMaterial({ color: IC.color, emissive: IC.emissive, roughness: IC.rough, metalness: IC.metal, envMapIntensity: IC.env, flatShading: true }), n);
     iceMesh.frustumCulled = false;
     for (let i = 0; i < n; i++) {
-      const big = i < IC.big, a = rand() * Math.PI * 2, r = big ? 30 + rand() * 40 : 11 + rand() * 30;
-      ICE.push({ p: new THREE.Vector3(Math.cos(a) * r, (rand() - .5) * (big ? 30 : 22), Math.sin(a) * r),
-        s: big ? 0.6 + rand() * 1.6 : 0.03 + Math.pow(rand(), 3) * 0.35,
+      const big = i < IC.big, a = rand() * Math.PI * 2, r = big ? IC.bigR[0] + rand() * IC.bigR[1] : IC.smallR[0] + rand() * IC.smallR[1];
+      ICE.push({ p: new THREE.Vector3(Math.cos(a) * r, (rand() - .5) * (big ? IC.bigY : IC.smallY), Math.sin(a) * r),
+        s: big ? IC.bigS[0] + rand() * IC.bigS[1] : IC.smallS[0] + Math.pow(rand(), 3) * IC.smallS[1],
         q: new THREE.Quaternion().setFromEuler(new THREE.Euler(rand() * 6, rand() * 6, rand() * 6)),
         w: new THREE.Vector3(rand() - .5, rand() - .5, rand() - .5).normalize(), sp: (rand() - .5) * 0.15, dr: 0.02 + rand() * 0.04 });
     }
+    iceMesh.position.y = CY;
     scene.add(iceMesh);
   }
   const _iq = new THREE.Quaternion(), _im = new THREE.Matrix4(), _is = new THREE.Vector3();
   function updateIce(t, dt) {
     ICE.forEach((o, i) => {
-      o.p.x += o.dr * dt * 0.6; if (o.p.x > 60) o.p.x -= 120;   // dérive lente du champ
+      if (PR.ice.rise) { o.p.y += o.dr * dt * 0.5; if (o.p.y > PR.ice.rise) o.p.y -= 2 * PR.ice.rise; }   // tout remonte lentement, comme dans l'eau
+      else { o.p.x += o.dr * dt * 0.6; if (o.p.x > 60) o.p.x -= 120; }   // dérive lente du champ
       _iq.setFromAxisAngle(o.w, t * o.sp).multiply(o.q); _is.setScalar(o.s);
       _im.compose(o.p, _iq, _is); iceMesh.setMatrixAt(i, _im);
     });
     iceMesh.instanceMatrix.needsUpdate = true;
+  }
+  // 22/10 — l'océan stellaire (optionnel, PR.aqua) : plancton qui luit, rais de lumière tombant de la « surface »,
+  // bulles qui montent, méduses qui pulsent ; tout en points et cônes additifs, sans ombre ni profondeur écrite
+  const AQ = PR.aqua ? Object.assign({ motes: 900, rays: 9, bubbles: 260, jellies: 7, jellyR: [13, 16], jellyS: [0.6, 1.1], lite: 0.4, y: 0 }, PR.aqua) : null;
+  let aqua = null;
+  if (AQ) {
+    const nk = (n) => Math.round(n * (LITE ? AQ.lite : MOBILE ? 0.7 : 1));
+    const scaleU = { value: H() * renderer.getPixelRatio() }, tU = { value: 0 };
+    const grp = new THREE.Group(); grp.position.y = CY + AQ.y; scene.add(grp);
+    const pts = (n, R, Y, extra) => { const g = new THREE.BufferGeometry(), pos = new Float32Array(n * 3), ph = new Float32Array(n);
+      for (let i = 0; i < n; i++) { const a = rand() * Math.PI * 2, r = R[0] + Math.pow(rand(), R[2]) * R[1]; pos.set([Math.cos(a) * r, (rand() - .5) * Y, Math.sin(a) * r], i * 3); ph[i] = rand() * 6.28; }
+      g.setAttribute('position', new THREE.BufferAttribute(pos, 3)); g.setAttribute('aPh', new THREE.BufferAttribute(ph, 1)); return g; };
+    const motes = new THREE.Points(pts(nk(AQ.motes), [4, 26, 0.7], 26), new THREE.ShaderMaterial({
+      transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, uniforms: { uT: tU, uScale: scaleU },
+      vertexShader: `attribute float aPh; uniform float uT; uniform float uScale; varying float vA;
+        void main(){ vec3 p = position; p.y = mod(p.y + uT * 0.08 + 13.0, 26.0) - 13.0; p.x += sin(uT * .3 + aPh) * .15;
+          vec4 mv = modelViewMatrix * vec4(p, 1.0); vA = 0.35 + 0.65 * pow(0.5 + 0.5 * sin(uT * 1.3 + aPh * 3.0), 4.0);
+          gl_PointSize = clamp(0.05 * uScale / -mv.z, 1.0, 6.0); gl_Position = projectionMatrix * mv; }`,
+      fragmentShader: `varying float vA; void main(){ float d = length(gl_PointCoord - .5); if (d > .5) discard;
+        gl_FragColor = vec4(vec3(.35, .85, 1.0) * vA * (1.0 - d * 2.0), 1.0); }` }));
+    motes.frustumCulled = false; grp.add(motes);
+    const rayMat = new THREE.ShaderMaterial({
+      transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide, fog: false, uniforms: { uT: tU },
+      vertexShader: `varying float vY; varying vec3 vN; varying vec3 vV; varying vec2 vUv;
+        void main(){ vY = uv.y; vUv = uv; vN = normalize(normalMatrix * normal); vec4 mv = modelViewMatrix * vec4(position,1.0); vV = normalize(-mv.xyz); gl_Position = projectionMatrix * mv; }`,
+      fragmentShader: `uniform float uT; varying float vY; varying vec3 vN; varying vec3 vV; varying vec2 vUv;
+        void main(){ float edge = pow(abs(dot(vN, vV)), 1.6);
+          float flick = .65 + .35 * sin(vUv.x * 40.0 + uT * .7) * sin(vUv.x * 17.0 - uT * .4);
+          float a = edge * smoothstep(0.0, .35, vY) * smoothstep(1.0, .55, vY) * flick * .24;
+          gl_FragColor = vec4(vec3(.55, .95, .95) * a, a); }` });
+    const RAYS = [];
+    for (let i = 0; i < nk(AQ.rays); i++) {
+      const r0 = 2.5 + rand() * 3.5, r1 = r0 * (2.0 + rand() * 1.2), L = 70 + rand() * 30;
+      const rm = new THREE.Mesh(new THREE.CylinderGeometry(r0, r1, L, 24, 1, true), rayMat); rm.frustumCulled = false;
+      const a = rand() * Math.PI * 2, rr = 2 + rand() * 16;
+      rm.position.set(Math.cos(a) * rr - 3, 30 - L * 0.5, Math.sin(a) * rr - 2);
+      rm.rotation.set((rand() - .5) * .35 + .22, 0, (rand() - .5) * .35 - .2);
+      rm.userData = { ph: rand() * 6, w: .05 + rand() * .08 }; grp.add(rm); RAYS.push(rm);
+    }
+    const bubbles = new THREE.Points(pts(nk(AQ.bubbles), [3, 24, 0.6], 30), new THREE.ShaderMaterial({
+      transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, uniforms: { uT: tU, uScale: scaleU },
+      vertexShader: `attribute float aPh; uniform float uT; uniform float uScale;
+        void main(){ vec3 p = position; float sp = .25 + .2 * fract(aPh * 7.3); p.y = mod(p.y + uT * sp + 15.0, 30.0) - 15.0;
+          p.x += sin(uT * 1.1 + aPh * 3.0) * .25; p.z += cos(uT * .9 + aPh * 2.0) * .25;
+          vec4 mv = modelViewMatrix * vec4(p, 1.0); gl_PointSize = clamp((.08 + .1 * fract(aPh * 3.1)) * uScale / -mv.z, 1.5, 14.0); gl_Position = projectionMatrix * mv; }`,
+      fragmentShader: `void main(){ float d = length(gl_PointCoord - .5) * 2.0; if (d > 1.0) discard;
+        float ring = smoothstep(.62, .9, d) * (1.0 - smoothstep(.9, 1.0, d)) + .12 * (1.0 - d) + .6 * smoothstep(.25, .0, length(gl_PointCoord - vec2(.35, .35)));
+        gl_FragColor = vec4(vec3(.6, .95, 1.0) * ring * .55, 1.0); }` }));
+    bubbles.frustumCulled = false; grp.add(bubbles);
+    const JELLY = [], bellGeo = new THREE.SphereGeometry(1, 28, 14, 0, Math.PI * 2, 0, Math.PI * 0.55), coreGeo = new THREE.SphereGeometry(.35, 12, 8);
+    for (let i = 0; i < nk(AQ.jellies); i++) {
+      const col = [0x5ff0ff, 0x8ab8ff, 0xc890ff, 0x6affd8][i % 4], jg = new THREE.Group();
+      const bell = new THREE.Mesh(bellGeo, new THREE.ShaderMaterial({
+        transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide, uniforms: { uCol: { value: new THREE.Color(col) }, uP: { value: 0 }, uF: { value: 1 } },
+        vertexShader: `varying vec3 vN; varying vec3 vV; varying float vY;
+          void main(){ vY = position.y; vN = normalize(normalMatrix * normal); vec4 mv = modelViewMatrix * vec4(position,1.0); vV = normalize(-mv.xyz); gl_Position = projectionMatrix * mv; }`,
+        fragmentShader: `uniform vec3 uCol; uniform float uP; uniform float uF; varying vec3 vN; varying vec3 vV; varying float vY;
+          void main(){ float rim = pow(1.0 - abs(dot(vN, vV)), 2.2); float a = (.03 + .6 * rim) * (.7 + .3 * uP) * uF;
+            float band = .5 + .5 * sin(vY * 22.0); a *= .8 + .35 * band; gl_FragColor = vec4(uCol * a, a); }` }));
+      const inner = new THREE.Mesh(coreGeo, new THREE.MeshBasicMaterial({ color: col, transparent: true, opacity: .25, blending: THREE.AdditiveBlending, depthWrite: false }));
+      inner.position.y = .1;
+      const NTn = 10, NS = 14, tpos = new Float32Array(NTn * NS * 2 * 3), tg = new THREE.BufferGeometry(); tg.setAttribute('position', new THREE.BufferAttribute(tpos, 3));
+      const tent = new THREE.LineSegments(tg, new THREE.LineBasicMaterial({ color: col, transparent: true, opacity: .45, blending: THREE.AdditiveBlending, depthWrite: false }));
+      tent.frustumCulled = false; jg.add(bell, inner, tent);
+      jg.scale.setScalar(AQ.jellyS[0] + rand() * AQ.jellyS[1]);
+      const a = rand() * Math.PI * 2, r = AQ.jellyR[0] + rand() * AQ.jellyR[1], y = -8 + rand() * 16;
+      jg.userData = { bell, inner, tent, tpos, NT: NTn, NS, ph: rand() * 6, sp: .5 + rand() * .4, a, r, y, len: 2.2 + rand() * 1.6 };
+      grp.add(jg); JELLY.push(jg);
+    }
+    aqua = { scaleU, update(t, dt) {
+      tU.value = t;
+      for (const rm of RAYS) rm.rotation.y = Math.sin(t * rm.userData.w + rm.userData.ph) * .25;
+      for (const jg of JELLY) {
+        const u = jg.userData, ph = t * u.sp + u.ph, pulse = Math.pow(.5 + .5 * Math.sin(ph * 2.0), 2.0);
+        u.bell.scale.set(1 + .14 * pulse, 1 - .18 * pulse, 1 + .14 * pulse);
+        const dj = _cp.copy(jg.position).add(grp.position).distanceTo(camera.position), dc = camera.position.distanceTo(controls.target);
+        const fade = sstep(0.55 * dc, 1.05 * dc, dj) * sstep(4, 8, dj);   // s'efface entre la caméra et la station : elle ne masque jamais le sujet
+        jg.visible = fade > 0.01;
+        u.bell.material.uniforms.uP.value = pulse; u.bell.material.uniforms.uF.value = fade; u.inner.material.opacity = (.12 + .22 * pulse) * fade; u.tent.material.opacity = .45 * fade;
+        u.y += dt * (.05 + .25 * pulse); if (u.y > 14) u.y = -14;   // elle monte par à-coups, à chaque contraction
+        u.a += dt * .008;
+        jg.position.set(Math.cos(u.a) * u.r, u.y, Math.sin(u.a) * u.r);
+        jg.rotation.z = Math.sin(ph * .3) * .15; jg.rotation.x = Math.cos(ph * .27) * .12;
+        let k = 0;
+        for (let i = 0; i < u.NT; i++) {
+          const ang = i / u.NT * Math.PI * 2, rx = Math.cos(ang) * .7, rz = Math.sin(ang) * .7;
+          let px = rx, py = -.05, pz = rz;
+          for (let j = 0; j < u.NS; j++) {
+            const f = (j + 1) / u.NS, y2 = -.05 - f * u.len, sw = Math.sin(ph * 1.3 - f * 5.0 + i) * .28 * f;
+            const nx = rx * (1 - .5 * f) + sw * Math.cos(ang + 1.3), nz = rz * (1 - .5 * f) + sw * Math.sin(ang + 1.3);
+            u.tpos[k] = px; u.tpos[k + 1] = py; u.tpos[k + 2] = pz; u.tpos[k + 3] = nx; u.tpos[k + 4] = y2; u.tpos[k + 5] = nz; k += 6; px = nx; py = y2; pz = nz;
+          }
+        }
+        u.tent.geometry.attributes.position.needsUpdate = true;
+      }
+    } };
   }
   const _cp = new THREE.Vector3();
   function updateClouds(dt) {
@@ -652,7 +1326,8 @@ function mount(container, opts = {}) {
       const u = sp.userData;
       u.a += u.w * dt;
       sp.position.set(Math.cos(u.a) * u.r, u.y, Math.sin(u.a) * u.r);
-      sp.material.opacity = u.base * (u.mist ? sstep(2.0, 7, _cp.copy(sp.position).distanceTo(camera.position)) : sstep(3, 11, _cp.copy(sp.position).distanceTo(camera.position)));
+      _cp.copy(sp.position); _cp.y += CY;
+      sp.material.opacity = u.base * (u.mist ? sstep(2.0, 7, _cp.distanceTo(camera.position)) : sstep(3, 11, _cp.distanceTo(camera.position)));
     }
   }
 
@@ -748,7 +1423,7 @@ function mount(container, opts = {}) {
   const ro = new ResizeObserver(() => {
     camera.aspect = W() / H(); camera.updateProjectionMatrix();
     renderer.setSize(W(), H()); composer.setSize(W(), H()); bloom.resolution.set(W() / 2, H() / 2);
-    engMat.uniforms.uScale.value = H() * renderer.getPixelRatio();
+    engMat.uniforms.uScale.value = H() * renderer.getPixelRatio(); if (aqua) aqua.scaleU.value = engMat.uniforms.uScale.value;
     shot = VIEWS[view](); applyLimits();
   });
   ro.observe(container);
@@ -783,6 +1458,7 @@ function mount(container, opts = {}) {
     });
     m.traverse(o => { if (o !== m) { o.position.set(0, 0, 0); o.rotation.set(0, 0, 0); o.scale.set(1, 1, 1); } });
     m.scale.setScalar(S);
+    if (PR.phys) physSwap(m);
     m.traverse(o => {
       if (!o.isMesh) return;
       const mats = Array.isArray(o.material) ? o.material : [o.material];
@@ -793,7 +1469,7 @@ function mount(container, opts = {}) {
           if (NT.hull && !mat.userData.nh) { mat.userData.nh = 1; mat.color.multiplyScalar(NT.hull * (NT.rock && /ROCK/.test(mat.name) ? NT.rock : 1)); } }   // 16/10 — coques crème/grises assombries la nuit (fini l'effet plastique)
         else if (mat.map) { mat.envMapIntensity = 0.22 * NT.env; mat.metalness = Math.min(mat.metalness, 0.3); mat.roughness = Math.max(mat.roughness, 0.9); if (NT.albedo) { mat.roughness = 1.0; mat.metalness = Math.min(mat.metalness, 0.15); }   /* matière qui boit la lumière : presque noire, sans reflet */ if (!mat.userData.nt) { mat.userData.nt = 1; if (mat.emissiveMap) mat.emissiveIntensity *= NT.tex; if (NT.albedo) mat.color.multiplyScalar(NT.albedo); } }   // 16/10 — pièces texturées (noyau de la Couronne) : reflets retenus comme le reste
         if (PR.rockLift && mat.name.startsWith('M_SC_ROCK') && !mat.userData.lift) { mat.userData.lift = 1; mat.color.multiplyScalar(PR.rockLift); }
-        if (/_GLASS$/.test(mat.name)) { mat.envMapIntensity = 0.6; mat.color.setRGB(...PR.glass); }
+        if (/_GLASS$/.test(mat.name) && !mat.userData.phys) { mat.envMapIntensity = 0.6; mat.color.setRGB(...PR.glass); }
         if (PR.fix) PR.fix(mat);   // 19/10 — retouches propres à une station (ivoire assombri du Refuge…)
         if (!GLOW[mat.name] && !mat.map && mat.emissive && mat.emissiveIntensity > 0 && !mat.userData.ng) { mat.userData.ng = 1; mat.emissiveIntensity *= NT.glow; }   // néons, enseigne, salon VIP : sans éblouir
         const look = LOOK[mat.name];
@@ -913,6 +1589,8 @@ function mount(container, opts = {}) {
     for (const m of beaconMats) m.emissiveIntensity = NT.glow * (4 + 6 * Math.pow(0.5 + 0.5 * Math.sin(t * 1.3), 4));
     for (const m of breatheMats) { const b = PR.breathe[m.name]; m.emissiveIntensity = NT.glow * (b[0] + b[1] * Math.sin(t * b[2])); }
     if (iceMesh) updateIce(t, dt);
+    if (aqua) aqua.update(t, dt);
+    CAUSTIC_T.value = t;
     for (const h of halos) {
       const k = h.userData.pulse ? 0.55 + 0.45 * Math.pow(0.5 + 0.5 * Math.sin(t * h.userData.pulse + h.userData.ph), 3) : 0.8 + 0.2 * Math.sin(t * 3 + h.userData.ph);
       h.scale.setScalar(h.userData.size * (0.7 + 0.5 * k)); h.material.opacity = (0.35 + 0.6 * k) * NT.halo;
@@ -928,7 +1606,7 @@ function mount(container, opts = {}) {
       bloom.strength = BLOOM[0] * (1 - 0.59 * near); if (barLight) barLight.intensity = barLight.userData.i0 * (1 - 0.64 * near);
     }
     const d = camera.position.distanceTo(controls.target);
-    scene.fog.near = Math.max(0.6, d - PR.fog[0]); scene.fog.far = d + PR.fog[1];
+    scene.fog.near = Math.max(0.6, PR.fogK ? d * PR.fogK : d - PR.fog[0]); scene.fog.far = d + PR.fog[1];
     composer.render();
   }
   frame();
@@ -955,7 +1633,7 @@ function mount(container, opts = {}) {
         const ms = o.material ? (Array.isArray(o.material) ? o.material : [o.material]) : [];
         for (const mt of ms) { if (mt.map) mt.map.dispose(); mt.dispose(); }
       });
-      envTex.dispose(); pmrem.dispose(); skyRT.dispose(); CLOUD_TEX.forEach(t => t.dispose()); composer.dispose && composer.dispose();
+      envTex.dispose(); if (studioEnv) studioEnv.dispose(); pmrem.dispose(); skyRT.dispose(); CLOUD_TEX.forEach(t => t.dispose()); composer.dispose && composer.dispose();
       renderer.dispose(); renderer.forceContextLoss(); renderer.domElement.remove();
     },
   };
