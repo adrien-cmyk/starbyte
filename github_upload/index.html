@@ -5916,6 +5916,7 @@ svg.map {
   <div class="cheat-label">Parcelles</div>
   <button onclick="cheatBuildBasic()">Construire bâtiments de base</button>
   <button onclick="cheatBuildAll()">⭐ Construire TOUS les bâtiments</button>
+  <button onclick="sbMapDiag()">📋 Diagnostic de la carte (copier)</button>
   <button onclick="cheatUnlockAll()">Débloquer toutes parcelles</button>
   <button onclick="cheatFinishUpgrade()">Finir l'amélioration en cours</button>
 
@@ -47759,6 +47760,27 @@ function cheatBuildBasic() {
   refreshCurrentScreen();
 }
 
+// 22/10 — diagnostic de la carte du Centre de prospection : à copier et envoyer (routes, lignes, missions, cases figées)
+async function sbMapDiag() {
+  const C = (G.mapCells && G.mapCells.cells) || {};
+  const at = k => (C[k] === undefined ? '?' : C[k]);
+  const d = { v: 1, at: new Date().toISOString(), home: (typeof MY_ADDRESS !== 'undefined' && MY_ADDRESS) ? MY_ADDRESS.cluster + '-' + MY_ADDRESS.sector + '-' + MY_ADDRESS.system : null,
+    mapCells: G.mapCells ? { v: G.mapCells.v, home: G.mapCells.home, n: Object.keys(C).length } : null, err: window._smRouteErr || null,
+    chains: (window._smChains || []).map(ch => ch.map(k => k + '@' + at(k))),
+    routes: (G.routes || []).map(r => ({ id: r.id, name: r.name, portSys: r.portSys || null, chain: (window.SBLines && r.portSys) ? (() => { try { return SBLines.knownChain(r.portSys).map(k => k + '@' + at(k)); } catch (e) { return 'ERR ' + e.message; } })() : null })),
+    opened: (window.SBLines ? SBLines.openedRoutes() : []).map(o => ({ id: o.id, name: o.name, chain: (o.chain || []).map(k => k + '@' + at(k)) })),
+    tankers: (G.tankerMissions || []).filter(m => m.status !== 'returned').map(m => ({ id: m.id, kind: m.kind, status: m.status, portSys: m.portSys || null, target: m.targetCoords || null, dock: m.dock && m.dock.name || null })) };
+  const txt = JSON.stringify(d);
+  try { await navigator.clipboard.writeText(txt); toast('Diagnostic copié : colle-le à Claude'); }
+  catch (e) {
+    const ov = document.createElement('div');
+    ov.style.cssText = 'position:fixed;inset:0;z-index:10050;background:rgba(0,0,0,.8);display:flex;flex-direction:column;padding:40px 16px;gap:10px';
+    ov.innerHTML = '<div style="color:#e6f0ff;font-size:13px">Diagnostic : sélectionne tout, copie, et envoie-le à Claude.</div><textarea style="flex:1;font-size:11px;font-family:monospace;background:#0b1016;color:#cfe;border:1px solid #345;border-radius:8px;padding:8px"></textarea><button style="padding:12px;border-radius:8px;border:1px solid #5fffe8;background:none;color:#5fffe8">Fermer</button>';
+    ov.querySelector('textarea').value = txt; ov.querySelector('button').onclick = () => ov.remove();
+    document.body.appendChild(ov); ov.querySelector('textarea').select();
+  }
+  return txt;
+}
 function cheatBuildAll() {
   // Construit TOUS les bâtiments disponibles (Mine, Centrale, Labo, Caserne, Chantier, Bunker + tous les Silos)
   // Débloque d'abord toutes les parcelles verrouillées pour avoir assez de place
@@ -48708,7 +48730,7 @@ if (G.knownTargets && Array.isArray(G.tankerMissions)) {
 <!-- HOME V2 — « monde d'abord » : planète plein écran, ressources en ligne, Flotte / Défense / Prospection (assets/home.js) -->
 <script type="module" src="assets/home.js?v=20261020-2150"></script>
 <!-- SPACE MAP v0 — carte du Centre de prospection (assets/spacemap.js, source src/spacemap.js) -->
-<script src="assets/spacemap.js?v=20261022-0831"></script>
+<script src="assets/spacemap.js?v=20261022-0837"></script>
 <!-- SPACE MAP niveau B — diorama 3D d'un système (assets/system3d.js, source src/system3d.js) -->
 <script type="module" src="assets/system3d.js?v=20261014-1440"></script>
 <!-- SHIP3D — fiches 3D : cuirassé KV-01, frégate SR-01, tanker TK-07, chantier orbital OS-01 (assets/ship3d.js, sur le moteur partagé window.SB3D) -->

@@ -261,7 +261,7 @@
     // 21/10 (Adrien : « la route du Linceul a encore changé ») — positions FIGÉES : un système qui a reçu une case la garde
     // pour toujours (G.mapCells). Les nouveaux venus se placent autour ; une route qui s'allonge ajoute ses jalons sans
     // déplacer ceux qu'on connaît. Les cases des systèmes absents (rapports supprimés…) restent réservées.
-    if (!G.mapCells || G.mapCells.v !== 5 || G.mapCells.home !== home) G.mapCells = { v: 5, home, cells: {} };   // v5 (22/10) : recalcul unique — routes en ligne droite, sur le flanc si le lieu est tout près
+    if (!G.mapCells || G.mapCells.v !== 6 || G.mapCells.home !== home) G.mapCells = { v: 6, home, cells: {} };   // v6 (22/10) : recalcul unique — les positions ne se figent qu'une fois les lignes chargées
     const MC = G.mapCells.cells;
     const fixed = new Set(), reserved = [];
     for (const [k, idx] of Object.entries(MC)) {
@@ -279,7 +279,10 @@
         // 22/10 — une ligne qu'un de mes tankers emprunte (même sans route enregistrée) se trace aussi en ligne droite
         const seen = new Set(routeChains.map(ch => ch[ch.length - 1]));
         for (const m of (G.tankerMissions || [])) if (m.portSys && !seen.has(m.portSys)) { const ch = SBLines.knownChain(m.portSys); if (ch.length > 1) { routeChains.push(ch); seen.add(m.portSys); } }
-      } catch (e) {}
+      } catch (e) { window._smRouteErr = String(e && e.stack || e).slice(0, 400); }
+    }
+    window._smChains = routeChains.map(ch => ch.slice());
+    if (false) {
     }
     routeChains.sort((a, b) => b.length - a.length);   // la plus longue d'abord : les routes qui partagent des jalons suivent son tracé
     const onRoute = new Set(routeChains.flat().filter(k => k !== home));
@@ -347,7 +350,9 @@
       const c = freeAround(CELLS[0], 2, BOARD, occ, k)[0]; if (c) { occ.set(c.idx, { kind: 'system', key: k }); cell['sys:' + k] = c.idx; }
     }
     for (const idx of reserved) occ.delete(idx);
-    for (const k of keys) if (cell['sys:' + k] !== undefined) MC[k] = cell['sys:' + k];   // mémorisé (sauvegardé avec la partie)
+    // mémorisé (sauvegardé avec la partie) — seulement une fois les lignes PNJ chargées : sinon les jalons des routes
+    // se figeraient à la place de leur secteur avant que la route ne soit connue (22/10, carte d'Adrien)
+    if (window.SBLines) for (const k of keys) if (cell['sys:' + k] !== undefined) MC[k] = cell['sys:' + k];
     // 13/10 (Adrien) — zoom sémantique : chaque objet vit DANS la case de son système, sur une orbite.
     // De loin on ne voit qu'un point par système ; de près, la case s'ouvre et montre le système.
     const items = {};                 // clé de système → [{ kind, key, ck, orbit, ang }]
