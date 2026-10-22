@@ -261,7 +261,7 @@
     // 21/10 (Adrien : « la route du Linceul a encore changé ») — positions FIGÉES : un système qui a reçu une case la garde
     // pour toujours (G.mapCells). Les nouveaux venus se placent autour ; une route qui s'allonge ajoute ses jalons sans
     // déplacer ceux qu'on connaît. Les cases des systèmes absents (rapports supprimés…) restent réservées.
-    if (!G.mapCells || G.mapCells.v !== 6 || G.mapCells.home !== home) G.mapCells = { v: 6, home, cells: {} };   // v6 (22/10) : recalcul unique — les positions ne se figent qu'une fois les lignes chargées
+    if (!G.mapCells || G.mapCells.v !== 7 || G.mapCells.home !== home) G.mapCells = { v: 7, home, cells: {} };   // v6 (22/10) : recalcul unique — les positions ne se figent qu'une fois les lignes chargées
     const MC = G.mapCells.cells;
     const fixed = new Set(), reserved = [];
     for (const [k, idx] of Object.entries(MC)) {
@@ -281,6 +281,10 @@
         for (const m of (G.tankerMissions || [])) if (m.portSys && !seen.has(m.portSys)) { const ch = SBLines.knownChain(m.portSys); if (ch.length > 1) { routeChains.push(ch); seen.add(m.portSys); } }
       } catch (e) { window._smRouteErr = String(e && e.stack || e).slice(0, 400); }
     }
+    // 22/10 (diagnostic d'Adrien) — une ligne connue peut compter des jalons qui ne sont pas sur la carte (écho capté
+    // mais système jamais relevé) : on trace la route avec ceux qui y sont, sinon ses autres jalons restaient orphelins
+    for (let i = 0; i < routeChains.length; i++) routeChains[i] = routeChains[i].filter(k => k === home || systems[k]);
+    for (let i = routeChains.length - 1; i >= 0; i--) if (routeChains[i].length < 2) routeChains.splice(i, 1);
     window._smChains = routeChains.map(ch => ch.slice());
     if (false) {
     }
