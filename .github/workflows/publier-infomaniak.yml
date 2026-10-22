@@ -14,6 +14,10 @@ on:
         description: 'Tout renvoyer (ignorer la liste du serveur)'
         type: boolean
         default: false
+      diagnostic:
+        description: 'Seulement lister le contenu du serveur FTP (rien n''est envoyé)'
+        type: boolean
+        default: false
 concurrency:
   group: publier-infomaniak
   cancel-in-progress: false
@@ -36,8 +40,22 @@ jobs:
       - name: Installer lftp
         if: env.SKIP != '1'
         run: sudo apt-get install -y -qq lftp >/dev/null
+      - name: Diagnostic (contenu du serveur)
+        if: env.SKIP != '1' && inputs.diagnostic
+        run: |
+          cat > /tmp/rc <<RC
+          set ftp:ssl-force true
+          set ftp:ssl-protect-data true
+          set ftp:ssl-reuse-session true
+          set ftp:passive-mode true
+          open -u "$FTP_USER","$FTP_PASS" ftp://$FTP_HOST
+          RC
+          lftp -c "source /tmp/rc; pwd; cls -1 --sort=name ./" > /tmp/ls.txt 2>&1 || true
+          lftp -c "source /tmp/rc; cls -1 ./sites ./web ./www ./public_html" >> /tmp/ls.txt 2>&1 || true
+          echo "::notice title=Racine FTP::$(head -60 /tmp/ls.txt | tr '\n' '|')"
+          echo "STOP=1" >> "$GITHUB_ENV"
       - name: Calculer ce qui a changé
-        if: env.SKIP != '1'
+        if: env.SKIP != '1' && env.STOP != '1'
         run: |
           set -e
           cd github_upload
@@ -65,7 +83,7 @@ jobs:
           while IFS= read -r f; do mkdir -p "/tmp/up/$(dirname "$f")"; cp "$f" "/tmp/up/$f"; done < /tmp/changed
           cp /tmp/local.manifest /tmp/up/.deploy-manifest
       - name: Envoyer chez Infomaniak
-        if: env.SKIP != '1'
+        if: env.SKIP != '1' && env.STOP != '1'
         run: |
           set -e
           # index.html en dernier : quand la page change, tous les fichiers qu'elle appelle sont déjà là
