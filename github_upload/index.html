@@ -49335,6 +49335,69 @@ if (G.knownTargets && Array.isArray(G.tankerMissions)) {
     } catch (e) {}
   }
   window.SBMove = { show: moveSheet };
+
+  // ── PATCH_2210_PRECHARGE — premier lancement : on télécharge l'univers avec une barre de progression ──
+  // (retour de Damien : carte noire au premier lancement, on ne sait pas si ça charge). La liste precache.json est
+  // produite à chaque publication chez Infomaniak ; les fichiers passent par le cache de l'app, puis ne se
+  // retéléchargent plus. Après 6 s on peut jouer pendant le téléchargement : une pastille garde le pourcentage.
+  const PRE_KEY = 'sb_precache_v1';
+  async function precache() {
+    if (!('caches' in window) || !('serviceWorker' in navigator)) return;
+    let list; try { const r = await fetch('precache.json', { cache: 'no-store' }); if (!r.ok) return; list = await r.json(); } catch (e) { return; }
+    if (!list || !Array.isArray(list.files) || !list.files.length) return;
+    let done = {}; try { done = JSON.parse(localStorage.getItem(PRE_KEY) || '{}'); } catch (e) {}
+    if (done.id === list.id && done.ok) return;
+    const firstTime = !done.ok;
+    try { await navigator.serviceWorker.ready; } catch (e) {}
+    // déjà dans le cache de l'app ? (une mise à jour ne retélécharge que le nouveau)
+    let todo = list.files;
+    try { const c = await caches.open('starbyte-v2'); const keys = new Set((await c.keys()).map(k => { const u = new URL(k.url); return u.pathname.replace(/^\//, '') + u.search; })); todo = list.files.filter(f => !keys.has(f.u)); } catch (e) {}
+    const total = todo.reduce((n, f) => n + f.s, 0); if (!todo.length) { localStorage.setItem(PRE_KEY, JSON.stringify({ id: list.id, ok: 1 })); return; }
+    let got = 0, fails = 0;
+    const mb = (b) => (b / 1e6).toFixed(b < 1e7 ? 1 : 0);
+    let ui = null, pill = null;
+    if (firstTime && total > 5e6) {
+      ui = document.createElement('div'); ui.id = 'sb-pre';
+      ui.style.cssText = 'position:fixed;inset:0;z-index:9900;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;padding:24px;background:radial-gradient(ellipse at 50% 40%,#22143d 0%,#0a0716 55%,#040605 100%);color:#e8e2ff;font-family:Space Grotesk,system-ui,sans-serif;text-align:center';
+      ui.innerHTML = `<img src="assets/app/icon-192.png" alt="" style="width:84px;height:84px;border-radius:20px;box-shadow:0 0 40px rgba(150,120,255,.35)">
+        <div style="font-size:12px;letter-spacing:.24em;text-transform:uppercase;color:#b9a4ff">Premier lancement</div>
+        <div style="font-size:20px;font-weight:600;color:#fff">Préparation de l'univers</div>
+        <div style="width:min(300px,80vw);height:6px;border-radius:3px;background:rgba(255,255,255,.1);overflow:hidden"><i id="sb-pre-bar" style="display:block;height:100%;width:0;background:linear-gradient(90deg,#7b5cff,#5fffe8);transition:width .3s"></i></div>
+        <div id="sb-pre-txt" style="font-family:JetBrains Mono,monospace;font-size:12px;color:rgba(232,226,255,.75)">0 %</div>
+        <div style="font-size:12px;line-height:1.5;color:rgba(232,226,255,.55);max-width:300px">Planètes, vaisseaux et stations se téléchargent une seule fois (${mb(total)} Mo, Wi-Fi conseillé).<br>Les prochains lancements seront immédiats.</div>
+        <button id="sb-pre-skip" style="margin-top:6px;padding:11px 18px;border-radius:10px;border:1px solid rgba(185,164,255,.5);background:rgba(185,164,255,.12);color:#efeaff;font:inherit;font-size:11px;letter-spacing:.12em;text-transform:uppercase;cursor:pointer;opacity:0;pointer-events:none;transition:opacity .4s">Jouer pendant le téléchargement</button>`;
+      document.body.appendChild(ui);
+      setTimeout(() => { const b = document.getElementById('sb-pre-skip'); if (b) { b.style.opacity = 1; b.style.pointerEvents = 'auto'; b.onclick = toPill; } }, 6000);
+    }
+    function toPill() {
+      if (ui) { ui.remove(); ui = null; }
+      if (pill || got >= total) return;
+      pill = document.createElement('div'); pill.id = 'sb-pre-pill';
+      pill.style.cssText = 'position:fixed;left:50%;transform:translateX(-50%);bottom:calc(env(safe-area-inset-bottom,0px) + 6px);z-index:9000;padding:4px 10px;border-radius:12px;background:rgba(10,8,22,.85);border:1px solid rgba(185,164,255,.35);color:#cfc3ff;font:11px JetBrains Mono,monospace;pointer-events:none';
+      document.body.appendChild(pill); paint();
+    }
+    function paint() {
+      const pct = total ? Math.min(100, Math.floor(got / total * 100)) : 100;
+      const bar = document.getElementById('sb-pre-bar'), txt = document.getElementById('sb-pre-txt');
+      if (bar) bar.style.width = pct + '%';
+      if (txt) txt.textContent = `${pct} %  ·  ${mb(got)} / ${mb(total)} Mo`;
+      if (pill) pill.textContent = `Univers ${pct} %`;
+    }
+    const queue = todo.slice().sort((a, b) => (/\.js(\?|$)/.test(b.u) - /\.js(\?|$)/.test(a.u)) || a.s - b.s);   // scripts d'abord, puis du plus léger au plus lourd
+    async function worker() {
+      while (queue.length) {
+        const f = queue.shift();
+        try { const r = await fetch(f.u); if (r.ok) { await r.arrayBuffer(); } else fails++; } catch (e) { fails++; }
+        got += f.s; paint();
+      }
+    }
+    await Promise.all(Array.from({ length: 4 }, worker));
+    if (!fails) try { localStorage.setItem(PRE_KEY, JSON.stringify({ id: list.id, ok: 1 })); } catch (e) {}
+    if (ui) { const t = document.getElementById('sb-pre-txt'); if (t) t.textContent = 'Prêt'; ui.style.transition = 'opacity .5s'; ui.style.opacity = 0; setTimeout(() => ui && ui.remove(), 520); }
+    if (pill) { pill.textContent = 'Univers prêt'; setTimeout(() => pill && pill.remove(), 2500); }
+  }
+  if (!OLD && (location.protocol === 'https:' || location.hostname === 'localhost')) addEventListener('load', () => setTimeout(() => precache().catch(e => console.warn('[app] préchargement', e)), 300));
+  window.__sbPrecache = precache;
   // PATCH_2210_RESTAURER : « J'ai déjà une partie » attend tout seul que la connexion au cloud soit prête
   // (au tout premier lancement de l'app, la 3D se télécharge d'abord et le module cloud arrive après)
   window.sbRestoreWhenReady = function (btn) {

@@ -35,7 +35,9 @@ jobs:
       - uses: actions/checkout@v4
         if: env.SKIP != '1'
         with:
-          sparse-checkout: github_upload
+          sparse-checkout: |
+            github_upload
+            tools
           sparse-checkout-cone-mode: true
       - name: Installer lftp
         if: env.SKIP != '1'
@@ -60,6 +62,7 @@ jobs:
           set -e
           cd github_upload
           rm -rf server
+          python3 ../tools/precache_list.py .   # liste du premier téléchargement de l'app (précache.json)
           find . -type f ! -name '.deploy-manifest' -print0 | sort -z | xargs -0 sha256sum > /tmp/local.manifest
           cat > /tmp/lftprc <<RC
           set ftp:ssl-force true
