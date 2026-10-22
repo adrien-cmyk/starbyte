@@ -927,7 +927,19 @@
       this.moveTo(0, 0, homeDist(), 1);
       this._t = 0; this._last = performance.now(); this._check = 0;
       try { this.still = window.matchMedia('(prefers-reduced-motion: reduce)').matches; } catch (e) { this.still = false; }
-      r.setAnimationLoop(() => this._frame());
+      // PATCH_2210_CARTE_FILET : une image qui plante ne doit pas laisser un écran noir sans fin
+      this._ferr = 0;
+      r.setAnimationLoop(() => {
+        try { this._frame(); this._ferr = 0; }
+        catch (e) {
+          if (++this._ferr === 1) console.warn('[SpaceMap] image: ' + (e && e.message) + ' ' + String(e && e.stack || '').split('\n').slice(1, 3).join(' ').replace(/https?:\/\/[^/]+\//g, '').slice(0, 140));
+          if (this._ferr > 40) { r.setAnimationLoop(null); this.ready = false; _fail('le plateau 3D plante'); }
+        }
+      });
+      r.domElement.addEventListener('webglcontextlost', (ev) => {
+        ev.preventDefault(); console.warn('[SpaceMap] contexte WebGL perdu');
+        clearTimeout(this._lostT); this._lostT = setTimeout(() => { if (r.getContext().isContextLost()) { r.setAnimationLoop(null); this.ready = false; _fail('contexte WebGL perdu'); } }, 4000);
+      });
       this.ready = true;
       console.log('[SpaceMap] plateau stratégique prêt');
     },
@@ -1750,11 +1762,21 @@
     document.body.appendChild(s);
   }
 
+  // PATCH_2210_CARTE_FILET : si le plateau 3D ne vient pas (ou plante), on passe à la carte simple au lieu d'un écran noir
+  function _fail(why) {
+    if (_fallback) return;
+    console.warn('[SpaceMap] carte simple : ' + why);
+    try { if (E.renderer) { E.renderer.setAnimationLoop(null); E.renderer.domElement.remove(); } } catch (e) {}
+    loadFallback();
+  }
   function render() {
     if (_fallback) return;
     if (!ensureDom()) return;
     if (E.ready) { refresh(true); return; }
     renderPanel(collect());
+    if (!E.loading && !E._wd) {
+      E._wd = setTimeout(() => { if (!E.ready && !_fallback) _fail('plateau pas prêt après 15 s'); }, 15000);
+    }
     if (!E.loading) {
       E.loading = E.init(_root.querySelector('.sm3-view')).then(() => {
         _sigStr = '';
@@ -2315,6 +2337,12 @@
       if (!(probe.getContext('webgl2') || probe.getContext('webgl'))) return;   // sans WebGL : ancienne mise en page
       this.on = true; this.scr = scr;
       scr.classList.add('sm-world');
+      // PATCH_2210_CARTE_FILET : la croix de retour, même si home.js ne l'a pas (encore) posée
+      if (!scr.querySelector(':scope > .w-screen-x')) {
+        const x = document.createElement('button'); x.className = 'w-screen-x'; x.setAttribute('aria-label', 'Retour à la planète'); x.textContent = '×';
+        x.onclick = () => { if (typeof goto === 'function') goto('planet'); };
+        scr.appendChild(x);
+      }
 
       // La carte : tout l'écran, sous le reste
       const map = document.createElement('div'); map.className = 'smw-map';
@@ -2465,6 +2493,7 @@
       #scr-prospect.sm-world > .stars,#scr-prospect.sm-world > .glow,#scr-prospect.sm-world > footer.actions,
       #scr-prospect.sm-world .screen-scroll > .head,#scr-prospect.sm-world #prospect-banner,#scr-prospect.sm-world #prospect-tabs{display:none !important}
       #scr-prospect.sm-world > .screen-scroll{display:none}
+      .sm-world>.w-screen-x{position:absolute;top:calc(var(--sai,0px) + 8px);right:8px;z-index:60;width:44px;height:44px;border-radius:50%;border:1px solid rgba(150,190,220,.2);background:rgba(8,13,19,.7);color:#dfe8ee;font-size:26px;line-height:1;cursor:pointer}
       .smw-map{position:absolute;inset:0;z-index:1}
       .smw-map #spacemap-root{position:absolute;inset:0;padding:0}
       .smw-map .sm3-wrap{position:absolute;inset:0;height:auto;border:0;border-radius:0;box-shadow:none}
