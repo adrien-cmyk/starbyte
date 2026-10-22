@@ -1,0 +1,86 @@
+# Publie le site vitrine (dossier site/) sur https://starbyte.online, hébergé chez Infomaniak.
+# Même principe que la publication du jeu : FTPS avec lftp, seuls les fichiers modifiés partent
+# (liste des empreintes .deploy-manifest gardée sur le serveur). Le dossier site/_src n'est jamais envoyé.
+# Identifiants : secrets INFOMANIAK_SITE_FTP_SERVER, INFOMANIAK_SITE_FTP_USER, INFOMANIAK_SITE_FTP_PASSWORD
+# (un compte FTP dont la racine est le dossier de starbyte.online, distinct de celui de play.starbyte.online).
+name: Publier sur starbyte.online
+on:
+  push:
+    branches: [main]
+    paths: ['site/**']
+  workflow_dispatch:
+    inputs:
+      tout:
+        description: 'Tout renvoyer (ignorer la liste du serveur)'
+        type: boolean
+        default: false
+      diagnostic:
+        description: 'Seulement lister le contenu du serveur FTP (rien n''est envoyé)'
+        type: boolean
+        default: false
+concurrency:
+  group: publier-site
+  cancel-in-progress: false
+jobs:
+  publier:
+    runs-on: ubuntu-latest
+    env:
+      FTP_HOST: ${{ secrets.INFOMANIAK_SITE_FTP_SERVER }}
+      FTP_USER: ${{ secrets.INFOMANIAK_SITE_FTP_USER }}
+      FTP_PASS: ${{ secrets.INFOMANIAK_SITE_FTP_PASSWORD }}
+    steps:
+      - name: Vérifier les identifiants
+        run: |
+          if [ -z "$FTP_HOST" ] || [ -z "$FTP_USER" ]; then echo "::warning::Secrets INFOMANIAK_SITE_FTP_* absents : le site n'est pas publié."; echo "SKIP=1" >> "$GITHUB_ENV"; fi
+      - uses: actions/checkout@v4
+        if: env.SKIP != '1'
+        with:
+          sparse-checkout: site
+          sparse-checkout-cone-mode: true
+      - name: Installer lftp
+        if: env.SKIP != '1'
+        run: sudo apt-get install -y -qq lftp >/dev/null
+      - name: Préparer la connexion
+        if: env.SKIP != '1'
+        run: |
+          cat > /tmp/lftprc <<RC
+          set ftp:ssl-force true
+          set ftp:ssl-protect-data true
+          set ssl:verify-certificate true
+          set ftp:passive-mode true
+          set net:max-retries 3
+          set net:timeout 30
+          open -u "$FTP_USER","$FTP_PASS" ftp://$FTP_HOST
+          RC
+      - name: Diagnostic (contenu du serveur)
+        if: env.SKIP != '1' && inputs.diagnostic
+        run: |
+          lftp -c "source /tmp/lftprc; pwd; cls -1 --sort=name ./" > /tmp/ls.txt 2>&1 || true
+          echo "::notice title=Racine FTP du site::$(head -60 /tmp/ls.txt | tr '\n' '|')"
+          echo "STOP=1" >> "$GITHUB_ENV"
+      - name: Calculer ce qui a changé
+        if: env.SKIP != '1' && env.STOP != '1'
+        run: |
+          set -e
+          cd site
+          rm -rf _src
+          find . -type f ! -name '.deploy-manifest' -print0 | sort -z | xargs -0 sha256sum > /tmp/local.manifest
+          : > /tmp/remote.manifest
+          if [ "${{ inputs.tout }}" != "true" ]; then
+            lftp -c "source /tmp/lftprc; get -O /tmp .deploy-manifest" 2>/dev/null && mv /tmp/.deploy-manifest /tmp/remote.manifest || echo "Pas de liste sur le serveur : envoi complet."
+          fi
+          awk 'NR==FNR { seen[$2]=$1; next } seen[$2] != $1 { print $2 }' /tmp/remote.manifest /tmp/local.manifest > /tmp/changed
+          echo "Fichiers à envoyer : $(wc -l < /tmp/changed)"
+          head -60 /tmp/changed
+          mkdir -p /tmp/up
+          while IFS= read -r f; do mkdir -p "/tmp/up/$(dirname "$f")"; cp "$f" "/tmp/up/$f"; done < /tmp/changed
+          cp /tmp/local.manifest /tmp/up/.deploy-manifest
+      - name: Envoyer chez Infomaniak
+        if: env.SKIP != '1' && env.STOP != '1'
+        run: |
+          set -e
+          # index.html en dernier : quand la page change, les images et modèles qu'elle appelle sont déjà là
+          if [ -f /tmp/up/index.html ]; then mv /tmp/up/index.html /tmp/index.html; fi
+          lftp -c "source /tmp/lftprc; mirror -R --parallel=4 --no-perms /tmp/up ."
+          if [ -f /tmp/index.html ]; then lftp -c "source /tmp/lftprc; put -O ./ /tmp/index.html"; fi
+          echo "Site publié sur starbyte.online."
