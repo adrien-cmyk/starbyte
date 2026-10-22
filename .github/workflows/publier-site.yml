@@ -59,6 +59,19 @@ jobs:
         run: |
           lftp -c "source /tmp/lftprc; pwd; cls -1 --sort=name ./; cls -1 img/ 3d/; cat index.html" > /tmp/ls.txt 2>&1 || true
           echo "::notice title=Racine FTP du site::$(head -80 /tmp/ls.txt | cut -c1-120 | tr '\n' '|')"
+          # Tests en direct du site (le runner GitHub atteint starbyte.online)
+          U=https://starbyte.online/api
+          t() { printf '%s → ' "$1"; shift; curl -sS -m 40 -o /tmp/r.txt -w 'HTTP %{http_code} ' "$@" 2>&1; head -c 300 /tmp/r.txt | tr '\n' ' '; echo; }
+          {
+            t "lib bloqué" "$U/_lib.php"
+            t "contact email invalide" -X POST -H 'Content-Type: application/json' -H 'Origin: https://starbyte.online' --data '{"email":"x","message":"test"}' "$U/contact.php"
+            t "contact envoi réel" -X POST -H 'Content-Type: application/json' -H 'Origin: https://starbyte.online' --data '{"category":"autre","captain":"Diagnostic","email":"empire@starbyte.online","message":"Message de test envoyé par le diagnostic de publication. Tu peux le supprimer."}' "$U/contact.php"
+            t "chat" -X POST -H 'Content-Type: application/json' -H 'Origin: https://starbyte.online' --data '{"messages":[{"role":"user","content":"À quoi sert la biomasse ?"}]}' "$U/chat.php"
+            curl -sS -m 20 -I "$U/contact.php" 2>&1 | grep -i -E '^(server|x-powered-by)' | tr '\n' ' '; echo
+          } > /tmp/live.txt 2>&1
+          lftp -c "source /tmp/lftprc; cls -1 api/; cat api/_data/journal.log" > /tmp/j.txt 2>&1 || true
+          echo "::notice title=Tests en direct::$(cut -c1-400 /tmp/live.txt | tr '\n' '|')"
+          echo "::notice title=Journal API::$(tail -20 /tmp/j.txt | cut -c1-200 | tr '\n' '|')"
           echo "STOP=1" >> "$GITHUB_ENV"
       - name: Calculer ce qui a changé
         if: env.SKIP != '1' && env.STOP != '1'
