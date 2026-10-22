@@ -69,7 +69,8 @@ jobs:
           if [ "${{ inputs.tout }}" != "true" ]; then
             lftp -c "source /tmp/lftprc; get -O /tmp .deploy-manifest" 2>/dev/null && mv /tmp/.deploy-manifest /tmp/remote.manifest || echo "Pas de liste sur le serveur : envoi complet."
           fi
-          awk 'NR==FNR { seen[$2]=$1; next } seen[$2] != $1 { print $2 }' /tmp/remote.manifest /tmp/local.manifest > /tmp/changed
+          # FILENAME plutôt que NR==FNR : avec une liste serveur vide, NR==FNR serait vrai pour tout le fichier local
+          awk 'FILENAME == ARGV[1] { seen[$2]=$1; next } seen[$2] != $1 { print $2 }' /tmp/remote.manifest /tmp/local.manifest > /tmp/changed
           echo "Fichiers à envoyer : $(wc -l < /tmp/changed)"
           echo "::notice title=Calcul::local $(wc -l < /tmp/local.manifest) · serveur $(wc -l < /tmp/remote.manifest) · à envoyer $(wc -l < /tmp/changed) · $(head -5 /tmp/changed | tr '\n' ' ')"
           head -60 /tmp/changed
