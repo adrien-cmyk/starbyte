@@ -65,16 +65,22 @@
   setTimeout(sendPending, 2500);
 
   // ── joueur : mon lien, ma progression, la récompense ──
-  let cached = ls.get('sb_ref_state', null), busy = false, lastAt = 0;
-  async function refresh() {
-    if (busy || !token()) return cached;
-    busy = true; lastAt = Date.now();
-    try {
-      const s = await rpc('mp_ref_state', { p_device: device() });
-      if (s && s.code) { cached = s; ls.set('sb_ref_state', s); }
-      await maybeClaim();
-    } catch (e) {} finally { busy = false; }
-    return cached;
+  let cached = ls.get('sb_ref_state', null), pending = null, lastAt = 0, lastErr = '';
+  // une seule demande à la fois : un second appel attend la réponse de la première (au lieu de repartir les mains vides)
+  function refresh() {
+    if (!token()) return Promise.resolve(cached);
+    if (pending) return pending;
+    lastAt = Date.now();
+    pending = (async () => {
+      try {
+        const s = await rpc('mp_ref_state', { p_device: device() });
+        if (s && s.code) { cached = s; ls.set('sb_ref_state', s); lastErr = ''; }
+        await maybeClaim();
+      } catch (e) { lastErr = String(e && e.message || e); console.warn('[invitation]', lastErr); }
+      finally { pending = null; }
+      return cached;
+    })();
+    return pending;
   }
   async function maybeClaim() {
     const G0 = (typeof G !== 'undefined') ? G : null;
@@ -130,7 +136,13 @@
     if (typeof sbNotifClose === 'function') sbNotifClose();
     if (!token()) { if (typeof toast === 'function') toast('Connecte-toi au registre pour inviter des commandants'); return; }
     if (!cached || !cached.code) await refresh();
-    if (!cached || !cached.code) { if (typeof toast === 'function') toast('Le registre ne répond pas, réessaie dans un instant'); return; }
+    if (!cached || !cached.code) {
+      const missing = /PGRST202|Could not find the function|mp_ref_state/.test(lastErr);
+      if (typeof toast === 'function') toast(missing ? 'Les invitations ne sont pas encore ouvertes sur le registre : reviens un peu plus tard'
+        : /JWT|401|expired/i.test(lastErr) ? 'Ta session a expiré : relance le jeu puis réessaie'
+        : 'Le registre ne répond pas, réessaie dans un instant');
+      return;
+    }
     close();
     const o = document.createElement('div'); o.id = 'sb-invite';
     o.style.cssText = 'position:fixed;inset:0;z-index:9100';
