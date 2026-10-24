@@ -1,7 +1,7 @@
 /* Starbyte — Bruitages (SFX_2410, 24/10/2026, demande d'Adrien : « essayons un peu de son »)
    Sons synthétisés en direct (Web Audio) : rien à télécharger. Esprit « cockpit premium » : doux, cristallins, feutrés.
-   - match-3 : petits bruits de chantier / forage (24/10) : déclic à l'échange, bloc qui tombe et gravats à chaque alignement,
-     coup de foreuse plus aigu à chaque cascade, mini-explosions de mine pour les charges et noyaux, cliquet, vérin, moteur
+   - match-3 : sobre (24/10) : petits bruits de pierre et de gravats, coups sourds à hauteur fixe, explosions de mine lointaines ;
+     ni mélodie ni moteur, rien qui monte en hauteur
    - planète : construction terminée ; flotte et tanker de retour ; léger « tic » sur les boutons
    - iPhone : le son ne démarre qu'après un toucher ; les bruitages respectent le bouton silencieux et se mêlent
      à la musique du joueur (session « ambient ») ; la radio de bord garde sa session « playback ».
@@ -120,6 +120,10 @@
       noise({ t, filter: 'bandpass', f: 3200, f2: 4200, q: 2, a: 0.02, d: d * 0.9, g: g * 0.35 });   // la mèche mord la roche
       oscs.forEach(o => { o.start(t); o.stop(t + d + 0.05); }); lfo.start(t); lfo.stop(t + d + 0.05);
     },
+    // version sobre (24/10) : rien qui « chante » — coups sourds à hauteur fixe, pierre, gravats, air
+    thud(t, g) { tone({ f: 68, t, a: 0.003, d: 0.07, g, lp: 300 }); noise({ t, filter: 'lowpass', f: 600, q: 0.7, a: 0.002, d: 0.06, g: g * 0.6 }); },
+    tap(t, g, f) { noise({ t, filter: 'bandpass', f: f || rnd(1100, 1400), q: 3, a: 0.001, d: 0.014, g: g * 3.5 }); },
+    trickle(t, d, g) { MX.gravel(t, Math.round(d * 40), d, g); },
     // gravats : grains de poussière et de cailloux
     gravel(t, n, d, g) {
       for (let k = 0; k < n; k++) noise({ t: t + Math.random() * d, filter: 'lowpass', f: rnd(1200, 3200), q: 0.8, a: 0.001, d: rnd(0.006, 0.02), g: g * rnd(0.5, 1), pan: rnd(-0.5, 0.5) });
@@ -135,7 +139,7 @@
     hiss(t, d, g) { noise({ t, filter: 'highpass', f: 2600, q: 0.6, a: 0.02, d, g, rev: 0.1 }); },
     // mini-explosion de mine : coup grave + grondement + gravats
     blast(t, g, len) {
-      tone({ f: 70, f2: 34, t, a: 0.003, d: 0.35 * len, g, glide: 0.6, lp: 400 });
+      tone({ f: 55, t, a: 0.004, d: 0.2 * len, g, lp: 250 });
       noise({ t, filter: 'lowpass', f: 900, f2: 180, q: 0.7, a: 0.004, d: 0.5 * len, g: g * 0.7, rev: 0.2 });
       MX.gravel(t + 0.06, Math.round(8 * len), 0.35 * len, g * 0.25);
     },
@@ -148,13 +152,13 @@
 
   const SOUNDS = {
     tap(t) { tone({ f: 1500, f2: 950, t, a: 0.002, d: 0.04, g: 0.09 }); },
-    // match-3 : chantier de forage
-    swap(t) { MX.click(t, 0.22); },
-    nope(t) { MX.motor(t, 60, 48, 0.12, 0.09, 22); MX.click(t + 0.13, 0.12); },          // la foreuse cale
-    bonus(t) { [0, 0.045, 0.09, 0.135].forEach(o => MX.click(t + o, 0.2)); },           // cliquet
-    tier(t) { MX.motor(t, 70, 210, 0.5, 0.12, 40); MX.chunk(t + 0.5, 0.32); MX.gravel(t + 0.52, 6, 0.2, 0.06); },   // la foreuse monte en régime
-    tier3(t) { MX.motor(t, 60, 280, 0.9, 0.14, 46); MX.blast(t + 0.9, 0.42, 1.3); },
-    finish(t) { MX.motor(t, 200, 55, 0.6, 0.1, 30); MX.hiss(t + 0.45, 0.35, 0.05); MX.chunk(t + 0.6, 0.3); },        // la machine s'arrête
+    // match-3 : sobre — pierre, gravats, coups sourds (aucune hauteur qui monte)
+    swap(t) { MX.tap(t, 0.16); },
+    nope(t) { MX.tap(t, 0.07, 700); MX.tap(t + 0.09, 0.06, 650); },
+    bonus(t) { MX.tap(t, 0.06); MX.tap(t + 0.07, 0.06); },
+    tier(t) { MX.thud(t, 0.22); MX.trickle(t + 0.04, 0.4, 0.035); },
+    tier3(t) { MX.blast(t, 0.3, 1.2); MX.trickle(t + 0.3, 0.7, 0.03); },
+    finish(t) { MX.trickle(t, 0.5, 0.03); MX.thud(t + 0.35, 0.18); },
     build(t) {
       bell(523.3, t, 0.14, 0.7, 0.4); bell(784, t + 0.16, 0.14, 1.0, 0.45);
       tone({ f: 130.8, t, a: 0.08, d: 0.9, g: 0.06, rev: 0.3 });
@@ -169,11 +173,11 @@
       tone({ f: 165, t: t + 0.05, type: 'sawtooth', a: 0.12, d: 0.7, g: 0.05, lp: 700, rev: 0.3 });
       bell(659.3, t + 0.25, 0.08, 0.8, 0.45);
     },
-    charge(t) { MX.blast(t, 0.5, 0.8); },
-    core(t) { MX.blast(t, 0.48, 1.4); MX.hiss(t + 0.25, 0.4, 0.035); },
-    forge(t) { MX.hiss(t, 0.16, 0.05); MX.click(t + 0.16, 0.14); },                        // vérin + verrou : la charge est armée
-    crack(t) { MX.gravel(t, 5, 0.06, 0.12); MX.chunk(t, 0.16); },
-    tick(t) { MX.gravel(t, 3, 0.03, 0.2); },
+    charge(t) { MX.blast(t, 0.24, 0.7); },
+    core(t) { MX.blast(t, 0.32, 1.1); },
+    forge(t) { MX.hiss(t, 0.1, 0.05); },
+    crack(t) { MX.gravel(t, 4, 0.05, 0.15); },
+    tick(t) { MX.gravel(t, 2, 0.02, 0.12); },
   };
 
   const last = {};
@@ -195,12 +199,9 @@
       const t = ctx.currentTime + 0.02 + (delay || 0);
       const c = Math.max(0, e.cascade | 0);
       const runs = Array.isArray(e.runs) ? e.runs.length : 0;
-      // un bloc tombe ; à chaque cascade, un petit coup de foreuse un peu plus aigu
-      MX.chunk(t, 0.3);
-      if (c > 0) MX.motor(t, 80 + c * 22, 95 + c * 28, 0.1 + Math.min(c, 5) * 0.015, 0.08, 34 + c * 4);
-      MX.gravel(t + 0.02, 2 + runs * 2, 0.08, 0.07);
-      if (runs >= 2) MX.chunk(t + 0.06, 0.22);
-      if ((e.maxRun | 0) >= 4) MX.hiss(t + 0.05, 0.12, 0.035);
+      // un coup sourd et quelques gravats ; la cascade ne change pas de hauteur, seulement un peu plus de matière
+      MX.thud(t, 0.14 + Math.min(c, 4) * 0.015);
+      MX.gravel(t + 0.015, 2 + runs + Math.min(c, 4), 0.07, 0.04);
       const blasts = Array.isArray(e.blasts) ? e.blasts : [];
       blasts.slice(0, 2).forEach((b, k) => (b && b.kind === 'charge' ? SOUNDS.charge : SOUNDS.core)(t + 0.03 + k * 0.12));
       if (Array.isArray(e.created) && e.created.length) SOUNDS.forge(t + 0.1);
