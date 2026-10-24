@@ -29,16 +29,16 @@ window.__sbErrs = [];
 <meta property="og:site_name" content="Starbyte">
 <meta property="og:title" content="Starbyte · Rejoins l'histoire">
 <meta property="og:description" content="Mine ta planète en match-3, bâtis ta colonie et lance ta flotte à travers la galaxie.">
-<meta property="og:url" content="https://adrien-cmyk.github.io/starbyte/github_upload/">
-<meta property="og:image" content="https://adrien-cmyk.github.io/starbyte/github_upload/assets/og-starbyte.jpg">
-<meta property="og:image:secure_url" content="https://adrien-cmyk.github.io/starbyte/github_upload/assets/og-starbyte.jpg">
+<meta property="og:url" content="https://play.starbyte.online/">
+<meta property="og:image" content="https://play.starbyte.online/assets/og-starbyte.jpg">
+<meta property="og:image:secure_url" content="https://play.starbyte.online/assets/og-starbyte.jpg">
 <meta property="og:image:type" content="image/jpeg">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
 <meta property="og:image:alt" content="Logo Starbyte et une flotte en hyperespace · Rejoins l'histoire">
 <meta property="og:locale" content="fr_FR">
 <meta name="twitter:card" content="summary_large_image">
-<meta name="twitter:image" content="https://adrien-cmyk.github.io/starbyte/github_upload/assets/og-starbyte.jpg">
+<meta name="twitter:image" content="https://play.starbyte.online/assets/og-starbyte.jpg">
 <style>
 :root {
   --bg-0:#040605;
@@ -12047,6 +12047,7 @@ function sbNotifOpen() {
     <div class="sbn-head"><div class="sbn-title">NOTIFICATIONS</div>
       ${sbNotifUnread() ? '<button class="sbn-all" onclick="sbNotifReadAll()">Tout marquer comme lu</button>' : ''}
       <button class="sbn-x" onclick="sbNotifClose()" aria-label="Fermer">×</button></div>
+    ${window.SBInvite ? SBInvite.card() : ''}
     <div class="sbn-list">${items.length ? items.map(x => `<div class="sbn-it${x.unread ? ' u' : ''}" onclick="sbNotifGo('${x.src}','${String(x.id).replace(/'/g, '')}')">
       <span class="sbn-dot" style="background:${x.unread ? x.color : 'transparent'}"></span>
       <div class="sbn-b"><div class="sbn-tag" style="color:${x.color}">${x.tag}<span>${ago(x.t)}</span></div>
@@ -49628,6 +49629,8 @@ if (G.knownTargets && Array.isArray(G.tankerMissions)) {
 <script src="assets/radio.js?v=20261024-2300"></script>
 <!-- SFX_2410 — bruitages synthétisés (match-3, construction, retours de flotte et de tanker), réglage dans la radio de bord -->
 <script src="assets/sfx.js?v=20261024-2300"></script>
+<!-- PARRAINAGE_2410 — inviter des commandants : 5 appareils ouvrent le lien → 2 500 métal, une fois (carte en tête de la cloche) -->
+<script src="assets/invite.js?v=20261024-2310"></script>
 <script type="module" src="assets/ship3d.js?v=20261020-2230"></script>
 <!-- PATCH_1510_MISSIONS — tout ce qui vole, fiche de mission des tankers -->
 <script src="assets/missions.js?v=20261021-1830"></script>
