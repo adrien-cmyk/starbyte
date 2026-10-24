@@ -24,6 +24,15 @@ jobs:
             note "HTTP→HTTPS $H" "$(curl -sI -m 20 http://$H/ | tr -d '\r' | grep -iE '^(HTTP|location)')"
             note "TLS $H" "$(echo | openssl s_client -servername $H -connect $H:443 2>/dev/null | openssl x509 -noout -issuer -enddate 2>/dev/null)"
           done
+      - name: Icônes et 3D du jeu
+        run: |
+          set +e
+          note() { printf '%s' "$2" | head -c 3800 | tr '\n' '|' > /tmp/n; echo "::notice title=$1::$(cat /tmp/n)"; }
+          for u in assets/app/apple-touch-icon.png assets/app/icon-192.png assets/app/icon-512.png apple-touch-icon.png apple-touch-icon-precomposed.png favicon.ico "assets/planet3d.js?v=20261021-1200" assets/meshopt_decoder.module.js manifest.webmanifest sw.js; do
+            note "play/$u" "$(curl -sI -m 20 "https://play.starbyte.online/$u" | tr -d '\r' | grep -iE '^(HTTP|content-type|content-length|cache-control|location|content-encoding)')"
+          done
+          note "head du jeu" "$(curl -s -m 20 https://play.starbyte.online/ | head -c 3000 | grep -oiE '<link[^>]*>|<meta name=\"apple[^>]*>')"
+          note "taille planet3d" "$(curl -s -m 60 --compressed -o /dev/null -w '%{http_code} %{size_download} %{time_total}s' 'https://play.starbyte.online/assets/planet3d.js?v=20261021-1200')"
       - name: Tests API et SEO
         run: |
           set +e
