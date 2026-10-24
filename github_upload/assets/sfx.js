@@ -5,7 +5,8 @@
    - planète : construction terminée ; flotte et tanker de retour ; léger « tic » sur les boutons
    - iPhone : le son ne démarre qu'après un toucher ; les bruitages respectent le bouton silencieux et se mêlent
      à la musique du joueur (session « ambient ») ; la radio de bord garde sa session « playback ».
-   - réglage : panneau de la radio de bord (Bruitages oui/non + volume), mémorisé sur l'appareil.
+   - ambiance de la planète : vent de nuit, grillons espacés, base au loin (carte planète seulement).
+   - réglage : panneau de la radio de bord (Bruitages oui/non + volume, Ambiance oui/non), mémorisé sur l'appareil.
    API : SBSfx.play(nom), SBSfx.m3Step(étape du match-3), SBSfx.on / SBSfx.setOn(bool). */
 (function () {
   if (window.SBSfx) return;
@@ -218,6 +219,97 @@
     if (b && !b.disabled) play('tap');
   }, { capture: true, passive: true });
 
+  // ── ambiance de la planète (24/10) : nuit, forêt, base au loin — sobre ──
+  //    vent doux qui respire (deux couches gauche/droite), rafales lentes, très léger bourdonnement de la base,
+  //    quelques grillons espacés ; planète dévastée : vent plus sombre, pas d'insectes, grondement lointain.
+  //    Ne joue que sur la carte planète ; s'efface ailleurs, et se fait discrète quand la radio joue.
+  let ambOn = !!store.get('amb', true), amb = null;
+  function planetVisible() {
+    const el = document.getElementById('scr-planet');
+    return !!el && !el.classList.contains('hidden') && !document.hidden;
+  }
+  function devastated() { try { return !!(window.SBAftermath && SBAftermath.dev > 0); } catch (e) { return false; } }
+  function ambStart() {
+    const g = ctx.createGain(); g.gain.value = 0.0001; g.connect(master);
+    const nodes = [], dark = devastated();
+    const wind = (pan, rate, cut) => {
+      const src = ctx.createBufferSource(); src.buffer = noiseBuf; src.loop = true;
+      const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = cut; lp.Q.value = 0.5;
+      const lp2 = ctx.createBiquadFilter(); lp2.type = 'lowpass'; lp2.frequency.value = cut * 1.4;
+      const v = ctx.createGain(); v.gain.value = 0.5;
+      const lfo = ctx.createOscillator(); lfo.frequency.value = rate;
+      const lfoF = ctx.createGain(); lfoF.gain.value = cut * 0.45; lfo.connect(lfoF); lfoF.connect(lp.frequency);
+      const lfoG = ctx.createGain(); lfoG.gain.value = 0.18; lfo.connect(lfoG); lfoG.connect(v.gain);
+      let n = lp2;
+      src.connect(lp); lp.connect(lp2);
+      if (ctx.createStereoPanner) { const pn = ctx.createStereoPanner(); pn.pan.value = pan; lp2.connect(pn); n = pn; }
+      n.connect(v); v.connect(g);
+      src.start(ctx.currentTime, Math.random()); lfo.start();
+      nodes.push(src, lfo);
+      return v;
+    };
+    const w1 = wind(-0.6, 0.061, dark ? 330 : 520), w2 = wind(0.6, 0.083, dark ? 280 : 460);
+    // bourdonnement de la base, très discret
+    [110, 110.6, 165].forEach((f, k) => { const o = ctx.createOscillator(); o.frequency.value = f; const v = ctx.createGain(); v.gain.value = k === 2 ? 0.004 : 0.007; o.connect(v); v.connect(g); o.start(); nodes.push(o); });
+    const timers = [];
+    const later = (fn, ms) => timers.push(setTimeout(fn, ms));
+    // rafales : le vent monte et redescend lentement
+    const gust = () => {
+      if (!amb || amb.g !== g) return;
+      const t = ctx.currentTime, peak = 0.75 + Math.random() * 0.35;
+      [w1, w2].forEach(w => { w.gain.cancelScheduledValues(t); w.gain.setValueAtTime(w.gain.value, t); w.gain.linearRampToValueAtTime(peak, t + 2.5); w.gain.linearRampToValueAtTime(0.5, t + 6); });
+      later(gust, 9000 + Math.random() * 14000);
+    };
+    later(gust, 6000);
+    // grillons (nuit vivante) ou grondement lointain (planète dévastée)
+    const life = () => {
+      if (!amb || amb.g !== g) return;
+      if (!ready()) { later(life, 4000); return; }
+      const t = ctx.currentTime + 0.05;
+      if (!dark) {
+        const f = 4300 + Math.random() * 700, pan = Math.random() * 1.6 - 0.8, n = 3 + Math.floor(Math.random() * 3);
+        for (let k = 0; k < n; k++) {
+          const o = ctx.createOscillator(); o.frequency.value = f;
+          const v = ctx.createGain(); const tt = t + k * 0.055;
+          v.gain.setValueAtTime(0.0001, tt); v.gain.exponentialRampToValueAtTime(0.006, tt + 0.008); v.gain.exponentialRampToValueAtTime(0.0001, tt + 0.035);
+          let nn = v; if (ctx.createStereoPanner) { const pn = ctx.createStereoPanner(); pn.pan.value = pan; v.connect(pn); nn = pn; }
+          o.connect(v); nn.connect(g); o.start(tt); o.stop(tt + 0.05);
+        }
+        later(life, 2200 + Math.random() * 5000);
+      } else {
+        const src = ctx.createBufferSource(); src.buffer = noiseBuf; src.loop = true;
+        const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 160;
+        const v = ctx.createGain(); v.gain.setValueAtTime(0.0001, t); v.gain.linearRampToValueAtTime(0.22, t + 1.5); v.gain.linearRampToValueAtTime(0.0001, t + 4.5);
+        src.connect(lp); lp.connect(v); v.connect(g); src.start(t); src.stop(t + 4.6);
+        later(life, 14000 + Math.random() * 16000);
+      }
+    };
+    later(life, 3000);
+    amb = { g, nodes, timers, dark, level: 0 };
+  }
+  function ambStop() {
+    if (!amb) return;
+    const a = amb; amb = null;
+    a.timers.forEach(clearTimeout);
+    try { const t = ctx.currentTime; a.g.gain.cancelScheduledValues(t); a.g.gain.setValueAtTime(Math.max(0.0001, a.g.gain.value), t); a.g.gain.linearRampToValueAtTime(0.0001, t + 1.2); } catch (e) {}
+    setTimeout(() => { a.nodes.forEach(n => { try { n.stop(); } catch (e) {} }); try { a.g.disconnect(); } catch (e) {} }, 1400);
+  }
+  function ambTick() {
+    const want = on && ambOn && ready() && planetVisible();
+    if (!want) { ambStop(); return; }
+    if (amb && amb.dark !== devastated()) ambStop();
+    if (!amb) ambStart();
+    const target = (window.SBRadio && SBRadio.playing) ? 0.08 : 0.22;   // fond discret ; la radio passe devant
+    if (Math.abs(amb.level - target) > 0.01) {
+      const t = ctx.currentTime;
+      amb.level = target;
+      amb.g.gain.cancelScheduledValues(t); amb.g.gain.setValueAtTime(Math.max(0.0001, amb.g.gain.value), t);
+      amb.g.gain.linearRampToValueAtTime(target, t + 2.5);
+    }
+  }
+  setInterval(ambTick, 1000);
+  function setAmb(v) { ambOn = !!v; store.set('amb', ambOn); ambTick(); refreshUi(); }
+
   function setOn(v) {
     on = !!v; store.set('on', on);
     if (on) unlock(); else if (ctx) { try { const r = ctx.suspend(); if (r && r.catch) r.catch(() => {}); } catch (e) {} }
@@ -233,18 +325,20 @@
     const r = document.getElementById('sb-sfx-row'); if (!r) return;
     const b = r.querySelector('button'); b.textContent = on ? 'Activés' : 'Coupés'; b.classList.toggle('on', on);
     r.querySelector('input').disabled = !on;
+    const a = document.getElementById('sb-amb-row');
+    if (a) { const ab = a.querySelector('button'); ab.textContent = ambOn ? 'Activée' : 'Coupée'; ab.classList.toggle('on', ambOn && on); ab.disabled = !on; }
   }
   function mountUi() {
     const panel = document.getElementById('sb-radio');
     if (!panel || document.getElementById('sb-sfx-row')) return;
     const st = document.createElement('style');
-    st.textContent = `#sb-sfx-row { display:flex; align-items:center; gap:10px; padding:8px 12px; border-radius:10px; background:rgba(255,255,255,.03); border:1px solid rgba(150,190,220,.12); }
-      #sb-sfx-row span { flex:1; font-size:12px; color:rgba(220,230,238,.85); }
-      #sb-sfx-row button { padding:6px 12px; border-radius:8px; border:1px solid rgba(150,190,220,.25); background:transparent; color:rgba(200,215,225,.7); font:inherit; font-size:11px; letter-spacing:.08em; cursor:pointer; }
-      #sb-sfx-row button.on { border-color:rgba(255,177,90,.55); color:#ffb15a; background:rgba(60,35,10,.35); }
-      #sb-sfx-row input { width:80px; }`;
+    st.textContent = `#sb-radio .sb-snd { display:flex; align-items:center; gap:10px; padding:8px 12px; border-radius:10px; background:rgba(255,255,255,.03); border:1px solid rgba(150,190,220,.12); }
+      #sb-radio .sb-snd span { flex:1; font-size:12px; color:rgba(220,230,238,.85); }
+      #sb-radio .sb-snd button { padding:6px 12px; border-radius:8px; border:1px solid rgba(150,190,220,.25); background:transparent; color:rgba(200,215,225,.7); font:inherit; font-size:11px; letter-spacing:.08em; cursor:pointer; }
+      #sb-radio .sb-snd button.on { border-color:rgba(255,177,90,.55); color:#ffb15a; background:rgba(60,35,10,.35); }
+      #sb-radio .sb-snd input { width:80px; }`;
     document.head.appendChild(st);
-    const row = document.createElement('div'); row.id = 'sb-sfx-row';
+    const row = document.createElement('div'); row.id = 'sb-sfx-row'; row.className = 'sb-snd';
     row.innerHTML = '<span>Bruitages du jeu</span><input type="range" min="0" max="1" step="0.05" aria-label="Volume des bruitages"><button type="button"></button>';
     const now = panel.querySelector('.now');
     if (now && now.nextSibling) panel.insertBefore(row, now.nextSibling); else panel.appendChild(row);
@@ -252,9 +346,13 @@
     inp.addEventListener('input', (e) => setVol(e.target.value));
     inp.addEventListener('change', () => play('build'));
     row.querySelector('button').addEventListener('click', () => { setOn(!on); if (on) setTimeout(() => play('build'), 60); });
+    const ar = document.createElement('div'); ar.id = 'sb-amb-row'; ar.className = 'sb-snd'; ar.style.marginTop = '6px';
+    ar.innerHTML = '<span>Ambiance de la planète</span><button type="button"></button>';
+    row.parentNode.insertBefore(ar, row.nextSibling);
+    ar.querySelector('button').addEventListener('click', () => setAmb(!ambOn));
     refreshUi();
   }
   setInterval(mountUi, 1500); mountUi();
 
-  window.SBSfx = { play, m3Step, setOn, setVol, get on() { return on; } };
+  window.SBSfx = { play, m3Step, setOn, setVol, setAmb, get on() { return on; }, get ambiance() { return ambOn; } };
 })();
