@@ -2,12 +2,13 @@
 --   · tout le monde commence pacifique, sans écran de choix ; aucun commandant ne peut attaquer un pacifique
 --     (ni raid sur sa planète ou ses colonies, ni abordage de ses convois) ;
 --   · un pacifique construit ce qu'il veut, flotte de guerre comprise ;
---   · il perd son statut, définitivement, au premier acte hostile contre un joueur : raid lancé, abordage d'un convoi,
---     ou embuscade postée avec l'ordre d'aborder les convois de joueurs (la filature ne compte pas) ;
+--   · il perd son statut, définitivement, au premier acte militaire : raid lancé, abordage d'un convoi (joueur OU PNJ),
+--     ou embuscade postée avec l'ordre d'aborder des convois, PNJ compris (la filature ne compte pas) ;
 --     le jeu demande une confirmation avant ;
 --   · les pirates PNJ peuvent toujours intercepter ses convois (géré par le jeu, rien ici) ;
 --   · commerce par tanker entre un pacifique et un conquérant : taxe de 20 % prélevée sur ce que reçoit le vendeur.
--- Les commandants qui ont déjà attaqué un joueur (raid, abordage, embuscade « joueurs compris » en place) sont conquérants ;
+-- Les commandants qui ont déjà attaqué (raid, abordage, embuscade d'abordage en place, butin PNJ en cale) sont conquérants ;
+-- (si tu as déjà lancé une version précédente de v29 : relance ce script, il est sans risque)
 -- « pastéphane » est pacifique (demande d'Adrien, 24/10).
 -- À coller tel quel dans Supabase → SQL Editor → Run (après v28 ; pas de fonction à redéployer).
 
@@ -21,7 +22,8 @@ update public.worlds w set peaceful = false, peaceful_lost_at = coalesce(w.peace
        exists (select 1 from public.raids r where r.attacker_id = w.user_id)
     or exists (select 1 from public.intercepts i where i.pirate_id = w.user_id)
     or exists (select 1 from public.ambushes a where a.user_id = w.user_id and a.left_at is null
-                and a.orders ->> 'mode' in ('rob_heavy', 'rob_all') and coalesce((a.orders ->> 'players')::boolean, false)));
+                and (a.orders ->> 'mode' in ('rob_heavy', 'rob_all')
+                     or coalesce((a.hold ->> 'metal')::bigint, 0) + coalesce((a.hold ->> 'energie')::bigint, 0) + coalesce((a.hold ->> 'cristal')::bigint, 0) > 0)));
 
 -- demande d'Adrien : pastéphane est pacifique
 update public.worlds set peaceful = true, peaceful_lost_at = null where lower(pseudo) in ('pastéphane', 'pastephane');
@@ -61,18 +63,22 @@ end $$;
 drop trigger if exists intercepts_peace on public.intercepts;
 create trigger intercepts_peace before insert on public.intercepts for each row execute function public._mp_intercepts_peace();
 
--- embuscade avec ordre d'aborder les convois de joueurs : le statut tombe dès qu'elle est posée
+-- embuscade : le statut tombe dès qu'elle a l'ordre d'aborder (joueurs ou PNJ), ou dès qu'un butin PNJ entre en cale
+create or replace function public._mp_hold_sum(h jsonb) returns bigint
+language sql immutable as $$
+  select coalesce((h ->> 'metal')::bigint, 0) + coalesce((h ->> 'energie')::bigint, 0) + coalesce((h ->> 'cristal')::bigint, 0)
+$$;
 create or replace function public._mp_ambushes_peace() returns trigger
 language plpgsql security definer set search_path = public as $$
 begin
-  if new.left_at is null and new.orders ->> 'mode' in ('rob_heavy', 'rob_all')
-     and coalesce((new.orders ->> 'players')::boolean, false) then
+  if new.left_at is null and (new.orders ->> 'mode' in ('rob_heavy', 'rob_all')
+     or public._mp_hold_sum(new.hold) > (case when tg_op = 'UPDATE' then public._mp_hold_sum(old.hold) else 0 end)) then
     perform public._mp_lose_peace(new.user_id);
   end if;
   return new;
 end $$;
 drop trigger if exists ambushes_peace on public.ambushes;
-create trigger ambushes_peace after insert or update of orders on public.ambushes for each row execute function public._mp_ambushes_peace();
+create trigger ambushes_peace after insert or update of orders, hold on public.ambushes for each row execute function public._mp_ambushes_peace();
 
 -- mon statut (le jeu le lit avant un premier acte hostile)
 create or replace function public.mp_peace_state()

@@ -9400,7 +9400,8 @@ async function mpPeaceGuard(what) {
   if (st && st.peaceful === false) { G.mpPeaceful = false; if (typeof saveGame === 'function') saveGame(); return true; }
   const ok = await sbConfirmWarning('Fin de ton statut pacifique',
     `Tu es <strong>pacifique</strong> : aucun commandant ne peut t'attaquer.<br><br>`
-    + `${what || 'Attaquer un autre commandant'} met fin à ce statut, <strong>définitivement</strong>. `
+    + `Tout acte militaire compte, contre un joueur comme contre un convoi PNJ. `
+    + `${what || 'Attaquer'} met fin à ce statut, <strong>définitivement</strong>. `
     + `Ta planète, tes colonies et tes convois pourront ensuite être attaqués comme ceux de tout le monde.`,
     'Renoncer et attaquer');
   return !!ok;
@@ -49228,7 +49229,7 @@ if (G.knownTargets && Array.isArray(G.tankerMissions)) {
 <!-- PERF_1310 — mesure des performances chez les joueurs + qualité 3D automatique (assets/perf.js) -->
 <script src="assets/perf.js?v=20261022-2000"></script>
 <!-- PATCH_1410_LIGNES — lignes PNJ à horaire sur les routes cachées (assets/lines.js) -->
-<script src="assets/lines.js?v=20261024-1240"></script>
+<script src="assets/lines.js?v=20261024-1250"></script>
 <!-- CLOUD — sauvegarde Supabase (source : sb-build/src/cloud.js) -->
 <script type="module" src="assets/cloud.js?v=20261022-1420"></script>
 <!-- MATCH3 — Match-3 V2 (assets/match3.js, source src/match3.js + src/m3core.js) : remplace startM3 -->

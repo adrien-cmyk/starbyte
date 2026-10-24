@@ -880,13 +880,13 @@
     const m = await _mpChoose('Ordres permanents de la flotte', Object.entries(ORDER_MODES).map(([k, v]) => ({ k, label: v.label + (cur && cur.mode === k ? ' · actuel' : ''), sub: v.sub })));
     if (!m) return null;
     if (m.k === 'manual') return { mode: 'manual', players: false };
+    // PATCH_2410_PACIFIQUE : aborder des convois, PNJ compris, met fin au statut pacifique (la filature non)
+    if (m.k !== 'spy' && typeof mpPeaceGuard === 'function' && !(await mpPeaceGuard('Ordonner à cette flotte d\'aborder des convois, même PNJ,'))) return null;
     const p = await _mpChoose('Et les convois des autres commandants ?', [
       { v: false, label: 'Seulement les convois PNJ', sub: 'Un convoi de joueur attend ta décision' },
       { v: true, label: 'Les convois de joueurs aussi', sub: 'Même quand tu n\'es pas là. Pactes, saison et protections restent respectés' },
     ]);
     if (!p) return null;
-    // PATCH_2410_PACIFIQUE : aborder les convois de joueurs met fin au statut pacifique (la filature non)
-    if (p.v && m.k !== 'spy' && typeof mpPeaceGuard === 'function' && !(await mpPeaceGuard('Ordonner à cette flotte d\'aborder les convois de joueurs'))) return null;
     return { mode: m.k, players: p.v };
   }
   async function pushOrders(f, force) {
@@ -896,7 +896,7 @@
     a.ordersTry = Date.now();
     try {
       await _mpRpc('mp_ambush_orders', { p_fleet_id: f.id, p_orders: ordersOf(f) }); a.ordersSync = true;
-      const o = ordersOf(f); if (o.players && o.mode !== 'spy' && typeof mpPeaceLost === 'function') mpPeaceLost();   // PATCH_2410_PACIFIQUE
+      const o = ordersOf(f); if ((o.mode === 'rob_heavy' || o.mode === 'rob_all') && typeof mpPeaceLost === 'function') mpPeaceLost();   // PATCH_2410_PACIFIQUE
       if (typeof saveGame === 'function') saveGame();
     }
     catch (e) { console.warn('[routes] ordres :', String(e && e.message || e)); }
@@ -1178,7 +1178,9 @@
     ]);
     if (!it || !f.ambush || f.ambush.phase !== 'posted') return true;
     if (Date.now() > (r.expiresAt || 0)) { toast('Trop tard : le convoi est passé'); return true; }
-    if (it.k === 'rob') { if (fleetAtk(f) <= 0) { toast('Il faut des frégates ou des cuirassés pour aborder'); return true; } robNpc(f, line, i, r.line.k, r.line.dir, r.line.t, 'manual'); pushNpc(f); }
+    if (it.k === 'rob' && fleetAtk(f) > 0 && typeof mpPeaceGuard === 'function' && !(await mpPeaceGuard('Aborder ce convoi PNJ'))) return true;   // PATCH_2410_PACIFIQUE
+    if (it.k === 'rob' && (!f.ambush || f.ambush.phase !== 'posted' || Date.now() > (r.expiresAt || 0))) { toast('Trop tard : le convoi est passé'); return true; }
+    if (it.k === 'rob') { if (fleetAtk(f) <= 0) { toast('Il faut des frégates ou des cuirassés pour aborder'); return true; } if (typeof mpPeaceLost === 'function') mpPeaceLost(); robNpc(f, line, i, r.line.k, r.line.dir, r.line.t, 'manual'); pushNpc(f); }
     else if (it.k === 'tail') {
       const leg = tailNpc(f, line, i, r.line.k, r.line.dir);
       if (!leg) toast(r.line.dir === 'out' && i >= line.chain.length - 2 ? 'Le convoi entre au lieu caché : rien de plus à relever' : r.line.dir === 'in' && i <= 1 ? 'Le convoi se perd vers les marges' : 'Ta flotte le suit sur un tronçon déjà connu');
