@@ -99,6 +99,7 @@
   }
   function play(s) {
     current = s; store.set('last', s);
+    try { if (navigator.audioSession) navigator.audioSession.type = 'playback'; } catch (e) {}   // SFX_2410 : la radio garde sa session lecture
     audio.src = s.url; audio.load();
     audio.play().then(refreshNow).catch(() => { toast('Station indisponible — essaie une autre'); refreshNow(); });
     refreshNow();
@@ -157,5 +158,5 @@
     refreshNow();
   }
   setInterval(mountBtn, 800); mountBtn();
-  window.SBRadio = { open, play, stop, get current() { return current; } };
+  window.SBRadio = { open, play, stop, get current() { return current; }, get playing() { return !!current && !audio.paused; } };
 })();

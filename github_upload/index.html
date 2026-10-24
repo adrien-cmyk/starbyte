@@ -9540,6 +9540,7 @@ async function mpReturnRaid(fleet) {
 }
 
 function _mpFinishRaid(fleet, raid) {
+  if (window.SBSfx) SBSfx.play('fleet');   // SFX_2410
   const res = raid.result || {};
   const tgt = fleet.mpTarget || {};
   const target = { name: tgt.name || raid.defender_address, profile: 'Commandant · ' + (raid.defender_pseudo || tgt.pseudo || '?') };
@@ -26146,6 +26147,7 @@ function handleTankerReturn(missionId) {
   if (idx === -1) return;
   const mission = G.tankerMissions[idx];
   if (mission.status !== 'in_transit') return;
+  if (window.SBSfx) SBSfx.play('dock');   // SFX_2410
 
   // PATCH_1310_POSTES — poste de route : le tanker reste en station au bout de la route
   if (mission.kind === 'route_post') {
@@ -26630,6 +26632,7 @@ function handleTankerReturnFromCancellation(missionId) {
   if (idx === -1) return;
   const m = G.tankerMissions[idx];
   if (m.status !== 'returning') return;
+  if (window.SBSfx) SBSfx.play('dock');   // SFX_2410
 
   if (m.mpTrade) mpTradeCashIn(m);   // PATCH_2110_COMMERCE — CG de la vente
   // Restituer les ressources au stock (les soldats étaient "engagés", se libèrent automatiquement)
@@ -28256,6 +28259,7 @@ function applyCombatResult(fleet, result, target) {
 // (ou via cheat). Lance le combat, applique le résultat, génère le rapport.
 // ═══════════════════════════════════════════════════════════════
 function returnMission(fleet) {
+  if (window.SBSfx) SBSfx.play('fleet');   // SFX_2410
   if (fleet.mpRaidId) { mpReturnRaid(fleet); return; }
   const target = getFakeTarget(fleet.missionTargetId);
   const doctrine = detectFleetDoctrine(fleet.composition, fleet.soldiers);
@@ -31316,6 +31320,7 @@ function finishBuild(idx, key) {
   delete parcel.buildStartedAt; delete parcel.buildEndsAt; delete parcel.buildCost;
   parcel.state = 'built';
   parcel.building = key;
+  if (window.SBSfx) SBSfx.play('build');   // SFX_2410
   parcel.n = customBuildingName(key);
   parcel.sub = b.desc;
   parcel.lvl = 1;
@@ -49249,7 +49254,7 @@ if (G.knownTargets && Array.isArray(G.tankerMissions)) {
 <!-- CLOUD — sauvegarde Supabase (source : sb-build/src/cloud.js) -->
 <script type="module" src="assets/cloud.js?v=20261022-1420"></script>
 <!-- MATCH3 — Match-3 V2 (assets/match3.js, source src/match3.js + src/m3core.js) : remplace startM3 -->
-<script type="module" src="assets/match3.js?v=20261021-1500"></script>
+<script type="module" src="assets/match3.js?v=20261024-2300"></script>
 <!-- HOME V2 — « monde d'abord » : planète plein écran, ressources en ligne, Flotte / Défense / Prospection (assets/home.js) -->
 <script type="module" src="assets/home.js?v=20261020-2150"></script>
 <!-- SPACE MAP v0 — carte du Centre de prospection (assets/spacemap.js, source src/spacemap.js) -->
@@ -49620,7 +49625,9 @@ if (G.knownTargets && Array.isArray(G.tankerMissions)) {
 })();
 </script>
 
-<script src="assets/radio.js?v=20261014-1440"></script>
+<script src="assets/radio.js?v=20261024-2300"></script>
+<!-- SFX_2410 — bruitages synthétisés (match-3, construction, retours de flotte et de tanker), réglage dans la radio de bord -->
+<script src="assets/sfx.js?v=20261024-2300"></script>
 <script type="module" src="assets/ship3d.js?v=20261020-2230"></script>
 <!-- PATCH_1510_MISSIONS — tout ce qui vole, fiche de mission des tankers -->
 <script src="assets/missions.js?v=20261021-1830"></script>
