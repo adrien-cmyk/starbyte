@@ -101,19 +101,24 @@
   // ── petits bruits de chantier / forage (match-3, 24/10) : moteur de foreuse, cliquet, vérin, gravats, mini-explosions ──
   const rnd = (a, b) => a + Math.random() * (b - a);
   const MX = {
-    // moteur de foreuse : dent de scie filtrée, hachée par un « couple » (modulation d'amplitude)
+    // moteur de foreuse : sifflement aigu de perceuse électrique (deux ondes légèrement désaccordées, filtre passe-bande)
+    // + grincement de la mèche sur la roche ; léger tremblement doux (pas de hachage grave, qui sonnait comme un pet)
     motor(t, f1, f2, d, g, chop) {
-      const o = ctx.createOscillator(); o.type = 'sawtooth';
-      o.frequency.setValueAtTime(f1, t); o.frequency.exponentialRampToValueAtTime(Math.max(20, f2), t + d);
-      const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = Math.min(2400, f2 * 7); lp.Q.value = 1.1;
-      const am = ctx.createGain(); am.gain.value = 0.6;
-      const lfo = ctx.createOscillator(); lfo.type = 'square'; lfo.frequency.setValueAtTime(chop || 38, t);
-      const lg = ctx.createGain(); lg.gain.value = 0.4; lfo.connect(lg); lg.connect(am.gain);
+      const F1 = Math.max(260, f1 * 4.5), F2 = Math.max(260, f2 * 4.5);
+      const bp = ctx.createBiquadFilter(); bp.type = 'bandpass'; bp.Q.value = 2.2;
+      bp.frequency.setValueAtTime(F1 * 2, t); bp.frequency.exponentialRampToValueAtTime(Math.min(6000, F2 * 2), t + d);
+      const hp = ctx.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 220;
+      const trem = ctx.createGain(); trem.gain.value = 0.85;
+      const lfo = ctx.createOscillator(); lfo.type = 'sine'; lfo.frequency.setValueAtTime(14 + (chop || 38) * 0.25, t);
+      const lg = ctx.createGain(); lg.gain.value = 0.15; lfo.connect(lg); lg.connect(trem.gain);
       const v = ctx.createGain(); v.gain.setValueAtTime(0.0001, t);
-      v.gain.exponentialRampToValueAtTime(g, t + Math.min(0.03, d * 0.2)); v.gain.setValueAtTime(g, t + d * 0.75);
+      v.gain.exponentialRampToValueAtTime(g, t + Math.min(0.04, d * 0.25)); v.gain.setValueAtTime(g, t + d * 0.7);
       v.gain.exponentialRampToValueAtTime(0.0001, t + d);
-      o.connect(lp); lp.connect(am); am.connect(v); out(v, 0.08, 0);
-      o.start(t); lfo.start(t); o.stop(t + d + 0.05); lfo.stop(t + d + 0.05);
+      const oscs = [0, 7].map(det => { const o = ctx.createOscillator(); o.type = 'square'; o.detune.value = det;
+        o.frequency.setValueAtTime(F1, t); o.frequency.exponentialRampToValueAtTime(F2, t + d); o.connect(bp); return o; });
+      bp.connect(hp); hp.connect(trem); trem.connect(v); out(v, 0.06, 0);
+      noise({ t, filter: 'bandpass', f: 3200, f2: 4200, q: 2, a: 0.02, d: d * 0.9, g: g * 0.35 });   // la mèche mord la roche
+      oscs.forEach(o => { o.start(t); o.stop(t + d + 0.05); }); lfo.start(t); lfo.stop(t + d + 0.05);
     },
     // gravats : grains de poussière et de cailloux
     gravel(t, n, d, g) {
