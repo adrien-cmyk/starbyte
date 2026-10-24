@@ -1,6 +1,7 @@
 /* Starbyte — Bruitages (SFX_2410, 24/10/2026, demande d'Adrien : « essayons un peu de son »)
    Sons synthétisés en direct (Web Audio) : rien à télécharger. Esprit « cockpit premium » : doux, cristallins, feutrés.
-   - match-3 : échange, coup refusé, alignements (la note monte avec la cascade), charge / noyau, roches, paliers, coups bonus, fin
+   - match-3 : uniquement de la batterie (24/10) : charleston à l'échange, grosse caisse puis toms qui montent avec la cascade,
+     caisse claire, clap, cymbale pour les charges, noyaux, paliers et la fin
    - planète : construction terminée ; flotte et tanker de retour ; léger « tic » sur les boutons
    - iPhone : le son ne démarre qu'après un toucher ; les bruitages respectent le bouton silencieux et se mêlent
      à la musique du joueur (session « ambient ») ; la radio de bord garde sa session « playback ».
@@ -96,27 +97,49 @@
     tone({ f: f * 2.76, t, a: 0.002, d: (d || 0.5) * 0.35, g: (g || 0.16) * 0.28, rev: rev == null ? 0.35 : rev, pan });
     tone({ f: f * 2.0, t, a: 0.002, d: (d || 0.5) * 0.6, g: (g || 0.16) * 0.12, rev: 0, pan });
   }
+  // ── batterie (match-3 : uniquement des drums, décision d'Adrien 24/10) ──
+  const DR = {
+    kick(t, g, f0) {
+      tone({ f: f0 || 150, f2: 45, t, a: 0.002, d: 0.32, g: g || 0.5, glide: 0.35 });
+      noise({ t, filter: 'highpass', f: 3500, a: 0.001, d: 0.012, g: (g || 0.5) * 0.25 });
+    },
+    snare(t, g) {
+      noise({ t, filter: 'bandpass', f: 1900, q: 0.7, a: 0.001, d: 0.17, g: g || 0.3, rev: 0.12 });
+      tone({ f: 200, f2: 160, t, type: 'triangle', a: 0.001, d: 0.09, g: (g || 0.3) * 0.7 });
+    },
+    hat(t, g, open) { noise({ t, filter: 'highpass', f: 7500, q: 0.8, a: 0.001, d: open ? 0.22 : 0.035, g: g || 0.12 }); },
+    tom(t, f, g) {
+      tone({ f, f2: f * 0.62, t, a: 0.002, d: 0.3, g: g || 0.35, glide: 0.6 });
+      noise({ t, filter: 'bandpass', f: f * 3, q: 1, a: 0.001, d: 0.04, g: (g || 0.35) * 0.2 });
+    },
+    clap(t, g) {
+      [0, 0.011, 0.022].forEach(o => noise({ t: t + o, filter: 'bandpass', f: 1300, q: 1.2, a: 0.001, d: 0.02, g: g || 0.22 }));
+      noise({ t: t + 0.03, filter: 'bandpass', f: 1300, q: 1, a: 0.002, d: 0.16, g: (g || 0.22) * 0.7, rev: 0.15 });
+    },
+    rim(t, g) { tone({ f: 1700, t, type: 'triangle', a: 0.001, d: 0.025, g: g || 0.16 }); noise({ t, filter: 'highpass', f: 5000, a: 0.001, d: 0.012, g: (g || 0.16) * 0.5 }); },
+    crash(t, g) {
+      noise({ t, filter: 'highpass', f: 4500, q: 0.5, a: 0.002, d: 1.3, g: g || 0.14, rev: 0.3 });
+      noise({ t, filter: 'bandpass', f: 8200, q: 0.6, a: 0.002, d: 0.7, g: (g || 0.14) * 0.6 });
+    },
+  };
+  const TOMS = [110, 130, 155, 185, 220, 262];   // toms graves → aigus : la cascade monte
+
   // gamme pentatonique (do majeur) : les alignements montent avec la cascade
   const SCALE = [0, 2, 4, 7, 9, 12, 14, 16, 19, 21, 24, 26, 28];
   const note = (i) => 523.25 * Math.pow(2, SCALE[Math.max(0, Math.min(SCALE.length - 1, i))] / 12);
 
   const SOUNDS = {
     tap(t) { tone({ f: 1500, f2: 950, t, a: 0.002, d: 0.04, g: 0.09 }); },
-    swap(t) { noise({ t, filter: 'bandpass', f: 700, f2: 1700, q: 1.4, a: 0.02, d: 0.09, g: 0.16 }); },
-    nope(t) {
-      tone({ f: 196, t, type: 'triangle', a: 0.004, d: 0.08, g: 0.12, lp: 900 });
-      tone({ f: 165, t: t + 0.09, type: 'triangle', a: 0.004, d: 0.1, g: 0.1, lp: 900 });
-    },
-    bonus(t) { bell(note(7), t, 0.12, 0.45); bell(note(9), t + 0.08, 0.12, 0.6); },
-    tier(t) { [2, 4, 7].forEach((n, k) => bell(note(n), t + k * 0.085, 0.13, 0.55, 0.4)); },
+    // match-3 : batterie
+    swap(t) { DR.hat(t, 0.1); },
+    nope(t) { DR.rim(t, 0.14); DR.rim(t + 0.09, 0.1); },
+    bonus(t) { DR.snare(t, 0.16); DR.snare(t + 0.06, 0.2); DR.snare(t + 0.12, 0.26); DR.hat(t + 0.18, 0.12, true); },
+    tier(t) { DR.tom(t, TOMS[1], 0.3); DR.tom(t + 0.1, TOMS[3], 0.3); DR.tom(t + 0.2, TOMS[5], 0.3); DR.kick(t + 0.3, 0.36); DR.crash(t + 0.3, 0.1); },
     tier3(t) {
-      [0, 2, 4, 7, 9, 12].forEach((n, k) => bell(note(n), t + k * 0.075, 0.12, 0.8, 0.5, (k - 2.5) * 0.15));
-      tone({ f: 130.8, t, a: 0.3, d: 1.6, g: 0.07, rev: 0.4 });
+      [0, 1, 2, 3, 4, 5].forEach((k) => DR.tom(t + k * 0.075, TOMS[5 - k], 0.3));
+      DR.snare(t + 0.45, 0.3); DR.kick(t + 0.52, 0.55); DR.crash(t + 0.52, 0.16);
     },
-    finish(t) {
-      [261.6, 329.6, 392, 523.3].forEach((f, k) => tone({ f, t: t + k * 0.03, a: 0.22, d: 1.5, g: 0.05, rev: 0.45 }));
-      bell(note(7), t + 0.15, 0.1, 1.0, 0.5);
-    },
+    finish(t) { DR.snare(t, 0.22); DR.kick(t + 0.12, 0.4); DR.crash(t + 0.12, 0.13); },
     build(t) {
       bell(523.3, t, 0.14, 0.7, 0.4); bell(784, t + 0.16, 0.14, 1.0, 0.45);
       tone({ f: 130.8, t, a: 0.08, d: 0.9, g: 0.06, rev: 0.3 });
@@ -131,18 +154,11 @@
       tone({ f: 165, t: t + 0.05, type: 'sawtooth', a: 0.12, d: 0.7, g: 0.05, lp: 700, rev: 0.3 });
       bell(659.3, t + 0.25, 0.08, 0.8, 0.45);
     },
-    charge(t) {
-      noise({ t, filter: 'bandpass', f: 2400, f2: 300, q: 0.8, a: 0.004, d: 0.35, g: 0.3, rev: 0.25 });
-      tone({ f: 140, f2: 48, t, a: 0.004, d: 0.4, g: 0.32 });
-    },
-    core(t) {
-      noise({ t, filter: 'lowpass', f: 3500, f2: 180, q: 0.7, a: 0.005, d: 0.85, g: 0.22, rev: 0.4 });
-      tone({ f: 95, f2: 32, t, a: 0.005, d: 0.95, g: 0.26 });
-      bell(note(9), t + 0.12, 0.07, 0.9, 0.6);
-    },
-    forge(t) { tone({ f: 420, f2: 1300, t, a: 0.01, d: 0.18, g: 0.06, rev: 0.3 }); bell(note(10), t + 0.17, 0.09, 0.6, 0.45); },
-    crack(t) { noise({ t, filter: 'highpass', f: 2200, a: 0.001, d: 0.06, g: 0.16 }); tone({ f: 230, t, type: 'triangle', a: 0.002, d: 0.06, g: 0.08 }); },
-    tick(t) { noise({ t, filter: 'highpass', f: 3200, a: 0.001, d: 0.035, g: 0.14 }); },
+    charge(t) { DR.kick(t, 0.62); DR.snare(t, 0.34); },
+    core(t) { DR.kick(t, 0.6, 120); DR.clap(t + 0.02, 0.24); DR.crash(t, 0.16); },
+    forge(t) { DR.clap(t, 0.2); },
+    crack(t) { DR.rim(t, 0.14); },
+    tick(t) { DR.hat(t, 0.08); },
   };
 
   const last = {};
@@ -157,15 +173,20 @@
   }
 
   // une étape du match-3 : { cascade, runs, maxRun, created, blasts, rocksCracked, rocksBroken }
-  function m3Step(e) {
+  function m3Step(e, delay) {
     if (!ready() || !e) return;
     session();
     try {
-      const t = ctx.currentTime + 0.02;
+      const t = ctx.currentTime + 0.02 + (delay || 0);
       const c = Math.max(0, e.cascade | 0);
       const runs = Array.isArray(e.runs) ? e.runs.length : 0;
-      for (let k = 0; k < Math.min(runs, 3); k++) bell(note(c * 2 + k), t + k * 0.05, 0.24 - k * 0.04, 0.5 + c * 0.08, 0.3 + Math.min(c, 4) * 0.05, (k - 1) * 0.25);
-      if ((e.maxRun | 0) >= 4) { bell(note(c * 2 + 5), t + 0.07, 0.07, 0.7, 0.5); noise({ t: t + 0.05, filter: 'highpass', f: 6000, a: 0.02, d: 0.25, g: 0.025, rev: 0.4 }); }
+      // premier alignement : grosse caisse + charleston ; chaque cascade : un tom plus aigu (un roulement qui monte)
+      if (c === 0) { DR.kick(t, 0.42); DR.hat(t, 0.08); }
+      else DR.tom(t, TOMS[Math.min(c - 1, TOMS.length - 1)], 0.34);
+      if (runs >= 2) DR.snare(t + 0.05, 0.2);
+      if (runs >= 3) DR.hat(t + 0.1, 0.09);
+      if ((e.maxRun | 0) >= 4) DR.clap(t + 0.04, 0.2);
+      if ((e.maxRun | 0) >= 5 || c >= 4) DR.crash(t + 0.04, 0.1);
       const blasts = Array.isArray(e.blasts) ? e.blasts : [];
       blasts.slice(0, 2).forEach((b, k) => (b && b.kind === 'charge' ? SOUNDS.charge : SOUNDS.core)(t + 0.03 + k * 0.12));
       if (Array.isArray(e.created) && e.created.length) SOUNDS.forge(t + 0.1);
@@ -214,8 +235,8 @@
     if (now && now.nextSibling) panel.insertBefore(row, now.nextSibling); else panel.appendChild(row);
     const inp = row.querySelector('input'); inp.value = vol;
     inp.addEventListener('input', (e) => setVol(e.target.value));
-    inp.addEventListener('change', () => play('bonus'));
-    row.querySelector('button').addEventListener('click', () => { setOn(!on); if (on) setTimeout(() => play('bonus'), 60); });
+    inp.addEventListener('change', () => play('build'));
+    row.querySelector('button').addEventListener('click', () => { setOn(!on); if (on) setTimeout(() => play('build'), 60); });
     refreshUi();
   }
   setInterval(mountUi, 1500); mountUi();

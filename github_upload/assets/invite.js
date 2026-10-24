@@ -88,7 +88,7 @@
     else if (G0.res && G0.res.metal) G0.res.metal.v = (G0.res.metal.v || 0) + REWARD;
     cached = Object.assign({}, cached, { claimed: true }); ls.set('sb_ref_state', cached);
     if (typeof saveGame === 'function') saveGame();
-    if (window.SBSfx) SBSfx.play('tier3');
+    if (window.SBSfx) SBSfx.play('build');
     if (typeof toast === 'function') toast(`Ton appel a été entendu : ${GOAL} appareils ont ouvert ton lien · +${fmtN(REWARD)} métal`);
     if (typeof refreshCurrentScreen === 'function') { try { refreshCurrentScreen(); } catch (e) {} }
     renderCard();
