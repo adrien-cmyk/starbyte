@@ -79,6 +79,16 @@ jobs:
           fi
           # fichiers dont l'empreinte a changé ou qui sont nouveaux
           awk 'NR==FNR { seen[$2]=$1; next } seen[$2] != $1 { print $2 }' /tmp/remote.manifest /tmp/local.manifest > /tmp/changed
+          # 24/10 : la liste du serveur peut mentir (fichiers notés comme envoyés mais absents : script 3D,
+          # icônes, manifeste en 404). On liste donc ce qui existe vraiment et on renvoie tout ce qui manque.
+          if lftp -c "source /tmp/lftprc; find ." > /tmp/remote.files 2>/dev/null && [ -s /tmp/remote.files ]; then
+            awk '{ print $2 }' /tmp/local.manifest | grep -vxF -f /tmp/remote.files > /tmp/missing || true
+            echo "Fichiers absents du serveur : $(wc -l < /tmp/missing)"
+            head -30 /tmp/missing
+            cat /tmp/changed /tmp/missing | sort -u > /tmp/changed2 && mv /tmp/changed2 /tmp/changed
+          else
+            echo "::warning::Impossible de lister le serveur : seule la liste des empreintes est utilisée."
+          fi
           echo "Fichiers à envoyer : $(wc -l < /tmp/changed)"
           head -50 /tmp/changed
           mkdir -p /tmp/up
@@ -93,3 +103,14 @@ jobs:
           lftp -c "source /tmp/lftprc; mirror -R --parallel=4 --no-perms /tmp/up ."   # « . » sans barre : sinon lftp crée un dossier up/
           if [ -f /tmp/index.html ]; then lftp -c "source /tmp/lftprc; put -O ./ /tmp/index.html"; fi
           echo "Publié."
+      - name: Vérifier en ligne les fichiers clés
+        if: env.SKIP != '1' && env.STOP != '1'
+        run: |
+          # le jeu sans ces fichiers = carte 2D de secours et icône « S » générique chez les nouveaux joueurs
+          cd github_upload
+          KO=0
+          for f in manifest.webmanifest assets/app/apple-touch-icon.png assets/app/icon-192.png $(grep -oE 'assets/[a-z0-9_]+\.js' index.html | sort -u); do
+            c=$(curl -s -o /dev/null -m 30 -w '%{http_code}' "https://play.starbyte.online/$f")
+            if [ "$c" != "200" ]; then echo "::error title=Fichier absent en ligne::$f → $c"; KO=1; fi
+          done
+          [ "$KO" = "0" ] && echo "Tous les fichiers clés répondent." || exit 1
