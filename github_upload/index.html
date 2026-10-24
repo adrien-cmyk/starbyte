@@ -9386,7 +9386,31 @@ var MP_RAID_ERRORS = {
   pact_active: 'Pacte de non-agression en cours avec ce commandant',   // AMBASSADES_1210
   ally: 'C\'est un membre de ton alliance',   // PATCH_2110_ALLIANCES
   ally_cooldown: 'Ancien allié : aucune attaque possible pendant 24 h après un départ de l\'alliance',
+  target_peaceful: 'Ce commandant est pacifique : personne ne peut l\'attaquer',   // PATCH_2410_PACIFIQUE
 };
+
+// ═══ PATCH_2410_PACIFIQUE — mode pacifique (décisions d'Adrien, 23-24/10) ═══
+// Tout le monde commence pacifique : personne ne peut l'attaquer. Le statut tombe, définitivement,
+// au premier acte hostile contre un joueur (raid, abordage, embuscade « joueurs compris »). Le serveur tranche ;
+// ici, on prévient avant.
+async function mpPeaceGuard(what) {
+  if (typeof G !== 'undefined' && G && G.mpPeaceful === false) return true;
+  let st = null;
+  try { st = await _mpRpc('mp_peace_state', {}); } catch (e) {}
+  if (st && st.peaceful === false) { G.mpPeaceful = false; if (typeof saveGame === 'function') saveGame(); return true; }
+  const ok = await sbConfirmWarning('Fin de ton statut pacifique',
+    `Tu es <strong>pacifique</strong> : aucun commandant ne peut t'attaquer.<br><br>`
+    + `${what || 'Attaquer un autre commandant'} met fin à ce statut, <strong>définitivement</strong>. `
+    + `Ta planète, tes colonies et tes convois pourront ensuite être attaqués comme ceux de tout le monde.`,
+    'Renoncer et attaquer');
+  return !!ok;
+}
+function mpPeaceLost() {
+  if (typeof G === 'undefined' || !G || G.mpPeaceful === false) return;
+  G.mpPeaceful = false;
+  if (typeof saveGame === 'function') saveGame();
+  if (typeof toast === 'function') toast('Tu n\'es plus pacifique : l\'amas le sait');
+}
 
 var _mpLaunching = false;
 async function mpLaunchRaid(fleet, target) {
@@ -9395,6 +9419,7 @@ async function mpLaunchRaid(fleet, target) {
   const fuelCost = computeMissionFuelCost(fleet, target);
   if ((G.res.energie.v || 0) < fuelCost) { toast('Énergie insuffisante'); return; }
   if (!window.SBMP || !window.SBMP.ready()) { toast('Registre hors ligne : réessaie dans un instant'); return; }
+  if (!(await mpPeaceGuard(`Lancer ce raid contre ${target.mpPseudo || target.name || 'ce monde'}`))) return;   // PATCH_2410_PACIFIQUE
   let raid;
   _mpLaunching = true;
   try {
@@ -9416,6 +9441,7 @@ async function mpLaunchRaid(fleet, target) {
   fleet.missionEndsAt = Date.parse(raid.returns_at);
   fleet.missionFuelSpent = fuelCost;
   fleet.mpRaidId = raid.id;
+  mpPeaceLost();   // PATCH_2410_PACIFIQUE
   fleet.mpTarget = { name: target.name, pseudo: target.mpPseudo || '', address: target.mpAddress, profile: target.profile };
   pendingMissionTargetId = null;
   if (typeof saveGame === 'function') saveGame();
@@ -10009,8 +10035,9 @@ function mpTradeReturn(m, d, why) {
   const f = typeof computeRouteLootFactor === 'function' ? (computeRouteLootFactor(m) || 1) : 1;
   for (const k of ['metal', 'energie', 'cristal']) back[k] = Math.max(0, (res[k] || 0) - ((sold[k] || 0) > 0 ? Math.ceil((sold[k] || 0) / f) : 0));
   if (m.cargo) m.cargo.resources = back;
-  m.mpTradeCG = (d && d.status === 'settled') ? d.paid_cg : 0;
-  m.mpTradeResult = { sold, paid: m.mpTradeCG, expired: !!(d && d.status === 'expired'), why: why || null };
+  m.mpTradeTax = (d && d.status === 'settled') ? Math.max(0, d.tax_cg || 0) : 0;   // PATCH_2410_PACIFIQUE : 20 % entre pacifique et conquérant
+  m.mpTradeCG = (d && d.status === 'settled') ? Math.max(0, d.paid_cg - m.mpTradeTax) : 0;
+  m.mpTradeResult = { sold, paid: m.mpTradeCG, tax: m.mpTradeTax, expired: !!(d && d.status === 'expired'), why: why || null };
   const now = Date.now();
   m.status = 'returning';
   m.cancelledAt = now;
@@ -10018,7 +10045,7 @@ function mpTradeReturn(m, d, why) {
   const who = m.mpTrade.pseudo;
   toast(why ? `${m.tankerName} : ${why} · retour avec la cale`
     : d && d.status === 'expired' ? `${who} n'a pas répondu en 12 h : ${m.tankerName} rentre avec sa cale`
-    : _mpCargoSum(sold) > 0 ? `${who} a acheté ${_mpResLine(sold)} · +${fmt(m.mpTradeCG)} CG au retour de ${m.tankerName}`
+    : _mpCargoSum(sold) > 0 ? `${who} a acheté ${_mpResLine(sold)} · +${fmt(m.mpTradeCG)} CG au retour de ${m.tankerName}${m.mpTradeTax ? ` (taxe pacifique −${fmt(m.mpTradeTax)} CG)` : ''}`
     : `${who} n'a rien pu acheter (CG, plafond ou silos) : ${m.tankerName} rentre avec sa cale`);
   if (typeof startTankerCountdownTicker === 'function') startTankerCountdownTicker();
   if (typeof saveGame === 'function') saveGame();
@@ -11197,6 +11224,7 @@ var MP_PIRACY_ERRORS = {
   target_shielded: 'Commandant débutant (72 h) : ses convois sont protégés',
   target_too_weak: 'Ce commandant est trop faible pour toi : aucune gloire à le piller',
   target_other_season: 'Ce convoi appartient à une autre saison',
+  target_peaceful: 'Commandant pacifique : ses convois sont intouchables',   // PATCH_2410_PACIFIQUE
 };
 function _mpPirErr(e) {
   const code = (String(e && e.message || e).match(/[a-z_]+/g) || []).find(c => MP_PIRACY_ERRORS[c]);
@@ -11841,11 +11869,14 @@ async function mpRobConvoy(reportId) {
   if (!r || !r.mp || _mpAmbushBusy.has('rob:' + reportId)) return;
   if (Date.now() > (r.expiresAt || 0)) { toast('Fenêtre fermée : le convoi est passé'); _mpInterceptSheetRefresh(); return; }
   if (!_mpOnline()) { toast('Registre hors ligne : réessaie dans un instant'); return; }
+  if (!(await mpPeaceGuard('Aborder le convoi d\'un autre commandant'))) return;   // PATCH_2410_PACIFIQUE
+  if (!G.beaconReports.includes(r)) return;
   _mpAmbushBusy.add('rob:' + reportId);
   try {
     const fleet = _mpPostedFleetAt(r.mp.system);
     if (!fleet) { toast(MP_PIRACY_ERRORS.no_ambush); return; }
     await window.SBMP.intercept(r.mp.convoyId, r.mp.system, fleet.id);
+    mpPeaceLost();   // PATCH_2410_PACIFIQUE
     r.expiresAt = Date.now();          // le convoi est engagé : la fenêtre se ferme
     toast('⚔ Abordage lancé…');
     closeMpInterceptSheet();
@@ -36350,6 +36381,7 @@ async function _spyEnrichReport(report, address, attempt) {
         level: prec >= 2 ? w.level_estimate : fuzz(w.level_estimate, 0.25),
         defense: prec >= 3 ? w.defense_estimate : fuzz(w.defense_estimate, prec >= 2 ? 0.15 : 0.35),
         shielded: !!w.shielded, lastSeen: prec >= 2 ? w.last_seen_days : null,
+        peaceful: !!w.peaceful,   // PATCH_2410_PACIFIQUE
       };
     } else report.spy = { address: addr, coord, precision: prec, found: false, knownPseudo: known && known.isReal ? known.playerName : null };
   } catch (e) { report.spy = { address: addr, coord, precision: prec, found: false, error: true }; }
@@ -36378,7 +36410,7 @@ function _spySummaryHtml(s) {
       ${typeof openEmbassy === 'function' ? `<button onclick="event.stopPropagation();openEmbassy('${_escapeHtml(s.address)}')" style="flex:1;padding:8px;border-radius:7px;border:1px solid rgba(255,255,255,.14);background:transparent;color:var(--text);font:inherit;font-size:11px;cursor:pointer">Ambassade</button>` : ''}
     </div>`;
   return `<div style="margin-bottom:8px"><div style="font-size:17px;font-weight:700;color:#ffb0a8">${_escapeHtml(s.pseudo || '—')}</div>
-    <div style="font-size:11px;color:var(--mut);margin-top:2px">${_escapeHtml(s.planet || 'Monde habité')} · ${_escapeHtml(s.address)}${s.shielded ? ' · <span style="color:#9fd8ff">bouclier débutant</span>' : ''}</div>${verdict}${acts}</div>`;
+    <div style="font-size:11px;color:var(--mut);margin-top:2px">${_escapeHtml(s.planet || 'Monde habité')} · ${_escapeHtml(s.address)}${s.shielded ? ' · <span style="color:#9fd8ff">bouclier débutant</span>' : ''}${s.peaceful ? ' · <span style="color:#9fd8ff">pacifique</span>' : ''}</div>${s.peaceful ? '' : verdict}${acts}</div>`;
 }
 // au démarrage : les relevés restés en suspens (jeu fermé pendant le décodage) se relisent
 setTimeout(() => { for (const r of (typeof G !== 'undefined' && G.probeReports) || []) if (r && r.tier === 'stealth' && r.spy && r.spy.pending) _spyEnrichReport(r, r.spy.coord || r.spy.address || r.targetCoords); }, 4000);
@@ -36394,6 +36426,7 @@ function _spyBlockHtml(r) {
   else body = _spySummaryHtml(s)
     + row('Niveau', '≈ ' + s.level) + row('Défense', '≈ ' + s.defense + ' <span style="color:var(--mut)">(' + precTxt + ')</span>')
     + row('Bouclier débutant', s.shielded ? 'actif' : 'non')
+    + row('Statut', s.peaceful ? '<span style="color:#9fd8ff">pacifique · intouchable</span>' : 'conquérant')   // PATCH_2410_PACIFIQUE
     + row('Dernière activité', s.lastSeen == null ? '<span style="color:var(--mut)">illisible</span>' : (s.lastSeen === 0 ? "aujourd'hui" : 'il y a ' + s.lastSeen + ' j'));
   // ce qu'il manque → ce qu'il faut développer pour mieux espionner
   const next = [];
@@ -49195,7 +49228,7 @@ if (G.knownTargets && Array.isArray(G.tankerMissions)) {
 <!-- PERF_1310 — mesure des performances chez les joueurs + qualité 3D automatique (assets/perf.js) -->
 <script src="assets/perf.js?v=20261022-2000"></script>
 <!-- PATCH_1410_LIGNES — lignes PNJ à horaire sur les routes cachées (assets/lines.js) -->
-<script src="assets/lines.js?v=20261022-1440"></script>
+<script src="assets/lines.js?v=20261024-1240"></script>
 <!-- CLOUD — sauvegarde Supabase (source : sb-build/src/cloud.js) -->
 <script type="module" src="assets/cloud.js?v=20261022-1420"></script>
 <!-- MATCH3 — Match-3 V2 (assets/match3.js, source src/match3.js + src/m3core.js) : remplace startM3 -->

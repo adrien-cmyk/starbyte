@@ -7,5 +7,6 @@ select v, case when ok then 'oui' else 'NON — à lancer' end as lance from (va
   ('v19 départ colonie',     exists (select 1 from pg_proc where proname = 'mp_launch_raid' and pg_get_function_arguments(oid) like '%p_origin_address%')),
   ('v20 audit',              exists (select 1 from pg_proc where proname = 'mp_requeue_stuck_raids')),
   ('v21 test à deux',        exists (select 1 from pg_proc where proname = '_mp_worlds_clean')),
-  ('v22 pillage colonie',    exists (select 1 from pg_proc where proname = '_mp_colony_loot_cap'))
+  ('v22 pillage colonie',    exists (select 1 from pg_proc where proname = '_mp_colony_loot_cap')),
+  ('v29 mode pacifique',     exists (select 1 from pg_proc where proname = 'mp_peace_state'))
 ) t(v, ok);

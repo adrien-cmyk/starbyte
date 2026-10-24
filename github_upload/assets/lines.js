@@ -885,6 +885,8 @@
       { v: true, label: 'Les convois de joueurs aussi', sub: 'Même quand tu n\'es pas là. Pactes, saison et protections restent respectés' },
     ]);
     if (!p) return null;
+    // PATCH_2410_PACIFIQUE : aborder les convois de joueurs met fin au statut pacifique (la filature non)
+    if (p.v && m.k !== 'spy' && typeof mpPeaceGuard === 'function' && !(await mpPeaceGuard('Ordonner à cette flotte d\'aborder les convois de joueurs'))) return null;
     return { mode: m.k, players: p.v };
   }
   async function pushOrders(f, force) {
@@ -892,7 +894,11 @@
     if (!a || a.phase !== 'posted' || !a.mpAmbushId || a.ordersSync || !online()) return;
     if (!force && Date.now() - (a.ordersTry || 0) < 5 * 60000) return;
     a.ordersTry = Date.now();
-    try { await _mpRpc('mp_ambush_orders', { p_fleet_id: f.id, p_orders: ordersOf(f) }); a.ordersSync = true; if (typeof saveGame === 'function') saveGame(); }
+    try {
+      await _mpRpc('mp_ambush_orders', { p_fleet_id: f.id, p_orders: ordersOf(f) }); a.ordersSync = true;
+      const o = ordersOf(f); if (o.players && o.mode !== 'spy' && typeof mpPeaceLost === 'function') mpPeaceLost();   // PATCH_2410_PACIFIQUE
+      if (typeof saveGame === 'function') saveGame();
+    }
     catch (e) { console.warn('[routes] ordres :', String(e && e.message || e)); }
   }
   async function setOrders(fleetId) {
