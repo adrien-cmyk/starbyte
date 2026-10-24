@@ -881,7 +881,7 @@
     if (!m) return null;
     if (m.k === 'manual') return { mode: 'manual', players: false };
     // PATCH_2410_PACIFIQUE : aborder des convois, PNJ compris, met fin au statut pacifique (la filature non)
-    if (m.k !== 'spy' && typeof mpPeaceGuard === 'function' && !(await mpPeaceGuard('Ordonner à cette flotte d\'aborder des convois, même PNJ,'))) return null;
+    if (m.k !== 'spy' && typeof mpPeaceGuard === 'function' && !(await mpPeaceGuard('Ordonner à cette flotte d\'aborder des convois'))) return null;
     const p = await _mpChoose('Et les convois des autres commandants ?', [
       { v: false, label: 'Seulement les convois PNJ', sub: 'Un convoi de joueur attend ta décision' },
       { v: true, label: 'Les convois de joueurs aussi', sub: 'Même quand tu n\'es pas là. Pactes, saison et protections restent respectés' },

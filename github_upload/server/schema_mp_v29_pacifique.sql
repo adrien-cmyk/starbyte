@@ -1,13 +1,14 @@
 -- v29 (24/10/2026) — MODE PACIFIQUE (décisions d'Adrien, 23-24/10 ; GDD claude/starbyte_GDD_mode_pacifique.md)
 --   · tout le monde commence pacifique, sans écran de choix ; aucun commandant ne peut attaquer un pacifique
 --     (ni raid sur sa planète ou ses colonies, ni abordage de ses convois) ;
---   · un pacifique construit ce qu'il veut, flotte de guerre comprise ;
---   · il perd son statut, définitivement, au premier acte militaire : raid lancé, abordage d'un convoi (joueur OU PNJ),
---     ou embuscade postée avec l'ordre d'aborder des convois, PNJ compris (la filature ne compte pas) ;
---     le jeu demande une confirmation avant ;
+--   · un pacifique construit ce qu'il veut, flotte de guerre comprise, mais ne la fait jamais sortir : il ne fait que
+--     du match-3 et du commerce ;
+--   · il perd son statut, définitivement, dès qu'une flotte part : raid, mission PNJ, embuscade (même en filature),
+--     garnison chez un allié ; le jeu demande une confirmation avant (les missions PNJ, que le serveur ne voit pas,
+--     sont signalées par le jeu : mp_peace_renounce) ;
 --   · les pirates PNJ peuvent toujours intercepter ses convois (géré par le jeu, rien ici) ;
 --   · commerce par tanker entre un pacifique et un conquérant : taxe de 20 % prélevée sur ce que reçoit le vendeur.
--- Les commandants qui ont déjà attaqué (raid, abordage, embuscade d'abordage en place, butin PNJ en cale) sont conquérants ;
+-- Les commandants qui ont déjà fait sortir une flotte (raid, abordage, embuscade ou garnison en cours) sont conquérants ;
 -- (si tu as déjà lancé une version précédente de v29 : relance ce script, il est sans risque)
 -- « pastéphane » est pacifique (demande d'Adrien, 24/10).
 -- À coller tel quel dans Supabase → SQL Editor → Run (après v28 ; pas de fonction à redéployer).
@@ -21,9 +22,8 @@ update public.worlds w set peaceful = false, peaceful_lost_at = coalesce(w.peace
  where w.peaceful and (
        exists (select 1 from public.raids r where r.attacker_id = w.user_id)
     or exists (select 1 from public.intercepts i where i.pirate_id = w.user_id)
-    or exists (select 1 from public.ambushes a where a.user_id = w.user_id and a.left_at is null
-                and (a.orders ->> 'mode' in ('rob_heavy', 'rob_all')
-                     or coalesce((a.hold ->> 'metal')::bigint, 0) + coalesce((a.hold ->> 'energie')::bigint, 0) + coalesce((a.hold ->> 'cristal')::bigint, 0) > 0)));
+    or exists (select 1 from public.ambushes a where a.user_id = w.user_id)
+    or exists (select 1 from public.alliance_garrisons g where g.owner_id = w.user_id));
 
 -- demande d'Adrien : pastéphane est pacifique
 update public.worlds set peaceful = true, peaceful_lost_at = null where lower(pseudo) in ('pastéphane', 'pastephane');
@@ -63,22 +63,34 @@ end $$;
 drop trigger if exists intercepts_peace on public.intercepts;
 create trigger intercepts_peace before insert on public.intercepts for each row execute function public._mp_intercepts_peace();
 
--- embuscade : le statut tombe dès qu'elle a l'ordre d'aborder (joueurs ou PNJ), ou dès qu'un butin PNJ entre en cale
-create or replace function public._mp_hold_sum(h jsonb) returns bigint
-language sql immutable as $$
-  select coalesce((h ->> 'metal')::bigint, 0) + coalesce((h ->> 'energie')::bigint, 0) + coalesce((h ->> 'cristal')::bigint, 0)
-$$;
+-- embuscade (tous ordres, filature comprise) : le statut tombe dès qu'elle est posée
 create or replace function public._mp_ambushes_peace() returns trigger
 language plpgsql security definer set search_path = public as $$
 begin
-  if new.left_at is null and (new.orders ->> 'mode' in ('rob_heavy', 'rob_all')
-     or public._mp_hold_sum(new.hold) > (case when tg_op = 'UPDATE' then public._mp_hold_sum(old.hold) else 0 end)) then
-    perform public._mp_lose_peace(new.user_id);
-  end if;
+  perform public._mp_lose_peace(new.user_id);
   return new;
 end $$;
 drop trigger if exists ambushes_peace on public.ambushes;
-create trigger ambushes_peace after insert or update of orders, hold on public.ambushes for each row execute function public._mp_ambushes_peace();
+create trigger ambushes_peace after insert on public.ambushes for each row execute function public._mp_ambushes_peace();
+
+-- garnison chez un allié : la flotte sort, le statut tombe
+create or replace function public._mp_garrisons_peace() returns trigger
+language plpgsql security definer set search_path = public as $$
+begin
+  perform public._mp_lose_peace(new.owner_id);
+  return new;
+end $$;
+drop trigger if exists garrisons_peace on public.alliance_garrisons;
+create trigger garrisons_peace after insert on public.alliance_garrisons for each row execute function public._mp_garrisons_peace();
+
+-- une flotte part en mission PNJ (le jeu le signale ; rien d'autre ne passe par ici)
+create or replace function public.mp_peace_renounce()
+returns jsonb
+language plpgsql security definer set search_path = public as $$
+begin
+  perform public._mp_lose_peace(auth.uid());
+  return public.mp_peace_state();
+end $$;
 
 -- mon statut (le jeu le lit avant un premier acte hostile)
 create or replace function public.mp_peace_state()
@@ -88,6 +100,8 @@ language sql stable security definer set search_path = public as $$
 $$;
 revoke all on function public.mp_peace_state() from public, anon;
 grant execute on function public.mp_peace_state() to authenticated;
+revoke all on function public.mp_peace_renounce() from public, anon;
+grant execute on function public.mp_peace_renounce() to authenticated;
 
 -- fiche d'un monde : on voit s'il est pacifique
 drop function if exists public.mp_world_card(text);
@@ -219,5 +233,5 @@ begin
 end $function$;
 
 -- Fin v29. Vérification :
---   select count(*) from pg_proc where proname in ('mp_peace_state', '_mp_lose_peace', '_mp_raids_peace', '_mp_intercepts_peace', '_mp_ambushes_peace');  → 5
+--   select count(*) from pg_proc where proname in ('mp_peace_state', 'mp_peace_renounce', '_mp_lose_peace', '_mp_raids_peace', '_mp_intercepts_peace', '_mp_ambushes_peace', '_mp_garrisons_peace');  → 7
 --   select pseudo, peaceful from public.worlds order by peaceful, pseudo;

@@ -9393,18 +9393,27 @@ var MP_RAID_ERRORS = {
 // Tout le monde commence pacifique : personne ne peut l'attaquer. Le statut tombe, définitivement,
 // au premier acte hostile contre un joueur (raid, abordage, embuscade « joueurs compris »). Le serveur tranche ;
 // ici, on prévient avant.
+var _mpPeaceOkAt = 0;   // confirmation récente : on ne redemande pas dans la même action
 async function mpPeaceGuard(what) {
   if (typeof G !== 'undefined' && G && G.mpPeaceful === false) return true;
+  if (Date.now() - _mpPeaceOkAt < 120000) return true;
   let st = null;
   try { st = await _mpRpc('mp_peace_state', {}); } catch (e) {}
   if (st && st.peaceful === false) { G.mpPeaceful = false; if (typeof saveGame === 'function') saveGame(); return true; }
   const ok = await sbConfirmWarning('Fin de ton statut pacifique',
     `Tu es <strong>pacifique</strong> : aucun commandant ne peut t'attaquer.<br><br>`
-    + `Tout acte militaire compte, contre un joueur comme contre un convoi PNJ. `
-    + `${what || 'Attaquer'} met fin à ce statut, <strong>définitivement</strong>. `
+    + `Un pacifique ne fait sortir aucune flotte : ni mission, ni raid, ni embuscade, ni garnison. `
+    + `${what || 'Envoyer cette flotte'} met fin à ce statut, <strong>définitivement</strong>. `
     + `Ta planète, tes colonies et tes convois pourront ensuite être attaqués comme ceux de tout le monde.`,
-    'Renoncer et attaquer');
+    'Renoncer et envoyer');
+  if (ok) _mpPeaceOkAt = Date.now();
   return !!ok;
+}
+// la flotte est partie : le registre l'inscrit (missions PNJ, embuscades : le serveur ne le voit pas encore)
+function mpPeaceRenounce() {
+  if (typeof G === 'undefined' || !G || G.mpPeaceful === false) return;
+  _mpRpc('mp_peace_renounce', {}).catch(e => console.warn('[pacifique] :', String(e && e.message || e)));
+  mpPeaceLost();
 }
 function mpPeaceLost() {
   if (typeof G === 'undefined' || !G || G.mpPeaceful === false) return;
@@ -9420,7 +9429,7 @@ async function mpLaunchRaid(fleet, target) {
   const fuelCost = computeMissionFuelCost(fleet, target);
   if ((G.res.energie.v || 0) < fuelCost) { toast('Énergie insuffisante'); return; }
   if (!window.SBMP || !window.SBMP.ready()) { toast('Registre hors ligne : réessaie dans un instant'); return; }
-  if (!(await mpPeaceGuard(`Lancer ce raid contre ${target.mpPseudo || target.name || 'ce monde'}`))) return;   // PATCH_2410_PACIFIQUE
+  if (!(await mpPeaceGuard(`Lancer ce raid contre ${target.mpPseudo || target.name || 'ce monde'}`))) { goto('fleet'); return; }   // PATCH_2410_PACIFIQUE
   let raid;
   _mpLaunching = true;
   try {
@@ -10375,10 +10384,12 @@ async function mpGarrisonStart(address) {
     + `<br><br>En orbite chez lui, elle combat avec ses défenses si un raid arrive. Elle reste à toi : tu paies ses pertes (la moitié des vaisseaux si l'orbite tombe, un dixième si le raid est repoussé).`
     + `<br><br><em>Pendant ce temps, elle ne protège plus ta planète. Tu peux la rappeler à tout moment (trajet retour).</em>`, 'Envoyer');
   if (!ok || _mpGarBusy.has(f.id)) return;
+  if (!(await mpPeaceGuard('Envoyer cette flotte en garnison'))) return;   // PATCH_2410_PACIFIQUE
   _mpGarBusy.add(f.id);
   try {
     const p = _mpFleetPayload(f); p.soldiers = { garde: 0, lourd: 0 };
     const g = await SBMP.garrisonPost(address, f.id, f.name, p, travel);
+    mpPeaceRenounce();   // PATCH_2410_PACIFIQUE
     const now = Date.now();
     G.res.energie.v = Math.max(0, G.res.energie.v - fuel);
     f.status = 'in_mission';
@@ -11690,6 +11701,7 @@ async function mpAmbushStart(fleetId, onlySystems) {   // PATCH_1510_ROUTES_UX :
   const armed = ['fregate', 'cuirasse'].some(type => ['t1', 't2', 't3'].some(t => (f.composition[type] && f.composition[type][t]) > 0));
   if (!armed) { toast('Il faut des frégates ou des cuirassés pour aborder un convoi'); return; }
   if (!_mpOnline()) { toast('Registre hors ligne : réessaie dans un instant'); return; }
+  if (!(await mpPeaceGuard('Poster cette flotte en embuscade'))) return;   // PATCH_2410_PACIFIQUE
   const beacons = mpBeaconList().filter(b => !Array.isArray(onlySystems) || onlySystems.includes(b.system));
   if (!beacons.length) { toast(Array.isArray(onlySystems) ? 'Pose d\'abord une balise sur un jalon de cette route' : 'Pose d\'abord une balise sur un système (Centre de prospection)'); return; }
   const taken = new Set((G.fleet.prepared || []).filter(x => x.ambush && x.id !== f.id).map(x => x.ambush.system));
@@ -11718,6 +11730,7 @@ async function mpAmbushStart(fleetId, onlySystems) {   // PATCH_1510_ROUTES_UX :
   if (!ok) return;
   const now = Date.now();
   G.res.energie.v = Math.max(0, G.res.energie.v - fuel);
+  mpPeaceRenounce();   // PATCH_2410_PACIFIQUE
   f.status = 'in_mission';
   f.missionStartedAt = now;
   f.missionEndsAt = null;
@@ -15837,8 +15850,10 @@ function openMissionConfirm(targetId) {
 }
 
 // ─── Étape 2.5 : wrapper du clic du bouton final (déclenche l'effet sensoriel) ───
-function triggerLaunchMission(btnElement) {
+async function triggerLaunchMission(btnElement) {
   // Niveau 3 — célébration extrême puis lancement effectif
+  if (btnElement && btnElement.disabled) return;
+  if (typeof mpPeaceGuard === 'function' && !(await mpPeaceGuard('Envoyer cette flotte en mission'))) return;   // PATCH_2410_PACIFIQUE
   // Désactive immédiatement le bouton pour empêcher double-tap
   if (btnElement) {
     btnElement.classList.add('disabled');
@@ -15870,6 +15885,7 @@ function confirmSendMission() {
 
   // Passage en mission
   const duration = getMissionDuration(target);
+  if (typeof mpPeaceRenounce === 'function') mpPeaceRenounce();   // PATCH_2410_PACIFIQUE
   fleet.status = 'in_mission';
   fleet.missionTargetId = target.id;
   fleet.missionStartedAt = Date.now();
@@ -49229,7 +49245,7 @@ if (G.knownTargets && Array.isArray(G.tankerMissions)) {
 <!-- PERF_1310 — mesure des performances chez les joueurs + qualité 3D automatique (assets/perf.js) -->
 <script src="assets/perf.js?v=20261022-2000"></script>
 <!-- PATCH_1410_LIGNES — lignes PNJ à horaire sur les routes cachées (assets/lines.js) -->
-<script src="assets/lines.js?v=20261024-1250"></script>
+<script src="assets/lines.js?v=20261024-1300"></script>
 <!-- CLOUD — sauvegarde Supabase (source : sb-build/src/cloud.js) -->
 <script type="module" src="assets/cloud.js?v=20261022-1420"></script>
 <!-- MATCH3 — Match-3 V2 (assets/match3.js, source src/match3.js + src/m3core.js) : remplace startM3 -->
