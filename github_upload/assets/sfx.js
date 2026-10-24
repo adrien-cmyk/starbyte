@@ -1,7 +1,7 @@
 /* Starbyte — Bruitages (SFX_2410, 24/10/2026, demande d'Adrien : « essayons un peu de son »)
    Sons synthétisés en direct (Web Audio) : rien à télécharger. Esprit « cockpit premium » : doux, cristallins, feutrés.
-   - match-3 : uniquement de la batterie (24/10) : charleston à l'échange, grosse caisse puis toms qui montent avec la cascade,
-     caisse claire, clap, cymbale pour les charges, noyaux, paliers et la fin
+   - match-3 : percussions abstraites (24/10) : clic à l'échange, coup sourd puis « pops » qui montent avec la cascade,
+     « toc » feutrés et souffles brefs pour les charges, noyaux, paliers et la fin ; ni cymbale ni charleston
    - planète : construction terminée ; flotte et tanker de retour ; léger « tic » sur les boutons
    - iPhone : le son ne démarre qu'après un toucher ; les bruitages respectent le bouton silencieux et se mêlent
      à la musique du joueur (session « ambient ») ; la radio de bord garde sa session « playback ».
@@ -98,29 +98,16 @@
     tone({ f: f * 2.0, t, a: 0.002, d: (d || 0.5) * 0.6, g: (g || 0.16) * 0.12, rev: 0, pan });
   }
   // ── batterie (match-3 : uniquement des drums, décision d'Adrien 24/10) ──
+  // percussions abstraites (24/10 : « juste du son, qu'on ne reconnaisse pas une batterie ») : pas de cymbale ni de charleston,
+  // des coups sourds, des « toc » boisés et des « pops » courts, sans métal
   const DR = {
-    kick(t, g, f0) {
-      tone({ f: f0 || 150, f2: 45, t, a: 0.002, d: 0.32, g: g || 0.5, glide: 0.35 });
-      noise({ t, filter: 'highpass', f: 3500, a: 0.001, d: 0.012, g: (g || 0.5) * 0.25 });
-    },
-    snare(t, g) {
-      noise({ t, filter: 'bandpass', f: 1900, q: 0.7, a: 0.001, d: 0.17, g: g || 0.3, rev: 0.12 });
-      tone({ f: 200, f2: 160, t, type: 'triangle', a: 0.001, d: 0.09, g: (g || 0.3) * 0.7 });
-    },
-    hat(t, g, open) { noise({ t, filter: 'highpass', f: 7500, q: 0.8, a: 0.001, d: open ? 0.22 : 0.035, g: g || 0.12 }); },
-    tom(t, f, g) {
-      tone({ f, f2: f * 0.62, t, a: 0.002, d: 0.3, g: g || 0.35, glide: 0.6 });
-      noise({ t, filter: 'bandpass', f: f * 3, q: 1, a: 0.001, d: 0.04, g: (g || 0.35) * 0.2 });
-    },
-    clap(t, g) {
-      [0, 0.011, 0.022].forEach(o => noise({ t: t + o, filter: 'bandpass', f: 1300, q: 1.2, a: 0.001, d: 0.02, g: g || 0.22 }));
-      noise({ t: t + 0.03, filter: 'bandpass', f: 1300, q: 1, a: 0.002, d: 0.16, g: (g || 0.22) * 0.7, rev: 0.15 });
-    },
-    rim(t, g) { tone({ f: 1700, t, type: 'triangle', a: 0.001, d: 0.025, g: g || 0.16 }); noise({ t, filter: 'highpass', f: 5000, a: 0.001, d: 0.012, g: (g || 0.16) * 0.5 }); },
-    crash(t, g) {
-      noise({ t, filter: 'highpass', f: 4500, q: 0.5, a: 0.002, d: 1.3, g: g || 0.14, rev: 0.3 });
-      noise({ t, filter: 'bandpass', f: 8200, q: 0.6, a: 0.002, d: 0.7, g: (g || 0.14) * 0.6 });
-    },
+    kick(t, g, f0) { tone({ f: f0 || 95, f2: 52, t, a: 0.004, d: 0.18, g: (g || 0.5) * 0.9, glide: 0.5, lp: 600 }); },   // coup sourd
+    snare(t, g) { noise({ t, filter: 'bandpass', f: 950, q: 2.2, a: 0.002, d: 0.05, g: (g || 0.3) * 0.9, rev: 0.12 }); },   // « toc » feutré
+    hat(t, g) { tone({ f: 2100, f2: 1600, t, a: 0.001, d: 0.018, g: (g || 0.12) * 0.7 }); },                             // petit clic
+    tom(t, f, g) { tone({ f: f * 1.6, f2: f * 1.35, t, a: 0.002, d: 0.11, g: (g || 0.35) * 0.85, lp: 1800, rev: 0.15 }); },  // « pop » qui monte
+    clap(t, g) { noise({ t, filter: 'lowpass', f: 1400, q: 0.7, a: 0.003, d: 0.07, g: (g || 0.22) * 0.9, rev: 0.15 }); },   // souffle bref
+    rim(t, g) { tone({ f: 880, f2: 760, t, a: 0.001, d: 0.03, g: g || 0.16 }); },                                          // « toc » boisé
+    crash() {},                                                                                                              // retirée
   };
   const TOMS = [110, 130, 155, 185, 220, 262];   // toms graves → aigus : la cascade monte
 
@@ -155,8 +142,8 @@
       bell(659.3, t + 0.25, 0.08, 0.8, 0.45);
     },
     charge(t) { DR.kick(t, 0.62); DR.snare(t, 0.34); },
-    core(t) { DR.kick(t, 0.6, 120); DR.clap(t + 0.02, 0.24); DR.crash(t, 0.16); },
-    forge(t) { DR.clap(t, 0.2); },
+    core(t) { DR.kick(t, 0.7, 75); DR.clap(t + 0.02, 0.26); DR.kick(t + 0.1, 0.45, 62); },
+    forge(t) { DR.clap(t, 0.36); DR.rim(t + 0.05, 0.12); },
     crack(t) { DR.rim(t, 0.14); },
     tick(t) { DR.hat(t, 0.08); },
   };
