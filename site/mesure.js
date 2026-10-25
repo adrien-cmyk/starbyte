@@ -5,7 +5,7 @@
    - Le lien « Cookies » du pied de page (data-mesure) rouvre le bandeau pour changer d'avis. */
 (function () {
   'use strict';
-  var GA_ID = '';   // identifiant de mesure GA4, ex. 'G-XXXXXXXXXX'
+  var GA_ID = 'G-GSZD6MVCFC';   // identifiant de mesure GA4, ex. 'G-XXXXXXXXXX'
   if (!/^G-[A-Z0-9]+$/.test(GA_ID)) return;
 
   var KEY = 'sb_mesure';
