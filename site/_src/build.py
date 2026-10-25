@@ -26,3 +26,10 @@ doc2='<!doctype html>\n<html lang="fr">\n<head>\n<meta charset="utf-8">\n<meta n
 open('dist_soutenir.html','w').write(doc2)
 open('soutenir.html','w').write(doc2)
 print('soutenir', len(doc2))
+
+# page CGV : même feuille de style que l'accueil
+cg=open('src/cgv.src.html',encoding='utf8').read().replace('{{STYLE}}',style).replace('{{HEART}}',heart).replace('{{LOGO}}',logo)
+i=cg.index('<nav class="nav"')
+doc3='<!doctype html>\n<html lang="fr">\n<head>\n<meta charset="utf-8">\n<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">\n'+cg[:i]+'\n</head>\n<body>\n'+cg[i:]+'\n</body>\n</html>\n'
+open('dist_cgv.html','w').write(doc3)
+print('cgv', len(doc3))
