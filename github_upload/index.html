@@ -46660,6 +46660,9 @@ function _crownCss2() {
     .sm-panel .smc-enter{margin:12px -36px 4px 0;width:calc(100% + 36px)}`;
   document.head.appendChild(st);
 }
+// PATCH_2510_ENTRER : les styles des stations dès le démarrage — sinon le bouton « ENTRER » de la fiche sur la carte
+// restait un petit bouton blanc par défaut tant qu'on n'était jamais entré dans une station pendant la session
+setTimeout(() => { try { _crownCss(); _crownCss2(); } catch (e) {} }, 0);
 // PATCH_1510_SANCTUAIRE — chaque station : son modèle, ses textes, ses cadrages
 var STATION_UI = {
   crown: { id: 'dock-37oe89', profile: 'crown', url: 'assets/3d/sb_dc02.glb?v=20261016-2030', kicker: 'PORT-FRANC', title: 'THE DRIFTING CROWN',
