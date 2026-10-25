@@ -168,24 +168,50 @@
     });
   }
 
-  // ── popup « Tu aimes Starbyte ? » : aux 3 premiers lancements, puis une fois par mois ──
+  // ── popups de lancement : une seule par lancement ; l'email passe avant l'invitation ──
+  function calmMoment() {
+    const pl = document.getElementById('scr-planet');
+    if (!pl || pl.classList.contains('hidden') || document.hidden) return false;
+    if (typeof G === 'undefined' || !G || !G.tuto || !G.tuto.done) return false;   // pas pendant les premiers pas
+    if (typeof _sbModalType !== 'undefined' && _sbModalType) return false;          // une autre fenêtre est ouverte
+    if (document.getElementById('sb-notif') || document.getElementById('sb-invite')) return false;
+    return true;
+  }
+
+  // « N'oublie pas de lier un email » : tant que la partie n'est pas liée, au plus une fois tous les 2 jours
+  (function emailPopup() {
+    const EVERY = 2 * 24 * 3600 * 1000;
+    if (Date.now() - (ls.get('sb_mail_pop', 0) || 0) < EVERY) return;
+    let tries = 0;
+    window._sbMailPending = true;                                                       // l'invitation attend son tour
+    const tryShow = async () => {
+      const C = window.SBCloud;
+      if (C && C.status === 'ok' && C.isLinked && C.isLinked()) { window._sbMailPending = false; return; }   // déjà liée : rien à dire
+      if (++tries > 40 || window._sbLaunchPopup) { window._sbMailPending = false; return; }
+      if (!C || C.status !== 'ok' || !calmMoment()) { setTimeout(tryShow, 15000); return; }
+      window._sbLaunchPopup = 'email'; window._sbMailPending = false;
+      ls.set('sb_mail_pop', Date.now());
+      const ok = typeof sbConfirm === 'function' ? await sbConfirm({
+        title: 'Sauvegarde ta partie',
+        body: `N'oublie pas de <b>lier un email</b> à ta partie.<br><br>Sans email, si tu changes de téléphone ou si tu effaces le navigateur, ton empire est perdu. Avec un email, tu le retrouves partout, sur tous tes appareils.`,
+        confirmLabel: 'Lier un email', cancelLabel: 'Plus tard',
+      }) : false;
+      if (ok && C.linkFlow) C.linkFlow();
+    };
+    setTimeout(tryShow, 18000);
+  })();
+
+  // « Tu aimes Starbyte ? » : aux 3 premiers lancements, puis une fois par mois
   (function invitePopup() {
     const MONTH = 30 * 24 * 3600 * 1000;
     const st = ls.get('sb_inv_pop', { n: 0, last: 0 });
     const due = (st.n || 0) < 3 || Date.now() - (st.last || 0) >= MONTH;
     if (!due) return;
     let tries = 0;
-    const calm = () => {
-      const pl = document.getElementById('scr-planet');
-      if (!pl || pl.classList.contains('hidden') || document.hidden) return false;
-      if (typeof G === 'undefined' || !G || !G.tuto || !G.tuto.done) return false;   // pas pendant les premiers pas
-      if (typeof _sbModalType !== 'undefined' && _sbModalType) return false;          // une autre fenêtre est ouverte
-      if (document.getElementById('sb-notif') || document.getElementById('sb-invite')) return false;
-      return !!token();
-    };
     const tryShow = async () => {
-      if (++tries > 40) return;                   // ~10 min sans moment calme : on retente au prochain lancement
-      if (!calm()) { setTimeout(tryShow, 15000); return; }
+      if (++tries > 40 || window._sbLaunchPopup) return;   // ~10 min sans moment calme, ou l'email est passé avant : prochain lancement
+      if (window._sbMailPending || !calmMoment() || !token()) { setTimeout(tryShow, 15000); return; }
+      window._sbLaunchPopup = 'invite';
       ls.set('sb_inv_pop', { n: (st.n || 0) + 1, last: Date.now() });
       const done = (cached && cached.claimed) || (typeof G !== 'undefined' && G && G.refRewardGiven);
       const ok = typeof sbConfirm === 'function' ? await sbConfirm({
