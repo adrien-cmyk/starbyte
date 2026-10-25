@@ -12748,7 +12748,7 @@ function _doGoto(scr) {
   if (scr === 'defense')        renderDefenseScreen();
   if (scr === 'unit-detail')    renderUnitDetailScreen();
   if (scr === 'capital')        renderCapitalScreen();
-  if (scr === 'building-detail') renderBuildingDetail();
+  if (scr === 'building-detail') { window._bdFresh = true; renderBuildingDetail(); }   // PATCH_2510_BUNKER : ouverture = haut de fiche, première unité
   if (scr === 'fleet')          renderFleetScreen();
   if (scr === 'fleet-compose')  renderFleetCompose();
   if (scr === 'fleet-detail')   renderFleetDetail();
@@ -49257,7 +49257,7 @@ if (G.knownTargets && Array.isArray(G.tankerMissions)) {
 <!-- MATCH3 — Match-3 V2 (assets/match3.js, source src/match3.js + src/m3core.js) : remplace startM3 -->
 <script type="module" src="assets/match3.js?v=20261024-2300"></script>
 <!-- HOME V2 — « monde d'abord » : planète plein écran, ressources en ligne, Flotte / Défense / Prospection (assets/home.js) -->
-<script type="module" src="assets/home.js?v=20261020-2150"></script>
+<script type="module" src="assets/home.js?v=20261025-1410"></script>
 <!-- SPACE MAP v0 — carte du Centre de prospection (assets/spacemap.js, source src/spacemap.js) -->
 <script src="assets/spacemap.js?v=20261022-2010"></script>
 <!-- SPACE MAP niveau B — diorama 3D d'un système (assets/system3d.js, source src/system3d.js) -->
