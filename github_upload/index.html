@@ -33836,7 +33836,48 @@ const PROBE_PSEUDO_UNITS = {
   probe_beacon:  { name: 'Balise',        icon: '⌖', color: '#a370ff', cost: { metal: 300, cristal: 100 }, duration: 180 }, // 3min build
 };
 
+// PATCH_2510_PROBE_QUEUE — file de construction des sondes visible : la sonde en cours (barre de progression)
+// puis toutes celles qui attendent leur tour (tous types), avec l'heure prévue et l'annulation. Mise à jour à chaque tic.
+function _probeQueueHtml(focusTier) {
+  const cmds = (QUEUES.prospect && QUEUES.prospect.commands) || [];
+  if (!cmds.length) return '';
+  const cfgOf = (c) => (typeof PROBE_TIER_CONFIG !== 'undefined' && PROBE_TIER_CONFIG[c.probeTier || String(c.unitKey || '').replace('probe_', '')]) || { label: 'Sonde', accent: '#5fffe8' };
+  const hhmm = (ms) => new Date(Date.now() + ms).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+  let acc = 0;
+  const rows = cmds.map((c, i) => {
+    const cfg = cfgOf(c), dur = Math.max(1, c.unitDuration | 0), left = dur - (c.currentElapsed || 0);
+    acc += left;
+    const mine = focusTier && (c.probeTier === focusTier || c.unitKey === 'probe_' + focusTier);
+    const x = `<button onclick="event.stopPropagation();cancelCommand('prospect', ${i})" aria-label="Annuler" style="background:transparent;border:none;color:var(--mut);font-size:16px;line-height:1;padding:2px 4px;cursor:pointer">×</button>`;
+    if (i === 0) {
+      const pct = Math.min(100, (c.currentElapsed || 0) / dur * 100);
+      return `<div style="padding:10px 12px;border-radius:8px;background:var(--bg-soft);border:1px solid ${cfg.accent}${mine ? '66' : '30'}">
+        <div style="display:flex;align-items:center;gap:8px">
+          <span style="flex:1;font-size:12px;color:var(--text)"><span style="color:${cfg.accent}">${cfg.label}</span> · en construction</span>
+          <span style="font-size:11px;color:var(--mut);font-family:'SF Mono',monospace">${formatTime(left)}</span>${x}
+        </div>
+        <div class="queue-progress-wrap" style="margin-top:7px;height:5px;background:var(--bg);border-radius:3px;overflow:hidden">
+          <div class="queue-progress" style="width:${pct.toFixed(1)}%;height:100%;background:${cfg.accent}"></div></div></div>`;
+    }
+    return `<div style="display:flex;align-items:center;gap:8px;padding:8px 12px;border-radius:8px;border:1px solid ${mine ? cfg.accent + '44' : 'var(--border)'}">
+      <span style="width:18px;font-size:10px;color:var(--mut);font-family:'SF Mono',monospace">${i + 1}</span>
+      <span style="flex:1;font-size:12px;color:var(--text)"><span style="color:${cfg.accent}">${cfg.label}</span> · en attente</span>
+      <span style="font-size:11px;color:var(--mut);font-family:'SF Mono',monospace">prête vers ${hhmm(acc * 1000)}</span>${x}</div>`;
+  });
+  return `<div style="display:flex;justify-content:space-between;align-items:baseline;margin:2px 2px 6px">
+      <span style="font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--mut)">File de construction · ${cmds.length} sonde${cmds.length > 1 ? 's' : ''}</span>
+      <span style="font-size:10px;color:var(--mut)">une à la fois</span></div>
+    <div style="display:flex;flex-direction:column;gap:6px">${rows.join('')}</div>`;
+}
+function _probeQueueRefresh() {
+  document.querySelectorAll('.probe-queue-live').forEach(el => {
+    const h = _probeQueueHtml(el.dataset.tier || '');
+    el.innerHTML = h; el.style.display = h ? '' : 'none';
+  });
+}
+
 function renderQueue(type) {
+  if (type === 'prospect') _probeQueueRefresh();   // PATCH_2510_PROBE_QUEUE
   const queue = QUEUES[type];
   const el = document.getElementById(type + '-queue');
   if (!el) return;
@@ -35091,6 +35132,7 @@ function renderProbesPane() {
         </div>
       </div>
     </div>
+    ${(() => { const h = _probeQueueHtml(''); return `<div class="probe-queue-live" data-tier="" style="margin:6px 8px 4px;${h ? '' : 'display:none'}">${h}</div>`; })()}
     <div class="section-label" style="margin-top:6px">Hangar des sondes</div>
   `;
 
@@ -35117,6 +35159,8 @@ function renderProbesPane() {
       if (onMissionInTier > 0) parts.push(`<span style="color:var(--amber)">${onMissionInTier} en mission</span>`);
       statsLine = parts.join(' · ');
     }
+    const _inQ = ((QUEUES.prospect && QUEUES.prospect.commands) || []).filter(c => c.unitKey === 'probe_' + cfg.key).length;   // PATCH_2510_PROBE_QUEUE
+    if (!locked && _inQ) statsLine += `${statsLine ? ' · ' : ''}<span style="color:${cfg.accent}">${_inQ} en file</span>`;
 
     // Illustration via getIllustration() — pattern identique aux unités militaires
     // (gère PNG + fallback automatique via pngFallback())
@@ -35616,27 +35660,9 @@ function renderProbeDetailScreen() {
     const inQueueForTier = (QUEUES.prospect.commands || []).filter(
       cmd => cmd.unitKey === 'probe_' + tier
     );
-    let queueHtml = '';
-    if (inQueueForTier.length > 0) {
-      const active = inQueueForTier[0]; // 1 seule cale prospect
-      const pct = (active.currentElapsed / active.unitDuration) * 100;
-      const remainingTime = active.unitDuration - active.currentElapsed;
-      const idxInGlobalQueue = QUEUES.prospect.commands.indexOf(active);
-      queueHtml = `
-        <div style="margin-top:12px;padding:12px;background:var(--bg-soft);border:1px solid ${cfg.accent}30;border-radius:8px">
-          <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px">
-            <span style="font-size:10px;color:${cfg.accent};letter-spacing:.12em;text-transform:uppercase">Construction en cours</span>
-            <span style="font-size:11px;color:var(--mut);font-family:'SF Mono',monospace">${formatTime(remainingTime)}</span>
-          </div>
-          <div class="queue-progress-wrap" style="height:6px;background:var(--bg);border-radius:3px;overflow:hidden">
-            <div class="queue-progress" style="width:${pct.toFixed(1)}%;height:100%;background:${cfg.accent};transition:width .3s"></div>
-          </div>
-          <div style="margin-top:8px;text-align:right">
-            <button onclick="cancelCommand('prospect', ${idxInGlobalQueue})" style="background:transparent;border:none;color:var(--mut);font-size:10px;letter-spacing:.1em;text-transform:uppercase;cursor:pointer;padding:2px 6px">Annuler</button>
-          </div>
-        </div>
-      `;
-    }
+    // PATCH_2510_PROBE_QUEUE : toute la file (pas seulement la première sonde de ce type)
+    const _qh = _probeQueueHtml(tier);
+    const queueHtml = `<div class="probe-queue-live" data-tier="${tier}" style="margin-top:12px;${_qh ? '' : 'display:none'}">${_qh}</div>`;
 
     let buildBtn;
     const totalEffective = totalInTier + inQueueForTier.reduce((acc, cmd) => acc + (cmd.totalQty - cmd.completed), 0);
