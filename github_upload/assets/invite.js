@@ -100,17 +100,10 @@
     renderCard();
   }
   setTimeout(refresh, 8000);
-  // une seule fois par appareil : on fait connaître l'invitation
-  setTimeout(() => {
-    if (ls.get('sb_ref_hint', false) || !token() || document.hidden || typeof toast !== 'function') return;
-    if (typeof G !== 'undefined' && G && G.refRewardGiven) return;
-    ls.set('sb_ref_hint', true);
-    toast(`Invite tes amis dans l'amas : +${fmtN(REWARD)} métal · touche ici`, () => open());
-  }, 150000);
   setInterval(() => { if (!document.hidden) refresh(); }, 5 * 60000);
 
   function link() { return cached && cached.code ? SITE + '?ref=' + cached.code : SITE; }
-  function message() { return `Je bâtis un empire galactique dans Starbyte. Rejoins-moi, l'amas est encore jeune : ${link()}`; }
+  function message() { return `Rejoins-moi dans Starbyte ! L'univers vient de s'ouvrir : c'est maintenant que naissent les empires. Arrive parmi les premiers et deviens l'un des commandants les plus puissants de l'amas. L'aventure commence ici : ${link()}`; }
 
   function progressHtml(s) {
     const n = Math.min(GOAL, (s && s.count) || 0), done = !!(s && s.claimed) || (typeof G !== 'undefined' && G && G.refRewardGiven);
@@ -159,7 +152,8 @@
           ${navigator.share ? btn('sbi-share', 'Partager', true) : ''}
           ${btn('sbi-wa', 'WhatsApp', !navigator.share)}
           ${btn('sbi-copy', 'Copier le lien', false)}
-        </div></div>`;
+        </div>
+        <div style="font-size:11px;color:rgba(220,228,240,.5);line-height:1.5;margin-top:10px">WhatsApp limite chaque envoi à 5 conversations : partage plusieurs fois, ou passe par une liste de diffusion, un groupe ou ton statut.</div></div>`;
     document.body.appendChild(o);
     o.querySelectorAll('[data-x]').forEach(x => x.addEventListener('click', close));
     const sh = o.querySelector('#sbi-share');
@@ -173,6 +167,37 @@
       if (typeof toast === 'function') toast(ok ? 'Lien copié : colle-le dans ton message' : link());
     });
   }
+
+  // ── popup « Tu aimes Starbyte ? » : aux 3 premiers lancements, puis une fois par mois ──
+  (function invitePopup() {
+    const MONTH = 30 * 24 * 3600 * 1000;
+    const st = ls.get('sb_inv_pop', { n: 0, last: 0 });
+    const due = (st.n || 0) < 3 || Date.now() - (st.last || 0) >= MONTH;
+    if (!due) return;
+    let tries = 0;
+    const calm = () => {
+      const pl = document.getElementById('scr-planet');
+      if (!pl || pl.classList.contains('hidden') || document.hidden) return false;
+      if (typeof G === 'undefined' || !G || !G.tuto || !G.tuto.done) return false;   // pas pendant les premiers pas
+      if (typeof _sbModalType !== 'undefined' && _sbModalType) return false;          // une autre fenêtre est ouverte
+      if (document.getElementById('sb-notif') || document.getElementById('sb-invite')) return false;
+      return !!token();
+    };
+    const tryShow = async () => {
+      if (++tries > 40) return;                   // ~10 min sans moment calme : on retente au prochain lancement
+      if (!calm()) { setTimeout(tryShow, 15000); return; }
+      ls.set('sb_inv_pop', { n: (st.n || 0) + 1, last: Date.now() });
+      const done = (cached && cached.claimed) || (typeof G !== 'undefined' && G && G.refRewardGiven);
+      const ok = typeof sbConfirm === 'function' ? await sbConfirm({
+        title: 'Tu aimes Starbyte ?',
+        body: `Envoie le jeu à tous tes amis pour qu'ils te rejoignent dans l'amas. L'univers vient de s'ouvrir : ensemble, vous serez parmi les premiers empires.`
+          + (done ? '' : `<br><br>Quand <b>${GOAL} appareils</b> auront ouvert ton lien, tu recevras <b style="color:#ffb15a">${fmtN(REWARD)} métal</b>.`),
+        confirmLabel: 'Inviter mes amis', cancelLabel: 'Plus tard',
+      }) : false;
+      if (ok) open();
+    };
+    setTimeout(tryShow, 20000);
+  })();
 
   window.SBInvite = { open, close, card, refresh, link, get state() { return cached; } };
 })();
