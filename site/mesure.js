@@ -17,6 +17,10 @@
     window.__sbGa = true;
     window.dataLayer = window.dataLayer || [];
     window.gtag = function () { window.dataLayer.push(arguments); };
+    // Consent Mode v2 (mode « de base ») : la balise n'est chargée qu'après accord ;
+    // tout est refusé par défaut, seule la mesure d'audience est accordée — jamais la publicité.
+    window.gtag('consent', 'default', { ad_storage: 'denied', ad_user_data: 'denied', ad_personalization: 'denied', analytics_storage: 'denied', functionality_storage: 'denied', personalization_storage: 'denied', security_storage: 'granted' });
+    window.gtag('consent', 'update', { analytics_storage: 'granted' });
     window.gtag('js', new Date());
     window.gtag('config', GA_ID);
     var s = document.createElement('script');
