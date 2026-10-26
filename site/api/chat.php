@@ -36,7 +36,9 @@ if ($ctx !== '') $sys[] = ['type' => 'text', 'text' => "PARTIE DU JOUEUR (état 
 
 $payload = [
     'model' => $cfg['model'] ?? 'claude-haiku-5-5',
-    'max_tokens' => 450,
+    'max_tokens' => 1000,
+    // réponse courte et directe : pas de réflexion (elle consommait tout le budget, la réponse revenait vide)
+    'thinking' => ['type' => 'disabled'],
     'system' => $sys,
     'messages' => $msgs,
 ];
