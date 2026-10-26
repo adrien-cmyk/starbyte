@@ -41103,6 +41103,20 @@ function renderCapitalTabContent() {
   }
 }
 
+// PATCH_2610_COUT_SKILL (Damien : « c'est pas marqué combien ça coûte ») — le coût reste toujours affiché, ressource
+// par ressource (ce que j'ai / ce qu'il faut), et on dit quand le stockage est trop petit pour le contenir
+function sbSkillCostDetail(skill) {
+  const NM = { metal: 'Métal', energie: 'Énergie', cristal: 'Cristal', biomass: 'Biomasse', artefact: 'Artefacts', fuel: 'Carburant' };
+  const fmt = (n) => Math.floor(n).toLocaleString('fr-CH');
+  const parts = Object.entries(skill.cost).map(([r, q]) => {
+    const R = G.res[r] || { v: 0, max: 0 }, have = R.v || 0, ok = have >= q;
+    const tooSmall = R.max > 0 && R.max < q;
+    return `<span style="color:${ok ? 'var(--green)' : (tooSmall ? '#ff8a70' : 'var(--amber)')}">${NM[r] || r} ${fmt(Math.min(have, q))} / ${fmt(q)}</span>` +
+      (tooSmall ? `<span style="display:block;color:#ff8a70;font-size:10px;margin-top:1px">Ton stockage de ${(NM[r] || r).toLowerCase()} s'arrête à ${fmt(R.max)} : améliore tes silos pour pouvoir réunir ${fmt(q)}.</span>` : '');
+  });
+  const dur = window.SBSkills && SBSkills.capDur ? `<span style="color:var(--mut)">Recherche · ${SBSkills.capDur(skill.key)}</span>` : '';
+  return `<div class="skill-cost" style="display:flex;flex-direction:column;gap:2px;margin-top:3px">${parts.join('')}${dur}</div>`;
+}
 function renderSkillRow(skill) {
   const applied = skill.isApplied();
   const lvlReq = skill.requires.capitalLevel;
@@ -41131,6 +41145,7 @@ function renderSkillRow(skill) {
         <div class="skill-name">${skill.name}</div>
         <div class="skill-desc">${skill.desc}</div>
         <div class="skill-cost">${applied ? '<span style="color:var(--green)">' + lockReason + '</span>' : (lockReason ? '<span style="color:var(--mut)">' + lockReason + '</span>' : '<span style="color:var(--amber)">' + costStr + '</span>')}</div>
+        ${!applied && lockReason && !_rs ? sbSkillCostDetail(skill) : ''}
       </div>
       ${buyable
         ? `<button class="skill-buy" onclick="buySkill('${skill.key}')">Apprendre</button>`
