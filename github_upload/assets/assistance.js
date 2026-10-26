@@ -126,5 +126,22 @@
     const sg = o.querySelector('.ab-sug'); if (sg) sg.onclick = (e) => { const b = e.target.closest('button'); if (b) send(b.textContent); };
   }
 
+  // 26/10 (Adrien) — le bouton « Recentrer » de la planète devient le raccourci d'aide (la planète se recentre déjà seule)
+  const HELP_SVG = '<svg viewBox="0 0 24 24" width="100%" height="100%" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9.2"/><path d="M9.4 9.3a2.7 2.7 0 0 1 5.2 1c0 1.8-2.6 2.3-2.6 3.9"/><circle cx="12" cy="17.2" r=".6" fill="currentColor"/></svg>';
+  function helpButton() {
+    const b = document.querySelector('.w-center');
+    if (!b || b.dataset.sbHelp) return;
+    b.dataset.sbHelp = '1';
+    b.innerHTML = HELP_SVG;
+    b.setAttribute('aria-label', 'Aide'); b.title = 'Assistance de bord';
+    b.style.color = '#7fd0ff'; b.style.borderColor = 'rgba(110,200,255,.45)';
+    b.onclick = (e) => {
+      e.stopPropagation();
+      if (available()) open();
+      else if (typeof toast === 'function') toast('L’Assistance de bord répond sur play.starbyte.online');
+    };
+  }
+  const iv = setInterval(() => { helpButton(); if (document.querySelector('.w-center[data-sb-help]')) clearInterval(iv); }, 800);
+
   window.SBAssist = { card, open, close, available };
 })();
