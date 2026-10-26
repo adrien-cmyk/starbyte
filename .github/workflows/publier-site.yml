@@ -68,7 +68,7 @@ jobs:
             t "contact email invalide" -X POST -H 'Content-Type: application/json' -H 'Origin: https://starbyte.online' --data '{"email":"x","message":"test"}' "$U/contact.php"
             sleep 3; t "contact envoi réel" -X POST -H 'Content-Type: application/json' -H 'Origin: https://starbyte.online' --data '{"category":"autre","captain":"Diagnostic","email":"empire@starbyte.online","message":"Message de test envoyé par le diagnostic de publication. Tu peux le supprimer."}' "$U/contact.php"
             t "chat" -X POST -H 'Content-Type: application/json' -H 'Origin: https://starbyte.online' --data '{"messages":[{"role":"user","content":"À quoi sert la biomasse ?"}]}' "$U/chat.php"
-            t "chat depuis le jeu" -X POST -H 'Content-Type: application/json' -H 'Origin: https://play.starbyte.online' --data '{"messages":[{"role":"user","content":"Comment débloquer le vaisseau colonial ?\n\n[Contexte envoyé par le jeu : planète niveau 4, Centre de commandement niveau 3, ressources metal 25 000/25 000]"}]}' "$U/chat.php"
+            t "chat depuis le jeu" -X POST -H 'Content-Type: application/json' -H 'Origin: https://play.starbyte.online' --data '{"messages":[{"role":"user","content":"Comment débloquer le vaisseau colonial ?"}],"context":"planète niveau 4, Centre de commandement niveau 3, ressources metal 25 000/25 000, cristal 8 000/10 000, artefact 1/200"}' "$U/chat.php"
             curl -sS -m 20 -I "$U/contact.php" 2>&1 | grep -i -E '^(server|x-powered-by)' | tr '\n' ' '; echo
           } > /tmp/live.txt 2>&1
           lftp -c "source /tmp/lftprc; cls -1 api/; cat api/_data/journal.log" > /tmp/j.txt 2>&1 || true

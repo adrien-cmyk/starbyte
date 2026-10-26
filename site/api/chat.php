@@ -29,10 +29,15 @@ if (!$msgs || end($msgs)['role'] !== 'user') sb_json(400, ['error' => 'no_questi
 $system = @file_get_contents(__DIR__ . '/system-prompt.txt');
 if (!$system) sb_json(503, ['error' => 'not_configured']);
 
+// Depuis le jeu : un court état de la partie, passé à part (jamais mêlé à la question du joueur)
+$sys = [['type' => 'text', 'text' => $system, 'cache_control' => ['type' => 'ephemeral']]];
+$ctx = sb_clean((string)($in['context'] ?? ''), 400);
+if ($ctx !== '') $sys[] = ['type' => 'text', 'text' => "PARTIE DU JOUEUR (état envoyé par le jeu, à utiliser pour répondre sur sa partie, sans le recopier) : " . $ctx];
+
 $payload = [
     'model' => $cfg['model'] ?? 'claude-haiku-5-5',
     'max_tokens' => 450,
-    'system' => [['type' => 'text', 'text' => $system, 'cache_control' => ['type' => 'ephemeral']]],
+    'system' => $sys,
     'messages' => $msgs,
 ];
 
@@ -63,6 +68,6 @@ if ($code !== 200 || !is_array($data)) {
 $text = '';
 foreach ($data['content'] ?? [] as $b) if (($b['type'] ?? '') === 'text') $text .= $b['text'];
 $text = trim($text);
-if ($text === '') sb_json(502, ['error' => 'empty']);
+if ($text === '') { sb_log('chat empty stop=' . ($data['stop_reason'] ?? '?') . ' ctx=' . ($ctx !== '' ? 1 : 0)); sb_json(502, ['error' => 'empty']); }
 
 sb_json(200, ['reply' => $text]);

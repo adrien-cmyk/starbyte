@@ -21,7 +21,7 @@
       const res = ['metal', 'energie', 'cristal', 'biomass', 'artefact'].filter((k) => r[k])
         .map((k) => `${k} ${fmt(r[k].v)}${r[k].max ? '/' + fmt(r[k].max) : ''}`).join(', ');
       const blds = (p.parcels || []).filter((x) => x && x.building).map((x) => x.building + (x.lvl > 1 ? ' T' + x.lvl : ''));
-      return `[Contexte envoyé par le jeu : planète niveau ${p.level || 0}, Centre de commandement niveau ${(g.skills && g.skills.capitalLevel) || 1}, ressources ${res || '?'}, bâtiments ${blds.slice(0, 10).join(', ') || 'aucun'}]`;
+      return `planète niveau ${p.level || 0}, Centre de commandement niveau ${(g.skills && g.skills.capitalLevel) || 1}, ressources ${res || '?'}, bâtiments ${blds.slice(0, 10).join(', ') || 'aucun'}`;
     } catch (e) { return ''; }
   }
 
@@ -87,10 +87,10 @@
     const log = document.querySelector('#sb-ab .ab-log');
     const t = document.createElement('div'); t.className = 'ab-ty'; t.innerHTML = '<i></i><i></i><i></i>'; log.appendChild(t); log.scrollTop = log.scrollHeight;
     // contexte de la partie collé à la dernière question seulement (l'historique reste celui du joueur)
-    const msgs = history.slice(-8).map((m, i, a) => (i === a.length - 1 ? { role: m.role, content: m.content.slice(0, 480) + '\n\n' + context().slice(0, 300) } : m));
+    const msgs = history.slice(-8);
     const ctl = new AbortController(), timer = setTimeout(() => ctl.abort(), 45000);
     const fail = (m) => { t.remove(); history.pop(); bubble('assistant', m, { err: true, support: true }); };
-    fetch(API, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ messages: msgs }), signal: ctl.signal })
+    fetch(API, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ messages: msgs, context: context().slice(0, 400) }), signal: ctl.signal })
       .then((r) => r.json().catch(() => ({ error: 'bad' })))
       .then((d) => {
         if (d && d.reply) {
