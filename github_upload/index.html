@@ -44527,7 +44527,7 @@ function maybeGenerateLeadFromIntel(intel, npc) {
   if (!intel || !npc) return null;
   const { tier } = intel;
   // Chance par tier
-  const chance = tier === 'rare' ? 0.60 : tier === 'medium' ? 0.25 : 0;
+  const chance = tier === 'rare' ? 1 : tier === 'medium' ? 0.25 : 0;   // 29/10 (Adrien) : une info rare ouvre toujours une piste (elle peut mentir)
   if (Math.random() >= chance) return null;
   // Type pondéré par type de PNJ
   const type = _pickLeadTypeForNpcType(npc.captainType);
@@ -45205,7 +45205,7 @@ function getNpcInfoTiers(npc, drinkState) {
       id: 'rare',
       label: 'Info rare',
       cost: Math.round((300 + _r('rare') * 700) * priceMult),
-      desc: 'Identité d\'un PNJ masqué · coordonnées d\'un dock secret',
+      desc: 'Un secret, et toujours une piste à explorer (le capitaine peut mentir)',
     });
   }
   return tiers;
@@ -45707,6 +45707,13 @@ function onNpcSubChoice(npcId, verb, choice) {
     if (!tier) { _exitSub(); _renderNpcSheet(npc); return; }
     if ((G.credits || 0) < tier.cost) {
       _setNpcResult(mission, npcId, { text: `Tu n'as pas ${tier.cost} CG.`, kind: 'fail' });
+      _exitSub();
+      _renderNpcSheet(npc);
+      return;
+    }
+    // 29/10 — l'info rare ouvre une piste : pas d'achat si le Carnet en a déjà 5 ouvertes (rien ne serait inscrit)
+    if (choice === 'rare' && (G.openLeads || []).filter(l => l.status === 'open').length >= 5) {
+      _setNpcResult(mission, npcId, { text: `Ton Carnet a déjà 5 pistes ouvertes. Explores-en une avant d'en acheter une autre.`, kind: 'fail' });
       _exitSub();
       _renderNpcSheet(npc);
       return;
