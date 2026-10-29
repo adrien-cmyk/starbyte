@@ -45420,7 +45420,7 @@ function _renderNpcInteractions(npc, behavior, drinkState, alreadyInteracted, dr
         line-height:1.55;
         font-family:'Charter','Iowan Old Style',Georgia,serif;
         font-style:italic
-      ">${r.text}</div>
+      ">${r.text}${r.lead ? `<button onclick="closeNpcSheet();openCarnet('pistes')" style="display:block;width:100%;margin-top:10px;padding:9px 12px;border-radius:8px;border:1px solid rgba(200,180,120,.5);background:rgba(200,180,120,.10);color:#e8d39a;font:600 12px/1.2 -apple-system,system-ui,sans-serif;font-style:normal;cursor:pointer">📍 Voir la piste dans le Carnet</button>` : ''}</div>
     `;
   }
 
@@ -45729,13 +45729,13 @@ function onNpcSubChoice(npcId, verb, choice) {
         const stability = Math.round(r.stability ?? 85);
         infoText = `Ta route "${r.name}" est en stabilité réelle ${stability}%. ${stability < 70 ? 'Risque élevé.' : stability < 85 ? 'Stable, mais surveille.' : 'Très stable.'}`;
       } else {
-        infoText = `Un dock secret existe à Σ-${100 + Math.floor(Math.random() * 50)}. Pas sur les cartes officielles.`;
+        infoText = `Il existe des docks qui ne figurent sur aucune carte officielle. Ceux qui y vont n'en parlent pas.`;
       }
     } else if (choice === 'rare') {
+      // PATCH_2910_PISTE : plus de coordonnées inventées dans le texte — une coordonnée achetée devient une vraie piste
       const possibilities = [
         `Anubis34 c'est en réalité un ancien officier de la Maison Vérath. Personne ne le sait.`,
         `Le Père Cobalt prépare un retour. Quelque chose se passe dans le couloir d'Erebus.`,
-        `Coordonnées d'un freeport non répertorié : Σ-${100 + Math.floor(Math.random() * 50)}.${Math.floor(Math.random() * 9)}.`,
         `Big Vesna Drestul a un contrat sur ta tête. Ne dis pas qui te l'a dit.`,
       ];
       infoText = possibilities[Math.floor(Math.random() * possibilities.length)];
@@ -45753,8 +45753,8 @@ function onNpcSubChoice(npcId, verb, choice) {
     if (generatedLead) {
       const prev = mission.npcInteractions?.[npcId]?.lastResult?.text || '';
       _setNpcResult(mission, npcId, {
-        text: prev + `\n\n📍 Une piste exploitable s'est ouverte dans ton Carnet.`,
-        kind: 'info',
+        text: prev + `\n\n📍 Une piste s'est ouverte : ${generatedLead.coords}. Elle est dans ton Carnet du capitaine, onglet Pistes.`,
+        kind: 'info', lead: generatedLead.id,
       });
     }
     _exitSub();
@@ -49305,7 +49305,7 @@ if (G.knownTargets && Array.isArray(G.tankerMissions)) {
 <!-- HOME V2 — « monde d'abord » : planète plein écran, ressources en ligne, Flotte / Défense / Prospection (assets/home.js) -->
 <script type="module" src="assets/home.js?v=20261025-1410"></script>
 <!-- SPACE MAP v0 — carte du Centre de prospection (assets/spacemap.js, source src/spacemap.js) -->
-<script src="assets/spacemap.js?v=20261022-2010"></script>
+<script src="assets/spacemap.js?v=20261029-1215"></script>
 <!-- SPACE MAP niveau B — diorama 3D d'un système (assets/system3d.js, source src/system3d.js) -->
 <script type="module" src="assets/system3d.js?v=20261014-1440"></script>
 <!-- SHIP3D — fiches 3D : cuirassé KV-01, frégate SR-01, tanker TK-07, chantier orbital OS-01 (assets/ship3d.js, sur le moteur partagé window.SB3D) -->

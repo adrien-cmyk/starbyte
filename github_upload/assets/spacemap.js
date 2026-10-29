@@ -2264,11 +2264,19 @@
     const pct = Math.round((o ? SBLines.balisageChain(mids) : r ? SBLines.balisage(r.portSys) : { ratio: 0 }).ratio * 100);
     return `${mids.length} jalon${mids.length > 1 ? 's' : ''} · ${pct ? 'balisée ' + pct + ' %' : 'non balisée'}`;
   }
+  // 29/10 (Adrien : « une coordonnée inscrite à mon carnet… rien ») — les pistes achetées au comptoir vivent dans le
+  // Carnet du capitaine ; le carnet de la carte y mène, en tête
+  function leadsLinkHtml() {
+    const ls = (typeof G !== 'undefined' && G.openLeads || []).filter(l => l && (l.status === 'open' || l.status === 'exploring'));
+    if (!ls.length) return '';
+    const open = ls.filter(l => l.status === 'open').length;
+    return `<button class="smw-fl" onclick="SBMap.closeSheet&&SBMap.closeSheet();openCarnet('pistes')"><span class="t" style="color:#c8b478">📍 Pistes du capitaine · ${ls.length}</span><span class="g">${open ? open + ' à explorer' : 'en exploration'} · ${esc(ls[0].coords || '')}</span><span class="e">voir →</span></button>`;
+  }
   function routesSheetHtml() {
     const st = _state || collect();
     const rs = st.routes || [];
-    if (!rs.length) return '';
-    return `<div class="smw-fl-h">Mes routes · ${rs.length}</div>` + rs.map(rt => `<button class="smw-fl" onclick="SBMap.showRoute('${esc(rt.r.id)}')">
+    if (!rs.length) return leadsLinkHtml();
+    return leadsLinkHtml() + `<div class="smw-fl-h">Mes routes · ${rs.length}</div>` + rs.map(rt => `<button class="smw-fl" onclick="SBMap.showRoute('${esc(rt.r.id)}')">
         <span class="t" style="color:${rt.r.color}">${esc(rt.r.name)}</span>
         <span class="g">${rt.a ? esc(rt.a.key) : '—'} → ${rt.b ? esc(rt.b.key) : '—'}</span>
         <span class="e">${rt.broken ? 'rompue' : routeSummary(rt)}</span></button>`).join('');
