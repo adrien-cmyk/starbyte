@@ -89,7 +89,7 @@
   function bandOfRing(ring) { return BAND_RINGS.findIndex(([a, b]) => ring >= a && ring <= b); }
 
   function litBands() {
-    const r = (typeof getMaxRange === 'function') ? getMaxRange() : { kind: 'sector_local' };
+    const r = (typeof getMaxRangeAny === 'function') ? getMaxRangeAny() : (typeof getMaxRange === 'function') ? getMaxRange() : { kind: 'sector_local' };
     if (r.kind === 'universe' || r.kind === 'cluster') return 4;
     if (r.kind === 'sector_radius') return Math.min(4, r.radius + 1);
     return 1;
@@ -213,7 +213,7 @@
     }
 
     // Balises posées : leur système apparaît (même jamais balayé), avec sa balise
-    for (const b of (G.probesPool || [])) {
+    for (const b of (typeof sbAllProbes === 'function' ? sbAllProbes() : (G.probesPool || []))) {
       if (b.tier !== 'beacon' || b.state !== 'deployed' || !b.deployedSystem) continue;
       const m = String(b.deployedSystem).toUpperCase().match(/^([A-Z])-([A-Z])-(\d{4})/);
       if (!m) continue;
@@ -465,7 +465,7 @@
     // Routes entre mes balises (13/10) : tracé sur la grille, en contournant les systèmes à éviter
     const routes = [];
     const beaconAt = (bid) => {
-      const b = (G.probesPool || []).find(x => x.id === bid && x.tier === 'beacon');
+      const b = (typeof sbAllProbes === 'function' ? sbAllProbes() : (G.probesPool || [])).find(x => x.id === bid && x.tier === 'beacon');
       if (!b || b.state !== 'deployed') return null;
       const m = String(b.deployedSystem || '').toUpperCase().match(/^([A-Z])-([A-Z])-(\d{4})/);
       if (!m) return null;
@@ -683,9 +683,9 @@
     if (s.kind === 'far') {
       // Décision d'Adrien (10/10) : dire comment aller plus loin — c'est le Laboratoire qui étend la portée
       const lt = (typeof getLaboTier === 'function') ? getLaboTier() : 0;
-      const hint = lt < 1 ? 'Construis un Laboratoire, puis développe-le au niveau 2 pour étendre la portée des sondes.'
-        : lt < 2 ? 'Développe ton Laboratoire au niveau 2 : portée +1 secteur.'
-        : lt < 3 ? 'Développe ton Laboratoire au niveau 3 : portée +3 secteurs.'
+      const hint = lt < 1 ? 'Développe un Laboratoire au niveau 2 pour étendre la portée des sondes (2 secteurs autour).'
+        : lt < 2 ? 'Développe ton Laboratoire au niveau 2 : portée de 2 secteurs autour de la planète.'
+        : lt < 3 ? 'Développe ton Laboratoire au niveau 3 : portée de 4 secteurs autour de la planète.'
         : 'Au-delà de ce que tes capteurs peuvent atteindre aujourd\'hui.';
       return `<div class="sm-panel"><div class="sm-ptitle">Trop loin pour les capteurs actuels</div><div class="sm-psub">Secteur ${esc(s.sector)}</div><div class="sm-psub" style="margin-top:6px;color:#c8d6d2">${hint}</div></div>`;
     }
@@ -1848,7 +1848,7 @@
   const BEACON_COL = '#a370ff';
   function beaconAction(sysKey, sys) {
     if (!sysKey || typeof PROBE_TIER_CONFIG === 'undefined' || !PROBE_TIER_CONFIG.beacon) return '';
-    const here = (G.probesPool || []).find(b => b.tier === 'beacon' && b.state === 'deployed' && String(b.deployedSystem || '').toUpperCase().startsWith(sysKey));
+    const here = (typeof sbAllProbes === 'function' ? sbAllProbes() : (G.probesPool || [])).find(b => b.tier === 'beacon' && b.state === 'deployed' && String(b.deployedSystem || '').toUpperCase().startsWith(sysKey));
     if (here) {
       const n = here.detectionCount || 0;
       return routesBlock(here) + _sigBtn(BEACON_COL, 'Rappeler la balise', `SBMap.recallBeacon('${esc(here.id)}')`, `Balise en surveillance · ${n} détection${n > 1 ? 's' : ''}`, true);
@@ -1897,7 +1897,7 @@
   /* ─── Routes entre balises (étape 1, 13/10) : tracé, évitement, couleur ─── */
   const ROUTE_COLS = [['Ambre', '#ffc864'], ['Rose', '#ff8fb0'], ['Violet', '#b48cff'], ['Vert', '#6fdc9a'], ['Orange', '#ff9f5a'], ['Bleu', '#6fb0ff']];
   let _pickAvoid = null;
-  const myBeacons = () => (G.probesPool || []).filter(b => b.tier === 'beacon' && b.state === 'deployed');
+  const myBeacons = () => (typeof sbAllProbes === 'function' ? sbAllProbes() : (G.probesPool || [])).filter(b => b.tier === 'beacon' && b.state === 'deployed');
   const beaconSys = (b) => String((b && b.deployedSystem) || '').toUpperCase().split('-').slice(0, 3).join('-');
   const routeById = (id) => (G.beaconRoutes || []).find(r => r.id === id);
   // 14/10 (routes & pistes v1) : une route ne se dessine plus entre deux balises.

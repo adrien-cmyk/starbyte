@@ -421,7 +421,7 @@
     return b;
   }
   function balisageChain(chain) {
-    const mine = new Set((G.probesPool || []).filter(p => p.tier === 'beacon' && p.state === 'deployed').map(p => sysOf(p.deployedSystem)));
+    const mine = new Set((typeof sbAllProbes === 'function' ? sbAllProbes() : (G.probesPool || [])).filter(p => p.tier === 'beacon' && p.state === 'deployed').map(p => sysOf(p.deployedSystem)));
     const going = new Set((G.probeMissions || []).filter(m => m.tier === 'beacon' && m.status === 'in_transit').map(m => sysOf(m.targetCoords)));
     const beaconed = chain.filter(k => mine.has(k));
     const ratio = chain.length ? beaconed.length / chain.length : 0;
@@ -948,7 +948,7 @@
     for (const k of ['metal', 'energie', 'cristal']) { const v = Math.min(Math.max(0, loot[k] || 0), free); if (v > 0) { out[k] = v; free -= v; } }
     return out;
   }
-  const seesHere = (sys) => (G.probesPool || []).some(p => p.tier === 'beacon' && p.state === 'deployed' && sysOf(p.deployedSystem) === sys);
+  const seesHere = (sys) => (typeof sbAllProbes === 'function' ? sbAllProbes() : (G.probesPool || [])).some(p => p.tier === 'beacon' && p.state === 'deployed' && sysOf(p.deployedSystem) === sys);
   const pidOf = (line, k, dir) => `${line.id}:${k}:${dir}`;
   const CV_NAME = { marchand: 'un convoi marchand', contrebande: 'un convoi de contrebande', recup: 'un convoi de récupérateurs', arme: 'un convoi armé', pelerins: 'un convoi de pèlerins' };
   const cvName = (cv) => CV_NAME[cv.kindKey] || 'un convoi';
@@ -1221,7 +1221,7 @@
     const c = npcReportCan(r);
     if (c) acts.push({ k: 'decide', label: `⚔ Décider avec ${c.f.name}`, sub: 'Aborder, le filer ou le laisser passer · ta flotte est sur ce jalon', col: '#c9a8ff' });
     if (cap && heavy && !port) {
-      const has = (G.probesPool || []).some(p => p.tier === 'beacon' && p.state === 'deployed' && sysOf(p.deployedSystem) === cap);
+      const has = (typeof sbAllProbes === 'function' ? sbAllProbes() : (G.probesPool || [])).some(p => p.tier === 'beacon' && p.state === 'deployed' && sysOf(p.deployedSystem) === cap);
       const going = (G.probeMissions || []).some(m => m.tier === 'beacon' && m.status === 'in_transit' && sysOf(m.targetCoords) === cap);
       const st = typeof _probeTierStatus === 'function' ? _probeTierStatus('beacon') : { ok: false };
       if (has) acts.push({ k: 'map', sys: cap, label: `Ta balise surveille déjà ${cap}`, sub: 'Voir sur la carte', col: '#b48cff' });
@@ -1350,7 +1350,7 @@
     const last = echoes.reduce((m, [, e]) => Math.max(m, e.at || 0), 0);
     if (!fresh && echoes.length && now - last < ECHO_EVERY_MS) return;
     // pas d'écho de plus tant que deux échos attendent une balise
-    const beaconSys = new Set((G.probesPool || []).filter(p => p.tier === 'beacon' && p.state === 'deployed').map(p => sysOf(p.deployedSystem)));
+    const beaconSys = new Set((typeof sbAllProbes === 'function' ? sbAllProbes() : (G.probesPool || [])).filter(p => p.tier === 'beacon' && p.state === 'deployed').map(p => sysOf(p.deployedSystem)));
     const waiting = echoes.filter(([s]) => !beaconSys.has(s)).length;
     if (!fresh && waiting >= 2) return;
     // à tour de rôle entre les antennes

@@ -43,7 +43,7 @@
   function mySystemKey() { return `${myCluster()}-${mySector()}-${MY_ADDRESS.system}`; }
 
   function litBands() {
-    const r = (typeof getMaxRange === 'function') ? getMaxRange() : { kind: 'sector_local' };
+    const r = (typeof getMaxRangeAny === 'function') ? getMaxRangeAny() : (typeof getMaxRange === 'function') ? getMaxRange() : { kind: 'sector_local' };
     if (r.kind === 'universe' || r.kind === 'cluster') return 4;
     if (r.kind === 'sector_radius') return Math.min(4, r.radius + 1);
     return 1;
@@ -339,9 +339,9 @@
     if (s.kind === 'far') {
       // Décision d'Adrien (10/10) : dire comment aller plus loin — c'est le Laboratoire qui étend la portée
       const lt = (typeof getLaboTier === 'function') ? getLaboTier() : 0;
-      const hint = lt < 1 ? 'Construis un Laboratoire, puis développe-le au niveau 2 pour étendre la portée des sondes.'
-        : lt < 2 ? 'Développe ton Laboratoire au niveau 2 : portée +1 secteur.'
-        : lt < 3 ? 'Développe ton Laboratoire au niveau 3 : portée +3 secteurs.'
+      const hint = lt < 1 ? 'Développe un Laboratoire au niveau 2 pour étendre la portée des sondes (2 secteurs autour).'
+        : lt < 2 ? 'Développe ton Laboratoire au niveau 2 : portée de 2 secteurs autour de la planète.'
+        : lt < 3 ? 'Développe ton Laboratoire au niveau 3 : portée de 4 secteurs autour de la planète.'
         : 'Au-delà de ce que tes capteurs peuvent atteindre aujourd\'hui.';
       return `<div class="sm-panel"><div class="sm-ptitle">Trop loin pour les capteurs actuels</div><div class="sm-psub">Secteur ${esc(s.sector)}</div><div class="sm-psub" style="margin-top:6px;color:#c8d6d2">${hint}</div></div>`;
     }

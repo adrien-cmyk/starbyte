@@ -7543,31 +7543,42 @@ function makeDefaultCartoSkills() {
 // Niveau de cartographie effectif (10/10) : jusqu'ici seuls les cheats débloquaient la portée,
 // alors que l'arbre promet Labo T2 → sismique, Labo T3 → interstellaire. On prend le plus haut
 // des deux : skills acquis (G.cartoSkills, cheats/futur) et niveau du Laboratoire construit.
-function getLaboTier() {
-  // PATCH_3010_PORTEE_EMPIRE (joueur : « les sondes ne marchent pas depuis la colonie ») — G.planet est la planète
-  // AFFICHÉE : depuis une colonie sans Laboratoire, la portée retombait au secteur local. La recherche est celle de
-  // l'empire : on prend le meilleur Laboratoire de toutes mes planètes.
+function getLaboTier() { return getLaboTierOf(); }
+// PATCH_3010_PORTEE_PLANETE (Adrien, 30/10) — chaque planète scanne depuis elle, avec SON Laboratoire
+// (remplace PATCH_3010_PORTEE_EMPIRE). wid absent = la planète affichée.
+function _sbWorldPlanet(wid) {
+  if (!wid || wid === (G.activeWorld || 'home')) return G && G.planet;
+  const w = (Array.isArray(G.worlds) ? G.worlds : []).find(x => x && x.id === wid);
+  return w && w.data && w.data.planet;
+}
+function getLaboTierOf(wid) {
   let t = 0;
-  const scan = (pl) => { for (const p of (pl && pl.parcels) || []) if (p && p.building === 'labo' && p.state === 'built') t = Math.max(t, p.lvl || 1); };
-  scan(G && G.planet);
-  for (const w of (G && Array.isArray(G.worlds) ? G.worlds : [])) if (w && w.data && w.data.planet) scan(w.data.planet);
+  for (const p of ((_sbWorldPlanet(wid) || {}).parcels) || []) if (p && p.building === 'labo' && p.state === 'built') t = Math.max(t, p.lvl || 1);
   return t;
 }
-function getCartoLevel() {
+function getCartoLevel(wid) {
   const s = (G && G.cartoSkills) ? G.cartoSkills : makeDefaultCartoSkills();
   let i = 0;
   ['sismic', 'interstellar', 'galactic', 'interCluster'].forEach((k, n) => { if (s[k]) i = Math.max(i, n + 1); });
-  const lt = getLaboTier();
+  const lt = getLaboTierOf(wid);
   if (lt >= 3) i = Math.max(i, 2); else if (lt >= 2) i = Math.max(i, 1);
   return ['local', 'sismic', 'interstellar', 'galactic', 'interCluster'][i];
 }
-function getMaxRange() {
-  const lvl = getCartoLevel();
+// 30/10 (Adrien) : +1 secteur pour toutes les planètes — sans Labo ou Labo 1 : 1 secteur autour, Labo 2 : 2, Labo 3 : 4
+function getMaxRange(wid) {
+  const lvl = getCartoLevel(wid);
   if (lvl === 'interCluster') return { kind: 'universe' };
   if (lvl === 'galactic')     return { kind: 'cluster' };
-  if (lvl === 'interstellar') return { kind: 'sector_radius', radius: 3 };
-  if (lvl === 'sismic')       return { kind: 'sector_radius', radius: 1 };
-  return { kind: 'sector_local' };
+  if (lvl === 'interstellar') return { kind: 'sector_radius', radius: 4 };
+  if (lvl === 'sismic')       return { kind: 'sector_radius', radius: 2 };
+  return { kind: 'sector_radius', radius: 1 };
+}
+// la plus grande portée de mes planètes (carte : zone éclairée)
+function getMaxRangeAny() {
+  const ids = (Array.isArray(G.worlds) && G.worlds.length) ? G.worlds.map(w => w.id) : ['home'];
+  let best = null, score = (r) => r.kind === 'universe' ? 99 : r.kind === 'cluster' ? 50 : (r.radius || 0);
+  for (const id of ids) { const r = getMaxRange(id); if (!best || score(r) > score(best)) best = r; }
+  return best || getMaxRange();
 }
 
 // Distance Chebyshev entre deux secteurs (lettres A-Z).
@@ -7596,10 +7607,11 @@ function sbAllOrigins() {
   for (const w of (Array.isArray(G.worlds) ? G.worlds : [])) if (w && w.id !== 'home') { const a = _sbAddrOf(w.coord); if (a) out.push(a); }
   return out;
 }
-function isInRange(parsed) { return sbAllOrigins().some(o => _isInRangeFrom(parsed, o)); }
-function _isInRangeFrom(parsed, MY_ADDRESS) {
+// 30/10 (Adrien) : on vise depuis la planète affichée, avec la portée de SON Laboratoire
+function isInRange(parsed) { return _isInRangeFrom(parsed, sbOrigin(), G.activeWorld || 'home'); }
+function _isInRangeFrom(parsed, MY_ADDRESS, wid) {
   if (!parsed || typeof MY_ADDRESS === 'undefined' || !MY_ADDRESS) return false;
-  const range = getMaxRange();
+  const range = getMaxRange(wid);
 
   // Cas spécial : si l'adresse n'a pas de cluster (kind = 'cluster' seul ou
   // legacy sans préfixe), on tolère et on suppose même amas que le joueur.
@@ -8086,11 +8098,11 @@ const TECH_TREE = [
     icon: 'gem',
     nodes: [
       { id: 'labo-t1', kind: 'building', name: 'Laboratoire', sub: 'Produit du cristal en passif.', flow: '→ le cristal est requis pour les sondes avancées et les Tiers 3', requires: 'metal:400 + énergie:50', buildingKey: 'labo', tier: 1 },
-      { id: 'labo-t2', kind: 'building', name: 'Centre de recherche', sub: 'Production de cristal ×4.', flow: '→ débloque la Cartographie sismique (+1 secteur de portée des sondes)', requires: 'metal:2000 + énergie:500', buildingKey: 'labo', tier: 2 },
-      { id: 'labo-t3', kind: 'building', name: 'Institut Quantique', sub: 'Production de cristal ×16 + matrices quantiques.', flow: '→ débloque la Cartographie interstellaire (+3 secteurs)', requires: 'metal:10000 + énergie:2500 + cristal:500', buildingKey: 'labo', tier: 3 },
+      { id: 'labo-t2', kind: 'building', name: 'Centre de recherche', sub: 'Production de cristal ×4.', flow: '→ débloque la Cartographie sismique (portée des sondes : 2 secteurs autour de la planète)', requires: 'metal:2000 + énergie:500', buildingKey: 'labo', tier: 2 },
+      { id: 'labo-t3', kind: 'building', name: 'Institut Quantique', sub: 'Production de cristal ×16 + matrices quantiques.', flow: '→ débloque la Cartographie interstellaire (4 secteurs autour de la planète)', requires: 'metal:10000 + énergie:2500 + cristal:500', buildingKey: 'labo', tier: 3 },
       { id: 'silo-cristal', kind: 'building', name: 'Silo Cristal', sub: 'Stockage cristal +2000.', flow: '→ utile dès que tu construis des sondes en série', requires: 'metal:800 + cristal:200', buildingKey: 'silo_cristal', tier: 1 },
-      { id: 'carto-sismic', kind: 'skill', name: 'Cartographie sismique', sub: 'Étend la portée des sondes Radar de +1 secteur.', flow: '→ permet de scanner plus loin que ton système d\'origine', requires: 'Labo Tier 2', status: 'auto-carto', cartoLevel: 'sismic' },
-      { id: 'carto-interstellar', kind: 'skill', name: 'Cartographie interstellaire', sub: 'Étend la portée de +3 secteurs.', flow: '→ ouvre l\'exploration galactique', requires: 'Labo Tier 3', status: 'auto-carto', cartoLevel: 'interstellar' },
+      { id: 'carto-sismic', kind: 'skill', name: 'Cartographie sismique', sub: 'Porte la portée des sondes à 2 secteurs autour de la planète (1 sans elle).', flow: '→ permet de scanner plus loin que ton système d\'origine', requires: 'Labo Tier 2', status: 'auto-carto', cartoLevel: 'sismic' },
+      { id: 'carto-interstellar', kind: 'skill', name: 'Cartographie interstellaire', sub: 'Porte la portée des sondes à 4 secteurs autour de la planète.', flow: '→ ouvre l\'exploration galactique', requires: 'Labo Tier 3', status: 'auto-carto', cartoLevel: 'interstellar' },
     ],
   },
   {
@@ -8785,7 +8797,8 @@ var EXTRA_SAVE_KEYS = [
   'tuto',          // TUTO_1410 — premiers pas (étape, vu, terminé)
   'skillsLearned', 'research', '_skillsSeen', '_skillsMigrated',   // PATCH_1610_SKILLS
   'mpRaidsApplied', 'mpRaidsReturned', 'mpPostsToClose', 'mpRelations', 'mpTradeCaps', 'mpAlliance', 'mpAllianceTags', 'mpAllyUnread', 'mpGarHosted',   // PATCH_2010_AUDIT — raids déjà intégrés (indépendant des rapports, qu'on peut supprimer)
-  'worlds', 'activeWorld', 'colonyMissions', 'fleetTransfers',   // PATCH_2010_WORLDS — colonies (planètes inactives) et planète affichée
+  'worlds', 'activeWorld', 'colonyMissions', 'fleetTransfers', '_probesPerWorld', '_resPerWorld', 'resTransfers',   // 30/10 : sondes et ressources par planète, convois entre planètes
+    // PATCH_2010_WORLDS — colonies (planètes inactives) et planète affichée
   '_linesCrown', 'crownSeen', '_linesSanct', 'sanctSeen', '_linesNoire', 'noireSeen', '_linesRefuge', '_linesRefuge2', 'refugeSeen', '_brest1',
   '_linesVeyra', 'veyraSeen', '_linesLucioles', 'luciolesSeen', '_linesIvoire', 'ivoireSeen', '_linesAkhet', 'akhetSeen', '_linesAbime', 'abimeSeen', '_linesObsidienne', 'obsidienneSeen',   // PATCH_2210_STATIONS6   // PATCH_1510_CROWN — lieu du secteur M devenu la Couronne, première arrivée vue
 ];
@@ -8905,6 +8918,8 @@ function loadGame() {
     // AUDIT_1110 — l'adresse fait foi (déménagement vers la zone de test)
     if (G.planet && (!G.activeWorld || G.activeWorld === 'home')) { G.planet.address = MY_ADDRESS; G.planet.coordString = MY_COORD_STRING; }   // PATCH_2010_WORLDS : seulement la capitale
     if (typeof sbWorldsInit === 'function') sbWorldsInit();
+    try { sbMigrateProbesPerWorld(); } catch (e) { console.warn('[sondes/planète]', e); }
+    try { sbMigrateResPerWorld(); } catch (e) { console.warn('[stock/planète]', e); }
 
     // OFFLINE — reprendre la simulation là où la sauvegarde l'a laissée
     G._simAt = snapshot.simAt || snapshot.savedAt || Date.now();
@@ -9694,9 +9709,7 @@ function _mpApplyRaidAgainstHome(raid) {
   if (raid.status === 'aborted' || res.outcome === 'aborted') return true;   // aucun combat : rien à intégrer
   const won = res.outcome === 'victory';
   const loot = Object.assign({ metal: 0, energie: 0, cristal: 0 }, won ? (res.loot || {}) : {});
-  const _depW = (G.worlds || []).find(w => w && w.kind === 'colony' && w.id === G.activeWorld);   // PATCH_2110_DEPOT
-  for (const k of ['metal', 'energie', 'cristal']) {
-    if (_depW) { const d = sbDepot(_depW); d[k] = Math.max(0, (d[k] || 0) - (loot[k] || 0)); continue; }
+  for (const k of ['metal', 'energie', 'cristal']) {   // 30/10 : le stock de la planète attaquée (capitale ou colonie)
     if (G.res[k]) G.res[k].v = Math.max(0, (G.res[k].v || 0) - (loot[k] || 0));
   }
   let damagedName = null;
@@ -11251,7 +11264,7 @@ function _mpSys(coord) { const m = String(coord || '').match(/^[A-Z]-[A-Z]-\d{4}
 function _mpOnline() { return !!(window.SBMP && window.SBMP.ready && window.SBMP.ready()); }
 // Balises posées, telles que le registre doit les connaître (3 au plus)
 function mpBeaconList() {
-  return (G.probesPool || []).filter(p => p.tier === 'beacon' && p.state === 'deployed' && _mpSys(p.deployedSystem))
+  return sbAllProbes().filter(p => p.tier === 'beacon' && p.state === 'deployed' && _mpSys(p.deployedSystem))
     .slice(0, 21).map(p => ({ local_id: String(p.id), system: _mpSys(p.deployedSystem) }));
 }
 
@@ -11588,7 +11601,7 @@ async function mpIngestPiracy(d, meId) {
     const end = Date.parse(s.window_end) || (Date.now() + 60000);
     let r = G.beaconReports.find(x => x.id === id);
     if (!r) {
-      const beacon = (G.probesPool || []).find(p => p.tier === 'beacon' && p.state === 'deployed' && _mpSys(p.deployedSystem) === s.system);
+      const beacon = sbAllProbes().find(p => p.tier === 'beacon' && p.state === 'deployed' && _mpSys(p.deployedSystem) === s.system);
       r = { id, kind: 'beacon', beaconId: beacon ? beacon.id : null, beaconName: 'Balise', systemCoord: s.system, createdAt: Date.now(), expiresAt: end, read: false,
         target: { type: 'player', name: s.pseudo || 'Pavillon impérial', tankerTier: s.tanker_tier,
                   cargoEstimate: s.cargo_hint === 'lourde' ? 'lourd' : s.cargo_hint === 'vide' ? 'vide' : 'léger', confidence: s.confidence },
@@ -25142,8 +25155,7 @@ const BEACON_DETECTION_MAX_PER_MIN = 2;          // anti-spam : max 2 dét/minut
 
 // Retourne les balises actuellement déployées (depuis G.probesPool)
 function getDeployedBeacons() {
-  if (!Array.isArray(G.probesPool)) return [];
-  return G.probesPool.filter(p => p.tier === 'beacon' && p.state === 'deployed');
+  return sbAllProbes().filter(p => p.tier === 'beacon' && p.state === 'deployed');
 }
 
 // Purge les détections expirées (au-delà de la fenêtre d'interception)
@@ -25259,7 +25271,7 @@ function _generateBeaconDetectionTarget() {
 // V1 simplifié : retour immédiat au pool (état 'ready'), pas de timer.
 // V2+ : voyage de retour, possibilité d'interception, etc.
 function recallBeacon(beaconId, confirmed) {
-  const pool = G.probesPool || [];
+  const pool = sbAllProbes();   // 30/10 : une balise de n'importe laquelle de mes planètes
   const beacon = pool.find(p => p.id === beaconId && p.tier === 'beacon');
   // PATCH_1510_ORDRES — balise sur une route vendue il y a moins de 7 jours : la retirer trahit l'acheteur
   const _sold = (!confirmed && beacon && beacon.state === 'deployed' && window.SBLines && SBLines.salesOn) ? SBLines.salesOn(_mpSys(beacon.deployedSystem)) : [];
@@ -25389,7 +25401,9 @@ function tickProbes() {
   const now = Date.now();
   const toReturn = G.probeMissions.filter(p => p.status === 'in_transit' && now >= p.arrivalAt);
   for (const p of toReturn) {
-    handleProbeReturn(p.id);
+    // 30/10 : la sonde rentre au hangar de SA planète
+    if (p.world && p.world !== (G.activeWorld || 'home') && typeof sbWithWorld === 'function' && sbWorld(p.world)) sbWithWorld(p.world, () => handleProbeReturn(p.id));
+    else handleProbeReturn(p.id);
   }
 
   // PASSE 4-sondes-v1.1 : vérifier aussi les rapports secrets en attente (délais 24h)
@@ -29776,8 +29790,8 @@ function cheatSetCarto(level) {
     G.cartoSkills[tiers[i]] = true;
   }
   const labels = {
-    sismic:       'Carto sismique (+1 secteur)',
-    interstellar: 'Carto interstellaire (+3 secteurs)',
+    sismic:       'Carto sismique (2 secteurs)',
+    interstellar: 'Carto interstellaire (4 secteurs)',
     galactic:     'Carto galactique (amas entier)',
     interCluster: 'Carto inter-amas (univers entier)',
   };
@@ -30265,7 +30279,7 @@ async function sbColonyFounded(w) {
   try { await sbAskColonyName(w.id, true); } catch (e) {}   // PATCH_2110_COLONIE_NOM : on la baptise d'abord
   if (typeof sbNotifPush === 'function') { try { sbNotifPush({ title: 'Colonie fondée', text: `${w.name} : l'Arche s'est posée.` }); } catch (e) {} }
   const go = await sbConfirmWarning('◈ ' + w.name + ' est fondée',
-    `L'Arche s'est posée sur <strong>${w.name}</strong> (${w.coord}). Elle est devenue le Centre de commandement d'une nouvelle colonie.<br><br>Tout est à bâtir : les parcelles se gagnent au match-3, et la nouvelle antenne verra ce que la capitale ne voyait pas.<br><br>Le stock reste commun à tout l'empire. Change de planète en touchant son nom en haut de l'écran.`, 'Voir la colonie');
+    `L'Arche s'est posée sur <strong>${w.name}</strong> (${w.coord}). Elle est devenue le Centre de commandement d'une nouvelle colonie.<br><br>Tout est à bâtir : les parcelles se gagnent au match-3, et la nouvelle antenne verra ce que la capitale ne voyait pas.<br><br>Elle a son propre stock (la cale de l'Arche : 2 000 métal, 1 000 énergie, 500 cristal) ; envoie-lui des ressources par convoi de tankers. Change de planète en touchant son nom en haut de l'écran.`, 'Voir la colonie');
   if (go) { sbSwitchWorld(w.id); try { goto('planet'); } catch (e) {} }
 }
 // Sélecteur : toucher le nom de la planète en haut de l'écran
@@ -30281,7 +30295,7 @@ function sbOpenWorldPicker() {
     <button class="sbw-row${w.id === G.activeWorld ? ' on' : ''}" onclick="document.getElementById('sb-worlds').remove();sbSwitchWorld('${w.id}')">
       <span class="sbw-k">${w.kind === 'capital' ? 'Capitale' : 'Colonie'}</span>
       <span class="sbw-m"><b>${esc(w.id === 'home' ? ((w.id === G.activeWorld ? G.planet.name : w.name) || 'Capitale') : w.name)}</b>
-      <span>${w.coord ? esc(w.coord) : (w.kind === 'capital' ? 'Planète d\'origine' : '')}${w.kind === 'colony' ? (() => { const L = sbDepotLine(w); return ' · dépôt ' + fmt(L.tot) + ' / ' + fmt(L.cap); })() : ''}</span></span>
+      <span>${w.coord ? esc(w.coord) : (w.kind === 'capital' ? 'Planète d\'origine' : '')}${(() => { const R = sbWorldRes(w.id); return R && R.metal ? ' · ' + fmt(R.metal.v) + ' métal' : ''; })()}</span></span>
       <span class="sbw-go">${w.id === G.activeWorld ? 'Tu es ici' : 'Y aller →'}</span>
     </button>${w.kind === 'colony' ? `<button class="sbw-ren" onclick="event.stopPropagation();document.getElementById('sb-worlds').remove();sbAskColonyName('${w.id}')">Renommer ${esc(w.name)}</button>` : ''}`).join('')}${(G.colonyMissions || []).map(m => `<div class="sbw-row off" style="cursor:pointer" onclick="document.getElementById('sb-worlds').remove();openArkMission('${m.id}')"><b>${esc(m.name)}</b><span>Arche en route · ${formatTankerDuration(Math.max(0, m.arriveAt - Date.now()))}</span></div>`).join('')}
     <button class="sbw-x" onclick="document.getElementById('sb-worlds').remove()">Fermer</button></div>`;
@@ -30346,7 +30360,7 @@ async function sbPublishColonies(client) {
         w.mpClaimed = true;
       }
       const snap = sbWithWorld(w.id, () => _mpWorldSnapshotHome());
-      const _d = sbDepot(w), _st = { metal: Math.floor(_d.metal || 0), energie: Math.floor(_d.energie || 0), cristal: Math.floor(_d.cristal || 0) };   // PATCH_2110_DEPOT
+      const _R = sbWorldRes(w.id) || {}, _st = { metal: Math.floor((_R.metal && _R.metal.v) || 0), energie: Math.floor((_R.energie && _R.energie.v) || 0), cristal: Math.floor((_R.cristal && _R.cristal.v) || 0) };   // 30/10 : le stock de la colonie
       let { error } = await client.rpc('mp_colony_publish', { p_address: w.coord, p_name: w.name, p_level: snap.level, p_defense: snap.defense, p_buildings: snap.buildings, p_stocks: _st });
       if (error && /p_stocks|function|schema cache|PGRST202/i.test(error.message || '')) ({ error } = await client.rpc('mp_colony_publish', { p_address: w.coord, p_name: w.name, p_level: snap.level, p_defense: snap.defense, p_buildings: snap.buildings }));
       if (error) console.warn('[colonie] publication', w.coord, error.message);
@@ -30436,43 +30450,119 @@ function sbDepotLine(w) {
   return { tot, cap, eta: Math.max(0, d.nextShip - Date.now()) };
 }
 // pastille sous le nom de la planète, sur une colonie
+// 30/10 (Adrien) — chaque planète a son stock : la pastille sous le nom de la planète ouvre le CONVOI (tankers)
 function sbDepotRender() {
-  const w = (G.worlds || []).find(x => x && x.id === G.activeWorld && x.kind === 'colony');
   let el = document.getElementById('sb-depot-chip');
-  if (!w) { if (el) el.remove(); return; }
+  const multi = Array.isArray(G.worlds) && G.worlds.length > 1;
+  if (!multi) { if (el) el.remove(); return; }
   const wp = document.getElementById('w-planet');
   const host = wp && wp.parentNode;
   if (!host) return;
-  if (!el) { el = document.createElement('button'); el.id = 'sb-depot-chip'; el.type = 'button'; el.onclick = () => sbDepotOpen(G.activeWorld); }
+  if (!el) { el = document.createElement('button'); el.id = 'sb-depot-chip'; el.type = 'button'; el.onclick = () => sbOpenConvoy(); }
   if (el.parentNode !== host || el.previousSibling !== wp) host.insertBefore(el, wp.nextSibling);
-  const L = sbDepotLine(w);
-  const full = L.tot >= L.cap * 0.98;
-  el.className = full ? 'full' : '';
-  el.innerHTML = `<span>Dépôt</span><b>${fmt(L.tot)} / ${fmt(L.cap)}</b><i>${full ? 'plein' : 'convoi dans ' + formatTankerDuration(L.eta)}</i>`;
+  const mine = (G.resTransfers || []).filter(x => x.from === G.activeWorld || x.to === G.activeWorld);
+  const next = mine.filter(x => x.phase === 'going' && x.to === G.activeWorld).sort((a, b) => a.arriveAt - b.arriveAt)[0];
+  el.className = '';
+  el.innerHTML = `<span>⇄ Convoi</span>${next ? `<i>arrivage dans ${formatTankerDuration(Math.max(0, next.arriveAt - Date.now()))}</i>` : mine.length ? `<i>${mine.length} en route</i>` : '<i>envoyer des ressources</i>'}`;
 }
-function sbDepotOpen(wid) {
-  const w = (G.worlds || []).find(x => x && x.id === wid);
-  if (!w) return;
-  const d = sbDepot(w);
-  const row = (k, lb) => { const v = Math.floor(d[k] || 0), c = sbDepotCap(w, k); return `<div class="dp-r"><span>${lb}</span><div class="dp-bar"><i style="width:${Math.min(100, v / c * 100).toFixed(1)}%"></i></div><b>${fmt(v)} / ${fmt(c)}</b></div>`; };
-  const wait = Math.max(0, (d.manualAt || 0) + DEPOT_MANUAL_CD - Date.now());
-  const ov = document.createElement('div'); ov.id = 'sb-depot-sheet';
-  ov.innerHTML = `<div class="dp-card">
-    <div class="dp-k">Dépôt colonial · ${String(w.name || '').replace(/[<>&]/g, '')}</div>
-    <p>La production de la colonie s'accumule ici. Un convoi l'expédie vers l'empire toutes les 6 h. <b>Un raid ne pille que ce dépôt</b> (jusqu'à la moitié) : le stock de ta capitale ne craint rien.</p>
-    ${row('metal', 'Métal')}${row('energie', 'Énergie')}${row('cristal', 'Cristal')}
-    <div class="dp-n">Prochain convoi dans <b>${formatTankerDuration(Math.max(0, d.nextShip - Date.now()))}</b>. Plus de silos sur la colonie = un plus grand dépôt (mais plus de butin à défendre).</div>
-    ${d.lastShip ? `<div class="dp-n">Dernier convoi : ${Object.entries(d.lastShip.got || {}).map(([k, q]) => fmt(q) + ' ' + (DEPOT_LB[k] || k)).join(' · ') || 'vide'}</div>` : ''}
-    <button class="dp-go" ${wait ? 'disabled' : ''} onclick="sbDepotShipNow('${w.id}')">${wait ? 'Convoi express dans ' + formatTankerDuration(wait) : 'Expédier maintenant · ' + DEPOT_MANUAL_FUEL + ' carburant'}</button>
-    <button class="dp-x" onclick="document.getElementById('sb-depot-sheet').remove()">Fermer</button></div>`;
-  ov.addEventListener('click', e => { if (e.target === ov) ov.remove(); });
-  document.body.appendChild(ov);
+function sbDepotOpen() { sbOpenConvoy(); }
+const CONVOY_RES = [['metal', 'Métal'], ['energie', 'Énergie'], ['cristal', 'Cristal'], ['biomass', 'Biomasse'], ['artefact', 'Artefacts']];
+let _sbCv = null;   // brouillon : { from, to, q: {metal…} }
+function _sbConvoyCap() {
+  const st = (G.fleet && G.fleet.stationed && G.fleet.stationed.tanker) || {};
+  let cap = 0, n = 0;
+  for (let t = 1; t <= 3; t++) { const q = st['t' + t] || 0; n += q; cap += q * ((SHIP_TIERS.tanker[t] && SHIP_TIERS.tanker[t].cargo) || 0); }
+  return { cap, n };
 }
+// les tankers nécessaires : les plus gros d'abord
+function _sbConvoyTankers(total) {
+  const st = (G.fleet && G.fleet.stationed && G.fleet.stationed.tanker) || {};
+  const use = { t1: 0, t2: 0, t3: 0 }; let left = total;
+  for (let t = 3; t >= 1 && left > 0; t--) {
+    const c = (SHIP_TIERS.tanker[t] && SHIP_TIERS.tanker[t].cargo) || 0, have = st['t' + t] || 0;
+    if (!c || !have) continue;
+    const k = Math.min(have, Math.ceil(left / c)); use['t' + t] = k; left -= k * c;
+  }
+  return left > 0 ? null : use;
+}
+function sbOpenConvoy() {
+  sbWorldsInit();
+  const others = G.worlds.filter(w => w.id !== G.activeWorld);
+  if (!others.length) { toast('Il faut une deuxième planète pour envoyer un convoi'); return; }
+  if (!_sbCv || _sbCv.from !== G.activeWorld) _sbCv = { from: G.activeWorld, to: others[0].id, q: {} };
+  const esc = (x) => String(x == null ? '' : x).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const nameOf = (w) => w.id === G.activeWorld ? G.planet.name : (w.id === 'home' ? (w.data && w.data.planet && w.data.planet.name) || w.name : w.name);
+  const { cap, n } = _sbConvoyCap();
+  const used = Object.values(_sbCv.q).reduce((a, b) => a + (b || 0), 0);
+  const ms = sbTransferMs(_sbCv.from, _sbCv.to);
+  const rows = CONVOY_RES.map(([k, lb]) => {
+    const have = Math.floor((G.res[k] && G.res[k].v) || 0), cur = Math.min(_sbCv.q[k] || 0, have);
+    const max = Math.max(0, Math.min(have, cap - used + cur));
+    return `<div class="cv-r"><span>${lb}</span><input type="range" min="0" max="${max}" step="${Math.max(1, Math.floor(max / 100))}" value="${cur}" ${max ? '' : 'disabled'}
+      oninput="_sbCv.q['${k}']=+this.value;this.parentNode.querySelector('b').textContent=fmt(+this.value)" onchange="sbOpenConvoy()"><b>${fmt(cur)}</b></div>`;
+  }).join('');
+  const enroute = (G.resTransfers || []).map(x => `<div class="sbx-transit">⇄ ${Object.entries(x.cargo).filter(([, q]) => q > 0).map(([k, q]) => fmt(q) + ' ' + ((CONVOY_RES.find(r => r[0] === k) || [k, k])[1]).toLowerCase()).join(' · ')}
+    · ${x.phase === 'going' ? `vers ${esc(x.toName)} · arrivée dans ${formatTankerDuration(Math.max(0, x.arriveAt - Date.now()))}` : `tankers en retour vers ${esc(x.fromName)} · ${formatTankerDuration(Math.max(0, x.backAt - Date.now()))}`}</div>`).join('');
+  let el = document.getElementById('sb-xfer');
+  if (!el) { el = document.createElement('div'); el.id = 'sb-xfer'; el.addEventListener('click', (e) => { if (e.target === el) el.remove(); }); document.body.appendChild(el); }
+  const need = used > 0 ? _sbConvoyTankers(used) : null;
+  el.innerHTML = `<div class="sbx-card">
+    <div class="sbx-h">Convoi de ressources</div>
+    <div class="sbx-sub">Depuis <b>${esc(G.planet.name)}</b> vers :</div>
+    <div class="sbx-dest">${others.map(w => `<button class="${w.id === _sbCv.to ? 'on' : ''}" onclick="_sbCv.to='${w.id}';sbOpenConvoy()">${esc(nameOf(w))}<i>${w.kind === 'capital' ? 'Capitale' : 'Colonie'}</i></button>`).join('')}</div>
+    ${n ? `<div class="sbx-sub">Tankers à quai : <b>${n}</b> · cale totale <b>${fmt(cap)}</b> · chargé <b>${fmt(used)}</b></div>${rows}`
+        : `<div class="sbx-empty">Aucun tanker à quai sur ${esc(G.planet.name)}. Construis-en un au chantier orbital : c'est lui qui porte la cargaison.</div>`}
+    ${enroute}
+    <div class="sbx-sub" style="margin-top:10px">Voyage : <b>${formatTankerDuration(ms)}</b> · les tankers livrent puis reviennent à quai (aller-retour).</div>
+    <button class="sbx-go${used > 0 && need ? '' : ' off'}" onclick="sbLaunchConvoy()">Lancer le convoi</button>
+    <button class="sbx-x" onclick="document.getElementById('sb-xfer').remove()">Fermer</button></div>`;
+}
+function sbLaunchConvoy() {
+  const x = _sbCv; if (!x || x.from !== G.activeWorld || !sbWorld(x.to)) return;
+  const cargo = {}; let total = 0;
+  for (const [k] of CONVOY_RES) { const q = Math.max(0, Math.min(Math.floor(x.q[k] || 0), Math.floor((G.res[k] && G.res[k].v) || 0))); if (q > 0) { cargo[k] = q; total += q; } }
+  if (!total) { toast('Choisis ce que tu envoies'); return; }
+  const tk = _sbConvoyTankers(total);
+  if (!tk) { toast('Pas assez de tankers à quai pour cette cargaison'); sbOpenConvoy(); return; }
+  for (const [k, q] of Object.entries(cargo)) G.res[k].v -= q;
+  for (const t of ['t1', 't2', 't3']) G.fleet.stationed.tanker[t] = Math.max(0, (G.fleet.stationed.tanker[t] || 0) - tk[t]);
+  const ms = sbTransferMs(x.from, x.to), to = sbWorld(x.to), now = Date.now();
+  if (!Array.isArray(G.resTransfers)) G.resTransfers = [];
+  G.resTransfers.push({ id: 'cv-' + now.toString(36), from: x.from, to: x.to, cargo, tankers: tk, phase: 'going', departAt: now, arriveAt: now + ms, backAt: now + 2 * ms,
+    toName: to.id === 'home' ? ((to.data && to.data.planet && to.data.planet.name) || to.name) : to.name, fromName: G.planet.name });
+  _sbCv = null;
+  const el = document.getElementById('sb-xfer'); if (el) el.remove();
+  toast(`⇄ Convoi en route vers ${G.resTransfers[G.resTransfers.length - 1].toName} · arrivée dans ${formatTankerDuration(ms)}`);
+  try { saveGame(); } catch (e) {}
+  try { sbDepotRender(); if (typeof refreshCurrentScreen === 'function') refreshCurrentScreen(); } catch (e) {}
+}
+function sbConvoyTick() {
+  if (!Array.isArray(G.resTransfers) || !G.resTransfers.length) return;
+  const now = Date.now(); let changed = false;
+  for (const x of G.resTransfers.slice()) {
+    if (x.phase === 'going' && now >= x.arriveAt) {
+      const dest = sbWorld(x.to) ? x.to : x.from;
+      sbWithWorld(dest, () => { for (const [k, q] of Object.entries(x.cargo || {})) if (G.res[k]) G.res[k].v = (G.res[k].v || 0) + q; });   // une cargaison livrée entre même au-delà des silos
+      x.phase = 'back'; changed = true;
+      toast(`⇄ Convoi arrivé à ${x.toName} : ${Object.entries(x.cargo).map(([k, q]) => fmt(q) + ' ' + ((CONVOY_RES.find(r => r[0] === k) || [k, k])[1]).toLowerCase()).join(' · ')}`);
+    }
+    if (x.phase === 'back' && now >= x.backAt) {
+      const home = sbWorld(x.from) ? x.from : 'home';
+      sbWithWorld(home, () => { if (!G.fleet.stationed) G.fleet.stationed = _sbEmptyShips(); for (const t of ['t1', 't2', 't3']) G.fleet.stationed.tanker[t] = (G.fleet.stationed.tanker[t] || 0) + ((x.tankers && x.tankers[t]) || 0); });
+      G.resTransfers = G.resTransfers.filter(y => y !== x); changed = true;
+    }
+  }
+  if (changed) { try { saveGame(); } catch (e) {} try { if (typeof refreshCurrentScreen === 'function') refreshCurrentScreen(); } catch (e) {} }
+}
+setInterval(() => { try { sbConvoyTick(); } catch (e) { console.warn('[convoi]', e); } }, 5000);
 (function () {
   const st = document.createElement('style');
   st.textContent = `
   #sb-depot-chip { display: table; margin: 5px auto 0; padding: 5px 11px; border-radius: 14px; border: 1px solid rgba(255,176,102,.3); background: rgba(10,8,6,.72); color: #e8d6c0; font: inherit; font-size: 9.5px; letter-spacing: .1em; cursor: pointer; backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); }
   #sb-depot-chip span { text-transform: uppercase; color: #b89a78; margin-right: 6px; letter-spacing: .16em; }
+  #sb-xfer .cv-r { display: grid; grid-template-columns: 70px 1fr 64px; gap: 10px; align-items: center; margin: 8px 0; font-size: 12px; }
+  #sb-xfer .cv-r input { width: 100%; accent-color: #ffb066; }
+  #sb-xfer .cv-r b { text-align: right; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11.5px; color: #ffe2bd; }
   #sb-depot-chip b { font-family: 'JetBrains Mono', ui-monospace, monospace; font-weight: 600; color: #ffe2bd; }
   #sb-depot-chip i { font-style: normal; color: #9aa8ae; margin-left: 7px; }
   #sb-depot-chip.full { border-color: rgba(255,120,90,.6); }
@@ -33432,7 +33522,7 @@ const QUEUES = {
    Le stock (G.res, crédits, carburant), la flotte, les skills de l'empire, les sondes et le carnet restent communs.
    Ce qui appartient à une planète vit dans G pour la planète ACTIVE (le reste du code lit G.planet, G.defense…
    sans rien savoir) et dans G.worlds[i].data pour les autres. sbWithWorld(id, fn) bascule le temps d'un calcul. */
-var SB_WORLD_KEYS = ['planet', 'defense', 'antenna', 'aftermath', 'selParcel'];
+var SB_WORLD_KEYS = ['planet', 'defense', 'antenna', 'aftermath', 'selParcel', 'probesPool', 'res', 'troopFamine', '_bioBuffer'];   // 30/10 (Adrien) : sondes, ressources et vivres par planète
 function sbWorldsInit() {
   if (!Array.isArray(G.worlds) || !G.worlds.length) {
     G.worlds = [{ id: 'home', kind: 'capital', name: (G.planet && G.planet.name) || 'KERATH-VII', coord: (typeof MY_COORD_STRING !== 'undefined' ? MY_COORD_STRING : ''), foundedAt: null, data: null }];
@@ -33447,19 +33537,22 @@ function _sbPack() {
   for (const k of SB_WORLD_KEYS) d[k] = G[k];
   if (d.planet && d.planet.families instanceof Set) d.planet.families = Array.from(d.planet.families);   // JSON : pas de Set
   d.capitalLevel = (G.skills && G.skills.capitalLevel) || 1;
-  d.queues = { capital: QUEUES.capital || { upgrade: null }, barracks: QUEUES.barracks || { commands: [] }, shipyard: QUEUES.shipyard || { commands: [] } };
+  d.queues = { capital: QUEUES.capital || { upgrade: null }, barracks: QUEUES.barracks || { commands: [] }, shipyard: QUEUES.shipyard || { commands: [] }, prospect: QUEUES.prospect || { commands: [] } };
   d.stationed = G.fleet.stationed;   // flotte à quai de cette planète (Adrien 20/10 : flotte par planète)
   return d;
 }
 function _sbUnpack(d) {
   for (const k of SB_WORLD_KEYS) G[k] = d[k];
   if (G.planet && Array.isArray(G.planet.families)) G.planet.families = new Set(G.planet.families);
+  if (!G.res || !G.res.metal) G.res = sbComputeRes(G.planet);   // 30/10 : planète sans stock propre (ne devrait plus arriver)
   if (G.selParcel == null) G.selParcel = 12;
   if (G.skills) G.skills.capitalLevel = d.capitalLevel || 1;
   const q = d.queues || {};
   QUEUES.capital = q.capital || { upgrade: null };
   QUEUES.barracks = q.barracks || { commands: [] };
   QUEUES.shipyard = q.shipyard || { commands: [] };
+  QUEUES.prospect = q.prospect || { commands: [] };   // 30/10 : hangar des sondes par planète
+  if (!Array.isArray(G.probesPool)) G.probesPool = [];
   G.fleet.stationed = d.stationed || { tanker: { t1: 0, t2: 0, t3: 0 }, fregate: { t1: 0, t2: 0, t3: 0 }, cuirasse: { t1: 0, t2: 0, t3: 0 } };
 }
 function _sbSwap(id) {
@@ -33486,6 +33579,96 @@ function sbAllParcels() {
   const out = ((G.planet && G.planet.parcels) || []).slice();
   for (const w of (G.worlds || [])) if (w && w.data && w.data.planet && Array.isArray(w.data.planet.parcels)) out.push(...w.data.planet.parcels);
   return out;
+}
+// 30/10 (Adrien) — stock par planète : chaque planète a ses ressources, sa production et ses silos.
+// Le stock de la planète affichée est G.res ; celui des autres, w.data.res. Crédits et carburant restent ceux de l'empire.
+const SB_RES_BASE = { metal: 5000, energie: 5000, cristal: 5000, biomass: 5000, artefact: 200 };
+function sbComputeRes(planet, keepV) {
+  const R = {};
+  for (const [k, m] of Object.entries(SB_RES_BASE)) R[k] = { v: (keepV && keepV[k] && keepV[k].v) || 0, max: m, rate: 0 };
+  for (const p of (planet && planet.parcels) || []) {
+    if (!p || p.state !== 'built' || !p.building) continue;
+    const prod = (typeof _mpTierProd === 'function') ? _mpTierProd(p) : {};
+    for (const [k, v] of Object.entries(prod)) if (R[k]) R[k].rate += v - ((p.damaged && p.damageLoss && p.damageLoss[k]) || 0);
+    const meta = BUILDINGS[p.building];
+    if (meta && meta.kind === 'silo' && meta.silo && R[meta.silo.res]) {
+      const td = BUILDING_TIERS[p.building] && BUILDING_TIERS[p.building][p.lvl || 1];
+      R[meta.silo.res].max += (td && td.siloCap) || meta.silo.cap || 0;
+    }
+  }
+  for (const k of Object.keys(R)) R[k].rate = Math.max(0, R[k].rate);
+  return R;
+}
+function sbWorldRes(wid) {
+  if (!wid || wid === (G.activeWorld || 'home')) return G.res;
+  const w = (Array.isArray(G.worlds) ? G.worlds : []).find(x => x && x.id === wid);
+  return (w && w.data && w.data.res) || null;
+}
+// la fortune de l'empire : toutes les planètes additionnées (marché)
+function sbEmpireRes() {
+  const out = {};
+  const add = (R) => { for (const [k, r] of Object.entries(R || {})) out[k] = (out[k] || 0) + Math.floor((r && r.v) || 0); };
+  add(G.res);
+  for (const w of (Array.isArray(G.worlds) ? G.worlds : [])) if (w && w.id !== (G.activeWorld || 'home') && w.data) add(w.data.res);
+  return out;
+}
+// Passage du stock commun au stock par planète (une fois) : la capitale garde le stock commun moins la production
+// et les silos de ses colonies ; chaque colonie reprend son dépôt.
+function sbMigrateResPerWorld() {
+  if (G._resPerWorld) return;
+  if (!Array.isArray(G.worlds) || G.worlds.length < 2) { G._resPerWorld = 1; return; }
+  const act = G.activeWorld || 'home';
+  const shared = G.res;
+  const colonyRes = {};
+  for (const w of G.worlds) {
+    if (!w || w.id === 'home') continue;
+    const pl = w.id === act ? G.planet : (w.data && w.data.planet);
+    const R = sbComputeRes(pl);
+    const d = w.depot || {};
+    for (const k of ['metal', 'energie', 'cristal']) R[k].v = Math.floor(d[k] || 0);
+    colonyRes[w.id] = R;
+    // ce que la colonie produisait et stockait sortait du stock commun
+    for (const [k, r] of Object.entries(R)) if (shared[k]) {
+      shared[k].rate = Math.max(0, (shared[k].rate || 0) - r.rate);
+      shared[k].max = Math.max(SB_RES_BASE[k] || 1000, (shared[k].max || 0) - (r.max - (SB_RES_BASE[k] || 0)));
+    }
+    delete w.depot;
+  }
+  const homeW = G.worlds.find(w => w && w.id === 'home');
+  if (act === 'home') {
+    for (const w of G.worlds) if (w && w.id !== 'home' && w.data) w.data.res = colonyRes[w.id];
+  } else {
+    if (homeW && homeW.data) homeW.data.res = shared;
+    G.res = colonyRes[act];
+    for (const w of G.worlds) if (w && w.id !== 'home' && w.id !== act && w.data) w.data.res = colonyRes[w.id];
+  }
+  G._resPerWorld = 1;
+}
+// 30/10 (Adrien) — sondes par planète : chaque planète a son hangar (G.probesPool de la planète affichée,
+// w.data.probesPool pour les autres). Les balises posées restent visibles et actives quelle que soit la planète affichée.
+function sbAllProbes() {
+  const out = (Array.isArray(G.probesPool) ? G.probesPool : []).slice();
+  for (const w of (Array.isArray(G.worlds) ? G.worlds : [])) if (w && w.id !== (G.activeWorld || 'home') && w.data && Array.isArray(w.data.probesPool)) out.push(...w.data.probesPool);
+  return out;
+}
+function sbMigrateProbesPerWorld() {
+  if (G._probesPerWorld) return;
+  if (!Array.isArray(G.worlds) || G.worlds.length < 2) { G._probesPerWorld = 1; return; }
+  const act = G.activeWorld || 'home';
+  for (const w of G.worlds) {
+    if (!w || w.id === act || !w.data) continue;
+    if (w.id === 'home' && act !== 'home') {   // tout le hangar commun revient à la capitale
+      w.data.probesPool = Array.isArray(G.probesPool) ? G.probesPool : [];
+      w.data.queues = Object.assign({}, w.data.queues, { prospect: QUEUES.prospect || { commands: [] } });
+      G.probesPool = []; QUEUES.prospect = { commands: [] };
+    } else {
+      if (!Array.isArray(w.data.probesPool)) w.data.probesPool = [];
+      w.data.queues = Object.assign({ prospect: { commands: [] } }, w.data.queues);
+      if (!w.data.queues.prospect) w.data.queues.prospect = { commands: [] };
+    }
+  }
+  for (const m of (G.probeMissions || [])) if (m && !m.world) m.world = 'home';
+  G._probesPerWorld = 1;
 }
 // Les autres planètes avancent aussi : chantiers, amélioration de bâtiment, caserne.
 function sbTickOtherWorlds(at, secs, out) {
@@ -33533,7 +33716,8 @@ function sbFoundColony(opts) {
   };
   const defense = { capitalBase: 200, units: { garde: { qty: 0, dmg: 0 }, lourd: { qty: 0, dmg: 0 }, tourelle: { qty: 0, dmg: 0 }, tourelle_lourde: { qty: 0, dmg: 0 } } };
   const w = { id: 'col-' + Date.now().toString(36), kind: 'colony', name, coord: opts.coord || '', foundedAt: Date.now(),
-    data: { planet, defense, antenna: null, aftermath: undefined, selParcel: 12, capitalLevel: 1, queues: { capital: { upgrade: null }, barracks: { commands: [] } } } };
+    data: { planet, defense, antenna: null, aftermath: undefined, selParcel: 12, capitalLevel: 1, probesPool: [], res: (() => { const R = sbComputeRes(planet); R.metal.v = 2000; R.energie.v = 1000; R.cristal.v = 500; return R; })(),   // 30/10 : stock propre, la cale de l'Arche pour démarrer
+      queues: { capital: { upgrade: null }, barracks: { commands: [] }, prospect: { commands: [] } } } };
   G.worlds.push(w);
   try { if (typeof saveGame === 'function') saveGame(); } catch (e) {}
   return w;
@@ -34057,7 +34241,7 @@ function sbTroopRations() {
   let n = 0;
   const add = d => { const u = d && d.units; if (!u) return; for (const [k, x] of Object.entries(u)) n += (x && x.qty || 0) * ((DEFENSE_UNITS[k] && DEFENSE_UNITS[k].ration) || 0); };
   add(G.defense);
-  for (const w of (G.worlds || [])) if (w && w.id !== (G.activeWorld || 'home') && w.data) add(w.data.defense);
+  if (!G._resPerWorld) for (const w of (G.worlds || [])) if (w && w.id !== (G.activeWorld || 'home') && w.data) add(w.data.defense);   // 30/10 : chaque planète nourrit ses troupes
   return n;
 }
 function sbRationPerDay() { return Math.max(0, sbTroopRations() - SB_FREE_RATIONS); }
@@ -34077,40 +34261,20 @@ function _sbFeedTroops(hours) {
 function _simSegment(ms, at, out) {
   // 1. Ressources — taux HORAIRES (décision d'Adrien 10/10 : « +40/h » veut dire 40 par heure)
   const hours = Math.max(0, ms) / 3600000;
-  // dévastation (après un raid perdu) : production réduite, guérison naturelle −1 %/h
-  // PATCH_2010_AUDIT — plusieurs planètes : chacune guérit de sa propre dévastation, qui ne freine que sa propre production
-  let devMult = 1, devCut = null;
-  const colProd = [];   // PATCH_2110_DEPOT : production horaire de chaque colonie (après dévastation), versée dans son dépôt
+  // 30/10 (Adrien) — chaque planète produit dans SON stock, freinée par SA dévastation, et nourrit SES troupes
   const _aft = window.SBAftermath && typeof SBAftermath.simSegment === 'function';
-  if (typeof sbWithWorld === 'function' && Array.isArray(G.worlds) && G.worlds.length > 1) {
-    devCut = {};
-    for (const w of G.worlds) {
-      if (!w || !w.id) continue;
-      try {
-        const r = sbWithWorld(w.id, () => {
-          const mult = _aft ? SBAftermath.simSegment(hours) : 1;
-          const base = {};
-          for (const p of (G.planet && G.planet.parcels) || []) {
-            if (!p || p.state !== 'built' || !p.building) continue;
-            for (const [k, v] of Object.entries(_mpTierProd(p))) base[k] = (base[k] || 0) + v * (p.damaged ? 0.5 : 1);
-          }
-          return { mult, base };
-        });
-        if (!r) continue;
-        if (r.mult < 1) for (const [k, v] of Object.entries(r.base)) devCut[k] = (devCut[k] || 0) + v * (1 - r.mult);
-        if (w.kind === 'colony') { const o = {}; for (const [k, v] of Object.entries(r.base)) o[k] = v * r.mult; colProd.push({ w, prod: o, base: r.base }); }
-      } catch (e) {}
+  const _prodHere = () => {
+    const mult = _aft ? SBAftermath.simSegment(hours) : 1;
+    for (const [rk, r] of Object.entries(G.res || {})) {   // PATCH_1610_SKILLS : bonus des skills
+      const rate = (r.rate || 0) * mult;
+      if (rate > 0 && r.v < r.max) r.v = Math.min(r.max, r.v + rate * hours * (window.SBSkills ? SBSkills.prodMult(rk) : 1));
     }
-  } else if (_aft) devMult = SBAftermath.simSegment(hours);
-  const colSub = {};
-  for (const c of colProd) for (const [k, v] of Object.entries(c.prod)) colSub[k] = (colSub[k] || 0) + v;   // production des colonies (après dévastation)
-  for (const [rk, r] of Object.entries(G.res || {})) {   // PATCH_1610_SKILLS : bonus des skills
-    // empire = production totale − dévastation de chaque planète − ce que produisent les colonies (versé dans leur dépôt)
-    const rate = devCut ? Math.max(0, r.rate - (devCut[rk] || 0) - (colSub[rk] || 0)) : r.rate * devMult;
-    if (rate > 0 && r.v < r.max) r.v = Math.min(r.max, r.v + rate * hours * (window.SBSkills ? SBSkills.prodMult(rk) : 1));
-  }
-  for (const c of colProd) { try { sbDepotProduce(c.w, c.prod, ms, at); } catch (e) { console.warn('[dépôt]', e); } }
-  try { _sbFeedTroops(hours); } catch (e) { console.warn('[vivres]', e); }   // PATCH_2210_VIVRES
+    try { _sbFeedTroops(hours); } catch (e) { console.warn('[vivres]', e); }   // PATCH_2210_VIVRES
+  };
+  if (typeof sbWithWorld === 'function' && Array.isArray(G.worlds) && G.worlds.length > 1) {
+    for (const w of G.worlds) { if (!w || !w.id) continue; try { sbWithWorld(w.id, _prodHere); } catch (e) { console.warn('[production]', w.id, e); } }
+  } else _prodHere();
+
 
   // 2. Crédits (Comptoirs) et carburant (Raffineries) — taux horaires aussi
   if (typeof getCommerceCreditsRate === 'function') {
@@ -34164,7 +34328,7 @@ function _announceCommandDone(cmd) {
 }
 
 function _advanceQueues(secs, out, localOnly) {   // PATCH_2010_WORLDS : localOnly = files propres à une planète (caserne, amélioration)
-  for (const type of (localOnly ? ['barracks', 'shipyard'] : ['barracks', 'shipyard', 'prospect'])) {
+  for (const type of ['barracks', 'shipyard', 'prospect']) {   // 30/10 : la file des sondes est aussi propre à chaque planète
     const queue = QUEUES[type];
     if (!queue || !Array.isArray(queue.commands) || queue.commands.length === 0) continue;
     const slots = type === 'barracks' ? (G.skills?.barracksSlots || 1) : 1;
@@ -35087,7 +35251,7 @@ function validateAddressForTier(addr, tier) {
   if (typeof isInRange === 'function' && !isInRange(parsed)) {
     return {
       valid: false,
-      error: 'Trop loin pour les capteurs actuels',
+      error: (Array.isArray(G.worlds) && G.worlds.length > 1) ? `Trop loin pour les capteurs de ${(G.planet && G.planet.name) || 'cette planète'}` : 'Trop loin pour les capteurs actuels',
       parsed,
       reason: 'out_of_range',  // tag interne pour styler le message différemment
     };
@@ -42871,6 +43035,20 @@ function setCommerceTab(tab) {
 }
 
 function renderCommerceScreen() {
+  // 30/10 (Adrien) — fortune de l'empire : toutes les planètes additionnées
+  try {
+    const bar = document.getElementById('commerce-credits-bar');
+    let fe = document.getElementById('commerce-fortune');
+    const multi = Array.isArray(G.worlds) && G.worlds.length > 1;
+    if (!multi) { if (fe) fe.remove(); }
+    else if (bar) {
+      if (!fe) { fe = document.createElement('div'); fe.id = 'commerce-fortune'; fe.style.cssText = 'margin:-4px 16px 12px;padding:10px 12px;border-radius:8px;border:1px solid rgba(255,200,100,.22);background:rgba(255,200,100,.04)'; bar.parentNode.insertBefore(fe, bar.nextSibling); }
+      const E = sbEmpireRes(), L = [['metal', 'Métal'], ['energie', 'Énergie'], ['cristal', 'Cristal'], ['biomass', 'Biomasse'], ['artefact', 'Artefacts']];
+      fe.innerHTML = `<div style="font-size:10px;color:var(--mut);letter-spacing:.12em;text-transform:uppercase;margin-bottom:6px">Fortune de l'empire · ${G.worlds.length} planètes</div>
+        <div style="display:flex;flex-wrap:wrap;gap:6px 14px;font-family:'SF Mono',monospace;font-size:12px;color:#ffe2bd">${L.map(([k, lb]) => `<span><span style="color:var(--mut);font-family:inherit">${lb}</span> ${fmt(E[k] || 0)}</span>`).join('')}</div>
+        <div style="font-size:10px;color:var(--mut);margin-top:6px">Tu vends depuis le stock de ${(G.planet && G.planet.name) || 'la planète affichée'}. Pour regrouper, envoie un convoi de tankers.</div>`;
+    }
+  } catch (e) { console.warn('[fortune]', e); }
   // Bandeau crédits + taux
   const creditsEl = document.getElementById('commerce-credits-value');
   if (creditsEl) {
@@ -48339,7 +48517,7 @@ function sbMapExport() {
     systemTags: G.systemTags || {}, mapSeen: Object.keys(G.mapSeen || {}),
     routes: (G.routes || []).map(r => ({ id: r.id, name: r.name, portSys: r.portSys || null, dockId: r.dockId || null })),
     opened: window.SBLines ? SBLines.openedRoutes() : [],
-    beacons: (G.probesPool || []).filter(b => b.tier === 'beacon').map(b => ({ id: b.id, state: b.state, sys: b.deployedSystem || null })),
+    beacons: sbAllProbes().filter(b => b.tier === 'beacon').map(b => ({ id: b.id, state: b.state, sys: b.deployedSystem || null })),
     tankers: (G.tankerMissions || []).filter(m => m.status !== 'returned').map(m => ({ id: m.id, kind: m.kind, status: m.status, portSys: m.portSys || null, target: m.targetCoords || null, via: m.via || null })),
     fleets: ((G.fleet && G.fleet.prepared) || []).filter(f => f.ambush).map(f => ({ id: f.id, ambush: f.ambush })) })); } catch (e) { d = { err: String(e) }; }
   const txt = JSON.stringify(d);
@@ -49308,7 +49486,7 @@ if (G.knownTargets && Array.isArray(G.tankerMissions)) {
 <!-- PERF_1310 — mesure des performances chez les joueurs + qualité 3D automatique (assets/perf.js) -->
 <script src="assets/perf.js?v=20261022-2000"></script>
 <!-- PATCH_1410_LIGNES — lignes PNJ à horaire sur les routes cachées (assets/lines.js) -->
-<script src="assets/lines.js?v=20261024-1300"></script>
+<script src="assets/lines.js?v=20261030-1820"></script>
 <!-- CLOUD — sauvegarde Supabase (source : sb-build/src/cloud.js) -->
 <script type="module" src="assets/cloud.js?v=20261022-1420"></script>
 <!-- MATCH3 — Match-3 V2 (assets/match3.js, source src/match3.js + src/m3core.js) : remplace startM3 -->
@@ -49316,7 +49494,7 @@ if (G.knownTargets && Array.isArray(G.tankerMissions)) {
 <!-- HOME V2 — « monde d'abord » : planète plein écran, ressources en ligne, Flotte / Défense / Prospection (assets/home.js) -->
 <script type="module" src="assets/home.js?v=20261025-1410"></script>
 <!-- SPACE MAP v0 — carte du Centre de prospection (assets/spacemap.js, source src/spacemap.js) -->
-<script src="assets/spacemap.js?v=20261030-1545"></script>
+<script src="assets/spacemap.js?v=20261030-1820"></script>
 <!-- SPACE MAP niveau B — diorama 3D d'un système (assets/system3d.js, source src/system3d.js) -->
 <script type="module" src="assets/system3d.js?v=20261014-1440"></script>
 <!-- SHIP3D — fiches 3D : cuirassé KV-01, frégate SR-01, tanker TK-07, chantier orbital OS-01 (assets/ship3d.js, sur le moteur partagé window.SB3D) -->

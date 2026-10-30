@@ -155,7 +155,7 @@ RÉPUTATION IMPÉRIALE
 Piller les convois de l'Empire fait monter une réputation, affichée en négatif, qui s'efface d'un point par heure. −25 Surveillé (escortes renforcées), −80 Recherché (avis de recherche public et prime pour qui te raide avec succès), −200 Ennemi de l'Empire (une expédition punitive vise ta capitale 12 h après l'annonce). On peut l'effacer en payant une amende dans une station impériale.
 
 EXPLORATION
-- Le Centre de prospection (débloqué par l'antenne) contient la carte spatiale : un plateau hexagonal qu'on parcourt en glissant, et qu'on zoome en pinçant. Toucher une case ouvre sa fiche. La portée de départ est le secteur d'origine ; le Laboratoire tier 2 et tier 3 l'étend.
+- Le Centre de prospection (débloqué par l'antenne) contient la carte spatiale : un plateau hexagonal qu'on parcourt en glissant, et qu'on zoome en pinçant. Toucher une case ouvre sa fiche. La portée de départ est d'1 secteur autour de la planète ; un Laboratoire niveau 2 la porte à 2 secteurs, niveau 3 à 4.
 - Adresses au format Amas-Secteur-Système-Position, par exemple A-K-3918-61.
 - Sondes : Radar (30 métal, jetable : balaie un système, « Balayer » sur une case), Légère (200 métal, 50 cristal : identifie une signature ; jusqu’à 3 Légères à la fois, réutilisables), Moyenne (600 métal, 200 cristal : verrouille un corps et lui donne une adresse fixe dans le Carnet), Furtive (espionne une planète), Balise (reste sur un système et note les convois qui passent ; on peut la rappeler).
 - Une signature non résolue expire après 7 jours. Chaque signature propose son action suivante (envoyer une Légère, un tanker, une Moyenne…).
@@ -169,7 +169,11 @@ COLONISATION
 - Conditions : Centre de commandement niveau 3, skill « Vaisseau colonial », puis Chantier orbital niveau 2.
 - Arche coloniale : 20 000 métal, 8 000 énergie, 3 000 cristal et 2 000 carburant ; assemblage de plusieurs heures.
 - Cible : une planète habitable libre déjà sondée, bouton « Coloniser ». Le voyage dure de 45 min à 12 h selon la distance. L'Arche ne revient pas : elle devient la colonie.
-- À l'arrivée : un nouveau Centre de commandement, une antenne à bâtir (elle écoute son propre secteur) et des parcelles vierges. Le stock est commun à l'empire ; la colonie peut être attaquée.
+- À l'arrivée : un nouveau Centre de commandement, une antenne à bâtir (elle écoute son propre secteur) et des parcelles vierges. La colonie peut être attaquée.
+- Chaque planète est indépendante : son propre stock de ressources (la colonie démarre avec la cale de l'Arche : 2 000 métal, 1 000 énergie, 500 cristal), sa production, ses silos, son hangar de sondes (quotas par planète), ses vaisseaux, ses soldats et sa défense. On change de planète en touchant son nom en haut de l'écran ; tout ce qu'on construit ou lance part de la planète affichée.
+- Convoi : la pastille « ⇄ Convoi » sous le nom de la planète envoie des ressources vers une autre de ses planètes avec les tankers à quai (cale T1 5 000, T2 25 000, T3 100 000) ; trajet de 30 min dans le même secteur, +1 h par secteur d'écart (8 h au plus), les tankers reviennent ensuite. Une flotte se déplace avec « ⇄ Transférer » sur l'écran Flotte.
+- Le marché (Commerce) affiche la fortune de tout l'empire, mais on vend depuis le stock de la planète affichée. Crédits et carburant restent communs à l'empire.
+- Portée des sondes : chaque planète scanne depuis sa position avec SON Laboratoire : 1 secteur autour sans Labo ou avec un Labo niveau 1, 2 secteurs avec un Labo niveau 2, 4 avec un Labo niveau 3.
 
 SITE, AIDE, SOUTIEN
 - Signaler un problème : bouton « Contacter le support » ou « Signaler un problème » sur starbyte.online ; le message part à l'équipe, qui répond par email.
