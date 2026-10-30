@@ -252,6 +252,13 @@
     // ── Plateau : une case par objet ──
     const home = mySystemKey();
     add(home, { known: true, isMine: true });
+    // 30/10 (joueur : « la flotte part de la planète mère sur la carte ») — mes colonies ont leur case : on y voit partir
+    // ce qui est lancé depuis elles
+    for (const w of (Array.isArray(G.worlds) ? G.worlds : [])) {
+      if (!w || w.id === 'home' || !w.coord) continue;
+      const k = String(w.coord).split('-').slice(0, 3).join('-');
+      if (/^[A-Z]-[A-Z]-\d{4}$/.test(k) && k !== home) { const sx = add(k, { known: true }); sx.colony = w.name || 'Colonie'; }
+    }
     const occ = new Map();            // idx de case → { kind, key }
     const cell = {};                  // 'sys:KEY' | 'sig:ID' | 'tgt:KEY' | 'pl:COORD' → idx
     // 12/10 (Adrien) : ma planète n'occupe que la case centrale ; l'anneau 1 autour est MON système (ses échos y apparaissent)
@@ -518,6 +525,13 @@
 
     // Missions en vol
     const flights = [];
+    // case de départ : ma planète (0) ou la colonie d'où la mission est partie (m.world)
+    const originCell = (wid) => {
+      if (!wid || wid === 'home') return 0;
+      const w = (Array.isArray(G.worlds) ? G.worlds : []).find(x => x && x.id === wid);
+      const k = w && w.coord ? String(w.coord).split('-').slice(0, 3).join('-') : null;
+      return k && cell['sys:' + k] !== undefined ? cell['sys:' + k] : 0;
+    };
     for (const m of (G.probeMissions || [])) {
       if (m.status !== 'in_transit') continue;
       const tc = String(m.targetCoords || '');
@@ -526,7 +540,7 @@
       else if (/^[A-Z]-[A-Z]-\d{4}/.test(tc)) to = cell['sys:' + tc.split('-').slice(0, 3).join('-')];
       // PATCH_2110_NOMS : « Légère → système de Panzerstorm », le nom de la sonde en petit
       const _pd = typeof sbDestLabel === 'function' ? sbDestLabel(tc) : { label: tc, coords: tc };
-      if (to !== undefined) flights.push({ kind: 'probe', tier: m.tier, id: m.id, label: `${typeof sbProbeTierLabel === 'function' ? sbProbeTierLabel(m.tier) : 'Sonde'} → ${_pd.label}`, shipName: m.probeName || 'Sonde', destCoords: _pd.coords, from: 0, to, toCk: /^SIG-/.test(tc) ? 'sig:' + tc : null, departedAt: m.departedAt, arrivalAt: m.arrivalAt, target: tc });
+      if (to !== undefined) flights.push({ kind: 'probe', tier: m.tier, id: m.id, label: `${typeof sbProbeTierLabel === 'function' ? sbProbeTierLabel(m.tier) : 'Sonde'} → ${_pd.label}`, shipName: m.probeName || 'Sonde', destCoords: _pd.coords, from: originCell(m.world), to, toCk: /^SIG-/.test(tc) ? 'sig:' + tc : null, departedAt: m.departedAt, arrivalAt: m.arrivalAt, target: tc });
     }
     for (const m of (G.tankerMissions || [])) {
       if (!(m.status === 'in_transit' || m.status === 'returning' || m.status === 'exploring')) continue;
@@ -549,7 +563,8 @@
         if (cells.length > 2) path = back ? cells.slice().reverse() : cells;
       }
       const _td = (m.mpTarget && m.mpTarget.pseudo) ? { label: m.mpTarget.pseudo, coords: tc } : (m.dock && m.dock.name) ? { label: m.dock.name, coords: sysKey } : m.targetLabel ? { label: m.targetLabel, coords: sysKey } : (typeof sbDestLabel === 'function' ? sbDestLabel(tc) : { label: tc, coords: '' });
-      flights.push({ kind: 'tanker', id: m.id, label: `Tanker → ${_td.label}`, shipName: m.tankerName || 'Tanker', destCoords: _td.coords, from: back ? at : 0, to: back ? 0 : at, toCk: back ? null : toCk, path,
+      const _o = originCell(m.world); if (_o !== 0) path = null;   // parti d'une colonie : trajet direct depuis elle
+      flights.push({ kind: 'tanker', id: m.id, label: `Tanker → ${_td.label}`, shipName: m.tankerName || 'Tanker', destCoords: _td.coords, from: back ? at : _o, to: back ? _o : at, toCk: back ? null : toCk, path,
         departedAt: back ? (m.returnDepartedAt || m.arrivalAt || m.departedAt) : m.departedAt, arrivalAt: back ? (m.returnArrivalAt || m.arrivalAt) : m.arrivalAt, target: tc, back });
     }
     // 22/10 — expédition punitive impériale : de la station impériale (ou du bord de la carte) vers ma planète
@@ -578,7 +593,8 @@
           if (cells.length > 2) path = back ? cells.slice().reverse() : cells;
         }
       }
-      flights.push({ kind: 'fleet', id: 'fl-' + f.id, fleetId: f.id, label: f.name || 'Flotte', from: back ? at : 0, to: back ? 0 : at, toCk: null, path,
+      const _fo = originCell(a.world || f.world); if (_fo !== 0) path = null;
+      flights.push({ kind: 'fleet', id: 'fl-' + f.id, fleetId: f.id, label: f.name || 'Flotte', from: back ? at : _fo, to: back ? _fo : at, toCk: null, path,
         departedAt: back ? (a.returnDepartedAt || (a.returnsAt - a.travelMs)) : a.departedAt, arrivalAt: back ? a.returnsAt : a.arrivesAt, target: a.system, back });
     }
     return { systems, flights, occ, cell, items, routes, spotted: spottedPaths, trade: tradePaths, hints: lineHints, home, lit: litRing() };

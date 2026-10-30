@@ -10399,7 +10399,7 @@ async function mpGarrisonStart(address) {
     G.res.energie.v = Math.max(0, G.res.energie.v - fuel);
     f.status = 'in_mission';
     f.missionStartedAt = now; f.missionEndsAt = null; f.missionTargetId = null; f.missionFuelSpent = fuel;
-    f.garrison = { address, pseudo: mem.pseudo, phase: 'going', departedAt: now, arrivesAt: Date.parse(g.arrives_at) || now + travel, travelMs: travel, mpGarrisonId: g.id };
+    f.garrison = { address, pseudo: mem.pseudo, phase: 'going', world: G.activeWorld || 'home', departedAt: now, arrivesAt: Date.parse(g.arrives_at) || now + travel, travelMs: travel, mpGarrisonId: g.id };
     if (typeof startMissionTimerLoop === 'function') startMissionTimerLoop();
     toast(`${f.name} part en garnison chez ${mem.pseudo} · ${Math.round(travel / 60000)} min`);
     if (typeof saveGame === 'function') saveGame();
@@ -11740,7 +11740,7 @@ async function mpAmbushStart(fleetId, onlySystems) {   // PATCH_1510_ROUTES_UX :
   f.missionStartedAt = now;
   f.missionEndsAt = null;
   f.missionTargetId = null;
-  f.ambush = { system: sys, beaconId: choice.local_id, phase: 'going', departedAt: now, arrivesAt: now + travel, travelMs: travel, hold: {}, mpAmbushId: null,
+  f.ambush = { system: sys, beaconId: choice.local_id, phase: 'going', world: G.activeWorld || 'home', departedAt: now, arrivesAt: now + travel, travelMs: travel, hold: {}, mpAmbushId: null,
     orders, routeId: _tr.route ? _tr.route.id : null, routeChain: _tr.route ? _tr.route.chain.slice(0, 14) : null };   // PATCH_1510_ORDRES
   if (typeof startMissionTimerLoop === 'function') startMissionTimerLoop();
   toast(`${f.name} part en embuscade sur ${sys} · ${Math.round(travel / 60000)} min`);
@@ -24471,7 +24471,7 @@ function launchProbe(tier, targetCoords, mode, force) {
   // Marquer la sonde comme "en mission"
   if (probe) probe.state = 'mission';
 
-  G.probeMissions.push(mission);
+  G.probeMissions.push(sbTagWorld(mission));   // PATCH_3010_DEPART_CARTE : la carte la fait partir de la planète d'où elle est lancée
 
   if (force) {
     // Retour immédiat : on déclenche tout de suite
@@ -35115,8 +35115,9 @@ function renderProbesPane() {
     <div style="padding:8px 16px 4px">
       <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:4px;gap:12px">
         <div style="min-width:0">
-          <div style="font-size:10px;color:var(--mut);letter-spacing:.16em;text-transform:uppercase">Adresse de ma planète</div>
+          <div style="font-size:10px;color:var(--mut);letter-spacing:.16em;text-transform:uppercase">${(Array.isArray(G.worlds) && G.worlds.length > 1) ? 'Départ depuis' : 'Adresse de ma planète'}</div>
           <div style="font-family:'SF Mono',monospace;color:var(--cyan);font-size:18px;letter-spacing:.04em;margin-top:2px">${myCoord}</div>
+          ${(Array.isArray(G.worlds) && G.worlds.length > 1) ? `<div style="font-size:10px;color:var(--mut);margin-top:3px;line-height:1.4">Sondes communes à tout l'empire : elles partent de la planète affichée.</div>` : ''}
         </div>
         <div style="display:flex;gap:14px;align-items:baseline;flex-shrink:0">
           ${onMissionTotal > 0
@@ -49315,7 +49316,7 @@ if (G.knownTargets && Array.isArray(G.tankerMissions)) {
 <!-- HOME V2 — « monde d'abord » : planète plein écran, ressources en ligne, Flotte / Défense / Prospection (assets/home.js) -->
 <script type="module" src="assets/home.js?v=20261025-1410"></script>
 <!-- SPACE MAP v0 — carte du Centre de prospection (assets/spacemap.js, source src/spacemap.js) -->
-<script src="assets/spacemap.js?v=20261029-1215"></script>
+<script src="assets/spacemap.js?v=20261030-1545"></script>
 <!-- SPACE MAP niveau B — diorama 3D d'un système (assets/system3d.js, source src/system3d.js) -->
 <script type="module" src="assets/system3d.js?v=20261014-1440"></script>
 <!-- SHIP3D — fiches 3D : cuirassé KV-01, frégate SR-01, tanker TK-07, chantier orbital OS-01 (assets/ship3d.js, sur le moteur partagé window.SB3D) -->
