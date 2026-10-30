@@ -30513,30 +30513,73 @@ function sbOpenConvoy() {
     ${n ? `<div class="sbx-sub">Tankers à quai : <b>${n}</b> · cale totale <b>${fmt(cap)}</b> · chargé <b>${fmt(used)}</b></div>${rows}`
         : `<div class="sbx-empty">Aucun tanker à quai sur ${esc(G.planet.name)}. Construis-en un au chantier orbital : c'est lui qui porte la cargaison.</div>`}
     ${enroute}
+    ${(() => { const aw = sbActiveWorld(); if (!aw || aw.kind !== 'colony') return ''; const on = aw.autoConvoy !== false;
+      return `<button class="sbx-fleet${on ? ' on' : ''}" style="margin-top:10px" onclick="sbToggleAutoConvoy('${aw.id}')"><b>Convoi automatique vers la capitale : ${on ? 'activé' : 'coupé'}</b><i>Toutes les 6 h, si des tankers sont à quai : l'excédent de métal, d'énergie et de cristal part à la capitale. La colonie garde 30 % de ses silos.${on && aw.autoNext ? ' Prochain départ dans ' + formatTankerDuration(Math.max(0, aw.autoNext - Date.now())) + '.' : ''}</i></button>`; })()}
     <div class="sbx-sub" style="margin-top:10px">Voyage : <b>${formatTankerDuration(ms)}</b> · les tankers livrent puis reviennent à quai (aller-retour).</div>
     <button class="sbx-go${used > 0 && need ? '' : ' off'}" onclick="sbLaunchConvoy()">Lancer le convoi</button>
     <button class="sbx-x" onclick="document.getElementById('sb-xfer').remove()">Fermer</button></div>`;
 }
-function sbLaunchConvoy() {
-  const x = _sbCv; if (!x || x.from !== G.activeWorld || !sbWorld(x.to)) return;
-  const cargo = {}; let total = 0;
-  for (const [k] of CONVOY_RES) { const q = Math.max(0, Math.min(Math.floor(x.q[k] || 0), Math.floor((G.res[k] && G.res[k].v) || 0))); if (q > 0) { cargo[k] = q; total += q; } }
-  if (!total) { toast('Choisis ce que tu envoies'); return; }
-  const tk = _sbConvoyTankers(total);
-  if (!tk) { toast('Pas assez de tankers à quai pour cette cargaison'); sbOpenConvoy(); return; }
+// à appeler sur la planète de départ (planète affichée ou sbWithWorld) : charge, fait partir les tankers
+function _sbConvoySend(fromId, toId, cargo, auto) {
+  const tot = Object.values(cargo).reduce((a, b) => a + b, 0);
+  const tk = _sbConvoyTankers(tot);
+  if (!tk) return null;
   for (const [k, q] of Object.entries(cargo)) G.res[k].v -= q;
   for (const t of ['t1', 't2', 't3']) G.fleet.stationed.tanker[t] = Math.max(0, (G.fleet.stationed.tanker[t] || 0) - tk[t]);
-  const ms = sbTransferMs(x.from, x.to), to = sbWorld(x.to), now = Date.now();
+  const ms = sbTransferMs(fromId, toId), to = sbWorld(toId), now = Date.now();
   if (!Array.isArray(G.resTransfers)) G.resTransfers = [];
-  G.resTransfers.push({ id: 'cv-' + now.toString(36), from: x.from, to: x.to, cargo, tankers: tk, phase: 'going', departAt: now, arriveAt: now + ms, backAt: now + 2 * ms,
-    toName: to.id === 'home' ? ((to.data && to.data.planet && to.data.planet.name) || to.name) : to.name, fromName: G.planet.name });
+  const x = { id: 'cv-' + now.toString(36) + Math.random().toString(36).slice(2, 5), from: fromId, to: toId, cargo, tankers: tk, phase: 'going', departAt: now, arriveAt: now + ms, backAt: now + 2 * ms, auto: !!auto,
+    toName: to.id === 'home' ? ((to.data && to.data.planet && to.data.planet.name) || to.name) : to.name, fromName: G.planet.name };
+  G.resTransfers.push(x);
+  return x;
+}
+// 30/10 (Adrien) — convoi automatique : toutes les 6 h, une colonie qui a des tankers à quai envoie son excédent à la
+// capitale. Elle garde une réserve (30 % de ses silos) pour ses propres chantiers ; biomasse (vivres) et artefacts restent sur place.
+const CONVOY_AUTO_MS = 6 * 3600 * 1000, CONVOY_AUTO_KEEP = 0.3;
+function _sbConvoyAuto(w) {
+  if (!w || w.kind !== 'colony' || w.autoConvoy === false) return;
+  const now = Date.now();
+  if (!w.autoNext) { w.autoNext = now + CONVOY_AUTO_MS; return; }
+  if (now < w.autoNext) return;
+  w.autoNext = now + CONVOY_AUTO_MS;
+  if ((G.resTransfers || []).some(x => x.auto && x.from === w.id && x.phase === 'going')) return;
+  sbWithWorld(w.id, () => {
+    const { cap } = _sbConvoyCap();
+    if (!cap) return;
+    const cargo = {}; let left = cap;
+    for (const k of ['metal', 'energie', 'cristal']) {
+      const r = G.res[k]; if (!r) continue;
+      const q = Math.max(0, Math.min(left, Math.floor(r.v - r.max * CONVOY_AUTO_KEEP)));
+      if (q >= 50) { cargo[k] = q; left -= q; }
+    }
+    if (!Object.keys(cargo).length) return;
+    const x = _sbConvoySend(w.id, 'home', cargo, true);
+    if (x) toast(`⇄ ${w.name || 'La colonie'} envoie son excédent à ${x.toName} : ${Object.entries(cargo).map(([k, q]) => fmt(q) + ' ' + ((CONVOY_RES.find(r => r[0] === k) || [k, k])[1]).toLowerCase()).join(' · ')}`);
+  });
+}
+function sbToggleAutoConvoy(wid) {
+  const w = sbWorld(wid); if (!w) return;
+  w.autoConvoy = w.autoConvoy === false;
+  if (w.autoConvoy) w.autoNext = Date.now() + CONVOY_AUTO_MS;
+  try { saveGame(); } catch (e) {}
+  sbOpenConvoy();
+}
+function sbLaunchConvoy() {
+  const x0 = _sbCv; if (!x0 || x0.from !== G.activeWorld || !sbWorld(x0.to)) return;
+  const cargo = {}; let total = 0;
+  for (const [k] of CONVOY_RES) { const q = Math.max(0, Math.min(Math.floor(x0.q[k] || 0), Math.floor((G.res[k] && G.res[k].v) || 0))); if (q > 0) { cargo[k] = q; total += q; } }
+  if (!total) { toast('Choisis ce que tu envoies'); return; }
+  const sent = _sbConvoySend(x0.from, x0.to, cargo, false);
+  if (!sent) { toast('Pas assez de tankers à quai pour cette cargaison'); sbOpenConvoy(); return; }
+  const ms = sent.arriveAt - sent.departAt;
   _sbCv = null;
   const el = document.getElementById('sb-xfer'); if (el) el.remove();
-  toast(`⇄ Convoi en route vers ${G.resTransfers[G.resTransfers.length - 1].toName} · arrivée dans ${formatTankerDuration(ms)}`);
+  toast(`⇄ Convoi en route vers ${sent.toName} · arrivée dans ${formatTankerDuration(ms)}`);
   try { saveGame(); } catch (e) {}
   try { sbDepotRender(); if (typeof refreshCurrentScreen === 'function') refreshCurrentScreen(); } catch (e) {}
 }
 function sbConvoyTick() {
+  for (const w of (Array.isArray(G.worlds) ? G.worlds : [])) { try { _sbConvoyAuto(w); } catch (e) { console.warn('[convoi auto]', e); } }
   if (!Array.isArray(G.resTransfers) || !G.resTransfers.length) return;
   const now = Date.now(); let changed = false;
   for (const x of G.resTransfers.slice()) {
