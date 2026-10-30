@@ -7544,10 +7544,13 @@ function makeDefaultCartoSkills() {
 // alors que l'arbre promet Labo T2 → sismique, Labo T3 → interstellaire. On prend le plus haut
 // des deux : skills acquis (G.cartoSkills, cheats/futur) et niveau du Laboratoire construit.
 function getLaboTier() {
+  // PATCH_3010_PORTEE_EMPIRE (joueur : « les sondes ne marchent pas depuis la colonie ») — G.planet est la planète
+  // AFFICHÉE : depuis une colonie sans Laboratoire, la portée retombait au secteur local. La recherche est celle de
+  // l'empire : on prend le meilleur Laboratoire de toutes mes planètes.
   let t = 0;
-  for (const p of (G && G.planet && G.planet.parcels) || []) {
-    if (p && p.building === 'labo' && p.state === 'built') t = Math.max(t, p.lvl || 1);
-  }
+  const scan = (pl) => { for (const p of (pl && pl.parcels) || []) if (p && p.building === 'labo' && p.state === 'built') t = Math.max(t, p.lvl || 1); };
+  scan(G && G.planet);
+  for (const w of (G && Array.isArray(G.worlds) ? G.worlds : [])) if (w && w.data && w.data.planet) scan(w.data.planet);
   return t;
 }
 function getCartoLevel() {
