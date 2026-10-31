@@ -23625,7 +23625,7 @@ function removeKnownTarget(coordKey) {
 
 const SIGNATURES_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 jours pour les non-résolues
 const SIGNATURES_STORAGE_KEY = 'starbyte_signatures';
-const SIGNATURES_MAX = 60; // capacité totale (peut être upgradée par skill plus tard)
+const SIGNATURES_MAX = 250; // 31/10 : 60 → 250 (les joueurs avancés remplissaient le carnet de signatures résolues)
 
 // Types de signatures (révélées par la Radar) — cf. chap 17
 const SIGNATURE_TYPES = {
@@ -23701,12 +23701,11 @@ function saveSignatures() {
     let entries = Object.entries(G.signatures);
     if (entries.length > SIGNATURES_MAX) {
       // Priorité : on garde toutes les résolues fixes, puis les plus récentes
-      entries.sort((a, b) => {
-        const aIsFixed = a[1].resolved && a[1].resolvedType === 'fixed';
-        const bIsFixed = b[1].resolved && b[1].resolvedType === 'fixed';
-        if (aIsFixed !== bIsFixed) return aIsFixed ? -1 : 1;
-        return (b[1].detectedAt || 0) - (a[1].detectedAt || 0);
-      });
+      // 31/10 (Damien : « que des systèmes morts, fini les amas métalliques et les planètes ») — BUG : les résolues
+      // fixes passaient en premier ; au-delà de 60, chaque NOUVELLE signature de Radar était supprimée à sa création.
+      // Ordre de garde : non résolues (les nouvelles d'abord), corps à verrouiller, puis le reste ; les plus anciennes partent.
+      const rank = (v) => !v.resolved ? 0 : (v.resolvedType === 'fixed' && !v.fixedAddress) ? 1 : v.inCarnet ? 2 : 3;
+      entries.sort((a, b) => (rank(a[1]) - rank(b[1])) || ((b[1].resolvedAt || b[1].detectedAt || 0) - (a[1].resolvedAt || a[1].detectedAt || 0)));
       entries = entries.slice(0, SIGNATURES_MAX);
       G.signatures = Object.fromEntries(entries);
     }
