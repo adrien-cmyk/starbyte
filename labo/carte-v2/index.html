@@ -1,0 +1,384 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<title>Starbyte · Carte v2 (labo)</title>
+<style>
+  :root { --sai: env(safe-area-inset-top, 0px); --sab: env(safe-area-inset-bottom, 0px); }
+  html, body { margin: 0; height: 100%; background: #02040a; overflow: hidden; color: #dfe8ee; font: 14px/1.4 -apple-system, BlinkMacSystemFont, system-ui, sans-serif; touch-action: none; -webkit-user-select: none; user-select: none; }
+  canvas { display: block; }
+  #hud { position: fixed; left: 0; right: 0; top: calc(var(--sai) + 10px); text-align: center; pointer-events: none; }
+  #lvl { font-weight: 800; letter-spacing: .32em; font-size: 12px; text-transform: uppercase; }
+  #sub { margin-top: 4px; font-size: 11px; color: #8fa3b5; letter-spacing: .06em; }
+  #crumbs { margin-top: 8px; display: flex; gap: 6px; justify-content: center; }
+  #crumbs i { width: 26px; height: 3px; border-radius: 2px; background: rgba(255,255,255,.14); }
+  #crumbs i.on { background: #7fd0ff; box-shadow: 0 0 8px #7fd0ff; }
+  #tools { position: fixed; right: 12px; bottom: calc(var(--sab) + 20px); display: flex; flex-direction: column; gap: 10px; }
+  #tools button { width: 46px; height: 46px; border-radius: 50%; border: 1px solid rgba(150,200,240,.3); background: rgba(8,14,22,.72); color: #dfe8ee; font-size: 22px; cursor: pointer; }
+  #hint { position: fixed; left: 16px; right: 76px; bottom: calc(var(--sab) + 24px); font-size: 11.5px; color: #9fb2c2; letter-spacing: .04em; pointer-events: none; }
+  #tip { position: fixed; pointer-events: none; padding: 6px 10px; border-radius: 8px; background: rgba(8,14,22,.9); border: 1px solid rgba(127,208,255,.35); font-size: 11.5px; display: none; white-space: nowrap; }
+  #flash { position: fixed; inset: 0; pointer-events: none; opacity: 0; background: radial-gradient(circle at 50% 50%, rgba(220,240,255,.95) 0%, rgba(120,190,255,.55) 22%, rgba(2,4,10,0) 62%); mix-blend-mode: screen; }
+  #lab { position: fixed; left: 12px; top: calc(var(--sai) + 10px); font-size: 10px; letter-spacing: .14em; color: #ffb066; border: 1px solid rgba(255,176,102,.4); padding: 3px 7px; border-radius: 10px; }
+</style>
+<script type="importmap">{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js" } }</script>
+</head>
+<body>
+<div id="lab">LABO · CARTE V2</div>
+<div id="hud"><div id="lvl">Amas</div><div id="sub"></div><div id="crumbs"><i></i><i></i><i></i><i></i></div></div>
+<div id="tools"><button id="zin" aria-label="Zoomer">+</button><button id="zout" aria-label="Dézoomer">−</button><button id="up" aria-label="Remonter" style="font-size:16px">⤴</button></div>
+<div id="hint"></div>
+<div id="tip"></div>
+<div id="flash"></div>
+<script type="module">
+import * as THREE from 'three';
+
+/* ───────────────────────── outils ───────────────────────── */
+const rng = (seed) => { let s = seed >>> 0; return () => { s = (s + 0x6D2B79F5) >>> 0; let t = s; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; };
+const clamp = (x, a, b) => Math.max(a, Math.min(b, x));
+const ease = (t) => t * t * (3 - 2 * t);
+const lerp = (a, b, t) => a + (b - a) * t;
+const V = (x, y, z) => new THREE.Vector3(x, y, z);
+const at = (o, p) => { o.position.copy(p); return o; };
+
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio || 1, 2));
+renderer.setSize(innerWidth, innerHeight);
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.1;
+document.body.prepend(renderer.domElement);
+const camera = new THREE.PerspectiveCamera(50, innerWidth / innerHeight, 0.05, 6000);
+addEventListener('resize', () => { renderer.setSize(innerWidth, innerHeight); camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); });
+
+function starfield(n, r, seed, size = 1.4) {
+  const R = rng(seed), p = new Float32Array(n * 3), c = new Float32Array(n * 3);
+  for (let i = 0; i < n; i++) {
+    const u = R() * 2 - 1, a = R() * Math.PI * 2, s = Math.sqrt(1 - u * u), d = r * (0.7 + R() * 0.3);
+    p.set([Math.cos(a) * s * d, u * d, Math.sin(a) * s * d], i * 3);
+    const w = 0.5 + R() * 0.5, tint = R();
+    c.set([w * (tint > .8 ? 1 : .85), w * .9, w * (tint < .3 ? 1 : .95)], i * 3);
+  }
+  const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(p, 3)); g.setAttribute('color', new THREE.BufferAttribute(c, 3));
+  return new THREE.Points(g, new THREE.PointsMaterial({ size, sizeAttenuation: false, vertexColors: true, transparent: true, opacity: .9, depthWrite: false }));
+}
+function glowTex(inner = 'rgba(255,255,255,1)', mid = 'rgba(255,200,120,.5)') {
+  const c = document.createElement('canvas'); c.width = c.height = 128; const x = c.getContext('2d');
+  const g = x.createRadialGradient(64, 64, 0, 64, 64, 64); g.addColorStop(0, inner); g.addColorStop(.25, mid); g.addColorStop(1, 'rgba(0,0,0,0)');
+  x.fillStyle = g; x.fillRect(0, 0, 128, 128); const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t;
+}
+function sprite(tex, scale, color = 0xffffff, opacity = 1) {
+  const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, color, transparent: true, opacity, depthWrite: false, blending: THREE.AdditiveBlending }));
+  s.scale.setScalar(scale); return s;
+}
+function label(text, color = '#cfe6ff') {
+  const c = document.createElement('canvas'), x = c.getContext('2d'); x.font = '600 34px -apple-system, system-ui, sans-serif';
+  const w = Math.ceil(x.measureText(text).width) + 24; c.width = w; c.height = 52;
+  x.font = '600 34px -apple-system, system-ui, sans-serif'; x.fillStyle = color; x.textBaseline = 'middle'; x.fillText(text, 12, 27);
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace;
+  const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: t, transparent: true, depthWrite: false, depthTest: false }));
+  s.scale.set(w / 52 * 1, 1, 1); s.userData.base = s.scale.clone(); return s;
+}
+// roche : un icosaèdre déformé
+function rockGeo(seed, detail = 1) {
+  const g = new THREE.IcosahedronGeometry(1, detail), p = g.attributes.position, R = rng(seed), v = new THREE.Vector3();
+  const k1 = V(R() * 2 - 1, R() * 2 - 1, R() * 2 - 1).normalize(), k2 = V(R() * 2 - 1, R() * 2 - 1, R() * 2 - 1).normalize();
+  for (let i = 0; i < p.count; i++) {
+    v.fromBufferAttribute(p, i);
+    const n = 1 + .28 * Math.sin(v.dot(k1) * 3.1 + R() * .4) + .16 * Math.sin(v.dot(k2) * 5.7) + (R() - .5) * .12;
+    v.multiplyScalar(n); v.y *= .78; p.setXYZ(i, v.x, v.y, v.z);
+  }
+  g.computeVertexNormals(); return g;
+}
+
+/* ───────────────────── niveau 0 : l'amas (sphère d'hexagones) ───────────────────── */
+const L0 = new THREE.Scene(); L0.background = new THREE.Color(0x02040a);
+L0.add(starfield(2500, 2600, 7, 1.3));
+L0.add(new THREE.HemisphereLight(0x7aa4d8, 0x05070c, .9));
+const SPH_R = 100, N_SYS = 362;
+const sysData = [];
+{
+  const R = rng(42), golden = Math.PI * (3 - Math.sqrt(5));
+  const hexGeo = new THREE.CircleGeometry(5.2, 6); hexGeo.rotateZ(Math.PI / 6);
+  const edgeGeo = new THREE.EdgesGeometry(hexGeo);
+  const group = new THREE.Group(); L0.add(group); L0.userData.group = group;
+  // coque très légère de l'amas
+  group.add(new THREE.Mesh(new THREE.SphereGeometry(SPH_R * .985, 64, 48), new THREE.MeshBasicMaterial({ color: 0x0b1a2c, transparent: true, opacity: .55, depthWrite: false, side: THREE.BackSide })));
+  const kinds = ['vide', 'vide', 'vide', 'connu', 'connu', 'echo', 'station'];
+  for (let i = 0; i < N_SYS; i++) {
+    const y = 1 - (i / (N_SYS - 1)) * 2, r = Math.sqrt(1 - y * y), th = golden * i;
+    const n = V(Math.cos(th) * r, y, Math.sin(th) * r), pos = n.clone().multiplyScalar(SPH_R);
+    let kind = kinds[Math.floor(R() * kinds.length)];
+    if (i === 180) kind = 'home';
+    const col = { vide: 0x1d3347, connu: 0x2f8fd0, echo: 0xa37dff, station: 0xffb066, home: 0xffd27a }[kind];
+    const fill = new THREE.Mesh(hexGeo, new THREE.MeshBasicMaterial({ color: col, transparent: true, opacity: kind === 'vide' ? .18 : .32, side: THREE.DoubleSide, depthWrite: false }));
+    const edge = new THREE.LineSegments(edgeGeo, new THREE.LineBasicMaterial({ color: col, transparent: true, opacity: kind === 'vide' ? .35 : .9 }));
+    const tile = new THREE.Group(); tile.add(fill, edge); tile.position.copy(pos); tile.lookAt(pos.clone().multiplyScalar(2));
+    if (kind !== 'vide') { const s = sprite(glowTex('rgba(255,255,255,1)', 'rgba(140,200,255,.5)'), kind === 'home' ? 9 : 5, col, .9); s.position.copy(n.clone().multiplyScalar(SPH_R + .6)); group.add(s); }
+    tile.userData = { i, kind, n, pos };
+    group.add(tile);
+    const name = `A-N-${1000 + Math.floor(R() * 9000)}`;
+    sysData.push({ i, kind, n, pos, tile, name: kind === 'home' ? 'A-N-6834 · ta planète' : name });
+  }
+  // routes et convois connus : arcs à la surface
+  const known = sysData.filter(s => s.kind !== 'vide');
+  for (let k = 0; k < 9; k++) {
+    const a = known[Math.floor(R() * known.length)], b = known[Math.floor(R() * known.length)];
+    if (a === b || a.pos.distanceTo(b.pos) > 90) continue;
+    const pts = []; for (let t = 0; t <= 1.0001; t += 1 / 40) pts.push(a.n.clone().lerp(b.n, t).normalize().multiplyScalar(SPH_R + 1.2));
+    const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), new THREE.LineDashedMaterial({ color: k % 3 ? 0xff9a6a : 0xffc864, dashSize: 2.2, gapSize: 1.6, transparent: true, opacity: .85 }));
+    line.computeLineDistances(); group.add(line);
+  }
+  // les autres amas, au loin
+  for (const [x, y, z, s, c] of [[-900, 260, -1500, 160, 0x6a4cff], [1300, -340, -1900, 220, 0x2fb0a0], [400, 700, 1800, 130, 0xff7a5a]]) {
+    const ball = new THREE.Mesh(new THREE.IcosahedronGeometry(s, 2), new THREE.MeshBasicMaterial({ color: c, wireframe: true, transparent: true, opacity: .16 }));
+    ball.position.set(x, y, z); L0.add(ball); L0.add(at(sprite(glowTex('rgba(255,255,255,.7)', 'rgba(160,140,255,.25)'), s * 2.2, c, .5), V(x, y, z)));
+    const lb = label('AUTRE AMAS', '#9a8cff'); lb.position.set(x, y - s - 40, z); lb.scale.multiplyScalar(26); L0.add(lb);
+  }
+}
+let focus0 = sysData[180];
+
+/* ───────────────────── niveau 1 : le système, vu de ta sonde ───────────────────── */
+const L1 = new THREE.Scene(); L1.background = new THREE.Color(0x01030a);
+L1.add(starfield(2200, 2400, 11, 1.2));
+L1.add(new THREE.AmbientLight(0x1a2638, 1.2));
+const sunDir = V(-0.6, 0.18, -1).normalize();
+const sunLight = new THREE.DirectionalLight(0xffe2b0, 2.4); sunLight.position.copy(sunDir.clone().multiplyScalar(100)); L1.add(sunLight);
+{ // le soleil : loin, c'est ce que la sonde voit
+  const sunPos = sunDir.clone().multiplyScalar(900);
+  L1.add(at(sprite(glowTex('rgba(255,255,240,1)', 'rgba(255,190,90,.6)'), 260, 0xffffff), sunPos));
+  L1.add(at(sprite(glowTex('rgba(255,220,160,.5)', 'rgba(255,140,60,.12)'), 900, 0xffaa66, .5), sunPos));
+}
+function probeModel() {
+  const g = new THREE.Group(), hull = new THREE.MeshStandardMaterial({ color: 0xb8c4cf, metalness: .7, roughness: .35 });
+  const panel = new THREE.MeshStandardMaterial({ color: 0x1b3f7a, metalness: .4, roughness: .3, emissive: 0x0a1a3a });
+  g.add(new THREE.Mesh(new THREE.CylinderGeometry(.6, .6, 1.4, 12), hull));
+  const dish = new THREE.Mesh(new THREE.SphereGeometry(.9, 20, 10, 0, Math.PI * 2, 0, Math.PI / 3.2), hull); dish.position.y = 1.1; g.add(dish);
+  for (const s of [-1, 1]) { const p = new THREE.Mesh(new THREE.BoxGeometry(2.6, .05, 1), panel); p.position.x = s * 2; g.add(p); }
+  const blink = sprite(glowTex('rgba(255,255,255,1)', 'rgba(127,208,255,.6)'), 1.6, 0x7fd0ff); blink.position.y = 1.6; g.add(blink); g.userData.blink = blink;
+  return g;
+}
+const probe = probeModel(); L1.add(probe);
+const sysObjs = [];
+{
+  const R = rng(5);
+  const mk = (kind, name, pos, obj, col) => { obj.position.copy(pos); L1.add(obj); const lb = label(name, col); lb.position.copy(pos).add(V(0, 4.5, 0)); lb.scale.multiplyScalar(1.1); L1.add(lb); sysObjs.push({ kind, name, pos, obj, lb }); };
+  // champ d'astéroïdes
+  const field = new THREE.Group(), rocks = new THREE.InstancedMesh(rockGeo(3, 1), new THREE.MeshStandardMaterial({ color: 0x8a8076, roughness: .95, metalness: .05 }), 160);
+  const m4 = new THREE.Matrix4(), q = new THREE.Quaternion();
+  for (let i = 0; i < 160; i++) { const a = R() * Math.PI * 2, d = 2 + R() * 7; m4.compose(V(Math.cos(a) * d, (R() - .5) * 2.2, Math.sin(a) * d * .7), q.setFromEuler(new THREE.Euler(R() * 3, R() * 3, R() * 3)), V(1, 1, 1).multiplyScalar(.15 + R() * .55)); rocks.setMatrixAt(i, m4); }
+  field.add(rocks); mk('asteroides', "CHAMP D'ASTÉROÏDES", V(26, -3, -18), field, '#ffd9a0');
+  // épave
+  const wreck = new THREE.Group(), dark = new THREE.MeshStandardMaterial({ color: 0x5b6670, metalness: .8, roughness: .5 });
+  const a = new THREE.Mesh(new THREE.BoxGeometry(5, 1.4, 1.6), dark); a.rotation.z = .25; wreck.add(a);
+  const b = new THREE.Mesh(new THREE.BoxGeometry(3, 1.2, 1.4), dark); b.position.set(4.2, -1.2, .6); b.rotation.set(.4, .3, -.6); wreck.add(b);
+  const fire = sprite(glowTex('rgba(255,240,220,1)', 'rgba(255,90,40,.6)'), 2.5, 0xff7a3a); fire.position.set(2.4, .2, .9); wreck.add(fire);
+  mk('epave', 'ÉPAVE · TANKER Σ-41', V(-22, 4, -26), wreck, '#ffb0a0');
+  // planètes
+  const pl = (c, r) => new THREE.Mesh(new THREE.SphereGeometry(r, 40, 24), new THREE.MeshStandardMaterial({ color: c, roughness: .8 }));
+  mk('planete', 'A-N-6834-02 · PLANÈTE LIBRE', V(-8, -6, 48), pl(0x6a8f6a, 4.2), '#bfe6c0');
+  mk('planete', 'A-N-6834-05 · GÉANTE GAZEUSE', V(60, 10, 30), pl(0xc9a06a, 7.5), '#ffe0b0');
+  // écho non résolu
+  const ico = new THREE.Mesh(new THREE.IcosahedronGeometry(1.6, 0), new THREE.MeshBasicMaterial({ color: 0xa37dff, wireframe: true }));
+  mk('signature', 'SIG-4F2 · ÉCHO MÉTALLIQUE', V(8, 12, -40), ico, '#cdb8ff');
+}
+let focus1 = sysObjs[0];
+
+/* ───────────────────── niveau 2 : l'objet (champ d'astéroïdes, épave) ───────────────────── */
+const L2 = new THREE.Scene(); L2.background = new THREE.Color(0x01030a);
+L2.add(starfield(2000, 2000, 23, 1.1));
+L2.add(new THREE.AmbientLight(0x1c2434, 1.1));
+const key2 = new THREE.DirectionalLight(0xffe2b0, 3); key2.position.copy(sunDir.clone().multiplyScalar(50)); L2.add(key2);
+const rim2 = new THREE.DirectionalLight(0x6aa8ff, 1.2); rim2.position.set(30, -10, 40); L2.add(rim2);
+L2.add(at(sprite(glowTex('rgba(255,255,240,1)', 'rgba(255,190,90,.6)'), 140), sunDir.clone().multiplyScalar(800)));
+const objFocus = [];
+{
+  const R = rng(77), field = new THREE.Group(); L2.add(field); L2.userData.field = field;
+  const geos = [0, 1, 2, 3, 4, 5].map(i => rockGeo(100 + i, 2));
+  const mats = [new THREE.MeshStandardMaterial({ color: 0x857a70, roughness: .95 }), new THREE.MeshStandardMaterial({ color: 0x6d6560, roughness: .9 }), new THREE.MeshStandardMaterial({ color: 0x9a8a74, roughness: .92 })];
+  const ore = new THREE.MeshStandardMaterial({ color: 0x5fe0ff, emissive: 0x1aa0d0, emissiveIntensity: 1.4, roughness: .2, metalness: .1 });
+  for (let i = 0; i < 260; i++) {
+    const rk = new THREE.Mesh(geos[i % geos.length], mats[i % 3]);
+    const a = R() * Math.PI * 2, d = 4 + Math.pow(R(), .7) * 46;
+    rk.position.set(Math.cos(a) * d, (R() - .5) * 9 * (1 - d / 70), Math.sin(a) * d * .8);
+    const s = i < 4 ? 3.2 + R() * 1.5 : .3 + Math.pow(R(), 2.4) * 2.6; rk.scale.setScalar(s);
+    rk.rotation.set(R() * 6, R() * 6, R() * 6); rk.userData.spin = V((R() - .5) * .2, (R() - .5) * .2, (R() - .5) * .2);
+    field.add(rk);
+    if (i < 4 || R() < .06) { // veines de minerai qui luisent
+      for (let k = 0; k < 4; k++) { const c = new THREE.Mesh(new THREE.OctahedronGeometry(.16, 0), ore); const dir = V(R() - .5, R() - .5, R() - .5).normalize(); c.position.copy(dir.multiplyScalar(.85)); c.scale.set(1, 1.8, 1); c.lookAt(dir.clone().multiplyScalar(3)); rk.add(c); }
+    }
+    if (i < 4) objFocus.push(rk);
+  }
+  // une épave prise dans le champ
+  const dark = new THREE.MeshStandardMaterial({ color: 0x4d5762, metalness: .85, roughness: .45 }), lit = new THREE.MeshBasicMaterial({ color: 0xffb070 });
+  const wreck = new THREE.Group(); wreck.position.set(-18, 3, 10); wreck.rotation.set(.3, .8, .4); field.add(wreck);
+  const body = new THREE.Mesh(new THREE.CylinderGeometry(1.6, 1.8, 10, 10, 1, true), dark); body.rotation.z = Math.PI / 2; wreck.add(body);
+  for (let k = 0; k < 6; k++) { const w = new THREE.Mesh(new THREE.BoxGeometry(.25, .12, .05), lit); w.position.set(-3.5 + k * 1.3, .9, 1.45); wreck.add(w); }
+  const broken = new THREE.Mesh(new THREE.CylinderGeometry(1.4, 1.6, 4, 10, 1, true), dark); broken.position.set(7.5, -2.5, 1); broken.rotation.set(.6, 0, 1.1); wreck.add(broken);
+  const spark = sprite(glowTex('rgba(255,250,230,1)', 'rgba(255,110,40,.6)'), 3.5, 0xff8a40); spark.position.set(5.2, 0, 0); wreck.add(spark); L2.userData.spark = spark;
+  for (let k = 0; k < 40; k++) { const d = new THREE.Mesh(new THREE.BoxGeometry(.3 + R() * .5, .05, .2 + R() * .4), dark); d.position.set(5 + R() * 9, (R() - .5) * 5, (R() - .5) * 5); d.rotation.set(R() * 6, R() * 6, R() * 6); d.userData.spin = V(R() * .5, R() * .5, 0); wreck.add(d); }
+  objFocus.push(wreck);
+}
+let focus2 = objFocus[0];
+
+/* ───────────────────── niveau 3 : le mur quantique (pixel battle) ───────────────────── */
+const L3 = new THREE.Scene(); L3.background = new THREE.Color(0x05030c);
+const WALL = 1000;
+const wallCanvas = document.createElement('canvas'); wallCanvas.width = wallCanvas.height = WALL;
+{
+  const x = wallCanvas.getContext('2d'), R = rng(2026);
+  x.fillStyle = '#0b0a14'; x.fillRect(0, 0, WALL, WALL);
+  const pal = ['#ff4f40', '#ffb066', '#ffd27a', '#7fd0ff', '#2f8fd0', '#a37dff', '#5fcc8a', '#ffffff', '#ff7ab8', '#222034', '#e8e0c8'];
+  for (let k = 0; k < 900; k++) { // blocs achetés : du pixel art de démo
+    const w = 4 + Math.floor(Math.pow(R(), 2.2) * 70), h = 4 + Math.floor(Math.pow(R(), 2.2) * 70);
+    const px = Math.floor(R() * (WALL - w)), py = Math.floor(R() * (WALL - h));
+    if (R() < .25) continue;
+    const base = pal[Math.floor(R() * pal.length)]; x.fillStyle = base; x.fillRect(px, py, w, h);
+    const motif = Math.floor(R() * 4);
+    for (let yy = 0; yy < h; yy++) for (let xx = 0; xx < w; xx++) {
+      let on = false;
+      if (motif === 0) on = ((xx >> 1) + (yy >> 1)) % 2 === 0;
+      else if (motif === 1) on = Math.hypot(xx - w / 2, yy - h / 2) < Math.min(w, h) / 3;
+      else if (motif === 2) on = yy % 3 === 0 || xx % 5 === 0;
+      else on = R() < .3;
+      if (on) { x.fillStyle = pal[(k + motif + 3) % pal.length]; x.fillRect(px + xx, py + yy, 1, 1); }
+    }
+  }
+  x.fillStyle = '#ffd27a'; x.font = 'bold 54px monospace'; x.fillText('STARBYTE', 380, 520);
+  x.fillStyle = '#7fd0ff'; x.font = 'bold 22px monospace'; x.fillText('ESPACE LIBRE · 1 CHF', 404, 552);
+}
+const wallTex = new THREE.CanvasTexture(wallCanvas); wallTex.magFilter = THREE.NearestFilter; wallTex.minFilter = THREE.LinearMipmapLinearFilter; wallTex.colorSpace = THREE.SRGBColorSpace;
+const wallMat = new THREE.ShaderMaterial({
+  uniforms: { map: { value: wallTex }, uGrid: { value: 0 } },
+  vertexShader: 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }',
+  fragmentShader: `uniform sampler2D map; uniform float uGrid; varying vec2 vUv;
+    void main(){ vec4 c = texture2D(map, vUv); vec2 g = fract(vUv * ${WALL}.0); float e = max(step(.94, g.x), step(.94, g.y));
+      vec3 col = mix(c.rgb, c.rgb * .55 + vec3(.05,.08,.12), e * uGrid); gl_FragColor = vec4(col, 1.0); }`
+});
+const wall = new THREE.Mesh(new THREE.PlaneGeometry(100, 100), wallMat); L3.add(wall);
+L3.add(starfield(1200, 1500, 31, 1));
+const wallFrame = new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.PlaneGeometry(100.6, 100.6)), new THREE.LineBasicMaterial({ color: 0x7fd0ff, transparent: true, opacity: .6 })); L3.add(wallFrame);
+let focus3 = V(0, 2, 0);   // le point du mur visé
+
+/* ───────────────────── zoom continu : profondeur D ───────────────────── */
+const LEVELS = [
+  { name: 'Amas', scene: L0, hint: 'Pince ou molette pour zoomer · glisse pour tourner · touche un système pour le viser' },
+  { name: 'Système', scene: L1, hint: 'Tu es ta sonde, au centre du système · touche un objet puis zoome pour plonger' },
+  { name: 'Objet', scene: L2, hint: 'Zoome encore : sous la matière, le mur quantique' },
+  { name: 'Quantique', scene: L3, hint: 'Le mur commun à tous les commandants · 1 000 000 d’espaces à 1 CHF · touche un espace' },
+];
+let D = 0.12, Dt = 0.12;   // profondeur courante et visée (niveau = partie entière)
+let yaw = 0, pitch = 0.15, yawT = 0, pitchT = 0.15;
+
+function setTarget(d) { Dt = clamp(d, 0, LEVELS.length - 0.02); }
+addEventListener('wheel', (e) => { e.preventDefault(); setTarget(Dt - e.deltaY * 0.0012); }, { passive: false });
+document.getElementById('zin').onclick = () => setTarget(Dt + 0.35);
+document.getElementById('zout').onclick = () => setTarget(Dt - 0.35);
+document.getElementById('up').onclick = () => setTarget(Math.floor(Dt) - 0.35 < 0 ? 0.05 : Math.floor(Dt) - 0.3);
+
+// gestes : glisser = tourner ; pincer = zoomer ; toucher = viser
+const ptrs = new Map(); let pinch0 = 0, dragMoved = 0;
+renderer.domElement.addEventListener('pointerdown', (e) => { renderer.domElement.setPointerCapture(e.pointerId); ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY }); dragMoved = 0; if (ptrs.size === 2) { const [a, b] = [...ptrs.values()]; pinch0 = Math.hypot(a.x - b.x, a.y - b.y); } });
+renderer.domElement.addEventListener('pointermove', (e) => {
+  const p = ptrs.get(e.pointerId);
+  if (!p) { hover(e); return; }
+  if (ptrs.size === 1) { const dx = e.clientX - p.x, dy = e.clientY - p.y; dragMoved += Math.abs(dx) + Math.abs(dy); yawT -= dx * 0.005; pitchT = clamp(pitchT + dy * 0.004, -1.2, 1.2); }
+  p.x = e.clientX; p.y = e.clientY;
+  if (ptrs.size === 2) { const [a, b] = [...ptrs.values()]; const d = Math.hypot(a.x - b.x, a.y - b.y); if (pinch0) setTarget(Dt + Math.log(d / pinch0) * 0.9); pinch0 = d; dragMoved = 99; }
+});
+const endPtr = (e) => { const was = ptrs.get(e.pointerId); ptrs.delete(e.pointerId); if (ptrs.size < 2) pinch0 = 0; if (was && dragMoved < 8 && ptrs.size === 0) pick(e); };
+renderer.domElement.addEventListener('pointerup', endPtr); renderer.domElement.addEventListener('pointercancel', endPtr);
+
+const ray = new THREE.Raycaster(), ndc = new THREE.Vector2(), tip = document.getElementById('tip');
+function castAt(e) { ndc.set(e.clientX / innerWidth * 2 - 1, -(e.clientY / innerHeight) * 2 + 1); ray.setFromCamera(ndc, camera); }
+function pick(e) {
+  castAt(e); const lv = Math.floor(D);
+  if (lv === 0) { const hit = ray.intersectObjects(sysData.map(s => s.tile), true)[0]; if (hit) { let o = hit.object; while (o && o.userData.i === undefined) o = o.parent; if (o) { focus0 = sysData[o.userData.i]; aimAt(focus0.n); } } }
+  else if (lv === 1) { const hit = ray.intersectObjects(sysObjs.map(s => s.obj), true)[0]; if (hit) { let o = hit.object; const s = sysObjs.find(x => { let p = o; while (p) { if (p === x.obj) return true; p = p.parent; } return false; }); if (s) { focus1 = s; } } }
+  else if (lv === 2) { const hit = ray.intersectObjects(objFocus, true)[0]; if (hit) { let o = hit.object; while (o && !objFocus.includes(o)) o = o.parent; if (o) focus2 = o; } }
+  else { const hit = ray.intersectObject(wall)[0]; if (hit) { focus3 = hit.point.clone(); showTip(e, hit.uv); } }
+}
+function hover(e) {
+  if (Math.floor(D) !== 3) { tip.style.display = 'none'; return; }
+  castAt(e); const hit = ray.intersectObject(wall)[0]; if (hit) showTip(e, hit.uv); else tip.style.display = 'none';
+}
+function showTip(e, uv) {
+  const x = Math.floor(uv.x * WALL), y = Math.floor((1 - uv.y) * WALL);
+  const px = wallCanvas.getContext('2d').getImageData(x, y, 1, 1).data; const free = px[0] === 11 && px[1] === 10 && px[2] === 20;
+  tip.innerHTML = `Espace <b>${x} · ${y}</b> — ${free ? '<span style="color:#7fd0ff">libre · 1 CHF</span>' : '<span style="color:#ffb066">déjà tagué</span>'}`;
+  tip.style.display = 'block'; tip.style.left = Math.min(innerWidth - 200, e.clientX + 14) + 'px'; tip.style.top = (e.clientY - 34) + 'px';
+}
+function aimAt(n) { // fait tourner l'amas pour amener le système visé face à la caméra
+  const sph = new THREE.Spherical().setFromVector3(n); yawT = sph.theta; pitchT = clamp(Math.PI / 2 - sph.phi, -1.2, 1.2);
+}
+aimAt(focus0.n); yaw = yawT; pitch = pitchT;
+
+/* ───────────────────── caméra par niveau ───────────────────── */
+function orbitDir(y, p) { return V(Math.sin(y) * Math.cos(p), Math.sin(p), Math.cos(y) * Math.cos(p)); }
+const tmp = new THREE.Vector3();
+function placeCamera(lv, t) {
+  const e = ease(t);
+  if (lv === 0) {
+    // de loin : tout l'amas ; en plongeant : jusqu'au système visé
+    const dir = orbitDir(yaw, pitch);
+    const dist = lerp(380, SPH_R + 1.5, Math.pow(e, 1.4));
+    camera.position.copy(dir).multiplyScalar(dist);
+    const look = focus0.pos.clone().multiplyScalar(Math.pow(e, 2)); camera.lookAt(look);
+    camera.up.set(0, 1, 0);
+  } else if (lv === 1) {
+    // derrière la sonde, regard vers l'objet visé ; en plongeant, on fonce dessus
+    const tgt = focus1.pos, d = tgt.clone().normalize();
+    const side = orbitDir(yaw * .5, pitch * .4);
+    const start = d.clone().multiplyScalar(-13).add(side.clone().multiplyScalar(5)).add(V(0, 2.5, 0));
+    const end = tgt.clone().sub(d.clone().multiplyScalar(5 + (focus1.kind === 'planete' ? 9 : 3)));
+    camera.position.lerpVectors(start, end, Math.pow(e, 1.6));
+    camera.lookAt(tmp.lerpVectors(V(0, 0, 0).add(d.clone().multiplyScalar(8)), tgt, Math.min(1, e * 1.6)));
+  } else if (lv === 2) {
+    const c = focus2.getWorldPosition(new THREE.Vector3()), dir = orbitDir(yaw, pitch);
+    const r = (focus2.scale.x || 1) * (focus2.isGroup ? 6 : 1.4);
+    camera.position.copy(c).add(dir.multiplyScalar(lerp(95, r * 1.7 + 1, Math.pow(e, 1.5))));
+    camera.lookAt(tmp.lerpVectors(V(0, 0, 0), c, Math.min(1, e * 2)));
+  } else {
+    const dir = orbitDir(yaw * .25, pitch * .25);
+    const dist = lerp(160, 1.6, Math.pow(e, 1.8));
+    camera.position.copy(focus3).add(V(dir.x * dist * .25, dir.y * dist * .25, dist));
+    camera.lookAt(focus3);
+    wallMat.uniforms.uGrid.value = clamp((e - .55) / .3, 0, 1);
+  }
+}
+
+/* ───────────────────── boucle ───────────────────── */
+const flash = document.getElementById('flash'), lvlEl = document.getElementById('lvl'), subEl = document.getElementById('sub'), hintEl = document.getElementById('hint'), crumbs = [...document.querySelectorAll('#crumbs i')];
+let lastLv = -1, clock = new THREE.Clock();
+function frame() {
+  const dt = Math.min(clock.getDelta(), .05), time = clock.elapsedTime;
+  D += (Dt - D) * (1 - Math.exp(-dt * 5));
+  yaw += (yawT - yaw) * (1 - Math.exp(-dt * 6)); pitch += (pitchT - pitch) * (1 - Math.exp(-dt * 6));
+  const lv = clamp(Math.floor(D), 0, LEVELS.length - 1), t = D - lv;
+  if (lv !== lastLv) {
+    lastLv = lv; lvlEl.textContent = LEVELS[lv].name; hintEl.textContent = LEVELS[lv].hint;
+    crumbs.forEach((c, i) => c.classList.toggle('on', i <= lv));
+    if (lv === 1) { yawT = yaw = 0; pitchT = pitch = .1; }
+    if (lv === 2) { yawT = yaw = .6; pitchT = pitch = .25; }
+    if (lv === 3) { yawT = yaw = 0; pitchT = pitch = 0; }
+    if (lv === 0) aimAt(focus0.n);
+  }
+  subEl.textContent = lv === 0 ? focus0.name : lv === 1 ? focus1.name : lv === 2 ? (focus2.isGroup ? 'Épave · Tanker Σ-41' : 'Astéroïde · minerai cristallin') : 'Mur quantique · ' + WALL + ' × ' + WALL;
+  // passage d'un niveau à l'autre : un éclair au moment où l'on traverse la matière
+  const edge = Math.min(t, 1 - t); flash.style.opacity = String(clamp(1 - edge / .07, 0, 1) * (D > .1 ? .95 : 0));
+  camera.fov = 50 + 22 * Math.pow(clamp((t - .82) / .18, 0, 1), 2); camera.updateProjectionMatrix();   // effet tunnel avant de traverser
+  placeCamera(lv, t);
+  // animations
+  probe.rotation.y = time * .3; probe.userData.blink.material.opacity = .4 + .6 * (Math.sin(time * 4) > .6 ? 1 : 0);
+  for (const s of sysObjs) { if (s.kind === 'signature') { s.obj.rotation.y = time * .6; s.obj.rotation.x = time * .3; } if (s.kind === 'asteroides') s.obj.rotation.y = time * .05; s.lb.material.opacity = clamp(1 - t * 1.4, 0, 1); }
+  if (lv === 2) { L2.userData.field.children.forEach(c => { if (c.userData.spin) { c.rotation.x += c.userData.spin.x * dt; c.rotation.y += c.userData.spin.y * dt; } }); L2.userData.spark.material.opacity = .5 + .5 * Math.abs(Math.sin(time * 9)); }
+  if (lv === 0) L0.userData.group.rotation.y = 0;
+  renderer.render(LEVELS[lv].scene, camera);
+  requestAnimationFrame(frame);
+}
+hintEl.textContent = LEVELS[0].hint;
+window.__lab = { go(d) { D = Dt = d; }, get D() { return D; } };   // tests
+frame();
+</script>
+</body>
+</html>
