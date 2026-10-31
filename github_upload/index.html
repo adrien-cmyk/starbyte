@@ -6345,6 +6345,7 @@ const BUILDINGS = {
   silo_energie:  { name:'Silo Énergie',  icon:'◓', color:'var(--amber)',  family:'Stockage', cost:{metal:600,energie:200},      prod:{},  prodLbl:'capacité énergie +5k',  desc:'Stockage d\'énergie', kind:'silo', silo:{ res:'energie',  cap:5000 } },
   silo_cristal:  { name:'Silo Cristal',  icon:'◓', color:'var(--cyan)',   family:'Stockage', cost:{metal:1500,energie:400},     prod:{},  prodLbl:'capacité cristal +2k',  desc:'Stockage de cristal', kind:'silo', silo:{ res:'cristal',  cap:2000 } },
   silo_biomass:  { name:'Silo Biomasse', icon:'◓', color:'var(--green)',  family:'Stockage', cost:{metal:500,energie:200},      prod:{},  prodLbl:'capacité biomasse +5k', desc:'Stockage de biomasse', kind:'silo', silo:{ res:'biomass',  cap:5000 } },
+  silo_fuel:     { name:'Silo Carburant', icon:'◓', color:'#7aaadc',      family:'Stockage', cost:{metal:800,energie:300},      prod:{},  prodLbl:'capacité carburant +3k', desc:'Réservoir de carburant', kind:'silo', silo:{ res:'fuel', cap:3000 } },   // 31/10 (Adrien)
   silo_artefact: { name:'Silo Artefact', icon:'◓', color:'#a370ff',       family:'Stockage', cost:{cristal:3000},               prod:{},  prodLbl:'capacité artefact +50', desc:'Coffre sécurisé d\'artefacts', kind:'silo', silo:{ res:'artefact', cap:50 } },
   // ─── Raffinerie (18/05) — produit du carburant pour tankers (commerce + exploration) ───
   // Consomme de l'énergie pour produire du carburant (3 énergie → 1 carburant).
@@ -6420,6 +6421,11 @@ const BUILDING_TIERS = {
     2: { name:'Dépôt renforcé Biomasse', siloCap:20000,  cost:{metal:2500, energie:1500},            duration:2880,  desc:'Bio-cuves stabilisées' },
     3: { name:'Silo orbital Biomasse',   siloCap:100000, cost:{metal:12000, energie:4500, cristal:1000}, duration:10080, desc:'Sphère vivante' },
   },
+  silo_fuel: {   // 31/10 (Adrien) : « on n'a pas de silo à carburant »
+    1: { name:'Silo Carburant',            siloCap:3000,  cost:{metal:800, energie:300},               duration:0,     desc:'Cuves pressurisées' },
+    2: { name:'Réservoir renforcé',        siloCap:12000, cost:{metal:4000, energie:1500},             duration:2880,  desc:'Cuves cryogéniques' },
+    3: { name:'Dépôt orbital de carburant',siloCap:50000, cost:{metal:18000, energie:6000, cristal:1200}, duration:10080, desc:'Anneau de stockage en orbite' },
+  },
   silo_artefact: {
     1: { name:'Silo Artefact',          siloCap:50,   cost:{cristal:3000},                          duration:0,    desc:'Coffre blindé' },
     2: { name:'Vault scellé Artefact',  siloCap:200,  cost:{cristal:15000, artefact:5},             duration:2880,  desc:'Champ de stase' },
@@ -6488,6 +6494,7 @@ const BTN_LABELS = {
   silo_energie:  { primary:'Améliorer', ghost:'Détails' },
   silo_cristal:  { primary:'Améliorer', ghost:'Détails' },
   silo_biomass:  { primary:'Améliorer', ghost:'Détails' },
+  silo_fuel:     { primary:'Améliorer', ghost:'Détails' },
   silo_artefact: { primary:'Améliorer', ghost:'Détails' },
 };
 
@@ -6661,6 +6668,7 @@ const PNG_ILLUSTRATIONS = {
   silo_energie:    'illustrations/silo_energie.png',
   silo_cristal:    'illustrations/silo_cristal.png',
   silo_biomass:    'illustrations/silo_biomass.png',
+  silo_fuel:       'illustrations/silo_energie.png',
   silo_artefact:   'illustrations/silo_artefact.png',
   // Points de rencontre dans l'espace (docks, comptoirs francs)
   dock:            'illustrations/dock.png',
@@ -7200,6 +7208,7 @@ const ST = {
   silo_energie:  { fill:'url(#gCentrale)', stroke:'#a07820', sw:1.4, label:'SILO ÉNERGIE',  badge:'#ffc060' },
   silo_cristal:  { fill:'url(#gLab)',      stroke:'#1a7888', sw:1.4, label:'SILO CRISTAL',  badge:'#5fffe8' },
   silo_biomass:  { fill:'url(#gMine)',     stroke:'#3a7820', sw:1.4, label:'SILO BIOMASSE', badge:'#7ed080' },
+  silo_fuel:     { fill:'url(#gMine)',     stroke:'#3a6a90', sw:1.4, label:'SILO CARBURANT', badge:'#7aaadc' },
   silo_artefact: { fill:'url(#gCentrale)', stroke:'#a370ff', sw:1.4, label:'SILO ARTEFACT', badge:'#a370ff' },
 };
 
@@ -7227,6 +7236,7 @@ const ICON = {
   silo_energie:  SILO_EGG_SHAPE,
   silo_cristal:  SILO_EGG_SHAPE,
   silo_biomass:  SILO_EGG_SHAPE,
+  silo_fuel:     SILO_EGG_SHAPE,
   silo_artefact: SILO_EGG_SHAPE,
 };
 
@@ -8073,6 +8083,7 @@ const TECH_TREE = [
       { id: 'mine-t3', kind: 'building', name: 'Extracteur lourd', sub: 'Production de métal ×16.', flow: '→ permet l\'auto-suffisance en métal en endgame', requires: 'metal:5000 + énergie:1000 + cristal:200', buildingKey: 'mine', tier: 3 },
       { id: 'silo-metal', kind: 'building', name: 'Silo Métal', sub: 'Augmente la capacité de stockage métal de +5000.', flow: '→ requis avant que tes stocks ne se remplissent', requires: 'metal:600', buildingKey: 'silo_metal', tier: 1 },
       { id: 'silo-biomass', kind: 'building', name: 'Silo Biomasse', sub: 'Stockage de biomasse (ressource organique).', flow: '→ augmente ta capacité de biomasse', requires: 'metal:500 + énergie:200', buildingKey: 'silo_biomass', tier: 1 },
+      { id: 'silo-fuel', kind: 'building', name: 'Silo Carburant', sub: 'Réservoir de carburant (commun à l\'empire).', flow: '→ augmente ta réserve de carburant', requires: 'metal:800 + énergie:300', buildingKey: 'silo_fuel', tier: 1 },
     ],
   },
   {
@@ -31448,7 +31459,7 @@ function doBuild(key, idx) {
 // Durées de construction T1 (minutes) — courtes : le joueur doit voir finir sa première mine dans sa session
 const BUILD_TIME_MIN = {
   mine: 2, centrale: 3, labo: 4, comptoir: 4, raffinerie: 5, caserne: 6, turret: 8, shipyard: 10,
-  silo_metal: 3, silo_energie: 3, silo_cristal: 3, silo_biomass: 3, silo_artefact: 3,
+  silo_metal: 3, silo_energie: 3, silo_cristal: 3, silo_biomass: 3, silo_artefact: 3, silo_fuel: 3,
 };
 
 // Fin de chantier : le bâtiment devient réel (production, familles, niveau de planète, moment 7…)
@@ -42036,7 +42047,12 @@ function getFuelCap() {
       if (tierData?.fuelCap && tierData.fuelCap > maxCap) maxCap = tierData.fuelCap;
     }
   }
-  return maxCap;
+  // 31/10 — les silos à carburant (de toutes mes planètes) s'ajoutent à la réserve
+  let silos = 0;
+  for (const parcel of (typeof sbAllParcels === 'function' ? sbAllParcels() : G.planet.parcels)) {
+    if (parcel?.building === 'silo_fuel' && parcel.state === 'built') silos += (BUILDING_TIERS.silo_fuel[parcel.lvl || 1] || {}).siloCap || 3000;
+  }
+  return maxCap + silos;
 }
 
 // Tick de production carburant — appelé toutes les 10s par la passive loop
@@ -47699,6 +47715,8 @@ function renderCommerceMarche() {
             <span style="color:${deltaColor};margin-left:6px;font-size:9px">(${deltaSign}${deltaPct}%)</span>
           </div>
         </div>
+        ${k === 'fuel' && remainingCap < 10 ? `<div style="font-size:10px;color:#ff9a7a;margin-top:2px">Réserve pleine (${fmt(cap)}) : construis un Silo Carburant ou améliore ta Raffinerie pour en stocker plus.</div>` : ''}
+        ${credits < price * 10 ? `<div style="font-size:10px;color:var(--mut);margin-top:2px">Il te faut des crédits (CG) : vends des ressources ou construis un Comptoir.</div>` : ''}
         <div style="display:flex;gap:4px;margin-top:8px">
           ${[10, 50, 100, 500].map(q => {
             const cost = price * q;
@@ -49137,6 +49155,7 @@ var BUILDING_GUIDE = {
   silo_metal: { lead: 'Plus de place pour ton métal.', how: 'Augmente ta capacité de métal de +5000. Au plafond, la production et les gains de match-3 sont perdus.', unlocks: ['Des stocks assez grands pour les gros chantiers'], tip: 'Quand ta jauge de métal plafonne, c\'est le moment.' },
   silo_energie: { lead: 'Plus de place pour ton énergie.', how: 'Augmente ta capacité d\'énergie de +5000. Au plafond, l\'énergie produite se perd.', unlocks: ['Des réserves pour les missions et la raffinerie'], tip: 'Utile dès que tu as plusieurs centrales.' },
   silo_cristal: { lead: 'Plus de place pour ton cristal.', how: 'Augmente ta capacité de cristal de +2000.', unlocks: ['Des réserves pour les sondes en série et les tiers 3'], tip: 'Le cristal est rare : ne le laisse pas déborder.' },
+  silo_fuel: { lead: 'Réservoir de carburant pour tes tankers et tes flottes.', how: 'Augmente ta réserve de carburant (+3 000, puis 12 000 et 50 000 aux niveaux suivants). Le carburant est commun à tout l\'empire.', unlocks: ['Plus de carburant en réserve', 'Plus d\'achats de carburant au marché'], tip: 'La Raffinerie produit le carburant ; le silo le garde.' },
   silo_biomass: { lead: 'Stockage de biomasse (ressource organique).', how: 'Augmente ta capacité de biomasse de +5000.', unlocks: ['Des réserves de biomasse'], tip: 'Coûte 500 métal et 200 énergie. Se construit sur n’importe quelle planète.' },
   silo_artefact: { lead: 'Le coffre sécurisé des artefacts.', how: 'Augmente ta capacité d\'artefacts de +50.', unlocks: ['De la place pour les artefacts rares'], tip: 'Pour plus tard, quand l\'exploration rapporte des artefacts.' },
 };
@@ -49493,7 +49512,7 @@ if (G.knownTargets && Array.isArray(G.tankerMissions)) {
 
 </script>
 <!-- PLANET3D — carte 3D + boucle antenne (source : sb-build/src/planet3d.js) -->
-<script type="module" src="assets/planet3d.js?v=20261021-1200"></script>
+<script type="module" src="assets/planet3d.js?v=20261031-1440"></script>
 <!-- PATCH_2010_CIEL — la planète suit l\'heure réelle : nuit bleue / jour d\'aube chaude -->
 <script src="assets/sky.js?v=20261021-1850"></script>
 <!-- PATCH_2010_TERRAIN — planète-jardin continue : sol, eau, forêt et rails jointifs (assets/terrain.js ; variante désert archivée : terrain_desert.js, non chargée) -->
