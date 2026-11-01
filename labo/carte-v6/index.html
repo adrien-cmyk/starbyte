@@ -183,24 +183,26 @@ function makeSystem(it) {
   if (it.port && it.bodies && !it.bodies.some(b => b[0] === 'station')) it.bodies = [['station', String(it.port.name || 'Station').toUpperCase() + ' · STATION', '#ffcf96']].concat(it.bodies.filter(b => b[1] !== 'AUCUNE SIGNATURE CONNUE'));
   const n = it.bodies ? it.bodies.length : it.home ? 6 : 3 + Math.floor(R() * 4);
   for (let i = 0; i < n; i++) {
-    const [kind, nm, col] = it.bodies ? it.bodies[i] : kinds[(i + Math.floor(R() * 2)) % kinds.length], rad = 40 + i * 26 + R() * 10, ang = R() * Math.PI * 2, spd = .05 / Math.sqrt(rad / 40) * (R() < .5 ? 1 : .8);
+    const [kind, nm, col, ex] = it.bodies ? it.bodies[i] : kinds[(i + Math.floor(R() * 2)) % kinds.length], rad = 78 + i * 46 + R() * 14, ang = R() * Math.PI * 2, spd = .016 / Math.sqrt(rad / 78) * (R() < .5 ? 1 : .8);
     const ring = new THREE.Mesh(new THREE.RingGeometry(rad - .15, rad + .15, 160), new THREE.MeshBasicMaterial({ color: 0x5a7a9a, transparent: true, opacity: .28, side: THREE.DoubleSide, depthWrite: false }));
     ring.rotation.x = -Math.PI / 2; S.add(ring);
     const g = new THREE.Group();
-    if (kind === 'station') { const hx = new THREE.Mesh(new THREE.RingGeometry(4.2, 5, 6), new THREE.MeshBasicMaterial({ color: 0xffb066, side: THREE.DoubleSide, transparent: true, opacity: .95 })); hx.rotation.x = -Math.PI / 2; g.add(hx); g.add(spr(glow('rgba(255,240,220,1)', 'rgba(255,170,90,.5)'), 7, 0xffc890)); g.userData.spin = hx; }
+    if (kind === 'station') { const hx = new THREE.Mesh(new THREE.RingGeometry(9, 9.5, 6), new THREE.MeshBasicMaterial({ color: 0xffb066, side: THREE.DoubleSide, transparent: true, opacity: .55 })); hx.rotation.x = -Math.PI / 2; g.add(hx);
+      const hold = new THREE.Group(); g.add(hold); g.userData.spin = hold; if (!S.environment) try { import('three/addons/environments/RoomEnvironment.js').then(({ RoomEnvironment }) => { const pm = new THREE.PMREMGenerator(renderer); S.environment = pm.fromScene(new RoomEnvironment(), .04).texture; }); } catch (e) {}
+      loadGLB(glbFor(it.port)).then(gl => { const m = gl.scene.clone(true), box = new THREE.Box3().setFromObject(m), sz = box.getSize(new THREE.Vector3()), c = box.getCenter(new THREE.Vector3()), k = 11 / Math.max(sz.x, sz.y, sz.z); m.scale.setScalar(k); m.position.sub(c.multiplyScalar(k)); hold.add(m); }).catch(() => hold.add(spr(glow('rgba(255,240,220,1)', 'rgba(255,170,90,.5)'), 7, 0xffc890))); }
     else if (kind === 'signature') { const ico = new THREE.Mesh(new THREE.IcosahedronGeometry(2.4, 0), new THREE.MeshBasicMaterial({ color: 0xa37dff, wireframe: true })); g.add(ico); g.userData.spin = ico; }
     else if (kind === 'planete') { const s = nm.startsWith('GÉANTE') ? 6 : 3.6; g.add(new THREE.Mesh(new THREE.SphereGeometry(s, 32, 20), new THREE.MeshStandardMaterial({ color: s > 5 ? 0xc9a06a : 0x6a8f6a, roughness: .8 }))); }
     else if (kind === 'asteroides') { const im = new THREE.InstancedMesh(rockGeo(it.seed + i, 1), new THREE.MeshStandardMaterial({ color: 0x8a8076, roughness: .95 }), 60); const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(); for (let k = 0; k < 60; k++) { const a = R() * 6.28, d = R() * 6; m4.compose(V(Math.cos(a) * d, (R() - .5) * 1.5, Math.sin(a) * d), q.setFromEuler(new THREE.Euler(R() * 3, R() * 3, R() * 3)), V(1, 1, 1).multiplyScalar(.2 + R() * .6)); im.setMatrixAt(k, m4); } g.add(im); }
     else { const m = new THREE.MeshStandardMaterial({ color: 0x5b6670, metalness: .8, roughness: .5 }); const a = new THREE.Mesh(new THREE.BoxGeometry(4.5, 1.2, 1.4), m); a.rotation.z = .25; g.add(a); const b = new THREE.Mesh(new THREE.BoxGeometry(2.4, 1, 1.2), m); b.position.set(3.6, -1, .6); b.rotation.set(.4, .3, -.7); g.add(b); g.add(at(spr(glow('rgba(255,240,220,1)', 'rgba(255,90,40,.6)'), 2.2, 0xff7a3a), 2, .2, .9)); }
     const lb = label(nm, col, 1.8); lb.position.set(0, 4.5, 0); g.add(lb);
     S.add(g);
-    const o = { kind, name: nm, rad, ang, spd, obj: g, r: 8, seed: it.seed + i * 977, port: kind === 'station' ? it.port : null, key: it.key };
+    const o = { kind, name: nm, rad, ang, spd, obj: g, r: 8, seed: it.seed + i * 977, port: kind === 'station' ? it.port : null, key: it.key, ex: ex || null };
     orbiters.push(o); items.push(o);
   }
   const place = () => { for (const o of orbiters) { o.x = Math.cos(o.ang) * o.rad; o.z = Math.sin(o.ang) * o.rad; o.obj.position.set(o.x, 0, o.z); } };
   place();
   return {
-    key: 'sys:' + it.name + (it.bodies ? ':r' : ''), scene: S, unit: 3e9, hMin: 7, hMax: 520, h0: 380, bounds: 260, title: 'Système ' + it.name.split(' ·')[0], kind: 'systeme',
+    key: 'sys:' + it.name + (it.bodies ? ':r' : ''), scene: S, unit: 3e9, hMin: 7, hMax: 900, h0: 560, bounds: 460, title: 'Système ' + it.name.split(' ·')[0], kind: 'systeme',
     hint: 'Le soleil au centre, les signatures en orbite · zoome vers une signature pour la rejoindre, ou au hasard pour plonger dans le vide',
     items, update(t, h, dt) { sun.userData.tick(t); for (const o of orbiters) { o.ang += o.spd * dt; if (o.obj.userData.spin) { o.obj.userData.spin.rotation.y = t * .6; o.obj.userData.spin.rotation.x = t * .3; } } place(); },
   };
@@ -307,6 +309,7 @@ function childOf(plan, wx, wz) {
     for (const it of plan.items) { const d = Math.hypot(it.x - wx, it.z - wz); if (d < it.r * 1.6 && d < nd) { nd = d; near = it; } }
     const c = near ? near.cell : cell;
     if (c < 0 && !near) return { plan: getPlan('vide:far' + Math.round(wx / 200) + Math.round(wz / 200), () => makeVoid(hash('far' + Math.round(wx / 200) + Math.round(wz / 200)))), via: 'vide' };
+    if (near && (near.home || near.colony)) { const b = { name: near.home ? near.homeName : near.colony, ex: { mine: near.home ? 'home' : 'colony', name: near.home ? near.homeName : near.colony }, seed: near.seed }; return { plan: getPlan('w:mine:' + near.key, () => makeWorld(b)), via: b.name }; }
     if (near && near.kind === 'system') return { plan: getPlan('sys:' + near.key + ':r', () => makeSystem(Object.assign({}, near, { name: near.key }))), via: near.key };
     return { plan: getPlan('nb:' + c + ':' + (near ? near.key : ''), () => makeNeighborhood(c, near)), via: near ? near.key : 'région' };
   }
@@ -323,9 +326,9 @@ function childOf(plan, wx, wz) {
     if (o.kind === 'balise') return { plan: getPlan('bal:' + o.key, () => makeBeacon(o)), via: 'balise' };
     return { plan: getPlan('form:' + o.kind + ':' + o.name + ':' + (o.seen || ''), () => makeFormation(o)), via: o.name }; }
   if (plan.kind === 'formation' || plan.kind === 'balise') return { plan: getPlan('q:' + plan.key, () => makeQuantum(hash('q' + plan.key))), via: 'matière' };
-  if (plan.kind === 'station') return { plan: getPlan('q:' + plan.key, () => makeQuantum(hash('q' + plan.key))), via: 'matière' };
+  if (plan.kind === 'station' || plan.kind === 'monde') return null;   // on ne descend pas plus bas : la fiche / la vue fixe
   if (plan.kind === 'amas') { if (best && best.kind === 'system') return { plan: getPlan('sys:' + best.name, () => makeSystem(best)), via: best.name }; return { plan: getPlan('vide:' + Math.round(wx / 40) + ':' + Math.round(wz / 40), () => makeVoid(hash(plan.key + Math.round(wx / 40) + ':' + Math.round(wz / 40)))), via: 'vide' }; }
-  if (plan.kind === 'systeme') { if (best && best.kind === 'station') return { plan: getPlan('st:' + best.key, () => makeStation(best)), via: 'station' }; if (best) return { plan: getPlan('sig:' + best.seed, () => makeSig(best)), via: best.name }; return { plan: getPlan('vide:s' + plan.key, () => makeVoid(hash('v' + plan.key))), via: 'vide' }; }
+  if (plan.kind === 'systeme') { if (best && best.kind === 'planete') return { plan: getPlan('w:' + plan.key + ':' + best.name, () => makeWorld(best)), via: best.name }; if (best && best.kind === 'station') return { plan: getPlan('st:' + best.key, () => makeStation(best)), via: 'station' }; if (best) return { plan: getPlan('sig:' + best.seed, () => makeSig(best)), via: best.name }; return { plan: getPlan('vide:s' + plan.key, () => makeVoid(hash('v' + plan.key))), via: 'vide' }; }
   if (plan.kind === 'sig') { if (best) return { plan: getPlan('q:' + plan.key, () => makeQuantum(hash('q' + plan.key))), via: 'matière' }; return { plan: getPlan('vide:g' + plan.key, () => makeVoid(hash('g' + plan.key))), via: 'vide' }; }
   if (plan.kind === 'vide') return { plan: getPlan('q:' + plan.key, () => makeQuantum(hash('q' + plan.key))), via: 'structure' };
   if (plan.kind === 'quantique') return { plan: getPlan('wall', makeWall), via: 'cordes' };
@@ -426,6 +429,8 @@ function edgeChips(items) {
 function _noop() {
 }
 
+const escN = (e) => typeof e === 'number' ? e : !e ? 0 : /aucune|sans|none/i.test(e) ? 0 : /lourde|heavy|forte/i.test(e) ? 4 : /légère|legere|light|faible/i.test(e) ? 1 : 2;
+const escTxt = (e) => typeof e === 'number' ? (e ? 'escorte ' + e : 'sans escorte') : (e ? String(e) : 'sans escorte');
 // ── Plan d'une ligne de convois ──
 function lineChainOf(lineKey) {
   const legs = (REAL ? REAL.legs : []).filter(l => l.lineId === lineKey);
@@ -459,9 +464,9 @@ function makeRoute(lineKey, label0) {
     const ln = r.line || (r.mp && { id: 'cv:' + r.mp.convoyId, label: r.mp.pseudo || 'Pavillon impérial', ships: 1, escort: 0, cargo: r.target && r.target.cargoEstimate }); if (!ln || (ln.id !== lineKey)) continue; if (now - (r.createdAt || 0) > 12 * 3600e3) continue;
     const i = idx(r.systemCoord); if (i < 0) continue; const j = ln.cap ? idx(ln.cap) : (ln.dir === 'out' ? i + 1 : i - 1);
     const g = new THREE.Group(); S.add(g); const lead = ship(0xffd27a); g.add(lead);
-    for (let e = 0; e < Math.min(4, ln.escort || 0); e++) { const es = ship(0xff8a6a, .6); es.position.set(-14 - e * 8, 0, (e % 2 ? 1 : -1) * (8 + e * 2)); g.add(es); }
-    const lb = label(`${ln.label || 'Convoi'} · ${ln.ships || '?'} vaisseaux${ln.escort ? ' · escorte ' + ln.escort : ''} · vu il y a ${Math.round((now - r.createdAt) / 60000)} min`, '#ffe0a0', .9); lb.userData.always = true; lb.position.set(0, 14, 0); g.add(lb);
-    const cit = { kind: 'convoi', name: (ln.label || 'Convoi') + ' · ' + (ln.ships || '?') + ' vaisseaux', sub: (ln.escort ? 'escorte ' + ln.escort + ' · ' : '') + (ln.cargo ? 'cargaison ' + ln.cargo : ''), x: X(i), z: Zf(i) + 30, r: 26, live: g, ln, seen: r.createdAt, sys: r.systemCoord };
+    for (let e = 0; e < Math.min(4, escN(ln.escort)); e++) { const es = ship(0xff8a6a, .6); es.position.set(-14 - e * 8, 0, (e % 2 ? 1 : -1) * (8 + e * 2)); g.add(es); }
+    const lb = label(`${ln.label || 'Convoi'} · ${ln.ships || '?'} vaisseaux · ${escTxt(ln.escort)} · vu il y a ${Math.round((now - r.createdAt) / 60000)} min`, '#ffe0a0', .9); lb.userData.always = true; lb.position.set(0, 14, 0); g.add(lb);
+    const cit = { kind: 'convoi', name: (ln.label || 'Convoi') + ' · ' + (ln.ships || '?') + ' vaisseaux', sub: escTxt(ln.escort) + (ln.cargo ? ' · cargaison ' + ln.cargo : ''), x: X(i), z: Zf(i) + 30, r: 26, live: g, ln, seen: r.createdAt, sys: r.systemCoord };
     conv.push({ g, i, j: (j >= 0 && j < N) ? j : i, t0: r.createdAt, it: cit }); items.push(cit);
   }
   // ma flotte en embuscade, mes tankers sur la ligne
@@ -478,6 +483,45 @@ function makeRoute(lineKey, label0) {
         const i0 = Math.floor(k), f = k - i0, x = lerp(X(i0), X(Math.min(N - 1, i0 + 1)), f), z = lerp(Zf(i0), Zf(Math.min(N - 1, i0 + 1)), f); c.g.position.set(x, 4, z + (c.mine ? -30 : 30));
         c.g.rotation.y = c.j >= c.i ? -Math.PI / 2 : Math.PI / 2; if (c.it) { c.it.x = x; c.it.z = z + (c.mine ? -30 : 30); } } } };
 }
+// ── Plan d'un monde : vu d'orbite basse, la courbure, l'atmosphère, le soleil rasant · vue fixe ──
+const WORLD_FS = `
+  uniform float uT; uniform vec3 uSun, uA, uB, uC, uSea; uniform float uSeaLvl, uCloud, uLights; varying vec3 vN; varying vec3 vW;
+  vec3 h3(vec3 p){ p = fract(p * .3183099 + .1); p *= 17.0; return fract(vec3(p.x*p.y*p.z, p.x+p.y*p.z, p.x*p.y+p.z)); }
+  float n3(vec3 x){ vec3 i = floor(x), f = fract(x); f = f*f*(3.-2.*f);
+    return mix(mix(mix(h3(i).x, h3(i+vec3(1,0,0)).x, f.x), mix(h3(i+vec3(0,1,0)).x, h3(i+vec3(1,1,0)).x, f.x), f.y),
+               mix(mix(h3(i+vec3(0,0,1)).x, h3(i+vec3(1,0,1)).x, f.x), mix(h3(i+vec3(0,1,1)).x, h3(i+vec3(1,1,1)).x, f.x), f.y), f.z); }
+  float fbm(vec3 p){ float a = .5, s = 0.; for (int i = 0; i < 6; i++) { s += a * n3(p); p = p * 2.07 + 3.1; a *= .5; } return s; }
+  void main(){ vec3 n = normalize(vN); vec3 p = n * 3.; float e = fbm(p + fbm(p * 1.7) * .6);
+    vec3 col = e < uSeaLvl ? mix(uSea * .55, uSea, smoothstep(uSeaLvl - .15, uSeaLvl, e)) : mix(uA, uB, smoothstep(uSeaLvl, uSeaLvl + .18, e)); col = mix(col, uC, smoothstep(.66, .78, e));
+    float cl = smoothstep(.5, .75, fbm(n * 5. + vec3(uT * .01, 0., uT * .006))) * uCloud; col = mix(col, vec3(1.), cl * .85);
+    float d = dot(n, normalize(uSun)), lit = smoothstep(-.08, .25, d);
+    vec3 night = uLights > 0. && e > uSeaLvl ? vec3(1., .75, .4) * smoothstep(.62, .7, fbm(n * 24.)) * uLights * (1. - cl) : vec3(0.);
+    vec3 V = normalize(cameraPosition - vW); float rim = pow(1. - max(dot(n, V), 0.), 3.);
+    vec3 c = col * (.04 + lit * 1.05) + night * (1. - lit) + vec3(.35, .6, 1.) * rim * (.25 + lit * .9);
+    gl_FragColor = vec4(c, 1.); }`;
+function makeWorld(b) {
+  const S = sceneBase(0x010208), ex = b.ex || {}, seed = hash(b.name), R = rng(seed);
+  const cls = String(ex.cls || b.name).toLowerCase(), dead = /dead|mort|stérile|sterile|rock|roche/.test(cls), gas = /géante|geante|gaz|gas/.test(cls), ice = /glace|ice|froid/.test(cls);
+  const pal = dead ? [0x6e6258, 0x8a7a68, 0xb8aa98, 0x2a2622, .0, 0] : gas ? [0xc9a06a, 0xe0c090, 0xfff0d0, 0xb08050, .0, 0] : ice ? [0xbfd6e6, 0xe6f2ff, 0xffffff, 0x3a6a8a, .45, .6] : [0x3f6a3a, 0x8a7a50, 0xe8e8e8, 0x1d4f8a, .5, .8];
+  const lights = ex.mine || ex.player ? 1 : 0;
+  const Rp = 2000, planet = new THREE.Mesh(new THREE.SphereGeometry(Rp, 160, 120), new THREE.ShaderMaterial({ uniforms: { uT: { value: 0 }, uSun: { value: V(-.22, .28, -.93).normalize() }, uA: { value: new THREE.Color(pal[0]) }, uB: { value: new THREE.Color(pal[1]) }, uC: { value: new THREE.Color(pal[2]) }, uSea: { value: new THREE.Color(pal[3]) }, uSeaLvl: { value: pal[4] }, uCloud: { value: pal[5] }, uLights: { value: lights } },
+    vertexShader: 'varying vec3 vN; varying vec3 vW; void main(){ vN = normalize(mat3(modelMatrix) * normal); vec4 w = modelMatrix * vec4(position,1.); vW = w.xyz; gl_Position = projectionMatrix * viewMatrix * w; }', fragmentShader: WORLD_FS }));
+  planet.position.set(0, -Rp, 0); planet.rotation.z = .35; S.add(planet);
+  const atm = new THREE.Mesh(new THREE.SphereGeometry(Rp * 1.035, 120, 90), new THREE.ShaderMaterial({ transparent: true, side: THREE.BackSide, depthWrite: false, blending: THREE.AdditiveBlending, uniforms: { uSun: { value: V(-.22, .28, -.93).normalize() } },
+    vertexShader: 'varying vec3 vN; varying vec3 vW; void main(){ vN = normalize(mat3(modelMatrix) * normal); vec4 w = modelMatrix * vec4(position,1.); vW = w.xyz; gl_Position = projectionMatrix * viewMatrix * w; }',
+    fragmentShader: 'uniform vec3 uSun; varying vec3 vN; varying vec3 vW; void main(){ vec3 V = normalize(cameraPosition - vW); float r = pow(max(0., 1. - abs(dot(normalize(vN), V))), 2.2); float l = smoothstep(-.3, .4, dot(normalize(vN), normalize(uSun))); gl_FragColor = vec4(vec3(.35, .62, 1.) * r * (.15 + l * 1.4), 1.); }' }));
+  atm.position.copy(planet.position); S.add(atm);
+  const sun = makeSun(26, 0xffd29a); sun.position.set(-380, 400 - Math.tan(.42) * 2200, -2200); S.add(sun); { const d = dust(2500, 3000, seed, 1, .8, .02); d.rotation.x = Math.PI / 2; d.position.set(0, 600, -2900); S.add(d); }
+  const mine = !!ex.mine, nm = ex.name || b.name.split(' · ').slice(-1)[0];
+  const it = mine ? { k: ex.mine === 'home' ? 'Ta capitale' : 'Ta colonie', name: nm, sub: 'Ton plateau de jeu : bâtiments, parcelles, défense', acts: [['Ouvrir mon plateau ▸', 'la carte planétaire, dans le jeu', true, 'https://play.starbyte.online/']] }
+    : ex.player ? { k: 'Monde d’un commandant', name: ex.player, sub: (ex.coord || '') + ' · habité, défendu', acts: [['Espionner', 'sonde Légère', true], ['Raid', 'flotte', false], ['Commercer', 'tanker', false]] }
+    : { k: dead ? 'Monde mort' : gas ? 'Géante gazeuse' : 'Monde libre', name: b.name, sub: dead ? 'Roches et métal, aucune vie · exploitable' : gas ? 'Gaz et cristal en orbite · exploitable' : 'Libre · on pourrait s’y installer', acts: [['Exploiter', 'tanker', true], ['Coloniser', 'Arche coloniale', false]] };
+  Object.assign(it, { kind: 'monde', x: 0, z: 0, r: 2000 });
+  return { key: 'w:' + b.name, scene: S, unit: 400, hMin: 300, hMax: 302, h0: 301, bounds: 0, title: nm, kind: 'monde', mine,
+    hint: mine ? 'Ta planète, vue d’orbite · dans le jeu, ce zoom ouvre directement ton plateau · dézoome pour revenir' : 'Le monde vu d’orbite basse · dézoome pour revenir au système', items: [it],
+    cam(c, t) { c.position.set(Math.sin(t * .05) * 30, 400 + Math.sin(t * .07) * 6, 0); c.lookAt(Math.sin(t * .05) * 30 - 60, 400 - Math.tan(.66) * 1000, -1000); },
+    update(t) { planet.material.uniforms.uT.value = t; planet.rotation.y = t * .004; sun.userData.tick(t); } };
+}
 // ── Plan d'un convoi / d'une flotte : les vrais modèles du jeu, en formation ──
 let _ships = null;
 function shipModels() { return _ships || (_ships = loadGLB('sb_ships_v3.glb').then(g => { const o = {}; g.scene.traverse(n => { if (/^SB_SHIP_/.test(n.name)) o[n.name.replace('SB_SHIP_', '').toLowerCase()] = n; }); return o; })); }
@@ -489,7 +533,7 @@ function makeFormation(o) {
   const mine = o.kind === 'flotte' || o.kind === 'tanker', comp = o.fleet && o.fleet.composition, ln = o.ln || {};
   const cnt = (t) => comp && comp[t] ? (comp[t].t1 || 0) + (comp[t].t2 || 0) + (comp[t].t3 || 0) : 0;
   let plan = [];   // [type, x, z]
-  if (o.kind === 'convoi') { const esc = Math.min(6, ln.escort || 0), tk = Math.max(1, Math.min(5, (ln.ships || 1) - esc)); for (let i = 0; i < tk; i++) plan.push(['tanker', -i * 34, (i % 2 ? 1 : -1) * 8]); for (let e = 0; e < esc; e++) plan.push(['frigate', 30 - Math.floor(e / 2) * 40, (e % 2 ? 1 : -1) * 34]); }
+  if (o.kind === 'convoi') { const esc = Math.min(6, escN(ln.escort), +ln.ships ? Math.max(0, ln.ships - 1) : 6), tk = Math.max(1, Math.min(5, (+ln.ships || 1) - esc)); for (let i = 0; i < tk; i++) plan.push(['tanker', -i * 34, (i % 2 ? 1 : -1) * 8]); for (let e = 0; e < esc; e++) plan.push(['frigate', 30 - Math.floor(e / 2) * 40, (e % 2 ? 1 : -1) * 34]); }
   else if (o.kind === 'tanker') plan.push(['tanker', 0, 0]);
   else { const cu = Math.min(3, cnt('cuirasse')), fr = Math.min(8, cnt('fregate') || 3), tk = Math.min(3, cnt('tanker')); for (let i = 0; i < cu; i++) plan.push(['cuirasse', -i * 60, 0]); for (let e = 0; e < fr; e++) plan.push(['frigate', 20 - Math.floor(e / 2) * 34, (e % 2 ? 1 : -1) * (cu ? 40 : 16 + e * 3)]); for (let i = 0; i < tk; i++) plan.push(['tanker', -120 - i * 34, 0]); }
   const holder = new THREE.Group(); S.add(holder); const wait = label('APPROCHE…', '#ffcf96', 1.2); S.add(wait);
@@ -500,7 +544,7 @@ function makeFormation(o) {
     g.position.set(x, (R() - .5) * 6, z); g.userData.bob = R() * 6; holder.add(g); } S.remove(wait); }).catch(() => { wait.material.opacity = .5; });
   try { import('three/addons/environments/RoomEnvironment.js').then(({ RoomEnvironment }) => { const pm = new THREE.PMREMGenerator(renderer); S.environment = pm.fromScene(new RoomEnvironment(), .04).texture; }); } catch (e) {}
   const ago = o.seen ? Math.round((Date.now() - o.seen) / 60000) : 0;
-  const it = o.kind === 'convoi' ? { k: 'Convoi détecté' + (o.sys ? ' · ' + o.sys : ''), name: o.name, sub: [ln.escort ? 'escorte ' + ln.escort : 'sans escorte', ln.cargo ? 'cargaison ' + ln.cargo : null, ago ? 'vu il y a ' + ago + ' min' : null].filter(Boolean).join(' · '), acts: [['Intercepter', 'flotte en embuscade', true], ['Espionner', 'cargaison, escorte']] }
+  const it = o.kind === 'convoi' ? { k: 'Convoi détecté' + (o.sys ? ' · ' + o.sys : ''), name: o.name, sub: [escTxt(ln.escort), ln.cargo ? 'cargaison ' + ln.cargo : null, ago ? 'vu il y a ' + ago + ' min' : null].filter(Boolean).join(' · '), acts: [['Intercepter', 'flotte en embuscade', true], ['Espionner', 'cargaison, escorte']] }
     : o.kind === 'tanker' ? { k: 'Ton tanker', name: o.name, sub: o.sub, acts: [['Suivre', 'jusqu’au port', true]] }
     : { k: 'Ta flotte', name: o.name, sub: o.sub + ' · ' + plan.length + ' vaisseaux', acts: [['Rappeler', 'retour à quai', true], ['Changer de jalon', 'déplacer l’embuscade']] };
   Object.assign(it, { kind: 'contact', x: 0, z: 0, r: 120 });
@@ -631,8 +675,10 @@ function makeAmasReal(D) {
     }
     suns.push(g);
     const bodies = [];
-    for (const pl of ((known[p.key] || {}).planets || [])) bodies.push(['planete', ((pl.playerName ? pl.playerName + ' · ' : pl.isMine ? 'TOI · ' : '') + (pl.coord || '')).toUpperCase(), pl.playerName ? '#ffb0a0' : '#bfe6c0']);
-    for (const sg of (sigBy[p.key] || [])) bodies.push(sg.resolved ? [sg.resolvedType === 'moving' ? 'asteroides' : 'planete', `${sg.id} · ${(sg.resolvedType === 'moving' ? 'cible mouvante' : (sg.fixedClass || 'corps fixe')).toUpperCase()}`, '#ffd9a0'] : ['signature', `${sg.id} · ${(sg.typeLabel || 'écho').toUpperCase()}`, '#cdb8ff']);
+    if (p.home) bodies.push(['planete', ('TOI · ' + homeName).toUpperCase(), '#9fdcff', { mine: 'home', name: homeName }]);
+    if (p.colony) bodies.push(['planete', ('TA COLONIE · ' + p.colony).toUpperCase(), '#bff0b0', { mine: 'colony', name: p.colony }]);
+    for (const pl of ((known[p.key] || {}).planets || [])) { if (pl.isMine && (p.home || p.colony)) continue; bodies.push(['planete', ((pl.playerName ? pl.playerName + ' · ' : pl.isMine ? 'TOI · ' : '') + (pl.coord || '')).toUpperCase(), pl.playerName ? '#ffb0a0' : '#bfe6c0', { player: pl.playerName || null, coord: pl.coord, mine: pl.isMine ? 'home' : null, name: pl.isMine ? homeName : null }]); }
+    for (const sg of (sigBy[p.key] || [])) bodies.push(sg.resolved ? [sg.resolvedType === 'moving' ? 'asteroides' : 'planete', `${sg.id} · ${(sg.resolvedType === 'moving' ? 'cible mouvante' : String(sg.fixedClass || 'corps fixe').replace(/_/g, ' ')).toUpperCase()}`, '#ffd9a0', { cls: sg.fixedClass || null }] : ['signature', `${sg.id} · ${(sg.typeLabel || 'écho').toUpperCase()}`, '#cdb8ff']);
     items.push({ kind: p.kind, key: p.key, name: p.key, port: p.port, home: !!p.home, homeName, colony: p.colony, sigs: sigBy[p.key] || [], planets: ((known[p.key] || {}).planets || []).length, nb: beaconAt[p.key] || 0,
       x: p.x, z: p.z, r: 26, cell: p.cell, obj: g, seed: hash(p.key), bodies: bodies.length ? bodies.slice(0, 9) : [['signature', 'AUCUNE SIGNATURE CONNUE', '#7f93a8']] });
   }
@@ -731,7 +777,7 @@ function makeStation(it) {
   }).catch(() => { wait.material.opacity = .6; });
   const name = String(it.port.name || 'Station');
   return {
-    key: 'st:' + it.key, scene: S, unit: 5, hMin: 55, hMax: 900, h0: 300, bounds: 300, title: name + ' · ' + it.key, kind: 'station', it,
+    key: 'st:' + it.key, scene: S, unit: 5, hMin: 84, hMax: 900, h0: 300, bounds: 300, title: name + ' · ' + it.key, kind: 'station', it,
     hint: 'La station, à quai · touche-la pour entrer (docks, bar, comptoir) · pince dessus : sous la coque, la matière',
     items: [{ kind: 'stationBody', name, x: 0, z: 0, r: 40, port: it.port, key: it.key }], update(t) { holder.rotation.y = t * .05; },
   };
@@ -774,7 +820,7 @@ let plan = amas('A'), stack = [];
 let tx = 0, tz = 0, h = plan.h0;           // centre visé et hauteur de caméra (valeurs lissées)
 let gx = 0, gz = 0, gh = plan.h0;          // valeurs visées
 const TILT = .62;                           // la caméra regarde en biais : on sent la 3D
-function placeCam() { camera.position.set(tx, h, tz + h * TILT); camera.lookAt(tx, 0, tz); }
+function placeCam() { if (plan.cam && !trans) { plan.cam(camera, clock.elapsedTime); return; } camera.position.set(tx, h, tz + h * TILT); camera.lookAt(tx, 0, tz); }
 const ndc = new THREE.Vector2(), ray = new THREE.Raycaster(), ground = new THREE.Plane(V(0, 1, 0), 0), hit = new THREE.Vector3();
 function groundAt(cx, cy) { ndc.set(cx / innerWidth * 2 - 1, -(cy / innerHeight) * 2 + 1); ray.setFromCamera(ndc, camera); return ray.ray.intersectPlane(ground, hit) ? hit.clone() : V(tx, 0, tz); }
 let zoomPt = { x: innerWidth / 2, y: innerHeight / 2 }, trans = null;
@@ -794,7 +840,7 @@ function startTrans(dir, next, at) {
 }
 function dive(pt) {
   if (trans) return;
-  const c = childOf(plan, pt.x, pt.z); if (!c) { if (plan.kind === 'route') flashTip({ clientX: innerWidth / 2 - 120, clientY: innerHeight / 2 }, 'Vise un convoi, une flotte, une balise ou un jalon'); return; }
+  const c = childOf(plan, pt.x, pt.z); if (!c) { if (plan.kind === 'station' || plan.kind === 'monde') { if (cardEl.style.display !== 'block') openCard(plan.items[0]); return; } if (plan.kind === 'route') flashTip({ clientX: innerWidth / 2 - 120, clientY: innerHeight / 2 }, 'Vise un convoi, une flotte, une balise ou un jalon'); return; }
   if (plan.kind === 'amas') { const b = plan.items.find(i => i.kind === 'border' && Math.abs(i.x - pt.x) < i.r); if (b) { goAmas(b.to); return; } }
   startTrans('in', c.plan, pt);
 }
@@ -872,7 +918,7 @@ function openCard(it) {
     const ns = (it.sigs || []).filter(x => !x.resolved).length, nr = (it.sigs || []).length - ns, nb = it.nb || (plan.beaconAt || {})[it.name] || 0;
     k = it.home ? 'Tu es ici · ' + (it.homeName || 'ta planète') : it.colony ? 'Ta colonie · ' + it.colony : it.port ? 'Station · ' + (it.port.name || it.port) : 'Système découvert';
     sub = [it.planets ? it.planets + ' monde' + (it.planets > 1 ? 's' : '') : null, ns ? ns + ' signature' + (ns > 1 ? 's' : '') + ' à résoudre' : null, nr ? nr + ' résolue' + (nr > 1 ? 's' : '') : null, nb ? nb + ' balise' + (nb > 1 ? 's' : '') + ' posée' + (nb > 1 ? 's' : '') : null].filter(Boolean).join(' · ') || 'Rien de relevé pour l\u2019instant';
-    acts = btn(plan.kind === 'amas' ? 'Entrer ▸' : (it.port ? 'S\u2019approcher ▸' : 'Entrer ▸'), plan.kind === 'amas' ? (it.port ? 'le système et sa station' : 'le système') : (it.port ? 'la station, à quai' : 'le système'), 'dive', true) + (it.port ? btn('Entrer dans la station', 'docks, bar, comptoir', 'game') : '') + btn('Balayer', 'Radar · nouvelles signatures', 'game') + (ns ? btn('Résoudre', 'Légère · ' + ns + ' signature' + (ns > 1 ? 's' : ''), 'game') : '') + btn(nb ? 'Rappeler la balise' : 'Poser une balise', 'surveiller les convois', 'game') + btn('Envoyer un tanker', 'route, poste, commerce', 'game');
+    acts = btn(plan.kind === 'amas' ? (it.home || it.colony ? 'Ma planète ▸' : 'Entrer ▸') : (it.port ? 'S\u2019approcher ▸' : 'Entrer ▸'), plan.kind === 'amas' ? (it.port ? 'le système et sa station' : 'le système') : (it.port ? 'la station, à quai' : 'le système'), 'dive', true) + (it.port ? btn('Entrer dans la station', 'docks, bar, comptoir', 'game') : '') + btn('Balayer', 'Radar · nouvelles signatures', 'game') + (ns ? btn('Résoudre', 'Légère · ' + ns + ' signature' + (ns > 1 ? 's' : ''), 'game') : '') + btn(nb ? 'Rappeler la balise' : 'Poser une balise', 'surveiller les convois', 'game') + btn('Envoyer un tanker', 'route, poste, commerce', 'game');
   } else if (it.kind === 'mass') {
     k = 'Masse chaude · entendue, jamais vue'; t = it.name.split(' ·')[0]; sub = 'Ton antenne ou tes balises l\u2019ont entendue passer. Une Radar la révélera.';
     acts = btn('Balayer', 'Radar · la révéler', 'game', true) + btn('Poser une balise', 'voir les convois', 'game');
@@ -885,12 +931,14 @@ function openCard(it) {
     acts = it.kind === 'jalon' ? btn('Entrer ▸', 'le système', 'dive', true) + btn('Poser une balise', 'ici', 'game') : it.kind === 'balise' ? btn('S\u2019approcher ▸', 'la balise', 'dive', true) + btn('Rappeler', 'retour au hangar', 'game') : it.kind === 'tanker' ? btn('S\u2019approcher ▸', 'ton tanker', 'dive', true) : it.kind === 'convoi' ? btn('S\u2019approcher ▸', 'le convoi et son escorte', 'dive', true) +  btn('Intercepter', 'flotte en embuscade', 'game') + btn('Espionner', 'cargaison, escorte', 'game') : btn('S\u2019approcher ▸', 'ta flotte', 'dive', true) + btn('Rappeler', 'retour à quai', 'game');
   } else if (plan.kind === 'formation' || plan.kind === 'balise') { k = it.k || 'Contact'; t = it.name; sub = it.sub || '';
     acts = (it.acts || []).map(([a, b, m]) => btn(a, b, 'game', m)).join('') + btn('Plonger ▸', 'sous la coque', 'dive');
-  } else if (plan.kind === 'station') { k = 'Station'; t = it.name; sub = 'À quai · docks, bar, comptoir, commandants présents';
-    acts = btn('Entrer', 'docks, bar, comptoir', 'game', true) + btn('Plonger sous la coque ▸', 'la matière', 'dive');
+  } else if (plan.kind === 'station') { k = 'Arrivée · à 500 m de la station'; t = it.name; sub = 'Demande d\u2019amarrage acceptée · docks, bar, comptoir, commandants présents';
+    acts = btn('Docks', 'amarrer, réparer', 'game', true) + btn('Bar', 'commandants présents', 'game') + btn('Comptoir', 'vendre, acheter', 'game') + btn('Routes', 'contrats de la station', 'game');
+  } else if (plan.kind === 'monde') { k = it.k; t = it.name; sub = it.sub; acts = (it.acts || []).map(([a, b, m, href]) => href ? `<a href="${href}" style="flex:1 1 100%;text-decoration:none">${btn(a, b, 'link', m)}</a>` : btn(a, b, 'game', m)).join('');
   } else { k = 'Objet'; sub = 'Zoome encore pour descendre sous la matière'; acts = btn('Plonger ▸', '', 'dive', true); }
   document.getElementById('cd-k').textContent = k; document.getElementById('cd-t').textContent = t; document.getElementById('cd-s').textContent = sub;
   const a = document.getElementById('cd-a'); a.innerHTML = acts;
   a.querySelectorAll('button').forEach(b => b.onclick = () => {
+    if (b.dataset.a === 'link') return;
     if (b.dataset.a === 'dive') { closeCard(); gx = it.x; gz = it.z; gh = plan.hMin; setTimeout(() => dive(V(it.x, 0, it.z)), 650); }
     else flashTip({ clientX: innerWidth / 2 - 120, clientY: innerHeight - 200 }, 'Labo : les actions partiront de la vraie carte, dans le jeu');
   });
@@ -949,7 +997,7 @@ function stepTrans(dt) {
 const planEl = document.getElementById('plan'), subEl = document.getElementById('sub'), pathEl = document.getElementById('path'), hintEl = document.getElementById('hint'), scaleEl = document.querySelector('#scale span');
 function enterPlan() {
   try { closeCard(); } catch (e) {}
-  planEl.textContent = { formation: plan.fTitle || 'Plan du convoi', balise: 'Plan de la balise', univers: 'Plan des amas', voisinage: 'Plan du voisinage', station: 'Plan de la station', route: 'Plan de la ligne', amas: 'Plan de l’amas', systeme: 'Plan du système', sig: 'Plan de la signature', vide: 'Plan du vide', quantique: 'Plan quantique', mur: 'Plan des tags' }[plan.kind];
+  planEl.textContent = { monde: plan.mine ? 'Ta planète' : 'Plan du monde', formation: plan.fTitle || 'Plan du convoi', balise: 'Plan de la balise', univers: 'Plan des amas', voisinage: 'Plan du voisinage', station: 'Plan de la station', route: 'Plan de la ligne', amas: 'Plan de l’amas', systeme: 'Plan du système', sig: 'Plan de la signature', vide: 'Plan du vide', quantique: 'Plan quantique', mur: 'Plan des tags' }[plan.kind];
   subEl.textContent = plan.title; hintEl.textContent = plan.hint;
   pathEl.textContent = stack.map(s => s.plan.title).concat(plan.title).join('  ›  ');
   tip.style.display = 'none'; for (const c of Object.values(_chips)) c.style.display = 'none';
@@ -967,8 +1015,8 @@ function frame() {
   // les étiquettes gardent une taille lisible à l'écran
   plan.scene.traverse(o => { if (o.isSprite && o.userData.ar) { const s = h * .0105 * o.userData.k; o.scale.set(s * o.userData.ar, s, 1); } });
   plan.update(time, h, dt);
-  if (plan.kind === 'station' && !trans && !plan._auto && h < 85) { plan._auto = true; openCard(plan.items[0]); }
-  if ((plan.kind === 'formation' || plan.kind === 'balise') && !trans && !plan._auto) { plan._auto = true; openCard(plan.items[0]); }
+  if (plan.kind === 'station' && !trans && !plan._auto && h < 95) { plan._auto = true; openCard(plan.items[0]); }
+  if ((plan.kind === 'formation' || plan.kind === 'balise' || plan.kind === 'monde') && !trans && !plan._auto) { plan._auto = true; openCard(plan.items[0]); }
   scaleEl.textContent = fmtLen(h * 1.2 * plan.unit);
   renderer.render(plan.scene, camera);
   requestAnimationFrame(frame);
