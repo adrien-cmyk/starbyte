@@ -487,12 +487,28 @@
       const key = new T.DirectionalLight(0xffe2b0, 3); key.position.set(-80, 60, -40); S.add(key);
       const rim = new T.DirectionalLight(0x6aa8ff, 1.1); rim.position.set(60, 20, 80); S.add(rim);
       S.add(at(spr(glow('rgba(255,255,240,1)', 'rgba(255,190,90,.6)'), 60), -900, 400, -700));
-      const geos = [0, 1, 2, 3].map(i => rockGeo(seed + i)), mats = [0x857a70, 0x6d6560, 0x9a8a74].map(c => new T.MeshStandardMaterial({ color: c, roughness: 0.95 }));
-      const ore = new T.MeshStandardMaterial({ color: 0xffc864, emissive: 0xc98a2a, emissiveIntensity: 1.1, roughness: 0.3 }), spin = [];
-      const n = lite ? 90 : 180;
+      const ttype = String(((b.obj && b.obj.kt) || {}).type || '').toLowerCase(), spin = [];
+      const wreck = /epave|cargo|sonde/.test(ttype), anomaly = /anomalie|signal/.test(ttype), crystal = /cristal/.test(ttype), debris = /debris/.test(ttype);
+      if (wreck) {   // épave, cargo à la dérive, vieille sonde : une coque éventrée et ses débris
+        const dark = new T.MeshStandardMaterial({ color: 0x4d5762, metalness: 0.85, roughness: 0.45 }), lit = new T.MeshBasicMaterial({ color: 0xffb070 });
+        const w = new T.Group(); w.rotation.set(0.2, 0.7, 0.3); S.add(w);
+        const len = /sonde/.test(ttype) ? 10 : 26;
+        const body = new T.Mesh(new T.CylinderGeometry(len / 6.5, len / 5.9, len, 14, 1, true), dark); body.rotation.z = Math.PI / 2; w.add(body);
+        for (let k = 0; k < 10; k++) { const pn = new T.Mesh(new T.BoxGeometry(0.7, 0.3, 0.1), lit); pn.position.set(-len * 0.35 + k * len * 0.077, len / 11, len / 7); w.add(pn); }
+        const br = new T.Mesh(new T.CylinderGeometry(len / 7, len / 6.5, len * 0.4, 14, 1, true), dark); br.position.set(len * 0.73, -len * 0.23, 3); br.rotation.set(0.6, 0, 1.1); w.add(br);
+        w.add(at(spr(glow('rgba(255,250,230,1)', 'rgba(255,110,40,.6)'), 9, 0xff8a40), len / 2, 0, 0));
+        for (let k = 0; k < (lite ? 40 : 90); k++) { const d = new T.Mesh(new T.BoxGeometry(0.6 + R(), 0.1, 0.4 + R()), dark); d.position.set(12 + R() * 40, (R() - 0.5) * 12, (R() - 0.5) * 30); d.rotation.set(R() * 6, R() * 6, R() * 6); d.userData.spin = V(R() * 0.4, R() * 0.4, 0); spin.push(d); S.add(d); }
+        w.userData.spin = V(0.01, 0.02, 0); spin.push(w);
+      } else if (anomaly) {   // champ instable : des voiles d'énergie qui tournent
+        for (let k = 0; k < 7; k++) { const r = new T.Mesh(new T.TorusGeometry(14 + k * 7, 0.5 + R() * 0.8, 8, 96), new T.MeshBasicMaterial({ color: new T.Color().setHSL(0.5 + R() * 0.3, 0.9, 0.6), transparent: true, opacity: 0.45, blending: T.AdditiveBlending, depthWrite: false })); r.rotation.set(R() * 3, R() * 3, 0); r.userData.spin = V((R() - 0.5) * 0.6, (R() - 0.5) * 0.6, 0); spin.push(r); S.add(r); }
+        S.add(spr(glow('rgba(220,255,255,1)', 'rgba(90,200,255,.45)'), 40, 0x9fe8ff, 0.9));
+      }
+      const geos = [0, 1, 2, 3].map(i => rockGeo(seed + i)), mats = (debris ? [0x5b6670, 0x7a8590, 0x4a525a] : [0x857a70, 0x6d6560, 0x9a8a74]).map(c => new T.MeshStandardMaterial({ color: c, roughness: debris ? 0.5 : 0.95, metalness: debris ? 0.7 : 0 }));
+      const ore = new T.MeshStandardMaterial({ color: crystal ? 0x5fe0ff : 0xffc864, emissive: crystal ? 0x1aa0d0 : 0xc98a2a, emissiveIntensity: 1.2, roughness: 0.25 });
+      const n = wreck || anomaly ? 0 : (lite ? 90 : 180);
       for (let i = 0; i < n; i++) { const rk = new T.Mesh(geos[i % 4], mats[i % 3]); const a = R() * 6.28, d = 6 + Math.pow(R(), 0.7) * 120; const s = i < 6 ? 4 + R() * 3 : 0.4 + Math.pow(R(), 2.3) * 3.5;
         rk.position.set(Math.cos(a) * d, (R() - 0.5) * 6, Math.sin(a) * d * 0.8); rk.scale.setScalar(s); rk.rotation.set(R() * 6, R() * 6, R() * 6);
-        if (i < 6) for (let k = 0; k < 4; k++) { const c = new T.Mesh(new T.OctahedronGeometry(0.15, 0), ore); const dir = V(R() - 0.5, R() - 0.5, R() - 0.5).normalize(); c.position.copy(dir.multiplyScalar(0.88)); c.scale.set(1, 1.8, 1); rk.add(c); }
+        if (i < 6 || (crystal && R() < 0.15)) for (let k = 0; k < 4; k++) { const c = new T.Mesh(new T.OctahedronGeometry(0.15, 0), ore); const dir = V(R() - 0.5, R() - 0.5, R() - 0.5).normalize(); c.position.copy(dir.multiplyScalar(0.88)); c.scale.set(1, 1.8, 1); rk.add(c); }
         rk.userData.spin = V((R() - 0.5) * 0.15, (R() - 0.5) * 0.15, 0); spin.push(rk); S.add(rk); }
       return { key: 'f:' + b.key, kind: 'gisement', scene: S, unit: 1e3, hMin: 20, hMax: 260, h0: 120, bounds: 200, title: bodyName(b), sys: sysKey, body: b,
         hint: 'Le gisement de près · sa fiche te dit quoi en faire', items: [{ kind: 'field', x: 0, z: 0, r: 140 }],
@@ -742,6 +758,9 @@
     function childOf(wx, wz) {
       const P = plan;
       if (P.kind === 'amas') {
+        // une balise (la croix violette à côté de son système) : on plonge vers elle
+        for (const [k, q] of Object.entries(P.sysPos)) { const sx = ST.systems[k]; if (!sx || !(sx.beacons || []).length) continue; const bx = q.x + (k === ST.home ? 22 : 18), bz = q.z + (k === ST.home ? -18 : -16);
+          if (Math.hypot(bx - wx, bz - wz) < 14) return { plan: getPlan('bal:' + k, () => makeBeacon({ key: k, beacon: sx.beacons[0], n: sx.beacons.length })) }; }
         const lg = nearStar(wx, wz, Math.max(26, h * 0.03)) ? null : legAt(P, wx, wz, Math.max(12, h * 0.02)); const s = sysAtCell(wx, wz);
         if (s && !(lg && lg.lineId)) return { plan: getPlan('sys:' + s.key, () => makeSystem(s.key)) };
         if (lg && lg.lineId) return { plan: getPlan('route:' + lg.lineId, () => makeRoute(lg.lineId, lg.npc ? (lg.pseudo || 'Ligne marchande') : 'Convoi ' + (lg.pseudo || 'impérial'), lg.id)) };
