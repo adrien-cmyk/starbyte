@@ -30020,6 +30020,16 @@ function renderShipBuildList() {
 /* ═══════════ PATCH_2010_COLONIE — l'Arche coloniale au chantier orbital ═══════════ */
 const COLONIAL_COST = { metal: 20000, energie: 8000, cristal: 3000 };
 const COLONIAL_FUEL = 2000;
+// PATCH_0111_ARCHE_PRORATA : la N-ième Arche coûte N fois le prix de base (planètes possédées + Arches déjà en cale, à quai ou en vol)
+function colonialRank() {
+  const worlds = Array.isArray(G.worlds) && G.worlds.length ? G.worlds.length : 1;
+  const flying = Array.isArray(G.colonyMissions) ? G.colonyMissions.length : 0;
+  const ready = (G.fleet && G.fleet.colonial) || 0;
+  const queued = (typeof QUEUES !== 'undefined' && QUEUES.shipyard) ? QUEUES.shipyard.commands.filter(c => c.unitKey === 'colonial').length : 0;
+  return worlds + flying + ready + queued;
+}
+function colonialCost() { const k = colonialRank(); const o = {}; for (const [r, q] of Object.entries(COLONIAL_COST)) o[r] = q * k; return o; }
+function colonialFuel() { return COLONIAL_FUEL * colonialRank(); }
 const COLONIAL_DURATION = 6 * 3600;   // saison de test : 6 h
 function colonialDuration() { return Math.max(1, Math.round(COLONIAL_DURATION / (G.skills.productionSpeed || 1) * (window.SBSkills ? SBSkills.durMult('ships') : 1))); }
 function colonialBlocker(tier) {
@@ -30028,12 +30038,13 @@ function colonialBlocker(tier) {
   return null;
 }
 function colonialBuildRowHtml(tier) {
+  const _cc = colonialCost(), _cf = colonialFuel();
   const block = colonialBlocker(tier);
   const meta = SHIP_UNITS.colonial;
-  const canAfford = Object.entries(COLONIAL_COST).every(([r, q]) => G.res[r] && G.res[r].v >= q) && (G.fuel || 0) >= COLONIAL_FUEL;
+  const canAfford = Object.entries(_cc).every(([r, q]) => G.res[r] && G.res[r].v >= q) && (G.fuel || 0) >= _cf;
   const inQueue = QUEUES.shipyard.commands.some(c => c.unitKey === 'colonial');
   const ready = G.fleet.colonial || 0;
-  const costStr = Object.entries(COLONIAL_COST).map(([r, q]) => `${fmt(q)} ${r}`).join(' · ') + ` · ${fmt(COLONIAL_FUEL)} carburant`;
+  const costStr = Object.entries(_cc).map(([r, q]) => `${fmt(q)} ${r}`).join(' · ') + ` · ${fmt(_cf)} carburant`;
   const ok = !block && canAfford;
   return `
       <div class="unit-row ${ok ? '' : 'locked'}" onclick="openUnitDetail('colonial','ship')" style="cursor:pointer;border-color:rgba(255,170,90,.35)">
@@ -30047,19 +30058,21 @@ function colonialBuildRowHtml(tier) {
       </div>`;
 }
 function buildColonialShip() {
+  const _cc = colonialCost(), _cf = colonialFuel();
   const block = colonialBlocker(getShipyardTier());
   if (block) { toast(block); return; }
-  for (const [r, q] of Object.entries(COLONIAL_COST)) if (!G.res[r] || G.res[r].v < q) { toast(`Manque ${fmt(q - (G.res[r]?.v || 0))} ${r}`); return; }
-  if ((G.fuel || 0) < COLONIAL_FUEL) { toast(`Manque ${fmt(COLONIAL_FUEL - (G.fuel || 0))} carburant`); return; }
-  for (const [r, q] of Object.entries(COLONIAL_COST)) G.res[r].v -= q;
-  G.fuel -= COLONIAL_FUEL;
-  QUEUES.shipyard.commands.push({ unitKey: 'colonial', shipTier: 1, totalQty: 1, completed: 0, currentElapsed: 0, unitDuration: colonialDuration(), cost: Object.assign({ fuel: COLONIAL_FUEL }, COLONIAL_COST), addedAt: Date.now() });
+  for (const [r, q] of Object.entries(_cc)) if (!G.res[r] || G.res[r].v < q) { toast(`Manque ${fmt(q - (G.res[r]?.v || 0))} ${r}`); return; }
+  if ((G.fuel || 0) < _cf) { toast(`Manque ${fmt(_cf - (G.fuel || 0))} carburant`); return; }
+  for (const [r, q] of Object.entries(_cc)) G.res[r].v -= q;
+  G.fuel -= _cf;
+  QUEUES.shipyard.commands.push({ unitKey: 'colonial', shipTier: 1, totalQty: 1, completed: 0, currentElapsed: 0, unitDuration: colonialDuration(), cost: Object.assign({ fuel: _cf }, _cc), addedAt: Date.now() });
   toast('◈ Arche coloniale en assemblage');
   renderShipyard();
   startQueueTicker();
   try { saveGame(); } catch (e) {}
 }
 function renderColonialDetail() {
+  const _cc = colonialCost(), _cf = colonialFuel();
   const meta = SHIP_UNITS.colonial;
   const ready = G.fleet.colonial || 0;
   const q = QUEUES.shipyard.commands.find(c => c.unitKey === 'colonial');
@@ -30075,8 +30088,8 @@ function renderColonialDetail() {
   const block = colonialBlocker(getShipyardTier());
   const row = (l, v, c) => `<div class="dash-stat-row"><span class="lbl">${l}</span><span class="val"${c ? ` style="color:${c}"` : ''}>${v}</span></div>`;
   document.getElementById('ud-composition').innerHTML =
-    row('Coût', Object.entries(COLONIAL_COST).map(([r, v]) => `${fmt(v)} ${r}`).join(' · ')) +
-    row('Carburant', fmt(COLONIAL_FUEL), 'var(--amber)') +
+    row('Coût', Object.entries(_cc).map(([r, v]) => `${fmt(v)} ${r}`).join(' · ')) +
+    row('Carburant', fmt(_cf), 'var(--amber)') +
     row('Assemblage', formatTime(colonialDuration())) +
     row('Conditions', block || 'remplies', block ? 'var(--red)' : 'var(--green)');
   document.getElementById('ud-costs').innerHTML =
@@ -30184,13 +30197,13 @@ function sbFindPlanet(coord) {
   const sys = (G.knownSystems || {})[sysKey];
   return sys && Array.isArray(sys.planets) ? sys.planets.find(p => p.coord === coord) || null : null;
 }
-// Voyage : 45 min dans le même secteur (+ un peu selon l'écart de système), +2 h par secteur d'écart ; plafonné à 12 h
+// Voyage (PATCH_0111_ARCHE_9H) : 9 h minimum dans le même secteur (+ jusqu'à 1 h selon l'écart de système), +2 h par secteur d'écart ; plafonné à 20 h
 function colonyTravelMs(coord) {
   const [, sec, sys] = String(coord || '').split('-');
   const dSec = (sec && MY_ADDRESS.sector) ? Math.abs(sec.charCodeAt(0) - MY_ADDRESS.sector.charCodeAt(0)) : 0;
   const dSys = Math.abs((parseInt(sys, 10) || 0) - (parseInt(MY_ADDRESS.system, 10) || 0));
-  const min = 45 + dSec * 120 + Math.min(60, Math.round(dSys / 150));
-  return Math.min(12 * 60, min) * 60000;
+  const min = 9 * 60 + dSec * 120 + Math.min(60, Math.round(dSys / 150));
+  return Math.min(20 * 60, Math.max(9 * 60, min)) * 60000;
 }
 async function sbColonizeAsk(coord) {
   const p = sbFindPlanet(coord);
