@@ -8931,6 +8931,10 @@ function loadGame() {
     if (typeof sbWorldsInit === 'function') sbWorldsInit();
     try { sbMigrateProbesPerWorld(); } catch (e) { console.warn('[sondes/planète]', e); }
     try { sbMigrateResPerWorld(); } catch (e) { console.warn('[stock/planète]', e); }
+    try {   // PATCH_0111_BUTIN : flottes et missions d'avant les colonies = parties de la capitale
+      for (const f of ((G.fleet && G.fleet.prepared) || [])) { if (!f) continue; if (!f.world) f.world = 'home'; if (f.ambush && !f.ambush.world) f.ambush.world = f.world; if (f.garrison && !f.garrison.world) f.garrison.world = f.world; }
+      for (const m of (G.tankerMissions || [])) if (m && !m.world) m.world = 'home';
+    } catch (e) { console.warn('[butin/planète]', e); }
 
     // OFFLINE — reprendre la simulation là où la sauvegarde l'a laissée
     G._simAt = snapshot.simAt || snapshot.savedAt || Date.now();
@@ -30659,7 +30663,7 @@ setInterval(() => { try { sbConvoyTick(); } catch (e) { console.warn('[convoi]',
     if (typeof f !== 'function' || f._sbWorld) return;
     const g = function (...a) {
       let it = null; try { it = pick(...a); } catch (e) {}
-      const w = it && it.world;
+      const w = it ? (it.world || 'home') : null;   // PATCH_0111_BUTIN : sans étiquette (lancée avant les colonies) = la capitale, jamais « la planète affichée »
       return (w && typeof sbWithWorld === 'function') ? sbWithWorld(w, () => f.apply(this, a)) : f.apply(this, a);
     };
     g._sbWorld = true;
