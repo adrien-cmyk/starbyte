@@ -711,7 +711,7 @@
     }
     if (s.kind === 'home') {
       const name = (G.planet && G.planet.name) || (G.profile && G.profile.planetName) || 'Ma planète';
-      const insp = window.SBSystem ? _sigBtn(COL.cyan, 'Inspecter le système', `SBSystem.open('${esc(mySystemKey())}')`, '', true) : '';
+      const insp = (window.SBSystem && !E.plans) ? _sigBtn(COL.cyan, 'Inspecter le système', `SBSystem.open('${esc(mySystemKey())}')`, '', true) : '';   // PATCH_0111_PLANS : avec les plans, on entre dans le système (« Entrer dans mon système ▸ »)
       return `<div class="sm-panel"><div class="sm-ptitle">${esc(name)}</div><div class="sm-psub mono">${esc(mySystemKey())}</div>${insp}</div>`;
     }
     if (s.kind === 'system') {
@@ -733,7 +733,7 @@
         else if (st.build) act = _sigBtn(COL.radar, 'Construire une Radar', `openProbeDetail('radar')`, '', true);
         else act = _sigOff(st.why);
       }
-      const insp = (window.SBSystem && sys && (sys.known || sys.scanning)) ? _sigBtn(COL.cyan, 'Inspecter le système', `SBSystem.open('${esc(s.key)}')`, '', true) : '';
+      const insp = (window.SBSystem && !E.plans && sys && (sys.known || sys.scanning)) ? _sigBtn(COL.cyan, 'Inspecter le système', `SBSystem.open('${esc(s.key)}')`, '', true) : '';   // PATCH_0111_PLANS
       const tag = (G.systemTags || {})[s.key];
       const tagTxt = tag === 'star' ? ' · <span style="color:#ffc864">intéressant</span>' : tag === 'skip' ? ' · <span style="color:#ff4a3a">sans intérêt</span>' : '';
       const li = sys && sys.li;
