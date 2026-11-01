@@ -310,6 +310,7 @@ function childOf(plan, wx, wz) {
     for (const it of plan.items) { const d = Math.hypot(it.x - wx, it.z - wz); if (d < it.r * 1.6 && d < nd) { nd = d; near = it; } }
     const c = near ? near.cell : cell;
     if (c < 0 && !near) return { plan: getPlan('vide:far' + Math.round(wx / 200) + Math.round(wz / 200), () => makeVoid(hash('far' + Math.round(wx / 200) + Math.round(wz / 200)))), via: 'vide' };
+    if (near && near.kind === 'balise') return { plan: getPlan('bal:' + near.key, () => makeBeacon(near)), via: 'balise' };
     if (near && (near.home || near.colony)) { const b = { name: near.home ? near.homeName : near.colony, ex: { mine: near.home ? 'home' : 'colony', name: near.home ? near.homeName : near.colony }, seed: near.seed }; return { plan: getPlan('w:mine:' + near.key, () => makeWorld(b)), via: b.name }; }
     if (near && near.kind === 'system') return { plan: getPlan('sys:' + near.key + ':r', () => makeSystem(Object.assign({}, near, { name: near.key }))), via: near.key };
     return { plan: getPlan('nb:' + c + ':' + (near ? near.key : ''), () => makeNeighborhood(c, near)), via: near ? near.key : 'région' };
@@ -692,7 +693,7 @@ function makeAmasReal(D) {
     const ln = new THREE.Line(new THREE.BufferGeometry().setFromPoints([V(a.x, .3, a.z), V(b.x, .3, b.z)]), new THREE.LineDashedMaterial({ color: col, dashSize: 14, gapSize: 9, transparent: true, opacity: .7 })); ln.computeLineDistances(); tac.add(ln);
     const ar = new THREE.Mesh(new THREE.ConeGeometry(5, 13, 3), new THREE.MeshBasicMaterial({ color: col })); ar.position.set((a.x + b.x) / 2, .3, (a.z + b.z) / 2); ar.rotation.x = Math.PI / 2; ar.rotation.z = -Math.atan2(b.x - a.x, b.z - a.z) + Math.PI; tac.add(ar);
     legs.push({ from: l.from, to: l.to, npc: l.npc, lineId: l.lineId || (l.convoyId ? 'cv:' + l.convoyId : 'leg:' + l.from), pseudo: l.pseudo }); }
-  for (const [k, n] of Object.entries(beaconAt)) { const p = P[k]; if (!p) continue; const g = new THREE.LineSegments(new THREE.BufferGeometry().setFromPoints([V(-9, 0, 0), V(9, 0, 0), V(0, 0, -9), V(0, 0, 9)]), new THREE.LineBasicMaterial({ color: 0xc89bff })); g.position.set(p.x + 18, .6, p.z - 16); tac.add(g); }
+  for (const [k, n] of Object.entries(beaconAt)) { const p = P[k]; if (!p) continue; const g = new THREE.LineSegments(new THREE.BufferGeometry().setFromPoints([V(-9, 0, 0), V(9, 0, 0), V(0, 0, -9), V(0, 0, 9)]), new THREE.LineBasicMaterial({ color: 0xc89bff })); g.position.set(p.x + 18, .6, p.z - 16); tac.add(g); items.push({ kind: 'balise', key: k, name: 'Balise · ' + k, n, x: p.x + 18, z: p.z - 16, r: 12, cell: p.cell, sub: 'surveille les convois qui passent à ' + k }); }
   const flights = [];
   const originOf = (wid) => { if (!wid || wid === 'home') return homeKey; const w = (G.worlds || []).find(x => x && x.id === wid); return w && w.coord ? String(w.coord).split('-').slice(0, 3).join('-') : homeKey; };
   const fl = (from, to, t0, t1, col, txt) => { const pa = P[from] || add(from, 'mass'), pb = P[to] || add(to, 'mass'); if (!pa || !pb || !(t1 > t0)) return;
@@ -920,6 +921,10 @@ function openCard(it) {
     k = it.home ? 'Tu es ici · ' + (it.homeName || 'ta planète') : it.colony ? 'Ta colonie · ' + it.colony : it.port ? 'Station · ' + (it.port.name || it.port) : 'Système découvert';
     sub = [it.planets ? it.planets + ' monde' + (it.planets > 1 ? 's' : '') : null, ns ? ns + ' signature' + (ns > 1 ? 's' : '') + ' à résoudre' : null, nr ? nr + ' résolue' + (nr > 1 ? 's' : '') : null, nb ? nb + ' balise' + (nb > 1 ? 's' : '') + ' posée' + (nb > 1 ? 's' : '') : null].filter(Boolean).join(' · ') || 'Rien de relevé pour l\u2019instant';
     acts = btn(plan.kind === 'amas' ? (it.home || it.colony ? 'Ma planète ▸' : 'Entrer ▸') : (it.port ? 'S\u2019approcher ▸' : 'Entrer ▸'), plan.kind === 'amas' ? (it.port ? 'le système et sa station' : 'le système') : (it.port ? 'la station, à quai' : 'le système'), 'dive', true) + (it.port ? btn('Entrer dans la station', 'docks, bar, comptoir', 'game') : '') + btn('Balayer', 'Radar · nouvelles signatures', 'game') + (ns ? btn('Résoudre', 'Légère · ' + ns + ' signature' + (ns > 1 ? 's' : ''), 'game') : '') + btn(nb ? 'Rappeler la balise' : 'Poser une balise', 'surveiller les convois', 'game') + btn('Envoyer un tanker', 'route, poste, commerce', 'game');
+  } else if (it.kind === 'balise' && plan.kind === 'amas') {
+    const G = REAL ? REAL.G : {}, rep = (G.beaconReports || []).filter(r => String(r.systemCoord || '').startsWith(it.key));
+    k = 'Ta balise' + (it.n > 1 ? ' · ' + it.n + ' posées' : ''); t = it.key; sub = rep.length ? rep.length + ' passage' + (rep.length > 1 ? 's' : '') + ' relevé' + (rep.length > 1 ? 's' : '') : 'En écoute · aucun passage relevé pour l\u2019instant';
+    acts = btn('S\u2019approcher ▸', 'la balise', 'dive', true) + btn('Rappeler', 'retour au hangar', 'game') + btn('Journal', 'ses détections', 'game');
   } else if (it.kind === 'mass') {
     k = 'Masse chaude · entendue, jamais vue'; t = it.name.split(' ·')[0]; sub = 'Ton antenne ou tes balises l\u2019ont entendue passer. Une Radar la révélera.';
     acts = btn('Balayer', 'Radar · la révéler', 'game', true) + btn('Poser une balise', 'voir les convois', 'game');
