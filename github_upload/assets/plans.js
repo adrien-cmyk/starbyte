@@ -323,7 +323,7 @@
     }
     function applySel(P) {
       if (!P || !P.sel) return;
-      if (selIdx > 0) { const p = Object.values(P.sysPos).find(q => q.ci === selIdx) || W(selIdx); P.sel.position.set(p.x, 0.6, p.z); P.sel.visible = true; }
+      if (selIdx > 0) { const p = W(selIdx); P.sel.position.set(p.x, 0.6, p.z); P.sel.visible = true; }   // la case de la grille, pas l'étoile (décalée dans sa case)
       else P.sel.visible = false;
     }
     function applyRouteHi(P) { if (!P || !P.routeLines) return; for (const [id, l] of Object.entries(P.routeLines)) { l.material.opacity = hiRoute ? (id === hiRoute ? 1 : 0.3) : 0.75; } }
