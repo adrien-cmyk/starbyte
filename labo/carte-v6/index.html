@@ -1,0 +1,926 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<title>Starbyte · Plans d'existence (labo)</title>
+<style>
+  :root { --sai: env(safe-area-inset-top, 0px); --sab: env(safe-area-inset-bottom, 0px); }
+  html, body { margin: 0; height: 100%; background: #010208; overflow: hidden; color: #dfe8ee; font: 14px/1.4 -apple-system, BlinkMacSystemFont, system-ui, sans-serif; touch-action: none; -webkit-user-select: none; user-select: none; }
+  canvas { display: block; }
+  #fx { position: fixed; inset: 0; pointer-events: none; }
+  #hud { position: fixed; left: 0; right: 0; top: calc(var(--sai) + 12px); text-align: center; pointer-events: none; }
+  #plan { font-weight: 800; letter-spacing: .34em; font-size: 12px; text-transform: uppercase; }
+  #sub { margin-top: 4px; font-size: 11px; color: #8fa3b5; letter-spacing: .05em; }
+  #path { margin-top: 6px; font-size: 10px; color: #5f7283; letter-spacing: .08em; }
+  #scale { position: fixed; left: 16px; bottom: calc(var(--sab) + 70px); font: 600 11px/1 'SF Mono', ui-monospace, monospace; color: #9fc4e0; pointer-events: none; }
+  #scale i { display: block; width: 90px; height: 6px; margin-bottom: 6px; border: 1px solid #9fc4e0; border-top: 0; }
+  #tools { position: fixed; right: 12px; bottom: calc(var(--sab) + 20px); display: flex; flex-direction: column; gap: 10px; }
+  #tools button { width: 46px; height: 46px; border-radius: 50%; border: 1px solid rgba(150,200,240,.3); background: rgba(8,14,22,.72); color: #dfe8ee; font-size: 22px; cursor: pointer; }
+  #hint { position: fixed; left: 16px; right: 76px; bottom: calc(var(--sab) + 24px); font-size: 11.5px; color: #9fb2c2; pointer-events: none; }
+  #tip { position: fixed; pointer-events: none; padding: 6px 10px; border-radius: 8px; background: rgba(8,14,22,.9); border: 1px solid rgba(127,208,255,.35); font-size: 11.5px; display: none; white-space: nowrap; }
+  #lab { position: fixed; left: 12px; top: calc(var(--sai) + 64px); font-size: 10px; letter-spacing: .14em; color: #ffb066; border: 1px solid rgba(255,176,102,.4); padding: 3px 7px; border-radius: 10px; }
+</style>
+<script type="importmap">{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js", "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/" } }</script>
+</head>
+<body>
+<canvas id="fx"></canvas>
+<div id="lab">LABO · CARTE V6</div>
+<div id="hud"><div id="plan"></div><div id="sub"></div><div id="path"></div></div>
+<div id="scale"><i></i><span></span></div>
+<button id="acct" style="position:fixed;right:12px;top:calc(var(--sai) + 10px);padding:6px 12px;border-radius:14px;border:1px solid rgba(127,208,255,.45);background:rgba(8,14,22,.75);color:#bfe6ff;font:600 11px/1 -apple-system,system-ui,sans-serif;letter-spacing:.06em">Mon compte</button>
+<div id="login" style="display:none;position:fixed;inset:0;z-index:50;background:rgba(1,2,8,.82);align-items:center;justify-content:center;padding:20px"><div style="width:100%;max-width:340px;background:#0b1320;border:1px solid rgba(127,208,255,.3);border-radius:14px;padding:18px">
+  <div style="font-weight:800;letter-spacing:.2em;font-size:12px">MON COMPTE</div>
+  <div style="font-size:12px;color:#9fb2c2;margin:8px 0 12px">Le labo lit ta partie dans le cloud (lecture seule, rien n'est modifié). Entre l'e-mail relié à ton compte Starbyte : tu reçois un code.</div>
+  <input id="lg-mail" type="email" placeholder="e-mail" style="width:100%;box-sizing:border-box;padding:11px;border-radius:9px;border:1px solid rgba(127,208,255,.3);background:#0f1923;color:#e6f0ff;font-size:16px">
+  <input id="lg-code" inputmode="numeric" placeholder="code reçu par e-mail" style="display:none;margin-top:8px;width:100%;box-sizing:border-box;padding:11px;border-radius:9px;border:1px solid rgba(127,208,255,.3);background:#0f1923;color:#e6f0ff;font-size:16px;letter-spacing:.3em">
+  <button id="lg-go" style="margin-top:10px;width:100%;padding:12px;border-radius:9px;border:0;background:#2f8fd0;color:#fff;font-weight:700">Recevoir le code</button>
+  <div id="lg-msg" style="font-size:11.5px;color:#ffb066;margin-top:8px;min-height:14px"></div>
+  <button id="lg-x" style="margin-top:6px;width:100%;padding:10px;border-radius:9px;border:1px solid rgba(255,255,255,.12);background:none;color:#9aa8ae">Fermer</button></div></div>
+<div id="card" style="display:none;position:fixed;left:10px;right:70px;bottom:calc(var(--sab) + 18px);z-index:30;background:rgba(8,13,20,.94);border:1px solid rgba(127,208,255,.3);border-radius:14px;padding:12px 14px">
+  <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px"><div><div id="cd-k" style="font-size:10px;letter-spacing:.14em;color:#7fd0ff;text-transform:uppercase"></div><div id="cd-t" style="font-weight:700;font-size:15px;margin-top:2px"></div><div id="cd-s" style="font-size:11.5px;color:#9fb2c2;margin-top:3px"></div></div><button id="cd-x" style="background:none;border:0;color:#9aa6b4;font-size:22px;line-height:1">×</button></div>
+  <div id="cd-a" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:10px"></div></div>
+<div id="tools"><button id="tac" aria-label="Vue tactique" style="font-size:13px;font-weight:700">▦</button><button id="home" aria-label="Recentrer" style="font-size:18px">◎</button><button id="zin" aria-label="Zoomer">+</button><button id="zout" aria-label="Dézoomer">−</button></div>
+<div id="hint"></div>
+<div id="tip"></div>
+<script type="module">
+import * as THREE from 'three';
+
+/* ═════════════ outils ═════════════ */
+const rng = (seed) => { let s = seed >>> 0; return () => { s = (s + 0x6D2B79F5) >>> 0; let t = s; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; };
+const hash = (s) => { let h = 2166136261; for (const c of String(s)) { h ^= c.charCodeAt(0); h = Math.imul(h, 16777619) >>> 0; } return h; };
+const clamp = (x, a, b) => Math.max(a, Math.min(b, x));
+const lerp = (a, b, t) => a + (b - a) * t;
+const V = (x, y, z) => new THREE.Vector3(x, y, z);
+const at = (o, x, y, z) => { o.position.set(x, y, z); return o; };
+
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio || 1, 2));
+renderer.setSize(innerWidth, innerHeight);
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+document.body.prepend(renderer.domElement);
+const camera = new THREE.PerspectiveCamera(42, innerWidth / innerHeight, 0.001, 20000);
+const fx = document.getElementById('fx'), fxc = fx.getContext('2d');
+const resize = () => { renderer.setSize(innerWidth, innerHeight); camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); fx.width = innerWidth * devicePixelRatio; fx.height = innerHeight * devicePixelRatio; };
+addEventListener('resize', resize); resize();
+
+const texCache = {};
+function glow(a = 'rgba(255,255,255,1)', b = 'rgba(255,200,120,.5)') {
+  const k = a + b; if (texCache[k]) return texCache[k];
+  const c = document.createElement('canvas'); c.width = c.height = 128; const x = c.getContext('2d');
+  const g = x.createRadialGradient(64, 64, 0, 64, 64, 64); g.addColorStop(0, a); g.addColorStop(.22, b); g.addColorStop(1, 'rgba(0,0,0,0)');
+  x.fillStyle = g; x.fillRect(0, 0, 128, 128); const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return (texCache[k] = t);
+}
+function spr(tex, s, color = 0xffffff, op = 1) { const m = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, color, transparent: true, opacity: op, depthWrite: false, blending: THREE.AdditiveBlending })); m.scale.setScalar(s); return m; }
+function label(text, color = '#cfe6ff', size = 1) {
+  const c = document.createElement('canvas'), x = c.getContext('2d'); const F = '600 34px -apple-system, system-ui, sans-serif'; x.font = F;
+  const w = Math.ceil(x.measureText(text).width) + 20; c.width = w; c.height = 48; x.font = F; x.fillStyle = color; x.textBaseline = 'middle'; x.fillText(text, 10, 25);
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace;
+  const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: t, transparent: true, depthWrite: false, depthTest: false })); s.center.set(.5, 0); s.userData.k = size; s.userData.ar = w / 48; return s;
+}
+function dust(n, R, seed, size = 1.2, op = .8, spread = .15) {
+  const r = rng(seed), p = new Float32Array(n * 3), c = new Float32Array(n * 3);
+  for (let i = 0; i < n; i++) { p.set([(r() - .5) * R * 2, -R * spread * (.3 + r()), (r() - .5) * R * 2], i * 3); const w = .4 + r() * .6; c.set([w * .85, w * .9, w], i * 3); }
+  const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(p, 3)); g.setAttribute('color', new THREE.BufferAttribute(c, 3));
+  return new THREE.Points(g, new THREE.PointsMaterial({ size, sizeAttenuation: false, vertexColors: true, transparent: true, opacity: op, depthWrite: false }));
+}
+function rockGeo(seed, detail = 2) {
+  const g = new THREE.IcosahedronGeometry(1, detail), p = g.attributes.position, R = rng(seed), v = new THREE.Vector3();
+  const k1 = V(R() - .5, R() - .5, R() - .5).normalize(), k2 = V(R() - .5, R() - .5, R() - .5).normalize();
+  for (let i = 0; i < p.count; i++) { v.fromBufferAttribute(p, i); v.multiplyScalar(1 + .26 * Math.sin(v.dot(k1) * 3.3) + .14 * Math.sin(v.dot(k2) * 6.1) + (R() - .5) * .1); v.y *= .75; p.setXYZ(i, v.x, v.y, v.z); }
+  g.computeVertexNormals(); return g;
+}
+// échelle affichée (largeur de la vue)
+function fmtLen(m) {
+  const LY = 9.461e15;
+  if (m >= LY * .5) return (m / LY).toFixed(m / LY < 10 ? 1 : 0) + ' a.l.';
+  if (m >= 1e9) return Math.round(m / 1e9).toLocaleString('fr-CH') + ' millions de km';
+  if (m >= 1e3) return Math.round(m / 1e3).toLocaleString('fr-CH') + ' km';
+  if (m >= 1) return Math.round(m) + ' m';
+  if (m >= .01) return Math.round(m * 100) + ' cm';
+  if (m >= 1e-5) return Math.round(m * 1e6) + ' µm';
+  if (m >= 1e-14) return '10⁻' + Math.round(-Math.log10(m)) + ' m';
+  return '≈ longueur de Planck';
+}
+
+/* ═════════════ les plans d'existence ═════════════
+   Chaque plan : une scène à plat (on la survole comme la carte de la planète), une échelle (mètres par unité),
+   une hauteur de caméra min/max, et ce qu'on trouve en plongeant sous un point (child). */
+const PLANS = {};
+const sceneBase = (bg) => { const s = new THREE.Scene(); s.background = new THREE.Color(bg); return s; };
+
+// ── Amas ──
+function makeAmas(key, seed, name, neighbor) {
+  const R = rng(seed), S = sceneBase(0x01030a), L = 260;
+  S.add(dust(3000, L * 1.6, seed, 1.1, .7));
+  const items = [];   // ce qu'on peut viser
+  // zones : nappes de couleur très douces, nommées
+  const zoneNames = ['Bras de Kerath', 'Couloir d’Erebus', 'Marges de Korr-Vask', 'Nébuleuse d’Ahn', 'Dérives de Caldris', 'Amas de Vérath'];
+  const zoneCols = [0x2f6fb0, 0x6a3fb0, 0xb0603f, 0x2fa08a, 0x8a3f6a, 0x6a8a2f];
+  const zones = [];
+  for (let z = 0; z < 6; z++) {
+    const zx = (R() - .5) * L * 1.5, zz = (R() - .5) * L * 1.5, zr = 70 + R() * 60;
+    for (let k = 0; k < 7; k++) { const g = spr(glow('rgba(255,255,255,.55)', 'rgba(255,255,255,.12)'), zr * (1 + R()), zoneCols[z], .16); g.position.set(zx + (R() - .5) * zr, -2, zz + (R() - .5) * zr); g.material.blending = THREE.AdditiveBlending; S.add(g); }
+    const lb = label(zoneNames[z].toUpperCase(), '#7f93a8', 2.2); lb.position.set(zx, 1, zz); S.add(lb); zones.push({ x: zx, z: zz, r: zr, lb });
+  }
+  // systèmes découverts (soleils) et masses chaudes non résolues
+  for (let i = 0; i < 70; i++) {
+    const x = (R() - .5) * L * 1.8, z = (R() - .5) * L * 1.8, known = R() < .45, sysName = `A-${name[0]}-${1000 + Math.floor(R() * 9000)}`;
+    if (known) {
+      const sun = new THREE.Group(); sun.position.set(x, 0, z);
+      const col = [0xffd9a0, 0xfff1d0, 0xffb070, 0xa8c8ff][Math.floor(R() * 4)];
+      sun.add(spr(glow('rgba(255,255,250,1)', 'rgba(255,190,110,.55)'), 9, col)); sun.add(spr(glow('rgba(255,220,170,.5)', 'rgba(255,150,70,.1)'), 26, col, .45));
+      const lb = label(sysName, '#e8d8b8', 1); lb.position.set(0, 3, 0); sun.add(lb); sun.userData.lb = lb;
+      S.add(sun); items.push({ kind: 'system', name: sysName, x, z, r: 9, obj: sun, seed: hash(sysName) });
+    } else {
+      const m = spr(glow('rgba(255,120,80,.9)', 'rgba(200,60,40,.25)'), 6, 0xff6a4a, .55); m.position.set(x, 0, z); m.userData.pulse = R() * 6; S.add(m);
+      items.push({ kind: 'mass', name: 'Masse chaude · non résolue', x, z, r: 6, obj: m });
+    }
+  }
+  // ma planète
+  const home = new THREE.Group(); home.add(spr(glow('rgba(255,255,255,1)', 'rgba(127,208,255,.6)'), 7, 0x7fd0ff)); const hl = label('TA PLANÈTE · A-N-6834', '#9fdcff', 1.25); hl.position.set(0, 3, 0); home.add(hl); S.add(home);
+  items.push({ kind: 'system', name: 'A-N-6834 · ton système', x: 0, z: 0, r: 8, obj: home, seed: 6834, home: true });
+  // balises connues : des croix fines, visibles seulement de près (dans une zone)
+  const beacons = new THREE.Group(); S.add(beacons);
+  for (let i = 0; i < 18; i++) {
+    const it = items[Math.floor(R() * items.length)]; const g = new THREE.Group();
+    const m = new THREE.LineBasicMaterial({ color: 0xc89bff, transparent: true, opacity: .9 });
+    g.add(new THREE.LineSegments(new THREE.BufferGeometry().setFromPoints([V(-2.2, 0, 0), V(2.2, 0, 0), V(0, 0, -2.2), V(0, 0, 2.2)]), m));
+    g.position.set(it.x + 5, .5, it.z - 4); beacons.add(g);
+  }
+  // routes connues
+  for (let k = 0; k < 6; k++) {
+    const a = items[Math.floor(R() * items.length)], b = items[Math.floor(R() * items.length)]; if (a === b) continue;
+    const l = new THREE.Line(new THREE.BufferGeometry().setFromPoints([V(a.x, .2, a.z), V(b.x, .2, b.z)]), new THREE.LineDashedMaterial({ color: 0xff9a6a, dashSize: 3, gapSize: 2.5, transparent: true, opacity: .6 }));
+    l.computeLineDistances(); S.add(l);
+  }
+  // frontière avec l'amas voisin : à l'est, on la lit en s'approchant ; on la touche pour passer
+  const fx0 = L * 1.05;
+  const border = new THREE.Mesh(new THREE.PlaneGeometry(60, L * 3.2), new THREE.MeshBasicMaterial({ color: neighbor.col, transparent: true, opacity: .1, side: THREE.DoubleSide, depthWrite: false }));
+  border.rotation.x = -Math.PI / 2; border.position.set(fx0 + 30, -1, 0); S.add(border);
+  const bl = new THREE.Line(new THREE.BufferGeometry().setFromPoints([V(fx0, 0, -L * 1.6), V(fx0, 0, L * 1.6)]), new THREE.LineDashedMaterial({ color: neighbor.col, dashSize: 6, gapSize: 4, transparent: true, opacity: .8 }));
+  bl.computeLineDistances(); S.add(bl);
+  for (const zz of [-L * .8, 0, L * .8]) { const lb = label(`FRONTIÈRE · ${neighbor.name.toUpperCase()}  →`, '#' + neighbor.col.toString(16).padStart(6, '0'), 1.6); lb.position.set(fx0 + 30, 1, zz); S.add(lb); }
+  items.push({ kind: 'border', name: 'Passer dans ' + neighbor.name, x: fx0 + 30, z: 0, r: 30, wide: true, to: neighbor.key });
+  return {
+    key, name, scene: S, unit: 4e14, hMin: 9, hMax: 420, h0: 300, bounds: L * 1.25, title: name, kind: 'amas',
+    hint: 'Glisse pour te déplacer · pince ou molette pour zoomer vers un point · vise un soleil et zoome pour y plonger',
+    items, beacons, zones,
+    update(t, h) { beacons.visible = h < 120; for (const z of zones) z.lb.material.opacity = clamp((h - 60) / 120, 0, 1); for (const it of items) if (it.obj && it.obj.userData.lb) it.obj.userData.lb.material.opacity = clamp((230 - h) / 90, 0, 1); for (const it of items) if (it.kind === 'mass') it.obj.material.opacity = .35 + .25 * Math.sin(t * 2 + it.obj.userData.pulse); },
+  };
+}
+
+// ── Système : soleil au centre, signatures en orbite ──
+function makeSystem(it) {
+  const R = rng(it.seed), S = sceneBase(0x01020a);
+  S.add(dust(1600, 400, it.seed, 1, .55));
+  S.add(new THREE.AmbientLight(0x223044, 1.4));
+  const sunL = new THREE.PointLight(0xffe0b0, 3, 0, 0); S.add(sunL);
+  const sun = makeSun(13, it.port ? 0xffb066 : 0xffd29a); S.add(sun);
+  const items = [], orbiters = [];
+  const kinds = [['asteroides', "CHAMP D'ASTÉROÏDES", '#ffd9a0'], ['epave', 'ÉPAVE · TANKER', '#ffb0a0'], ['planete', 'PLANÈTE LIBRE', '#bfe6c0'], ['signature', 'SIG · ÉCHO MÉTALLIQUE', '#cdb8ff'], ['signature', 'SIG · MASSE FROIDE', '#cdb8ff'], ['planete', 'GÉANTE GAZEUSE', '#ffe0b0']];
+  const n = it.bodies ? it.bodies.length : it.home ? 6 : 3 + Math.floor(R() * 4);
+  for (let i = 0; i < n; i++) {
+    const [kind, nm, col] = it.bodies ? it.bodies[i] : kinds[(i + Math.floor(R() * 2)) % kinds.length], rad = 40 + i * 26 + R() * 10, ang = R() * Math.PI * 2, spd = .05 / Math.sqrt(rad / 40) * (R() < .5 ? 1 : .8);
+    const ring = new THREE.Mesh(new THREE.RingGeometry(rad - .15, rad + .15, 160), new THREE.MeshBasicMaterial({ color: 0x5a7a9a, transparent: true, opacity: .28, side: THREE.DoubleSide, depthWrite: false }));
+    ring.rotation.x = -Math.PI / 2; S.add(ring);
+    const g = new THREE.Group();
+    if (kind === 'signature') { const ico = new THREE.Mesh(new THREE.IcosahedronGeometry(2.4, 0), new THREE.MeshBasicMaterial({ color: 0xa37dff, wireframe: true })); g.add(ico); g.userData.spin = ico; }
+    else if (kind === 'planete') { const s = nm.startsWith('GÉANTE') ? 6 : 3.6; g.add(new THREE.Mesh(new THREE.SphereGeometry(s, 32, 20), new THREE.MeshStandardMaterial({ color: s > 5 ? 0xc9a06a : 0x6a8f6a, roughness: .8 }))); }
+    else if (kind === 'asteroides') { const im = new THREE.InstancedMesh(rockGeo(it.seed + i, 1), new THREE.MeshStandardMaterial({ color: 0x8a8076, roughness: .95 }), 60); const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(); for (let k = 0; k < 60; k++) { const a = R() * 6.28, d = R() * 6; m4.compose(V(Math.cos(a) * d, (R() - .5) * 1.5, Math.sin(a) * d), q.setFromEuler(new THREE.Euler(R() * 3, R() * 3, R() * 3)), V(1, 1, 1).multiplyScalar(.2 + R() * .6)); im.setMatrixAt(k, m4); } g.add(im); }
+    else { const m = new THREE.MeshStandardMaterial({ color: 0x5b6670, metalness: .8, roughness: .5 }); const a = new THREE.Mesh(new THREE.BoxGeometry(4.5, 1.2, 1.4), m); a.rotation.z = .25; g.add(a); const b = new THREE.Mesh(new THREE.BoxGeometry(2.4, 1, 1.2), m); b.position.set(3.6, -1, .6); b.rotation.set(.4, .3, -.7); g.add(b); g.add(at(spr(glow('rgba(255,240,220,1)', 'rgba(255,90,40,.6)'), 2.2, 0xff7a3a), 2, .2, .9)); }
+    const lb = label(nm, col, 1.8); lb.position.set(0, 4.5, 0); g.add(lb);
+    S.add(g);
+    const o = { kind, name: nm, rad, ang, spd, obj: g, r: kind === 'planete' ? 8 : 8, seed: it.seed + i * 977 };
+    orbiters.push(o); items.push(o);
+  }
+  const place = () => { for (const o of orbiters) { o.x = Math.cos(o.ang) * o.rad; o.z = Math.sin(o.ang) * o.rad; o.obj.position.set(o.x, 0, o.z); } };
+  place();
+  return {
+    key: 'sys:' + it.name + (it.bodies ? ':r' : ''), scene: S, unit: 3e9, hMin: 7, hMax: 520, h0: 380, bounds: 260, title: 'Système ' + it.name.split(' ·')[0], kind: 'systeme',
+    hint: 'Le soleil au centre, les signatures en orbite · zoome vers une signature pour la rejoindre, ou au hasard pour plonger dans le vide',
+    items, update(t, h, dt) { sun.userData.tick(t); for (const o of orbiters) { o.ang += o.spd * dt; if (o.obj.userData.spin) { o.obj.userData.spin.rotation.y = t * .6; o.obj.userData.spin.rotation.x = t * .3; } } place(); },
+  };
+}
+
+// ── Les environs d'une signature ──
+function makeSig(it) {
+  const R = rng(it.seed), S = sceneBase(0x01020a);
+  S.add(dust(1500, 300, it.seed, 1, .5));
+  S.add(new THREE.AmbientLight(0x1c2434, 1.1));
+  const key = new THREE.DirectionalLight(0xffe2b0, 3); key.position.set(-80, 60, -40); S.add(key);
+  const rim = new THREE.DirectionalLight(0x6aa8ff, 1.1); rim.position.set(60, 20, 80); S.add(rim);
+  S.add(at(spr(glow('rgba(255,255,240,1)', 'rgba(255,190,90,.6)'), 60), -900, 400, -700));
+  const items = [], spinners = [];
+  if (it.kind === 'asteroides' || it.kind === 'signature') {
+    const geos = [0, 1, 2, 3, 4, 5].map(i => rockGeo(it.seed + i));
+    const mats = [0x857a70, 0x6d6560, 0x9a8a74].map(c => new THREE.MeshStandardMaterial({ color: c, roughness: .95 }));
+    const ore = new THREE.MeshStandardMaterial({ color: 0x5fe0ff, emissive: 0x1aa0d0, emissiveIntensity: 1.3, roughness: .2 });
+    for (let i = 0; i < 220; i++) {
+      const rk = new THREE.Mesh(geos[i % 6], mats[i % 3]); const a = R() * 6.28, d = 6 + Math.pow(R(), .7) * 120;
+      const s = i < 6 ? 4 + R() * 3 : .4 + Math.pow(R(), 2.3) * 3.5;
+      rk.position.set(Math.cos(a) * d, (R() - .5) * 6, Math.sin(a) * d * .8); rk.scale.setScalar(s); rk.rotation.set(R() * 6, R() * 6, R() * 6);
+      if (i < 6 || R() < .07) for (let k = 0; k < 4; k++) { const c = new THREE.Mesh(new THREE.OctahedronGeometry(.15, 0), ore); const dir = V(R() - .5, R() - .5, R() - .5).normalize(); c.position.copy(dir.clone().multiplyScalar(.88)); c.scale.set(1, 1.8, 1); c.lookAt(dir.multiplyScalar(3)); rk.add(c); }
+      rk.userData.spin = V((R() - .5) * .15, (R() - .5) * .15, 0); spinners.push(rk); S.add(rk);
+      items.push({ kind: 'rock', name: i < 6 ? 'Astéroïde · minerai cristallin' : 'Fragment rocheux', x: rk.position.x, z: rk.position.z, r: s * 1.1, obj: rk, size: s });
+    }
+  } else if (it.kind === 'epave') {
+    const dark = new THREE.MeshStandardMaterial({ color: 0x4d5762, metalness: .85, roughness: .45 }), lit = new THREE.MeshBasicMaterial({ color: 0xffb070 });
+    const w = new THREE.Group(); w.rotation.set(.2, .7, .3); S.add(w);
+    const body = new THREE.Mesh(new THREE.CylinderGeometry(4, 4.4, 26, 14, 1, true), dark); body.rotation.z = Math.PI / 2; w.add(body);
+    for (let k = 0; k < 10; k++) { const p = new THREE.Mesh(new THREE.BoxGeometry(.7, .3, .1), lit); p.position.set(-9 + k * 2, 2.4, 3.7); w.add(p); }
+    const br = new THREE.Mesh(new THREE.CylinderGeometry(3.6, 4, 10, 14, 1, true), dark); br.position.set(19, -6, 3); br.rotation.set(.6, 0, 1.1); w.add(br);
+    w.add(at(spr(glow('rgba(255,250,230,1)', 'rgba(255,110,40,.6)'), 9, 0xff8a40), 13, 0, 0));
+    for (let k = 0; k < 90; k++) { const d = new THREE.Mesh(new THREE.BoxGeometry(.6 + R(), .1, .4 + R()), dark); d.position.set(12 + R() * 40, (R() - .5) * 12, (R() - .5) * 30); d.rotation.set(R() * 6, R() * 6, R() * 6); d.userData.spin = V(R() * .4, R() * .4, 0); spinners.push(d); S.add(d); items.push({ kind: 'rock', name: 'Débris de coque', x: d.position.x, z: d.position.z, r: 1.2, obj: d, size: 1 }); }
+    items.push({ kind: 'rock', name: 'Coque du tanker', x: 0, z: 0, r: 14, obj: w, size: 12 });
+  } else {
+    const s = it.name.startsWith('GÉANTE') ? 60 : 36;
+    const p = new THREE.Mesh(new THREE.SphereGeometry(s, 64, 40), new THREE.MeshStandardMaterial({ color: s > 50 ? 0xc9a06a : 0x6a8f6a, roughness: .85 })); p.position.set(0, -s - 6, 0); S.add(p);
+    items.push({ kind: 'rock', name: it.name.toLowerCase(), x: 0, z: 0, r: s, obj: p, size: s });
+  }
+  return {
+    key: 'sig:' + it.seed, scene: S, unit: 1e3, hMin: .9, hMax: 260, h0: 95, bounds: 200, title: it.name, kind: 'sig',
+    hint: 'Navigue autour de la signature · zoome sur un caillou jusqu’à 10 cm : en dessous, la matière s’ouvre',
+    items, update(t, h, dt) { for (const r of spinners) { r.rotation.x += r.userData.spin.x * dt; r.rotation.y += r.userData.spin.y * dt; } },
+  };
+}
+
+// ── Le vide ──
+function makeVoid(seed) {
+  const S = sceneBase(0x000104); const R = rng(seed);
+  const d1 = dust(900, 200, seed, 1.4, .5, .8), d2 = dust(400, 200, seed + 1, 2.4, .25, .8); S.add(d1, d2);
+  for (let k = 0; k < 4; k++) S.add(at(spr(glow('rgba(120,140,220,.25)', 'rgba(60,70,140,.05)'), 140 + R() * 100, 0x5a6ac0, .25), (R() - .5) * 300, -60, (R() - .5) * 300));
+  return { key: 'vide:' + seed, scene: S, unit: 1e8, hMin: 4, hMax: 260, h0: 180, bounds: 180, title: 'Vide interstellaire', kind: 'vide', hint: 'Rien. Le vide. Zoome encore, au hasard : sous le vide, la structure.', items: [],
+    update(t) { d1.position.x = Math.sin(t * .05) * 6; d2.position.z = Math.cos(t * .04) * 8; } };
+}
+
+// ── La structure quantique : des cordes qui vibrent ──
+function makeQuantum(seed) {
+  const S = sceneBase(0x03010c), R = rng(seed), lines = [], N = 46, P = 160;
+  for (let i = 0; i < N; i++) {
+    const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(P * 3), 3));
+    const hue = R(), col = new THREE.Color().setHSL(.55 + hue * .35, .9, .62);
+    const l = new THREE.Line(g, new THREE.LineBasicMaterial({ color: col, transparent: true, opacity: .75, blending: THREE.AdditiveBlending }));
+    l.userData = { z: (i - N / 2) * 4.2, f: 1 + R() * 4, a: .6 + R() * 2.4, ph: R() * 6, sp: .6 + R() * 1.8, closed: R() < .3, cx: (R() - .5) * 150, r: 2 + R() * 6 };
+    S.add(l); lines.push(l);
+  }
+  S.add(at(spr(glow('rgba(255,255,255,.6)', 'rgba(160,100,255,.15)'), 120, 0xa37dff, .3), 0, -10, 0));
+  return { key: 'q:' + seed, scene: S, unit: 1e-33 * 1e3, hMin: 3, hMax: 220, h0: 160, bounds: 140, title: 'Structure quantique', kind: 'quantique', hint: 'Les cordes vibrent · zoome encore : au bout, le mur des tags', items: [],
+    update(t) { for (const l of lines) { const u = l.userData, p = l.geometry.attributes.position; for (let k = 0; k < P; k++) { const s = k / (P - 1); if (u.closed) { const a = s * Math.PI * 2; const rr = u.r * (1 + .25 * Math.sin(a * u.f * 2 + t * u.sp * 3)); p.setXYZ(k, u.cx + Math.cos(a) * rr, Math.sin(a * 3 + t) * .6, u.z + Math.sin(a) * rr); } else { const x = (s - .5) * 300; p.setXYZ(k, x, Math.sin(s * u.f * 9 + t * u.sp + u.ph) * u.a, u.z + Math.sin(s * u.f * 5 - t * u.sp * .7) * u.a * .6); } } p.needsUpdate = true; } } };
+}
+
+// ── Le mur des tags ──
+const WALL = 1000, wallCanvas = document.createElement('canvas'); wallCanvas.width = wallCanvas.height = WALL;
+{
+  const x = wallCanvas.getContext('2d'), R = rng(2026), pal = ['#ff4f40', '#ffb066', '#ffd27a', '#7fd0ff', '#2f8fd0', '#a37dff', '#5fcc8a', '#ffffff', '#ff7ab8', '#222034', '#e8e0c8'];
+  x.fillStyle = '#0b0a14'; x.fillRect(0, 0, WALL, WALL);
+  for (let k = 0; k < 900; k++) {
+    const w = 4 + Math.floor(Math.pow(R(), 2.2) * 70), h = 4 + Math.floor(Math.pow(R(), 2.2) * 70), px = Math.floor(R() * (WALL - w)), py = Math.floor(R() * (WALL - h)); if (R() < .25) continue;
+    x.fillStyle = pal[Math.floor(R() * pal.length)]; x.fillRect(px, py, w, h); const mo = Math.floor(R() * 4);
+    for (let yy = 0; yy < h; yy++) for (let xx = 0; xx < w; xx++) { const on = mo === 0 ? ((xx >> 1) + (yy >> 1)) % 2 === 0 : mo === 1 ? Math.hypot(xx - w / 2, yy - h / 2) < Math.min(w, h) / 3 : mo === 2 ? yy % 3 === 0 || xx % 5 === 0 : R() < .3; if (on) { x.fillStyle = pal[(k + mo + 3) % pal.length]; x.fillRect(px + xx, py + yy, 1, 1); } }
+  }
+  x.fillStyle = '#ffd27a'; x.font = 'bold 54px monospace'; x.fillText('STARBYTE', 380, 520); x.fillStyle = '#7fd0ff'; x.font = 'bold 22px monospace'; x.fillText('ESPACE LIBRE · 1 CHF', 404, 552);
+}
+const wallTex = new THREE.CanvasTexture(wallCanvas); wallTex.magFilter = THREE.NearestFilter; wallTex.colorSpace = THREE.SRGBColorSpace;
+const wallMat = new THREE.ShaderMaterial({ uniforms: { map: { value: wallTex }, uGrid: { value: 0 } },
+  vertexShader: 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }',
+  fragmentShader: `uniform sampler2D map; uniform float uGrid; varying vec2 vUv; void main(){ vec4 c = texture2D(map, vUv); vec2 g = fract(vUv * ${WALL}.0); float e = max(step(.93, g.x), step(.93, g.y)); gl_FragColor = vec4(mix(c.rgb, c.rgb*.5 + vec3(.05,.08,.12), e*uGrid), 1.0); }` });
+function makeWall() {
+  const S = sceneBase(0x05030c); const w = new THREE.Mesh(new THREE.PlaneGeometry(200, 200), wallMat); w.rotation.x = -Math.PI / 2; S.add(w);
+  return { key: 'wall', scene: S, unit: 1.6e-35 * 5, hMin: .35, hMax: 300, h0: 230, bounds: 100, title: 'Le mur des tags', kind: 'mur', hint: '1 000 000 d’espaces à 1 CHF · touche un espace', items: [], wall: w,
+    update(t, h) { wallMat.uniforms.uGrid.value = clamp((12 - h) / 8, 0, 1); } };
+}
+
+/* ═════════════ navigation : ce qu'on trouve en plongeant sous un point ═════════════ */
+const amasA = { key: 'A', name: 'Amas A', col: 0x7fd0ff }, amasB = { key: 'B', name: 'Amas B', col: 0xff9a6a };
+const getPlan = (key, make) => PLANS[key] || (PLANS[key] = make());
+function amas(k) { if (k === 'A' && PLANS.amasReal) return PLANS.amasReal; return k === 'A' ? getPlan('amasA', () => makeAmas('amasA', 11, 'Amas A', amasB)) : getPlan('amasB', () => { const p = makeAmas('amasB', 97, 'Amas B', amasA); return p; }); }
+function childOf(plan, wx, wz) {
+  // l'objet le plus proche du point visé, s'il est assez près
+  let best = null, bd = Infinity;
+  for (const it of plan.items) { if (it.wide || it.kind === 'mass') continue; const d = Math.hypot(it.x - wx, it.z - wz); if (d < it.r * 1.8 && d < bd) { bd = d; best = it; } }
+  if (plan.real) {   // v5 : toute case mène à son voisinage
+    const cell = worldCell(wx, wz); let near = null, nd = Infinity;
+    for (const it of plan.items) { const d = Math.hypot(it.x - wx, it.z - wz); if (d < it.r * 1.6 && d < nd) { nd = d; near = it; } }
+    const c = near ? near.cell : cell;
+    if (c < 0 && !near) return { plan: getPlan('vide:far' + Math.round(wx / 200) + Math.round(wz / 200), () => makeVoid(hash('far' + Math.round(wx / 200) + Math.round(wz / 200)))), via: 'vide' };
+    return { plan: getPlan('nb:' + c + ':' + (near ? near.key : ''), () => makeNeighborhood(c, near)), via: near ? near.key : 'région' };
+  }
+  if (plan.kind === 'voisinage') {
+    const it = best && best.nb_ref ? best : null;
+    if (it && it.port) return { plan: getPlan('st:' + it.key, () => makeStation(it)), via: 'station' };
+    if (it && it.kind === 'system') return { plan: getPlan('sys:' + it.key + ':r', () => makeSystem(Object.assign({}, it, { name: it.key }))), via: it.key };
+    return { plan: getPlan('vide:nb' + plan.key, () => makeVoid(hash('vnb' + plan.key))), via: 'vide' };
+  }
+  if (plan.kind === 'univers') { const c = plan.items.reduce((m, i) => { const d = Math.hypot(i.x - wx, i.z - wz); return d < m.d ? { d, i } : m; }, { d: Infinity }).i; if (!c) return null; return { plan: c.key === 'Z' ? getPlan('amasZ', () => makeAmas('amasZ', 53, 'Amas Z', amasA)) : amas(c.key), via: c.name }; }
+  if (plan.kind === 'route') { const j = best && best.kind === 'jalon' && REAL ? PLANS.amasReal && PLANS.amasReal.items.find(i => i.key === best.key) : null;
+    if (j) return { plan: getPlan('nb:' + j.cell + ':' + j.key, () => makeNeighborhood(j.cell, j)), via: j.key }; return { plan: getPlan('vide:r' + plan.key, () => makeVoid(hash('vr' + plan.key))), via: 'vide' }; }
+  if (plan.kind === 'station') return { plan: getPlan('q:' + plan.key, () => makeQuantum(hash('q' + plan.key))), via: 'matière' };
+  if (plan.kind === 'amas') { if (best && best.kind === 'system') return { plan: getPlan('sys:' + best.name, () => makeSystem(best)), via: best.name }; return { plan: getPlan('vide:' + Math.round(wx / 40) + ':' + Math.round(wz / 40), () => makeVoid(hash(plan.key + Math.round(wx / 40) + ':' + Math.round(wz / 40)))), via: 'vide' }; }
+  if (plan.kind === 'systeme') { if (best) return { plan: getPlan('sig:' + best.seed, () => makeSig(best)), via: best.name }; return { plan: getPlan('vide:s' + plan.key, () => makeVoid(hash('v' + plan.key))), via: 'vide' }; }
+  if (plan.kind === 'sig') { if (best) return { plan: getPlan('q:' + plan.key, () => makeQuantum(hash('q' + plan.key))), via: 'matière' }; return { plan: getPlan('vide:g' + plan.key, () => makeVoid(hash('g' + plan.key))), via: 'vide' }; }
+  if (plan.kind === 'vide') return { plan: getPlan('q:' + plan.key, () => makeQuantum(hash('q' + plan.key))), via: 'structure' };
+  if (plan.kind === 'quantique') return { plan: getPlan('wall', makeWall), via: 'cordes' };
+  return null;
+}
+
+// ═════════════ v6 ═════════════
+// étoile « à contempler » : surface en granulation qui bouge, assombrissement du bord, couronne, aigrettes
+function spikeTex() {
+  if (texCache.spike) return texCache.spike;
+  const c = document.createElement('canvas'); c.width = c.height = 256; const x = c.getContext('2d');
+  const g = x.createRadialGradient(128, 128, 0, 128, 128, 128); g.addColorStop(0, 'rgba(255,255,255,1)'); g.addColorStop(.08, 'rgba(255,240,220,.85)'); g.addColorStop(.3, 'rgba(255,200,150,.12)'); g.addColorStop(1, 'rgba(0,0,0,0)');
+  x.fillStyle = g; x.fillRect(0, 0, 256, 256); x.globalCompositeOperation = 'lighter';
+  for (const [a, w, l] of [[0, 2.2, 128], [Math.PI / 2, 2.2, 128], [Math.PI / 4, 1, 70], [-Math.PI / 4, 1, 70]]) {
+    x.save(); x.translate(128, 128); x.rotate(a); const lg = x.createLinearGradient(-l, 0, l, 0); lg.addColorStop(0, 'rgba(255,255,255,0)'); lg.addColorStop(.5, 'rgba(255,250,240,.9)'); lg.addColorStop(1, 'rgba(255,255,255,0)');
+    x.fillStyle = lg; x.fillRect(-l, -w / 2, l * 2, w); x.restore(); }
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return (texCache.spike = t);
+}
+const SUN_FS = `
+  uniform float uT; uniform vec3 uHot, uMid, uCool; varying vec3 vN; varying vec3 vP; varying vec3 vV;
+  vec3 h3(vec3 p){ p = fract(p * .3183099 + .1); p *= 17.0; return fract(vec3(p.x*p.y*p.z, p.x+p.y*p.z, p.x*p.y+p.z)); }
+  float n3(vec3 x){ vec3 i = floor(x), f = fract(x); f = f*f*(3.-2.*f);
+    return mix(mix(mix(h3(i).x, h3(i+vec3(1,0,0)).x, f.x), mix(h3(i+vec3(0,1,0)).x, h3(i+vec3(1,1,0)).x, f.x), f.y),
+               mix(mix(h3(i+vec3(0,0,1)).x, h3(i+vec3(1,0,1)).x, f.x), mix(h3(i+vec3(0,1,1)).x, h3(i+vec3(1,1,1)).x, f.x), f.y), f.z); }
+  float fbm(vec3 p){ float a = .5, s = 0.; for (int i = 0; i < 5; i++) { s += a * n3(p); p = p * 2.03 + vec3(1.7, 9.2, 3.1); a *= .5; } return s; }
+  void main(){ vec3 p = vN * 3.2; float w = fbm(p + vec3(uT * .05, uT * .03, 0.)); float g = fbm(p * 2.6 + w * 1.8 - vec3(0., uT * .08, 0.));
+    float cells = smoothstep(.35, .75, g); float mu = clamp(dot(normalize(vV), vN), 0., 1.);
+    vec3 col = mix(uMid, uHot, cells); col = mix(uCool, col, smoothstep(0., .55, mu)); col *= .55 + .75 * pow(mu, .45);
+    float spots = smoothstep(.72, .78, fbm(p * .9 + 11.3)); col *= 1. - spots * .6;
+    gl_FragColor = vec4(col * 1.2, 1.); }`;
+function makeSun(r, tint = 0xffd9a0) {
+  const g = new THREE.Group(), c = new THREE.Color(tint);
+  const mat = new THREE.ShaderMaterial({ uniforms: { uT: { value: 0 }, uHot: { value: new THREE.Color(1, .97, .86) }, uMid: { value: c.clone().multiplyScalar(1.05) }, uCool: { value: c.clone().multiplyScalar(.42).lerp(new THREE.Color(.6, .12, .02), .5) } },
+    vertexShader: 'varying vec3 vN; varying vec3 vP; varying vec3 vV; void main(){ vN = normalize(normal); vec4 w = modelMatrix * vec4(position,1.); vP = w.xyz; vV = cameraPosition - w.xyz; vV = (inverse(modelMatrix) * vec4(vV, 0.)).xyz; gl_Position = projectionMatrix * viewMatrix * w; }',
+    fragmentShader: SUN_FS });
+  const ball = new THREE.Mesh(new THREE.SphereGeometry(r, 64, 40), mat); g.add(ball);
+  const c1 = spr(glow('rgba(255,250,235,.9)', 'rgba(255,190,110,.35)'), r * 3.4, tint, .55), c2 = spr(glow('rgba(255,210,160,.35)', 'rgba(255,140,60,.07)'), r * 8, tint, .32);
+  const sp = spr(spikeTex(), r * 9, 0xffffff, .5); g.add(c1, c2, sp);
+  g.userData.tick = (t) => { mat.uniforms.uT.value = t; ball.rotation.y = t * .03; sp.material.rotation = Math.sin(t * .1) * .05; c1.material.opacity = .5 + .06 * Math.sin(t * 1.3); };
+  return g;
+}
+
+// ── Plan des amas : la vue d'au-dessus, une nébuleuse immense, l'amas A au milieu, B à l'est, Z à l'ouest ──
+const NEB_FS = `
+  uniform float uT; varying vec2 vP;
+  float h(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+  float n(vec2 x){ vec2 i = floor(x), f = fract(x); f = f*f*(3.-2.*f); return mix(mix(h(i), h(i+vec2(1,0)), f.x), mix(h(i+vec2(0,1)), h(i+vec2(1,1)), f.x), f.y); }
+  float fbm(vec2 p){ float a = .5, s = 0.; for (int i = 0; i < 6; i++) { s += a * n(p); p = mat2(1.6, 1.2, -1.2, 1.6) * p; a *= .5; } return s; }
+  void main(){ vec2 p = vP * .00042 + vec2(uT * .002, 0.);
+    vec2 q = vec2(fbm(p), fbm(p + vec2(5.2, 1.3))); vec2 r = vec2(fbm(p + 3.5 * q + vec2(1.7, 9.2) + uT * .004), fbm(p + 3.5 * q + vec2(8.3, 2.8)));
+    float f = fbm(p + 3.8 * r);
+    float dust = smoothstep(.45, .75, fbm(p * 2.3 + 7.1 + r));
+    vec3 deep = vec3(.025, .03, .085), purple = vec3(.34, .12, .48), magenta = vec3(.78, .22, .42), orange = vec3(1.0, .52, .18), gold = vec3(1.0, .86, .56);
+    vec3 col = mix(deep, purple, smoothstep(.25, .7, f));
+    col = mix(col, magenta, smoothstep(.55, .8, f) * smoothstep(.3, .9, r.x));
+    float ridge = pow(1. - abs(f - .62) * 3.2, 6.) * smoothstep(.4, .8, q.y);
+    col += orange * ridge * 1.1 + gold * pow(ridge, 3.) * .9;
+    col = mix(col, col * .18, dust * .85);
+    float vig = smoothstep(1.0, .2, length(vP) * .00009);
+    gl_FragColor = vec4(col * (.32 + .42 * vig), 1.); }`;
+function makeUniverse() {
+  const S = sceneBase(0x020208);
+  const neb = new THREE.Mesh(new THREE.PlaneGeometry(60000, 60000), new THREE.ShaderMaterial({ uniforms: { uT: { value: 0 } }, vertexShader: 'varying vec2 vP; void main(){ vec4 w = modelMatrix * vec4(position,1.); vP = w.xz; gl_Position = projectionMatrix * viewMatrix * w; }', fragmentShader: NEB_FS }));
+  neb.material.depthWrite = false; neb.renderOrder = -10; neb.rotation.x = -Math.PI / 2; neb.position.y = -40; S.add(neb);
+  const R = rng(777);
+  { const n = 16000, p = new Float32Array(n * 3), c = new Float32Array(n * 3);
+    for (let i = 0; i < n; i++) { p.set([(R() - .5) * 26000, -10 - R() * 20, (R() - .5) * 26000], i * 3); const w = .35 + R() * .65, t = R(); c.set([w, w * (t > .7 ? .8 : .95), w * (t < .3 ? 1 : .85)], i * 3); }
+    const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(p, 3)); g.setAttribute('color', new THREE.BufferAttribute(c, 3));
+    S.add(new THREE.Points(g, new THREE.PointsMaterial({ size: 1.4, sizeAttenuation: false, vertexColors: true, transparent: true, opacity: .9, depthWrite: false }))); }
+  for (let i = 0; i < 260; i++) { const col = [0xffffff, 0xcfe0ff, 0xffd0a0, 0xff9a8a, 0xa8c8ff][Math.floor(R() * 5)]; S.add(at(spr(spikeTex(), 40 + Math.pow(R(), 4) * 260, col, .5 + R() * .4), (R() - .5) * 24000, -5, (R() - .5) * 24000)); }
+  const items = [];
+  const cluster = (key, name, x, z, col, sub) => {
+    const g = new THREE.Group(); g.position.set(x, 0, z); S.add(g); const r = rng(hash(key));
+    g.add(spr(glow('rgba(255,255,255,.9)', 'rgba(255,220,180,.25)'), 1400, col, .5)); g.add(spr(glow('rgba(255,240,220,.6)', 'rgba(255,200,150,.05)'), 3400, col, .3));
+    const n = 1800, p = new Float32Array(n * 3); for (let i = 0; i < n; i++) { const a = r() * 6.28, d = Math.pow(r(), 1.8) * 1500; p.set([Math.cos(a) * d * (1 + .3 * Math.sin(a * 3)), 2, Math.sin(a) * d * .8], i * 3); }
+    const pg = new THREE.BufferGeometry(); pg.setAttribute('position', new THREE.BufferAttribute(p, 3)); g.add(new THREE.Points(pg, new THREE.PointsMaterial({ size: 1.6, sizeAttenuation: false, color: 0xfff1dc, transparent: true, opacity: .95, depthWrite: false })));
+    const lb = label(name.toUpperCase(), '#' + new THREE.Color(col).getHexString(), 2.6); lb.userData.always = true; lb.position.set(0, 10, -1700); g.add(lb);
+    const sl = label(sub, '#c8d6e2', 1.5); sl.position.set(0, 10, -1300); g.add(sl);
+    items.push({ kind: 'cluster', key, name, x, z, r: 1700, sub });
+  };
+  cluster('A', 'Amas A', 0, 0, 0xffd9a0, REAL ? 'ton amas · ' + Object.values(REAL.P).filter(p => p.kind === 'system').length + ' systèmes connus' : 'ton amas');
+  cluster('B', 'Amas B', 5600, 500, 0xa8c8ff, 'à l’est · inexploré');
+  cluster('Z', 'Amas Z', -5600, -400, 0xff9a8a, 'à l’ouest · inexploré');
+  return { key: 'univers', scene: S, unit: 1.6e15, hMin: 1800, hMax: 16000, h0: 8200, bounds: 9000, title: 'Les amas', kind: 'univers',
+    hint: 'Au-dessus des amas · l’Amas B à l’est, l’Amas Z à l’ouest · pince vers un amas pour y descendre', items,
+    update(t) { neb.material.uniforms.uT.value = t; edgeChips(items); } };
+}
+// un amas hors de l'écran : une pastille au bord, qui y emmène
+const _chips = {};
+function edgeChips(items) {
+  for (const it of items) { let c = _chips[it.key]; if (!c) { c = _chips[it.key] = document.createElement('button'); c.style.cssText = 'position:fixed;z-index:20;padding:6px 10px;border-radius:12px;border:1px solid rgba(255,255,255,.25);background:rgba(10,8,20,.7);color:#f0e6ff;font:600 11px/1 -apple-system,system-ui,sans-serif;letter-spacing:.08em;display:none'; c.onclick = () => { gx = it.x; gz = it.z; }; document.body.appendChild(c); }
+    const v = V(it.x, 0, it.z).project(camera), on = Math.abs(v.x) < .92 && Math.abs(v.y) < .92 && v.z < 1;
+    if (on || plan.kind !== 'univers' || trans) { c.style.display = 'none'; continue; }
+    const ang = Math.atan2(v.y, v.x), ex = clamp(.5 + Math.cos(ang) * .5, .03, .97), ey = clamp(.5 - Math.sin(ang) * .5, .12, .82);
+    c.textContent = (v.x < 0 ? '◂ ' : '') + it.name.toUpperCase() + (v.x >= 0 ? ' ▸' : ''); c.style.display = 'block';
+    c.style.left = Math.round(ex * innerWidth - (ex > .5 ? c.offsetWidth : 0)) + 'px'; c.style.top = Math.round(ey * innerHeight) + 'px'; }
+}
+function _noop() {
+}
+
+// ── Plan d'une ligne de convois ──
+function lineChainOf(lineKey) {
+  const legs = (REAL ? REAL.legs : []).filter(l => l.lineId === lineKey);
+  const next = {}, has = {}; for (const l of legs) { next[l.from] = l.to; has[l.to] = 1; }
+  let start = legs.map(l => l.from).find(k => !has[k]) || (legs[0] && legs[0].from); const chain = []; const seen = new Set();
+  while (start && !seen.has(start)) { chain.push(start); seen.add(start); start = next[start]; }
+  return { chain, legs };
+}
+function makeRoute(lineKey, label0) {
+  const S = sceneBase(0x01020a); S.add(dust(2600, 1600, hash(lineKey), 1, .55));
+  const { chain } = lineChainOf(lineKey), G = REAL ? REAL.G : {}, now = Date.now(), N = Math.max(2, chain.length), step = 190;
+  const X = (i) => (i - (N - 1) / 2) * step, Zf = (i) => Math.sin(i * .9) * 26;
+  // couloir : une bande de lumière très douce le long de la ligne
+  for (let i = 0; i < N; i++) S.add(at(spr(glow('rgba(255,170,120,.35)', 'rgba(255,120,80,.06)'), 420, 0xff9a6a, .18), X(i), -3, Zf(i)));
+  const pts = chain.map((k, i) => V(X(i), .3, Zf(i)));
+  if (pts.length > 1) { const curve = new THREE.CatmullRomCurve3(pts); const l = new THREE.Line(new THREE.BufferGeometry().setFromPoints(curve.getPoints(200)), new THREE.LineDashedMaterial({ color: 0xff9a6a, dashSize: 12, gapSize: 8, transparent: true, opacity: .8 })); l.computeLineDistances(); S.add(l); }
+  const items = [], movers = [];
+  chain.forEach((k, i) => {
+    const isPort = REAL && REAL.P[k] && REAL.P[k].port, g = makeSun(isPort ? 9 : 6, isPort ? 0xffb066 : 0xffe0b8); g.position.set(X(i), 0, Zf(i)); S.add(g); movers.push(g);
+    const nb = (REAL && REAL.beaconAt[k]) || 0;
+    const lb = label((isPort ? String(isPort.name || 'Station').toUpperCase() + ' · ' : '') + k + (nb ? '  ·  balise' : ''), isPort ? '#ffcf96' : '#e8d8b8', 1.1); lb.userData.always = true; lb.position.set(X(i), 22, Zf(i)); S.add(lb);
+    if (nb) { const cr = new THREE.LineSegments(new THREE.BufferGeometry().setFromPoints([V(-9, 0, 0), V(9, 0, 0), V(0, 0, -9), V(0, 0, 9)]), new THREE.LineBasicMaterial({ color: 0xc89bff })); cr.position.set(X(i) + 22, 1, Zf(i) - 20); S.add(cr); }
+    items.push({ kind: 'jalon', key: k, name: k, x: X(i), z: Zf(i), r: 30, port: isPort });
+  });
+  const idx = (k) => chain.indexOf(String(k || '').split('-').slice(0, 3).join('-'));
+  const ship = (col, s = 1) => { const m = new THREE.Mesh(new THREE.ConeGeometry(3.2 * s, 12 * s, 4), new THREE.MeshBasicMaterial({ color: col })); m.rotation.x = Math.PI / 2; const g = new THREE.Group(); g.add(m); g.add(spr(glow('rgba(255,255,255,.9)', 'rgba(255,200,150,.3)'), 16 * s, col, .7)); return g; };
+  const conv = [];
+  // convois détectés par mes balises sur cette ligne (dernières 12 h)
+  for (const r of (G.beaconReports || [])) {
+    const ln = r.line || (r.mp && { id: 'cv:' + r.mp.convoyId, label: r.mp.pseudo || 'Pavillon impérial', ships: 1, escort: 0, cargo: r.target && r.target.cargoEstimate }); if (!ln || (ln.id !== lineKey)) continue; if (now - (r.createdAt || 0) > 12 * 3600e3) continue;
+    const i = idx(r.systemCoord); if (i < 0) continue; const j = ln.cap ? idx(ln.cap) : (ln.dir === 'out' ? i + 1 : i - 1);
+    const g = new THREE.Group(); S.add(g); const lead = ship(0xffd27a); g.add(lead);
+    for (let e = 0; e < Math.min(4, ln.escort || 0); e++) { const es = ship(0xff8a6a, .6); es.position.set(-14 - e * 8, 0, (e % 2 ? 1 : -1) * (8 + e * 2)); g.add(es); }
+    const lb = label(`${ln.label || 'Convoi'} · ${ln.ships || '?'} vaisseaux${ln.escort ? ' · escorte ' + ln.escort : ''} · vu il y a ${Math.round((now - r.createdAt) / 60000)} min`, '#ffe0a0', .9); lb.userData.always = true; lb.position.set(0, 14, 0); g.add(lb);
+    conv.push({ g, i, j: (j >= 0 && j < N) ? j : i, t0: r.createdAt });
+    items.push({ kind: 'convoi', name: (ln.label || 'Convoi') + ' · ' + (ln.ships || '?') + ' vaisseaux', sub: ln.cargo ? 'cargaison ' + ln.cargo : '', x: X(i), z: Zf(i) + 30, r: 26, live: g });
+  }
+  // ma flotte en embuscade, mes tankers sur la ligne
+  for (const f of ((G.fleet && G.fleet.prepared) || [])) { const a = f.ambush; if (!a) continue; const i = idx(a.system); if (i < 0) continue;
+    const g = new THREE.Group(); g.position.set(X(i) + 8, 0, Zf(i) + 46); S.add(g); const d = new THREE.Mesh(new THREE.OctahedronGeometry(7, 0), new THREE.MeshBasicMaterial({ color: 0xff5a4a, wireframe: true })); g.add(d); movers.push(d);
+    const lb = label((f.name || 'Flotte') + (a.phase === 'going' ? ' · en route vers l’embuscade' : a.phase === 'returning' ? ' · rentre' : ' · en embuscade'), '#ff9a8a', 1); lb.userData.always = true; lb.position.set(0, 16, 0); g.add(lb);
+    items.push({ kind: 'flotte', name: f.name || 'Flotte', sub: 'en embuscade sur ' + a.system, x: X(i) + 8, z: Zf(i) + 46, r: 24 }); }
+  for (const m of (G.tankerMissions || [])) { if (!m.portSys || chain[chain.length - 1] !== m.portSys) continue; const tk = ship(0x9fe08a, .8); S.add(tk);
+    const lb = label('Ton tanker ' + (m.tankerName || ''), '#bff0b0', .9); lb.userData.always = true; tk.add(lb); lb.position.set(0, 12, 0); conv.push({ g: tk, i: 0, j: N - 1, t0: m.departedAt, t1: m.arrivalAt, mine: true }); }
+  return { key: 'route:' + lineKey, scene: S, unit: 4e12, hMin: 40, hMax: 1800, h0: 760, bounds: N * step, title: label0 || 'Ligne de convois', kind: 'route',
+    hint: 'La ligne · les convois vus par tes balises, leur escorte, ta flotte en embuscade · touche un jalon ou un convoi',
+    items, update(t) { for (const m of movers) { if (m.userData && m.userData.tick) m.userData.tick(t); else m.rotation.y = t; }
+      const n = Date.now(); for (const c of conv) { const k = c.t1 ? clamp((n - c.t0) / (c.t1 - c.t0), 0, 1) * (N - 1) : c.i + clamp((n - c.t0) / (40 * 60e3), 0, 1) * (c.j - c.i);
+        const i0 = Math.floor(k), f = k - i0, x = lerp(X(i0), X(Math.min(N - 1, i0 + 1)), f), z = lerp(Zf(i0), Zf(Math.min(N - 1, i0 + 1)), f); c.g.position.set(x, 4, z + (c.mine ? -30 : 30));
+        c.g.rotation.y = c.j >= c.i ? -Math.PI / 2 : Math.PI / 2; } } };
+}
+// distance d'un point à un segment
+function segDist(px, pz, a, b) { const dx = b.x - a.x, dz = b.z - a.z, L = dx * dx + dz * dz || 1, u = clamp(((px - a.x) * dx + (pz - a.z) * dz) / L, 0, 1); return Math.hypot(px - (a.x + u * dx), pz - (a.z + u * dz)); }
+function legAt(px, pz, tol) { if (!REAL || !plan.real) return null; let best = null, bd = tol; for (const l of REAL.legs) { const a = REAL.P[l.from], b = REAL.P[l.to]; if (!a || !b) continue; const d = segDist(px, pz, a, b); if (d < bd) { bd = d; best = l; } } return best; }
+
+/* ═════════════ MON COMPTE : la vraie partie, lue dans le cloud (lecture seule) ═════════════ */
+const SB_URL = 'https://elupnpdcblztpfywnhjl.supabase.co', SB_KEY = 'sb_publishable_tXGrQIROzH2DwBrny1GcHQ_iKJKoBOQ';
+let sbc = null;
+async function supa() {
+  if (sbc) return sbc;
+  await new Promise((ok, ko) => { const sc = document.createElement('script'); sc.src = 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js'; sc.onload = ok; sc.onerror = ko; document.head.appendChild(sc); });
+  sbc = window.supabase.createClient(SB_URL, SB_KEY, { auth: { persistSession: true, storageKey: 'sb-labo-carte' } });
+  return sbc;
+}
+// ═════════════ v5 : grille révélée par le regard, soleils rares et petits, plan du voisinage, stations ═════════════
+const GCELL = 50, GSQ3 = Math.sqrt(3), GCELLS = [], K = 2.4, CELLW = GCELL * K;
+(() => { const N = 17; for (let q = -N; q <= N; q++) for (let r = -N; r <= N; r++) { const ring = (Math.abs(q) + Math.abs(r) + Math.abs(q + r)) / 2; if (ring > N) continue; const x = GCELL * (q + r / 2), z = GCELL * GSQ3 / 2 * r; GCELLS.push({ ring, x, z, ang: Math.atan2(z, x) }); }
+  GCELLS.sort((a, b) => a.ring - b.ring || a.ang - b.ang); })();
+const STATION_GLB = { 'dock-37oe89': 'sb_dc02.glb', 'dock-otqflf': 'sb_sc01.glb', 'dock-uguzli': 'sb_on01.glb', 'dock-wc15ki': 'sb_er01.glb', 'dock-o3pz0b': 'sb_vy01.glb', 'dock-smt2z6': 'sb_ml01.glb', 'dock-uzt7ha': 'sb_gi01.glb', 'dock-xy2s3': 'sb_pk01.glb', 'dock-wldphp': 'sb_da01.glb', 'dock-3c8na': 'sb_mo01.glb' };
+function glbFor(port) {
+  if (port && port.dockId && STATION_GLB[port.dockId]) return STATION_GLB[port.dockId];
+  const n = String((port && port.name) || '').toLowerCase();
+  return /erebus|brest|refuge/.test(n) ? 'sb_er01.glb' : /crown|couronne/.test(n) ? 'sb_dc02.glb' : /sanctuaire|linceul/.test(n) ? 'sb_sc01.glb' : /noire|o.neill/.test(n) ? 'sb_on01.glb' : /veyra/.test(n) ? 'sb_vy01.glb' : /montagne/.test(n) ? 'sb_mo01.glb' : 'sb_dc02.glb';
+}
+// la grille : on calcule la distance au bord de la case hexagonale (même géométrie que la carte du jeu, à l'échelle K)
+const GRID_FS = `
+  uniform float uCell, uLensR, uTac, uTime; uniform vec2 uLens, uHome; varying vec2 vP;
+  vec2 hexd(vec2 P, float C) { float H = 0.8660254; float r = P.y / (C * H), q = P.x / C - r * 0.5, s = -q - r;
+    float rq = floor(q + .5), rr = floor(r + .5), rs = floor(s + .5); float dq = abs(rq - q), dr = abs(rr - r), ds = abs(rs - s);
+    if (dq > dr && dq > ds) rq = -rr - rs; else if (dr > ds) rr = -rq - rs;
+    vec2 p = P - vec2(C * (rq + rr * .5), C * H * rr); float e = max(abs(p.x), max(abs(dot(p, vec2(.5, H))), abs(dot(p, vec2(.5, -H)))));
+    return vec2(C * .5 - e, max(fwidth(e), 1e-4)); }
+  void main() { vec2 f = hexd(vP, uCell); float line = 1. - smoothstep(f.y * .4, f.y * 1.4, f.x);
+    float lens = 1. - smoothstep(uLensR * .25, uLensR, length(vP - uLens));
+    float home = (1. - smoothstep(uCell * .6, uCell * 2.6, length(vP - uHome))) * .55;
+    float ping = smoothstep(.0, .25, fract(uTime * .18 - length(vP - uLens) / (uLensR * 2.2))) * (1. - fract(uTime * .18 - length(vP - uLens) / (uLensR * 2.2))) * lens;
+    float a = line * max(max(lens * .55 + ping * .5, home), uTac * .42);
+    gl_FragColor = vec4(vec3(.45, .78, 1.) * a, a); }`;
+function makeGrid() {
+  const m = new THREE.ShaderMaterial({ transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, extensions: { derivatives: true },
+    uniforms: { uCell: { value: CELLW / 1 }, uLensR: { value: CELLW * 3.6 }, uTac: { value: 0 }, uTime: { value: 0 }, uLens: { value: new THREE.Vector2() }, uHome: { value: new THREE.Vector2() } },
+    vertexShader: 'varying vec2 vP; void main(){ vec4 w = modelMatrix * vec4(position,1.0); vP = w.xz; gl_Position = projectionMatrix * viewMatrix * w; }', fragmentShader: GRID_FS });
+  const g = new THREE.Mesh(new THREE.PlaneGeometry(9000, 9000), m); g.rotation.x = -Math.PI / 2; g.position.y = -1.5; return g;
+}
+// hexagones de cellule de la carte du jeu → monde (rangée pointe en haut, comme cellXZ)
+const cellW = (i) => GCELLS[i] ? { x: GCELLS[i].x * K, z: GCELLS[i].z * K } : null;
+function worldCell(x, z) { // l'index de case du jeu sous un point du monde
+  const X = x / K, Z = z / K, rf = Z / (GCELL * GSQ3 / 2), qf = X / GCELL - rf / 2, sf = -qf - rf;
+  let q = Math.round(qf), r = Math.round(rf), s = Math.round(sf); const dq = Math.abs(q - qf), dr = Math.abs(r - rf), ds = Math.abs(s - sf);
+  if (dq > dr && dq > ds) q = -r - s; else if (dr > ds) r = -q - s;
+  const cx = GCELL * (q + r / 2), cz = GCELL * GSQ3 / 2 * r; return GCELLS.findIndex(c => Math.abs(c.x - cx) < .01 && Math.abs(c.z - cz) < .01);
+}
+
+let REAL = null;   // la partie du joueur, une fois lue
+function makeAmasReal(D) {
+  const G = D.savegame, stores = D.stores || {}, now = Date.now();
+  const sigs = (() => { try { return JSON.parse(stores.starbyte_signatures || '{}'); } catch (e) { return {}; } })();
+  const homeKey = (() => { const a = G.planet && G.planet.address; if (a && a.cluster) return `${a.cluster}-${a.sector}-${a.system}`; try { const m = JSON.parse(stores.starbyte_my_address || 'null'); if (m) return `${m.cluster}-${m.sector}-${m.system}`; } catch (e) {} return 'A-N-6834'; })();
+  const homeName = (G.worlds && G.worlds[0] && G.worlds[0].data && G.worlds[0].data.planet && G.worlds[0].data.planet.name) || (G.planet && G.planet.name) || 'Ta planète';
+  const MC = (G.mapCells && G.mapCells.cells) || {};
+  const S = sceneBase(0x01030a); S.add(dust(7000, 5200, 3, 1.05, .6));
+  const grid = makeGrid(); S.add(grid);
+  // de très loin : d'autres amas, simples nappes
+  for (const [x, z, c] of [[-7000, -4000, 0x6a4cff], [8000, 2500, 0x2fb0a0], [1500, 8500, 0xff7a5a]]) for (let k = 0; k < 5; k++) S.add(at(spr(glow('rgba(255,255,255,.45)', 'rgba(255,255,255,.08)'), 2600 + k * 700, c, .1), x + k * 300, -6, z - k * 200));
+  { const r = rng(hash(homeKey)); const cols = [0x2f6fb0, 0x6a3fb0, 0xb0603f, 0x2fa08a, 0x8a3f6a];
+    for (let z = 0; z < 10; z++) { const cx = (r() - .5) * 5200, cz = (r() - .5) * 5200, rad = 380 + r() * 520, col = cols[z % cols.length];
+      for (let k = 0; k < 6; k++) S.add(at(spr(glow('rgba(255,255,255,.45)', 'rgba(255,255,255,.08)'), rad * (1 + r()), col, .1), cx + (r() - .5) * rad, -4, cz + (r() - .5) * rad)); } }
+  const known = G.knownSystems || {}, P = {}, explored = new Set();
+  const pos = (k) => {
+    if (k === homeKey) return { x: 0, z: 0, cell: 0 };
+    const i = MC[k]; const c = i !== undefined ? cellW(i) : null;
+    if (c) { const j = rng(hash('j' + k)); const a = j() * Math.PI * 2, d = (.12 + j() * .26) * CELLW; explored.add(i); return { x: c.x + Math.cos(a) * d, z: c.z + Math.sin(a) * d, cell: i }; }   // à sa vraie place dans la case, pas au centre
+    const r = rng(hash(k)); const a = r() * Math.PI * 2, d = 2300 + r() * 1400; return { x: Math.cos(a) * d, z: Math.sin(a) * d, cell: -1 };
+  };
+  const add = (k, kind, extra) => { if (!/^[A-Z]-[A-Z]-\d{4}$/.test(k)) return null; if (!P[k]) { const p = pos(k); P[k] = Object.assign({ key: k, x: p.x, z: p.z, cell: p.cell, kind }, extra); } else { if (kind === 'system') P[k].kind = 'system'; Object.assign(P[k], extra || {}); } return P[k]; };
+  for (const k of Object.keys(known)) add(k, 'system');
+  add(homeKey, 'system', { home: true });
+  for (const k of Object.keys(G.trafficEchoes || {})) add(k, 'mass');
+  for (const l of (G.spottedLegs || [])) { add(l.from, 'mass'); add(l.to, 'mass'); }
+  for (const w of (G.worlds || [])) if (w && w.id !== 'home' && w.coord) add(String(w.coord).split('-').slice(0, 3).join('-'), 'system', { colony: w.name });
+  const sigBy = {}; for (const sg of Object.values(sigs)) if (sg && sg.system) (sigBy[sg.system] = sigBy[sg.system] || []).push(sg);
+  for (const k of Object.keys(sigBy)) add(k, 'system');
+  const ports = Object.assign({}, G.hiddenPorts || {});
+  for (const r of (G.routes || [])) if (r && r.portSys && !ports[r.portSys]) ports[r.portSys] = { name: r.dockName || r.name };
+  for (const [k, pt] of Object.entries(ports)) add(k, 'system', { port: pt });
+  for (const k of Object.keys(MC)) if (GCELLS[MC[k]]) explored.add(MC[k]);
+  // zones dégagées : les cases explorées, à peine plus claires que le noir
+  { const hexG = new THREE.CircleGeometry(CELLW / GSQ3 * .985, 6); hexG.rotateZ(Math.PI / 6 + Math.PI / 2); hexG.rotateX(-Math.PI / 2);
+    const im = new THREE.InstancedMesh(hexG, new THREE.MeshBasicMaterial({ color: 0x0f2236, transparent: true, opacity: .45, depthWrite: false }), Math.max(1, explored.size));
+    let n = 0; const m4 = new THREE.Matrix4(); for (const i of explored) { const c = cellW(i); m4.makeTranslation(c.x, -2, c.z); im.setMatrixAt(n++, m4); } im.count = n; S.add(im); }
+  const items = [], suns = [];
+  const allProbes = [].concat(G.probesPool || [], ...((G.worlds || []).map(w => (w && w.data && w.data.probesPool) || [])));
+  const beaconAt = {}; for (const b of allProbes) if (b.tier === 'beacon' && b.state === 'deployed') { const k = String(b.deployedSystem || '').split('-').slice(0, 3).join('-'); beaconAt[k] = (beaconAt[k] || 0) + 1; }
+  for (const p of Object.values(P)) {
+    const g = new THREE.Group(); g.position.set(p.x, 0, p.z); S.add(g);
+    if (p.home) {   // pas un soleil parmi d'autres : « tu es ici »
+      const ring = new THREE.Mesh(new THREE.RingGeometry(1, 1.12, 64), new THREE.MeshBasicMaterial({ color: 0x7fd0ff, transparent: true, side: THREE.DoubleSide, depthWrite: false })); ring.rotation.x = -Math.PI / 2; g.add(ring);
+      const core = spr(glow('rgba(255,255,255,1)', 'rgba(127,208,255,.7)'), 1, 0x9fdcff); g.add(core);
+      const lb = label('TU ES ICI · ' + String(homeName).toUpperCase(), '#9fdcff', 1.25); lb.userData.always = true; g.add(lb); g.userData = { ring, core, lb, home: true };
+    } else if (p.kind === 'system') {
+      const col = p.colony ? 0x9fe08a : p.port ? 0xffb066 : [0xffe6c0, 0xfff4e0, 0xffc890, 0xc8dcff][hash(p.key) % 4];
+      const core = spr(glow('rgba(255,255,250,1)', 'rgba(255,200,140,.35)'), 1, col), halo = spr(glow('rgba(255,220,170,.35)', 'rgba(255,150,70,.06)'), 1, col, 0); g.add(core, halo);
+      let ring = null; if (p.port) { ring = new THREE.Mesh(new THREE.RingGeometry(1, 1.15, 6), new THREE.MeshBasicMaterial({ color: 0xffb066, transparent: true, opacity: .9, side: THREE.DoubleSide, depthWrite: false })); ring.rotation.x = -Math.PI / 2; g.add(ring); }
+      const ns = (sigBy[p.key] || []).filter(x => !x.resolved).length;
+      const lb = label((p.colony ? p.colony.toUpperCase() + ' · ' : p.port ? String(p.port.name || 'Station').toUpperCase() + ' · ' : '') + p.key + (ns ? `  ·  ${ns} sig.` : ''), p.port ? '#ffcf96' : p.colony ? '#bff0b0' : '#e8d8b8', p.port ? 1.2 : .95); if (p.port || p.colony) lb.userData.always = true; g.add(lb);
+      g.userData = { core, halo, ring, lb };
+    } else {
+      const core = spr(glow('rgba(255,120,80,.9)', 'rgba(200,60,40,.25)'), 1, 0xff6a4a, .5); g.add(core); g.userData = { core, mass: true, pulse: hash(p.key) % 60 / 10 };
+    }
+    suns.push(g);
+    const bodies = [];
+    for (const pl of ((known[p.key] || {}).planets || [])) bodies.push(['planete', ((pl.playerName ? pl.playerName + ' · ' : pl.isMine ? 'TOI · ' : '') + (pl.coord || '')).toUpperCase(), pl.playerName ? '#ffb0a0' : '#bfe6c0']);
+    for (const sg of (sigBy[p.key] || [])) bodies.push(sg.resolved ? [sg.resolvedType === 'moving' ? 'asteroides' : 'planete', `${sg.id} · ${(sg.resolvedType === 'moving' ? 'cible mouvante' : (sg.fixedClass || 'corps fixe')).toUpperCase()}`, '#ffd9a0'] : ['signature', `${sg.id} · ${(sg.typeLabel || 'écho').toUpperCase()}`, '#cdb8ff']);
+    items.push({ kind: p.kind, key: p.key, name: p.key, port: p.port, home: !!p.home, homeName, colony: p.colony, sigs: sigBy[p.key] || [], planets: ((known[p.key] || {}).planets || []).length, nb: beaconAt[p.key] || 0,
+      x: p.x, z: p.z, r: 26, cell: p.cell, obj: g, seed: hash(p.key), bodies: bodies.length ? bodies.slice(0, 9) : [['signature', 'AUCUNE SIGNATURE CONNUE', '#7f93a8']] });
+  }
+  // colonies reliées à la capitale par un fil
+  for (const p of Object.values(P)) if (p.colony) { const l = new THREE.Line(new THREE.BufferGeometry().setFromPoints([V(0, .2, 0), V(p.x, .2, p.z)]), new THREE.LineDashedMaterial({ color: 0x7fd0ff, dashSize: 10, gapSize: 10, transparent: true, opacity: .35 })); l.computeLineDistances(); S.add(l); }
+  // VUE TACTIQUE (liserés fins)
+  const tac = new THREE.Group(); S.add(tac);
+  const legs = [];
+  for (const l of (G.spottedLegs || [])) { const a = P[l.from], b = P[l.to]; if (!a || !b) continue; const col = l.npc ? 0xff9a6a : 0xffc864;
+    const ln = new THREE.Line(new THREE.BufferGeometry().setFromPoints([V(a.x, .3, a.z), V(b.x, .3, b.z)]), new THREE.LineDashedMaterial({ color: col, dashSize: 14, gapSize: 9, transparent: true, opacity: .7 })); ln.computeLineDistances(); tac.add(ln);
+    const ar = new THREE.Mesh(new THREE.ConeGeometry(5, 13, 3), new THREE.MeshBasicMaterial({ color: col })); ar.position.set((a.x + b.x) / 2, .3, (a.z + b.z) / 2); ar.rotation.x = Math.PI / 2; ar.rotation.z = -Math.atan2(b.x - a.x, b.z - a.z) + Math.PI; tac.add(ar);
+    legs.push({ from: l.from, to: l.to, npc: l.npc, lineId: l.lineId || (l.convoyId ? 'cv:' + l.convoyId : 'leg:' + l.from), pseudo: l.pseudo }); }
+  for (const [k, n] of Object.entries(beaconAt)) { const p = P[k]; if (!p) continue; const g = new THREE.LineSegments(new THREE.BufferGeometry().setFromPoints([V(-9, 0, 0), V(9, 0, 0), V(0, 0, -9), V(0, 0, 9)]), new THREE.LineBasicMaterial({ color: 0xc89bff })); g.position.set(p.x + 18, .6, p.z - 16); tac.add(g); }
+  const flights = [];
+  const originOf = (wid) => { if (!wid || wid === 'home') return homeKey; const w = (G.worlds || []).find(x => x && x.id === wid); return w && w.coord ? String(w.coord).split('-').slice(0, 3).join('-') : homeKey; };
+  const fl = (from, to, t0, t1, col, txt) => { const pa = P[from] || add(from, 'mass'), pb = P[to] || add(to, 'mass'); if (!pa || !pb || !(t1 > t0)) return;
+    const ln = new THREE.Line(new THREE.BufferGeometry().setFromPoints([V(pa.x, .3, pa.z), V(pb.x, .3, pb.z)]), new THREE.LineBasicMaterial({ color: col, transparent: true, opacity: .3 })); tac.add(ln);
+    const dot = spr(glow('rgba(255,255,255,1)', 'rgba(127,208,255,.6)'), 14, col); tac.add(dot); const lb = label(txt, '#' + new THREE.Color(col).getHexString(), .9); lb.userData.always = true; tac.add(lb); flights.push({ pa, pb, t0, t1, dot, lb }); };
+  for (const m of (G.probeMissions || [])) if (m.status === 'in_transit') fl(originOf(m.world), String(m.targetCoords || '').split('-').slice(0, 3).join('-'), m.departedAt, m.arrivalAt, 0x7fd0ff, 'Sonde ' + (m.tier || ''));
+  for (const m of (G.tankerMissions || [])) { const to = String(m.portSys || m.targetCoords || '').split('/')[0].split('-').slice(0, 3).join('-'); if (m.status === 'in_transit' || m.status === 'exploring') fl(originOf(m.world), to, m.departedAt, m.arrivalAt, 0xffc864, 'Tanker → ' + ((m.mpTarget && m.mpTarget.pseudo) || (m.dock && m.dock.name) || to)); else if (m.status === 'returning') fl(to, originOf(m.world), m.returnDepartedAt || m.arrivalAt, m.returnArrivalAt, 0xffc864, 'Tanker (retour)'); }
+  for (const f of ((G.fleet && G.fleet.prepared) || [])) { const a = f.ambush; if (a && (a.phase === 'going' || a.phase === 'returning')) { const back = a.phase === 'returning'; fl(back ? a.system : originOf(a.world || f.world), back ? originOf(a.world || f.world) : a.system, back ? (a.returnDepartedAt || a.returnsAt - a.travelMs) : a.departedAt, back ? a.returnsAt : a.arrivesAt, 0xff6a5a, (f.name || 'Flotte') + (back ? ' (retour)' : ' → embuscade')); }
+    if (f.mpTarget && f.missionEndsAt && f.missionEndsAt > now) { const to = String(f.mpTarget.address || '').split('-').slice(0, 3).join('-'); const goingT = f.mpArrivesAt && now < f.mpArrivesAt; fl(goingT ? originOf(f.world) : to, goingT ? to : originOf(f.world), goingT ? f.missionStartedAt : f.mpArrivesAt, goingT ? f.mpArrivesAt : f.missionEndsAt, 0xff4f40, (f.name || 'Flotte') + ' → raid ' + (f.mpTarget.pseudo || '')); } }
+  for (const x of (G.resTransfers || [])) { const a = originOf(x.from), b = originOf(x.to); if (x.phase === 'going') fl(a, b, x.departAt, x.arriveAt, 0x9fe08a, 'Convoi → ' + (x.toName || '')); else fl(b, a, x.arriveAt, x.backAt, 0x9fe08a, 'Tankers (retour)'); }
+  REAL = { G, P, legs, beaconAt, homeKey, homeName, explored, sigBy };
+  const nSys = Object.values(P).filter(p => p.kind === 'system').length;
+  let lens = { x: 0, z: 0 };
+  return {
+    key: 'amasReal', scene: S, unit: 6e13, hMin: 40, hMax: 3950, h0: 1300, bounds: 4200, title: `Amas A · ${D.pseudo || 'ma partie'} · ${nSys} systèmes · ${flights.length} en vol`, kind: 'amas', real: true,
+    hint: 'La grille s’allume là où tu regardes · touche un objet pour sa fiche · pince vers une case pour entrer dans son voisinage · touche une case ou une route · dézoome au-delà de 30 années-lumière : les amas',
+    items, beaconAt, explored, setLens(x, z) { lens = { x, z }; }, grid,
+    update(t, hh) {
+      const u = grid.material.uniforms; u.uTime.value = t; u.uLens.value.set(tx, tz); u.uTac.value += ((window.__tac ? 1 : 0) - u.uTac.value) * .1;
+      const pt = hh * .012, near = clamp((900 - hh) / 700, 0, 1);
+      for (const g of suns) { const d = g.userData;
+        if (d.home) { const s = Math.max(16, hh * .032) * (1 + .08 * Math.sin(t * 3)); d.ring.scale.setScalar(s); d.core.scale.setScalar(Math.max(8, hh * .016)); d.lb.position.set(0, s * .9, 0); continue; }
+        if (d.mass) { d.core.scale.setScalar(Math.max(7, pt * 1.4)); d.core.material.opacity = .28 + .22 * Math.sin(t * 2 + d.pulse); continue; }
+        d.core.scale.setScalar(Math.max(5, pt)); d.halo.scale.setScalar(Math.max(5, pt) * 5); d.halo.material.opacity = .45 * near;
+        if (d.ring) { d.ring.scale.setScalar(Math.max(14, pt * 2.4)); d.ring.rotation.z = t * .3; }
+        if (d.lb) { d.lb.position.set(0, Math.max(5, pt) * 1.3, 0); d.lb.material.opacity = d.lb.userData.always ? 1 : clamp((1100 - hh) / 400, 0, 1); }
+      }
+      const n = Date.now(); for (const f of flights) { const k = clamp((n - f.t0) / (f.t1 - f.t0), 0, 1); f.dot.position.set(lerp(f.pa.x, f.pb.x, k), .8, lerp(f.pa.z, f.pb.z, k)); f.lb.position.set(f.dot.position.x, 8, f.dot.position.z); f.dot.scale.setScalar(Math.max(10, hh * .014)); }
+    },
+  };
+}
+
+// ── Plan du voisinage : une case devient une région d'espace dont on ne connaît qu'un point ──
+function makeNeighborhood(cell, it) {
+  const seed = hash('nb' + cell + (it ? it.key : '')), R = rng(seed), S = sceneBase(0x01020a);
+  S.add(dust(2200, 900, seed, 1.1, .6));
+  for (let k = 0; k < 4; k++) S.add(at(spr(glow('rgba(255,255,255,.4)', 'rgba(255,255,255,.06)'), 400 + R() * 500, [0x2f6fb0, 0x6a3fb0, 0x2fa08a][k % 3], .1), (R() - .5) * 900, -6, (R() - .5) * 900));
+  // étoiles de décor : on ne peut pas les toucher, elles disent juste que l'espace est plein d'autres choses
+  for (let k = 0; k < 70; k++) { const c = [0xffe6c0, 0xfff4e0, 0xffc890, 0xc8dcff, 0xff9a7a][Math.floor(R() * 5)], s = 2 + Math.pow(R(), 3) * 9; S.add(at(spr(glow('rgba(255,255,250,.95)', 'rgba(255,200,140,.25)'), s, c, .55 + R() * .4), (R() - .5) * 1400, -1, (R() - .5) * 1400)); }
+  const items = []; let title = 'Région inexplorée', kind = 'vide';
+  if (it) {
+    const ox = (R() - .5) * 140, oz = (R() - .5) * 140, g = new THREE.Group(); g.position.set(ox, 0, oz); S.add(g);
+    if (it.kind === 'mass') { g.add(spr(glow('rgba(255,120,80,.9)', 'rgba(200,60,40,.25)'), 40, 0xff6a4a, .6)); title = it.key + ' · masse chaude'; }
+    else { const col = it.home ? 0x9fdcff : it.port ? 0xffb066 : 0xffe6c0; if (it.home) { g.add(spr(glow('rgba(255,255,250,1)', 'rgba(127,208,255,.55)'), 40, col)); g.add(spr(glow('rgba(160,220,255,.4)', 'rgba(80,150,255,.08)'), 150, col, .45)); } else { const sn = makeSun(it.port ? 9 : 12, it.port ? 0xffb066 : 0xffd29a); g.add(sn); g.userData.sun = sn; }
+      if (it.port) { const ring = new THREE.Mesh(new THREE.RingGeometry(30, 34, 6), new THREE.MeshBasicMaterial({ color: 0xffb066, side: THREE.DoubleSide, transparent: true, opacity: .9 })); ring.rotation.x = -Math.PI / 2; g.add(ring); g.userData.ring = ring; }
+      title = it.home ? (it.homeName + ' · ' + it.key) : it.port ? (String(it.port.name || 'Station') + ' · ' + it.key) : it.colony ? it.colony + ' · ' + it.key : 'Système ' + it.key; }
+    const lb = label(title.toUpperCase(), it.port ? '#ffcf96' : it.home ? '#9fdcff' : '#e8d8b8', 1.3); lb.position.set(0, 30, 0); g.add(lb);
+    kind = it.kind; items.push(Object.assign({}, it, { x: ox, z: oz, r: 60, nb_ref: true }));
+    // balises posées ici
+    for (let b = 0; b < (it.nb || 0); b++) { const cr = new THREE.LineSegments(new THREE.BufferGeometry().setFromPoints([V(-10, 0, 0), V(10, 0, 0), V(0, 0, -10), V(0, 0, 10)]), new THREE.LineBasicMaterial({ color: 0xc89bff })); cr.position.set(ox + 70 + b * 26, 0, oz - 50); S.add(cr); }
+    // les lignes de convois qui passent par ici : elles sortent vers leur destination
+    if (REAL) for (const l of REAL.legs) { if (l.from !== it.key && l.to !== it.key) continue; const other = REAL.P[l.from === it.key ? l.to : l.from]; if (!other) continue;
+      const dir = V(other.x - it.x, 0, other.z - it.z).normalize(), out = l.from === it.key, col = l.npc ? 0xff9a6a : 0xffc864;
+      const ln = new THREE.Line(new THREE.BufferGeometry().setFromPoints([V(ox, .3, oz), V(ox + dir.x * 900, .3, oz + dir.z * 900)]), new THREE.LineDashedMaterial({ color: col, dashSize: 10, gapSize: 7, transparent: true, opacity: .7 })); ln.computeLineDistances(); S.add(ln);
+      const t = label((out ? 'vers ' : 'depuis ') + other.key, '#ffbfa0', .9); t.position.set(ox + dir.x * 260, 2, oz + dir.z * 260); S.add(t); }
+  } else if (REAL && REAL.explored.has(cell)) title = 'Région explorée · rien de notable';
+  return {
+    key: 'nb:' + cell + ':' + (it ? it.key : ''), scene: S, unit: 4e12, hMin: 26, hMax: 1600, h0: 700, bounds: 700, title, kind: 'voisinage', it,
+    hint: it ? (it.port ? 'Le voisinage de la station · touche-la ou pince vers elle pour t’en approcher' : 'Le voisinage · les étoiles de décor ne sont pas à toi · pince vers ton objet pour entrer') : 'Rien de connu dans cette région · pince au hasard : le vide',
+    items, update(t) { S.traverse(o => { if (o.userData && o.userData.ring) o.userData.ring.rotation.z = t * .3; if (o.userData && o.userData.sun) o.userData.sun.userData.tick(t); }); },
+  };
+}
+
+// ── Plan de la station : son vrai modèle 3D ──
+let _gltf = null;
+async function loadGLB(file) {
+  if (!_gltf) { const [{ GLTFLoader }, { MeshoptDecoder }] = await Promise.all([import('three/addons/loaders/GLTFLoader.js'), import('three/addons/libs/meshopt_decoder.module.js')]); _gltf = new GLTFLoader(); _gltf.setMeshoptDecoder(MeshoptDecoder); }
+  return new Promise((ok, ko) => _gltf.load('../../github_upload/assets/3d/' + file, ok, undefined, ko));
+}
+function makeStation(it) {
+  const S = sceneBase(0x01020a); S.add(dust(1800, 700, hash(it.key), 1.1, .55));
+  S.add(new THREE.HemisphereLight(0x8fb2e0, 0x0a0c12, 1.3));
+  const key = new THREE.DirectionalLight(0xffe2c0, 3.2); key.position.set(-120, 160, 80); S.add(key);
+  const rim = new THREE.DirectionalLight(0x6aa8ff, 1.6); rim.position.set(140, 40, -160); S.add(rim);
+  S.add(at(spr(glow('rgba(255,255,240,1)', 'rgba(255,190,90,.6)'), 90), -1400, 600, -900));
+  const holder = new THREE.Group(); S.add(holder);
+  const wait = label('ARRIVÉE SUR ' + String(it.port.name || 'LA STATION').toUpperCase() + '…', '#ffcf96', 1.4); wait.position.set(0, 10, 0); S.add(wait);
+  const file = glbFor(it.port);
+  loadGLB(file).then((g) => {
+    const m = g.scene; const box = new THREE.Box3().setFromObject(m), sz = box.getSize(new THREE.Vector3()), c = box.getCenter(new THREE.Vector3());
+    const s = 58 / Math.max(sz.x, sz.y, sz.z); m.scale.setScalar(s); m.position.sub(c.multiplyScalar(s)); holder.add(m); S.remove(wait);
+    try { import('three/addons/environments/RoomEnvironment.js').then(({ RoomEnvironment }) => { const pm = new THREE.PMREMGenerator(renderer); S.environment = pm.fromScene(new RoomEnvironment(), .04).texture; }); } catch (e) {}
+  }).catch(() => { wait.material.opacity = .6; });
+  const name = String(it.port.name || 'Station');
+  return {
+    key: 'st:' + it.key, scene: S, unit: 5, hMin: 55, hMax: 900, h0: 300, bounds: 300, title: name + ' · ' + it.key, kind: 'station', it,
+    hint: 'La station, à quai · touche-la pour entrer (docks, bar, comptoir) · pince dessus : sous la coque, la matière',
+    items: [{ kind: 'stationBody', name, x: 0, z: 0, r: 40, port: it.port, key: it.key }], update(t) { holder.rotation.y = t * .05; },
+  };
+}
+
+async function loadMine(D) {
+  for (const k of Object.keys(PLANS)) delete PLANS[k];
+  plan = getPlan('amasReal', () => makeAmasReal(D)); stack = []; tx = gx = 0; tz = gz = 0; h = gh = plan.h0; enterPlan();
+}
+const lgEl = document.getElementById('login'), lgMsg = document.getElementById('lg-msg'), lgMail = document.getElementById('lg-mail'), lgCode = document.getElementById('lg-code'), lgGo = document.getElementById('lg-go');
+async function fetchMine() {
+  const c = await supa();
+  const { data: u } = await c.auth.getUser(); if (!u || !u.user) return false;
+  const [{ data: sv, error }, { data: w }] = await Promise.all([c.from('saves').select('data').eq('user_id', u.user.id).maybeSingle(), c.from('worlds').select('pseudo').eq('user_id', u.user.id).maybeSingle()]);
+  if (error || !sv || !sv.data || !sv.data.savegame) { lgMsg.textContent = 'Aucune partie trouvée pour ce compte.'; return false; }
+  await loadMine({ savegame: sv.data.savegame, stores: sv.data.stores || {}, pseudo: w && w.pseudo });
+  document.getElementById('acct').textContent = (w && w.pseudo) || 'Mon compte'; lgEl.style.display = 'none'; return true;
+}
+document.getElementById('acct').onclick = async () => { lgEl.style.display = 'flex'; lgMsg.textContent = ''; try { if (await fetchMine()) return; } catch (e) {} };
+document.getElementById('lg-x').onclick = () => { lgEl.style.display = 'none'; };
+lgGo.onclick = async () => {
+  try {
+    const c = await supa();
+    if (lgCode.style.display === 'none') {
+      const { error } = await c.auth.signInWithOtp({ email: lgMail.value.trim(), options: { shouldCreateUser: false } });
+      if (error) { lgMsg.textContent = 'Cet e-mail n’est relié à aucun compte (' + error.message + ')'; return; }
+      lgCode.style.display = 'block'; lgGo.textContent = 'Ouvrir ma partie'; lgMsg.textContent = 'Code envoyé : regarde tes e-mails.';
+    } else {
+      const { error } = await c.auth.verifyOtp({ email: lgMail.value.trim(), token: lgCode.value.trim(), type: 'email' });
+      if (error) { lgMsg.textContent = 'Code refusé : ' + error.message; return; }
+      lgMsg.textContent = 'Chargement de ta partie…'; await fetchMine();
+    }
+  } catch (e) { lgMsg.textContent = 'Erreur : ' + (e && e.message || e); }
+};
+// déjà connecté sur ce navigateur : on charge directement
+setTimeout(async () => { try { if (localStorage.getItem('sb-labo-carte')) await fetchMine(); } catch (e) {} }, 400);
+
+/* ═════════════ caméra : survol à plat, zoom vers le point visé ═════════════ */
+let plan = amas('A'), stack = [];
+let tx = 0, tz = 0, h = plan.h0;           // centre visé et hauteur de caméra (valeurs lissées)
+let gx = 0, gz = 0, gh = plan.h0;          // valeurs visées
+const TILT = .62;                           // la caméra regarde en biais : on sent la 3D
+function placeCam() { camera.position.set(tx, h, tz + h * TILT); camera.lookAt(tx, 0, tz); }
+const ndc = new THREE.Vector2(), ray = new THREE.Raycaster(), ground = new THREE.Plane(V(0, 1, 0), 0), hit = new THREE.Vector3();
+function groundAt(cx, cy) { ndc.set(cx / innerWidth * 2 - 1, -(cy / innerHeight) * 2 + 1); ray.setFromCamera(ndc, camera); return ray.ray.intersectPlane(ground, hit) ? hit.clone() : V(tx, 0, tz); }
+let zoomPt = { x: innerWidth / 2, y: innerHeight / 2 }, trans = null;
+function zoomBy(f, cx = innerWidth / 2, cy = innerHeight / 2) {
+  if (trans) return;
+  zoomPt = { x: cx, y: cy };
+  const before = groundAt(cx, cy);
+  const nh = gh * f;
+  if (nh < plan.hMin) { gh = plan.hMin; if (f < .999 && Math.abs(h - plan.hMin) < plan.hMin * .25) dive(before); return; }
+  if (nh > plan.hMax) { gh = plan.hMax; if (f > 1.001 && Math.abs(h - plan.hMax) < plan.hMax * .08) surface(); return; }
+  // garder le point visé sous le doigt : on rapproche le centre de ce point en proportion
+  const k = 1 - nh / gh; gx += (before.x - gx) * k; gz += (before.z - gz) * k; gh = nh;
+  gx = clamp(gx, -plan.bounds * 1.3, plan.bounds * 1.3); gz = clamp(gz, -plan.bounds * 1.3, plan.bounds * 1.3);
+}
+function startTrans(dir, next, at) {
+  trans = { dir, t: 0, next, at, from: plan };
+}
+function dive(pt) {
+  if (trans) return;
+  const c = childOf(plan, pt.x, pt.z); if (!c) return;
+  if (plan.kind === 'amas') { const b = plan.items.find(i => i.kind === 'border' && Math.abs(i.x - pt.x) < i.r); if (b) { goAmas(b.to); return; } }
+  startTrans('in', c.plan, pt);
+}
+let UNIV = null;
+function universe() { return UNIV || (UNIV = makeUniverse()); }
+function surface() { if (trans) return; if (!stack.length) { if (plan.kind === 'amas') startTrans('top', universe(), null); return; } startTrans('out', null, null); }
+function goHome() { if (trans) return; closeCard(); const A = amas('A'); if (plan === A) { gx = 0; gz = 0; gh = A.h0 * .6; return; } startTrans('home', A, null); }
+function goAmas(k) { startTrans('jump', amas(k), null); }
+
+/* ═════════════ gestes ═════════════ */
+addEventListener('wheel', (e) => { e.preventDefault(); zoomBy(Math.exp(e.deltaY * .0016), e.clientX, e.clientY); }, { passive: false });
+document.getElementById('home').onclick = goHome;
+document.getElementById('tac').onclick = () => { window.__tac = !window.__tac; document.getElementById('tac').style.borderColor = window.__tac ? '#7fd0ff' : ''; };
+document.getElementById('zin').onclick = () => { for (let i = 0; i < 6; i++) setTimeout(() => zoomBy(.86), i * 30); };
+document.getElementById('zout').onclick = () => { for (let i = 0; i < 6; i++) setTimeout(() => zoomBy(1.16), i * 30); };
+const ptrs = new Map(); let pinch0 = 0, moved = 0;
+const cv = renderer.domElement;
+cv.addEventListener('pointerdown', (e) => { cv.setPointerCapture(e.pointerId); ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY }); moved = 0; if (ptrs.size === 2) { const [a, b] = [...ptrs.values()]; pinch0 = Math.hypot(a.x - b.x, a.y - b.y); } });
+cv.addEventListener('pointermove', (e) => {
+  const p = ptrs.get(e.pointerId); if (!p) { hover(e); return; }
+  if (ptrs.size === 1 && !trans) { const a = groundAt(p.x, p.y), b = groundAt(e.clientX, e.clientY); gx -= b.x - a.x; gz -= b.z - a.z; tx = gx; tz = gz; moved += Math.abs(e.clientX - p.x) + Math.abs(e.clientY - p.y); gx = clamp(gx, -plan.bounds * 1.3, plan.bounds * 1.3); gz = clamp(gz, -plan.bounds * 1.3, plan.bounds * 1.3); }
+  p.x = e.clientX; p.y = e.clientY;
+  if (ptrs.size === 2) { const [a, b] = [...ptrs.values()], d = Math.hypot(a.x - b.x, a.y - b.y); if (pinch0) zoomBy(pinch0 / d, (a.x + b.x) / 2, (a.y + b.y) / 2); pinch0 = d; moved = 99; }
+});
+const up = (e) => { const was = ptrs.get(e.pointerId); ptrs.delete(e.pointerId); if (ptrs.size < 2) pinch0 = 0; if (was && moved < 8 && !ptrs.size) tap(e); };
+cv.addEventListener('pointerup', up); cv.addEventListener('pointercancel', up);
+const tip = document.getElementById('tip');
+function tap(e) {
+  const pt = groundAt(e.clientX, e.clientY);
+  if (plan.kind === 'mur') { showWallTip(e, pt); return; }
+  if (plan.kind === 'amas') { const b = plan.items.find(i => i.kind === 'border' && Math.abs(i.x - pt.x) < i.r); if (b) { goAmas(b.to); return; } }
+  // toucher un objet : on glisse vers lui
+  let best = null, bd = Infinity; for (const it of plan.items) { if (it.wide) continue; const d = Math.hypot(it.x - pt.x, it.z - pt.z); if (d < it.r * 2.2 && d < bd) { bd = d; best = it; } }
+  if (best) { gx = best.x; gz = best.z; selHex(null); openCard(best); return; }
+  if (plan.real) {
+    const lg = legAt(pt.x, pt.z, Math.max(14, h * .025)); if (lg) { selHex(null); openLegCard(lg, pt); return; }
+    const c = worldCell(pt.x, pt.z); if (c >= 0) { selHex(c); openCellCard(c); return; }
+  }
+  selHex(null); closeCard();
+}
+let _sel = null;
+function selHex(c) {
+  const A = PLANS.amasReal; if (!A) return;
+  if (!_sel) { const pts = []; const R = CELLW / GSQ3 * .97; for (let i = 0; i <= 6; i++) { const a = Math.PI / 6 + i * Math.PI / 3 + Math.PI / 2; pts.push(V(Math.cos(a) * R, 0, -Math.sin(a) * R)); }
+    _sel = new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), new THREE.LineBasicMaterial({ color: 0x7fd0ff, transparent: true, opacity: .95 })); A.scene.add(_sel); }
+  if (c == null) { _sel.visible = false; return; } const w = cellW(c); _sel.position.set(w.x, .5, w.z); _sel.visible = true;
+}
+function cardBtn(t, sub, fn, main) { return `<button data-a="${fn}" style="flex:1 1 45%;padding:9px 10px;border-radius:10px;border:1px solid ${main ? 'rgba(127,208,255,.6)' : 'rgba(255,255,255,.14)'};background:${main ? 'rgba(47,143,208,.25)' : 'rgba(255,255,255,.03)'};color:#e6f0ff;text-align:left;font:600 12px/1.25 -apple-system,system-ui,sans-serif">${t}<br><span style="font-weight:400;font-size:10.5px;color:#9fb2c2">${sub}</span></button>`; }
+function showCard(k, t, sub, acts, on) {
+  document.getElementById('cd-k').textContent = k; document.getElementById('cd-t').textContent = t; document.getElementById('cd-s').textContent = sub;
+  const a = document.getElementById('cd-a'); a.innerHTML = acts; a.querySelectorAll('button').forEach(b => b.onclick = () => { if (on && on(b.dataset.a) !== false) return; flashTip({ clientX: innerWidth / 2 - 120, clientY: innerHeight - 200 }, 'Labo : les actions partiront de la vraie carte, dans le jeu'); });
+  cardEl.style.display = 'block';
+}
+function openCellCard(c) {
+  const w = cellW(c), ex = REAL && REAL.explored.has(c);
+  showCard(ex ? 'Case explorée' : 'Case inexplorée', 'Région ' + (c + 1), ex ? 'Tes capteurs y sont passés · rien de notable pour l\u2019instant' : 'Personne ne sait ce qu\u2019il y a là · un Radar ou une sonde le dira',
+    cardBtn('Voisinage ▸', 'la région de près', 'dive', true) + cardBtn('Balayer', 'Radar · chercher des signatures', 'game') + cardBtn('Envoyer une sonde', ex ? 'Légère' : 'Radar · ouvrir la case', 'game'),
+    (a) => { if (a !== 'dive') return false; closeCard(); selHex(null); gx = w.x; gz = w.z; gh = plan.hMin; setTimeout(() => dive(V(w.x, 0, w.z)), 650); });
+}
+function openLegCard(lg, pt) {
+  const { chain } = lineChainOf(lg.lineId), G = REAL.G, now = Date.now();
+  const seen = (G.beaconReports || []).filter(r => ((r.line && r.line.id) || (r.mp && 'cv:' + r.mp.convoyId)) === lg.lineId && now - (r.createdAt || 0) < 12 * 3600e3).length;
+  const lbl = lg.npc ? (lg.pseudo || 'Ligne marchande') : 'Convoi ' + (lg.pseudo || 'impérial');
+  showCard(lg.npc ? 'Ligne de convois' : 'Trajet d\u2019un joueur', lbl, chain.length + ' systèmes relevés · ' + (seen ? seen + ' passage' + (seen > 1 ? 's' : '') + ' vu' + (seen > 1 ? 's' : '') + ' en 12 h' : 'aucun passage récent vu'),
+    cardBtn('Voir la ligne ▸', 'convois, escortes, ta flotte', 'route', true) + cardBtn('Poser une balise', 'sur la ligne', 'game') + cardBtn('Embuscade', 'envoyer une flotte', 'game'),
+    (a) => { if (a !== 'route') return false; closeCard(); gx = pt.x; gz = pt.z; gh = plan.hMin * 1.5; setTimeout(() => { if (!trans) startTrans('in', getPlan('route:' + lg.lineId, () => makeRoute(lg.lineId, lbl)), V(pt.x, 0, pt.z)); }, 600); });
+}
+const cardEl = document.getElementById('card');
+function closeCard() { cardEl.style.display = 'none'; }
+document.getElementById('cd-x').onclick = closeCard;
+function openCard(it) {
+  const btn = (t, sub, fn, main) => `<button data-a="${fn}" style="flex:1 1 45%;padding:9px 10px;border-radius:10px;border:1px solid ${main ? 'rgba(127,208,255,.6)' : 'rgba(255,255,255,.14)'};background:${main ? 'rgba(47,143,208,.25)' : 'rgba(255,255,255,.03)'};color:#e6f0ff;text-align:left;font:600 12px/1.25 -apple-system,system-ui,sans-serif">${t}<br><span style="font-weight:400;font-size:10.5px;color:#9fb2c2">${sub}</span></button>`;
+  let k = '', t = it.name, sub = '', acts = '';
+  if ((plan.kind === 'amas' || plan.kind === 'voisinage') && it.kind === 'system') {
+    const ns = (it.sigs || []).filter(x => !x.resolved).length, nr = (it.sigs || []).length - ns, nb = it.nb || (plan.beaconAt || {})[it.name] || 0;
+    k = it.home ? 'Tu es ici · ' + (it.homeName || 'ta planète') : it.colony ? 'Ta colonie · ' + it.colony : it.port ? 'Station · ' + (it.port.name || it.port) : 'Système découvert';
+    sub = [it.planets ? it.planets + ' monde' + (it.planets > 1 ? 's' : '') : null, ns ? ns + ' signature' + (ns > 1 ? 's' : '') + ' à résoudre' : null, nr ? nr + ' résolue' + (nr > 1 ? 's' : '') : null, nb ? nb + ' balise' + (nb > 1 ? 's' : '') + ' posée' + (nb > 1 ? 's' : '') : null].filter(Boolean).join(' · ') || 'Rien de relevé pour l\u2019instant';
+    acts = btn(plan.kind === 'amas' ? 'Voisinage ▸' : (it.port ? 'S\u2019approcher ▸' : 'Entrer ▸'), plan.kind === 'amas' ? 'la région autour' : (it.port ? 'la station, à quai' : 'le système'), 'dive', true) + (it.port ? btn('Entrer dans la station', 'docks, bar, comptoir', 'game') : '') + btn('Balayer', 'Radar · nouvelles signatures', 'game') + (ns ? btn('Résoudre', 'Légère · ' + ns + ' signature' + (ns > 1 ? 's' : ''), 'game') : '') + btn(nb ? 'Rappeler la balise' : 'Poser une balise', 'surveiller les convois', 'game') + btn('Envoyer un tanker', 'route, poste, commerce', 'game');
+  } else if (it.kind === 'mass') {
+    k = 'Masse chaude · entendue, jamais vue'; t = it.name.split(' ·')[0]; sub = 'Ton antenne ou tes balises l\u2019ont entendue passer. Une Radar la révélera.';
+    acts = btn('Balayer', 'Radar · la révéler', 'game', true) + btn('Poser une balise', 'voir les convois', 'game');
+  } else if (plan.kind === 'systeme') {
+    k = it.kind === 'signature' ? 'Signature non résolue' : it.kind === 'planete' ? 'Monde' : 'Signature résolue'; sub = 'Dans le système · zoome dessus pour la rejoindre';
+    acts = btn('Rejoindre ▸', 'plonger vers elle', 'dive', true) + (it.kind === 'signature' ? btn('Résoudre', 'Légère', 'game') : btn('Exploiter', 'tanker', 'game'));
+  } else if (plan.kind === 'univers') { k = it.key === 'A' ? 'Ton amas' : 'Amas voisin'; t = it.name; sub = it.sub;
+    acts = btn('Descendre ▸', 'dans l\u2019amas', 'dive', true);
+  } else if (plan.kind === 'route') { k = it.kind === 'jalon' ? (it.port ? 'Station sur la ligne' : 'Jalon de la ligne') : it.kind === 'convoi' ? 'Convoi détecté' : 'Ta flotte'; t = it.name; sub = it.sub || (it.kind === 'jalon' ? 'Pince dessus pour son voisinage' : '');
+    acts = it.kind === 'jalon' ? btn('Voisinage ▸', 'la région autour', 'dive', true) + btn('Poser une balise', 'ici', 'game') : it.kind === 'convoi' ? btn('Intercepter', 'flotte en embuscade', 'game', true) + btn('Espionner', 'cargaison, escorte', 'game') : btn('Rappeler', 'retour à quai', 'game', true);
+  } else if (plan.kind === 'station') { k = 'Station'; t = it.name; sub = 'À quai · docks, bar, comptoir, commandants présents';
+    acts = btn('Entrer', 'docks, bar, comptoir', 'game', true) + btn('Plonger sous la coque ▸', 'la matière', 'dive');
+  } else { k = 'Objet'; sub = 'Zoome encore pour descendre sous la matière'; acts = btn('Plonger ▸', '', 'dive', true); }
+  document.getElementById('cd-k').textContent = k; document.getElementById('cd-t').textContent = t; document.getElementById('cd-s').textContent = sub;
+  const a = document.getElementById('cd-a'); a.innerHTML = acts;
+  a.querySelectorAll('button').forEach(b => b.onclick = () => {
+    if (b.dataset.a === 'dive') { closeCard(); gx = it.x; gz = it.z; gh = plan.hMin; setTimeout(() => dive(V(it.x, 0, it.z)), 650); }
+    else flashTip({ clientX: innerWidth / 2 - 120, clientY: innerHeight - 200 }, 'Labo : les actions partiront de la vraie carte, dans le jeu');
+  });
+  cardEl.style.display = 'block';
+}
+function flashTip(e, txt) { tip.textContent = txt; tip.style.display = 'block'; tip.style.left = Math.min(innerWidth - 240, e.clientX + 12) + 'px'; tip.style.top = (e.clientY - 34) + 'px'; clearTimeout(flashTip.t); flashTip.t = setTimeout(() => tip.style.display = 'none', 1800); }
+function hover(e) { if (plan.kind !== 'mur') return; showWallTip(e, groundAt(e.clientX, e.clientY)); }
+function showWallTip(e, pt) {
+  const u = (pt.x + 100) / 200, v = (pt.z + 100) / 200; if (u < 0 || u > 1 || v < 0 || v > 1) { tip.style.display = 'none'; return; }
+  const x = Math.floor(u * WALL), y = Math.floor(v * WALL), d = wallCanvas.getContext('2d').getImageData(x, y, 1, 1).data, free = d[0] === 11 && d[1] === 10 && d[2] === 20;
+  tip.innerHTML = `Espace <b>${x} · ${y}</b> — ${free ? '<span style="color:#7fd0ff">libre · 1 CHF</span>' : '<span style="color:#ffb066">déjà tagué</span>'}`; tip.style.display = 'block'; tip.style.left = Math.min(innerWidth - 220, e.clientX + 12) + 'px'; tip.style.top = (e.clientY - 34) + 'px';
+}
+
+/* ═════════════ effet de zoom accéléré ═════════════ */
+function drawStreaks(k, inward) {
+  const W = fx.width, H = fx.height, cx = zoomPt.x * devicePixelRatio, cy = zoomPt.y * devicePixelRatio;
+  fxc.clearRect(0, 0, W, H); if (k <= 0) return;
+  const R = rng(Math.floor(performance.now() / 40));
+  fxc.globalCompositeOperation = 'lighter';
+  for (let i = 0; i < 180; i++) {
+    const a = R() * Math.PI * 2, r0 = (20 + R() * Math.max(W, H) * .7) * (inward ? 1 : .6), len = (60 + R() * 260) * k * devicePixelRatio;
+    const x0 = cx + Math.cos(a) * r0, y0 = cy + Math.sin(a) * r0, x1 = cx + Math.cos(a) * (r0 + len), y1 = cy + Math.sin(a) * (r0 + len);
+    const g = fxc.createLinearGradient(x0, y0, x1, y1); g.addColorStop(0, 'rgba(160,210,255,0)'); g.addColorStop(1, `rgba(200,230,255,${.55 * k})`);
+    fxc.strokeStyle = g; fxc.lineWidth = (1 + R() * 2) * devicePixelRatio; fxc.beginPath(); fxc.moveTo(x0, y0); fxc.lineTo(x1, y1); fxc.stroke();
+  }
+  const rg = fxc.createRadialGradient(cx, cy, 0, cx, cy, Math.max(W, H) * .6); rg.addColorStop(0, `rgba(230,245,255,${Math.pow(k, 3) * .95})`); rg.addColorStop(.35, `rgba(120,180,255,${Math.pow(k, 2) * .35})`); rg.addColorStop(1, 'rgba(0,0,0,0)');
+  fxc.fillStyle = rg; fxc.fillRect(0, 0, W, H); fxc.globalCompositeOperation = 'source-over';
+}
+function stepTrans(dt) {
+  if (!trans) return;
+  const T = .95; trans.t += dt / T; const t = trans.t;
+  if (trans.dir === 'in') {
+    if (t < .5) { const k = t / .5; h = lerp(plan.hMin, plan.hMin * .04, k * k); if (trans.at) { tx = lerp(tx, trans.at.x, .2); tz = lerp(tz, trans.at.z, .2); } drawStreaks(k, true); }
+    else { if (!trans.swapped) { stack.push({ plan, x: trans.at ? trans.at.x : gx, z: trans.at ? trans.at.z : gz }); plan = trans.next; tx = gx = 0; tz = gz = 0; h = plan.hMax * .9; gh = plan.h0; trans.swapped = true; enterPlan(); }
+      const k = (t - .5) / .5; h = lerp(plan.hMax * .9, plan.h0, 1 - Math.pow(1 - k, 3)); drawStreaks(1 - k, true); }
+  } else if (trans.dir === 'out') {
+    if (t < .5) { const k = t / .5; h = lerp(plan.hMax, plan.hMax * 3, k * k); drawStreaks(k, false); }
+    else { if (!trans.swapped) { const s = stack.pop(); plan = s.plan; tx = gx = s.x; tz = gz = s.z; h = plan.hMin * .3; gh = plan.hMin * 2.2; trans.swapped = true; enterPlan(); }
+      const k = (t - .5) / .5; h = lerp(plan.hMin * .3, plan.hMin * 2.2, 1 - Math.pow(1 - k, 3)); drawStreaks(1 - k, false); }
+  } else if (trans.dir === 'top') {   // au-dessus de l'amas : on recule jusqu'au plan des amas
+    if (t < .5) { const k = t / .5; h = lerp(plan.hMax, plan.hMax * 3, k * k); drawStreaks(k, false); }
+    else { if (!trans.swapped) { const from = plan, U = trans.next, c = U.items.find(i => i.key === (from.key === 'amasB' ? 'B' : from.key === 'amasZ' ? 'Z' : 'A')); plan = U; stack = []; tx = gx = c ? c.x : 0; tz = gz = c ? c.z : 0; h = plan.hMin * .8; gh = plan.h0; trans.swapped = true; enterPlan(); }
+      const k = (t - .5) / .5; h = lerp(plan.hMin * .8, plan.h0, 1 - Math.pow(1 - k, 3)); drawStreaks(1 - k, false); }
+  } else if (trans.dir === 'home') {   // retour à sa planète, d'où qu'on soit
+    if (t < .5) { drawStreaks(t / .5, false); }
+    else { if (!trans.swapped) { plan = trans.next; stack = []; tx = gx = 0; tz = gz = 0; h = plan.h0 * 1.4; gh = plan.h0 * .6; trans.swapped = true; enterPlan(); }
+      const k = (t - .5) / .5; h = lerp(plan.h0 * 1.4, plan.h0 * .6, 1 - Math.pow(1 - k, 3)); drawStreaks(1 - k, false); }
+  } else { // jump : passer la frontière vers l'amas voisin
+    if (t < .5) { gx += dt * plan.bounds * 1.4; tx = gx; drawStreaks(t / .5 * .7, true); }
+    else { if (!trans.swapped) { plan = trans.next; stack = []; tx = gx = -plan.bounds * .85; tz = gz = 0; h = gh = plan.h0 * .7; trans.swapped = true; enterPlan(); } drawStreaks((1 - (t - .5) / .5) * .7, true); }
+  }
+  if (t >= 1) { trans = null; drawStreaks(0); gh = h; }
+}
+
+/* ═════════════ HUD ═════════════ */
+const planEl = document.getElementById('plan'), subEl = document.getElementById('sub'), pathEl = document.getElementById('path'), hintEl = document.getElementById('hint'), scaleEl = document.querySelector('#scale span');
+function enterPlan() {
+  try { closeCard(); } catch (e) {}
+  planEl.textContent = { univers: 'Plan des amas', voisinage: 'Plan du voisinage', station: 'Plan de la station', route: 'Plan de la ligne', amas: 'Plan de l’amas', systeme: 'Plan du système', sig: 'Plan de la signature', vide: 'Plan du vide', quantique: 'Plan quantique', mur: 'Plan des tags' }[plan.kind];
+  subEl.textContent = plan.title; hintEl.textContent = plan.hint;
+  pathEl.textContent = stack.map(s => s.plan.title).concat(plan.title).join('  ›  ');
+  tip.style.display = 'none'; for (const c of Object.values(_chips)) c.style.display = 'none';
+  document.getElementById('tac').style.display = plan.real ? '' : 'none'; plan._auto = false; try { selHex(null); } catch (e) {}
+}
+enterPlan();
+
+/* ═════════════ boucle ═════════════ */
+const clock = new THREE.Clock();
+function frame() {
+  const dt = Math.min(clock.getDelta(), .05), time = clock.elapsedTime;
+  if (trans) stepTrans(dt);
+  else { const k = 1 - Math.exp(-dt * 7); h += (gh - h) * k; tx += (gx - tx) * k; tz += (gz - tz) * k; }
+  placeCam();
+  // les étiquettes gardent une taille lisible à l'écran
+  plan.scene.traverse(o => { if (o.isSprite && o.userData.ar) { const s = h * .0105 * o.userData.k; o.scale.set(s * o.userData.ar, s, 1); } });
+  plan.update(time, h, dt);
+  if (plan.kind === 'station' && !trans && !plan._auto && h < 85) { plan._auto = true; openCard(plan.items[0]); }
+  scaleEl.textContent = fmtLen(h * 1.2 * plan.unit);
+  renderer.render(plan.scene, camera);
+  requestAnimationFrame(frame);
+}
+window.__lab = { loadMine, get busy() { return !!trans; }, zoomBy, get plan() { return plan; }, get h() { return h; }, dive: (x, z) => dive(V(x, 0, z)), surface, goAmas, settle() { h = gh; tx = gx; tz = gz; }, routeTest() { const l = REAL.legs[0], a = REAL.P[l.from], b = REAL.P[l.to]; startTrans('in', getPlan('route:' + l.lineId, () => makeRoute(l.lineId, 'test')), V((a.x + b.x) / 2, 0, (a.z + b.z) / 2)); } };
+frame();
+</script>
+</body>
+</html>
