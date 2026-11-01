@@ -1680,7 +1680,7 @@
       const _pe = window.SBPlans.engine({ CELLS, CELL, BOARD, cellAtWorld, mySystemKey, waitSB3D,
         onPick: (sel) => onPick(sel), onPickCell: (i) => onPickCell(i), fail: (why) => { if (E === _pe) _fail(why); },
         clearSel: () => { if (_sel) API.clear(); }, hasSel: () => !!_sel, avoiding: () => !!_pickAvoid,
-        refreshIfChanged: () => refreshIfChanged() });
+        refreshIfChanged: () => refreshIfChanged(), renderPanel: () => renderPanel() });
       E = _pe;
     } catch (e) { console.warn('[SpaceMap] plans indisponibles', e); E = E0; }
   }

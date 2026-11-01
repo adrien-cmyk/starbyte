@@ -258,7 +258,8 @@
         const has = (k) => list.some((it) => it.kind === k && !(k === 'sig' && it.obj && it.obj.resolved));
         const hasPlayer = list.some((it) => it.kind === 'planet' && it.obj && it.obj.playerName);
         const tk = tag === 'skip' ? null : hasPlayer ? 0xff7a6a : has('sig') ? 0x8fc4ff : has('target') ? 0xffc864 : list.some((it) => it.kind === 'planet') ? 0xb8a8ff : null;
-        if (tk) { const d = spr(glow('rgba(255,255,255,1)', 'rgba(255,255,255,.4)'), 2.4, tk, 1); g.add(d); ud.tick = d; }
+        const tk2 = tk || (!port && li && (li.lane || (li.obs || []).length) ? 0xffc864 : null);   // couloir de passage (comme l'ancienne carte)
+        if (tk2) { const d = spr(glow('rgba(255,255,255,1)', 'rgba(255,255,255,.4)'), 2.4, tk2, 1); g.add(d); ud.tick = d; }
         if (s.scanning || (li && li.echo && !(s.beacons && s.beacons.length))) { const w = new T.Mesh(new T.RingGeometry(0.92, 1, 48), new T.MeshBasicMaterial({ color: s.scanning ? 0xcfdcea : 0xffc864, transparent: true, side: T.DoubleSide, depthWrite: false })); w.rotation.x = -Math.PI / 2; w.position.y = 0.4; g.add(w); ud.pulse = w; }
         if (s.beacons && s.beacons.length) { const cr = cross(9); cr.position.set(18, 0.6, -16); g.add(cr); ud.cross = cr; }
         if ((s.posts || []).length || (s.others || []).length) { const d = new T.Mesh(new T.OctahedronGeometry(3.2, 0), new T.MeshBasicMaterial({ color: (s.posts || []).length ? 0xffc864 : 0xff9a6a })); d.scale.set(1, 1.5, 1); d.position.set(-16, 2, 10); g.add(d); }
@@ -730,7 +731,7 @@
       startTrans('out', null, null);
     }
     function goAmas(x, z, hh, snap) {
-      if (plan !== AMAS) { stack = []; plan = AMAS; trans = null; drawStreaks(0); enterPlan(true); gcPlans(); }
+      if (plan !== AMAS) { stack = []; plan = AMAS; trans = null; drawStreaks(0); enterPlan(true); gcPlans(); setTimeout(() => { try { ctx.renderPanel && ctx.renderPanel(); } catch (e) {} }, 0); }
       gx = x; gz = z; gh = clamp(hh, AMAS.hMin, AMAS.hMax * 0.95);
       if (snap) { tx = gx; tz = gz; h = gh; }
     }
@@ -1033,8 +1034,8 @@
         if (plan === AMAS && (sel.kind === 'system' || sel.kind === 'home')) { const ci = ST && ST.cell['sys:' + sel.key]; if (ci !== undefined) { label0 = sel.kind === 'home' ? 'Entrer dans mon système ▸' : 'Entrer dans le système ▸'; go = () => { const p = AMAS.sysPos[sel.key] || W(ci); gx = p.x; gz = p.z; gh = AMAS.hMin; setTimeout(() => { if (!trans && plan === AMAS) startTrans('in', getPlan('sys:' + sel.key, () => makeSystem(sel.key)), V(p.x, 0, p.z)); }, 450); }; } }
         else if (plan === AMAS && sel.kind === 'leg') { const lg = AMAS.legHits.find(l => l.id === sel.key); if (lg && lg.lineId) { label0 = 'Voir la ligne de près ▸'; go = () => { const x = (lg.ax + lg.bx) / 2, z = (lg.az + lg.bz) / 2; gx = x; gz = z; startTrans('in', getPlan('route:' + lg.lineId, () => makeRoute(lg.lineId, lg.npc ? (lg.pseudo || 'Ligne marchande') : 'Convoi ' + (lg.pseudo || 'impérial'), lg.id)), V(x, 0, z)); }; } }
         else if (plan.kind === 'systeme' && (sel.kind === 'planet' || sel.kind === 'target' || sel.kind === 'sig')) { const b = plan.items.find(x => x.kind === sel.kind && x.key === sel.key); if (b) { label0 = sel.kind === 'planet' ? 'S’approcher du monde ▸' : sel.kind === 'target' ? 'S’approcher du gisement ▸' : (b.obj && b.obj.resolved ? 'S’approcher du corps ▸' : 'S’approcher de l’écho ▸'); go = () => dive({ x: b.x, z: b.z }); } }
-        else if (plan.kind === 'systeme' && sel.kind === 'home') { const b = plan.items.find(x => x.kind === 'mine'); if (b) { label0 = 'Ouvrir mon plateau ▸'; go = () => startTrans('board', b.wid, { x: b.x, z: b.z }); } }
-        else if (plan.kind === 'systeme' && sel.kind === 'system') { const b = plan.items.find(x => x.kind === 'station'), m = plan.items.find(x => x.kind === 'mine'); if (b) { label0 = 'S’approcher de la station ▸'; go = () => dive({ x: b.x, z: b.z }); } else if (m) { label0 = 'Ouvrir le plateau de ma colonie ▸'; go = () => startTrans('board', m.wid, { x: m.x, z: m.z }); } }
+        else if (plan.kind === 'systeme' && sel.kind === 'home' && sel.key === plan.sys) { const b = plan.items.find(x => x.kind === 'mine'); if (b) { label0 = 'Ouvrir mon plateau ▸'; go = () => startTrans('board', b.wid, { x: b.x, z: b.z }); } }
+        else if (plan.kind === 'systeme' && sel.kind === 'system' && sel.key === plan.sys) { const b = plan.items.find(x => x.kind === 'station'), m = plan.items.find(x => x.kind === 'mine'); if (b) { label0 = 'S’approcher de la station ▸'; go = () => dive({ x: b.x, z: b.z }); } else if (m) { label0 = m.wid === 'home' ? 'Ouvrir mon plateau ▸' : 'Ouvrir le plateau de ma colonie ▸'; go = () => startTrans('board', m.wid, { x: m.x, z: m.z }); } }
         if (!label0) return true;
         const d = document.createElement('div'); d.className = 'pl-xtra'; d.innerHTML = btn(label0, '', 'go', true);
         d.querySelector('button').onclick = (e) => { e.stopPropagation(); try { go(); } catch (er) { console.warn('[Plans]', er); } };
