@@ -37,6 +37,9 @@
   <button id="lg-go" style="margin-top:10px;width:100%;padding:12px;border-radius:9px;border:0;background:#2f8fd0;color:#fff;font-weight:700">Recevoir le code</button>
   <div id="lg-msg" style="font-size:11.5px;color:#ffb066;margin-top:8px;min-height:14px"></div>
   <button id="lg-x" style="margin-top:6px;width:100%;padding:10px;border-radius:9px;border:1px solid rgba(255,255,255,.12);background:none;color:#9aa8ae">Fermer</button></div></div>
+<div id="card" style="display:none;position:fixed;left:10px;right:70px;bottom:calc(var(--sab) + 18px);z-index:30;background:rgba(8,13,20,.94);border:1px solid rgba(127,208,255,.3);border-radius:14px;padding:12px 14px">
+  <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px"><div><div id="cd-k" style="font-size:10px;letter-spacing:.14em;color:#7fd0ff;text-transform:uppercase"></div><div id="cd-t" style="font-weight:700;font-size:15px;margin-top:2px"></div><div id="cd-s" style="font-size:11.5px;color:#9fb2c2;margin-top:3px"></div></div><button id="cd-x" style="background:none;border:0;color:#9aa6b4;font-size:22px;line-height:1">×</button></div>
+  <div id="cd-a" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:10px"></div></div>
 <div id="tools"><button id="zin" aria-label="Zoomer">+</button><button id="zout" aria-label="Dézoomer">−</button></div>
 <div id="hint"></div>
 <div id="tip"></div>
@@ -353,7 +356,11 @@ function makeAmasReal(D) {
   for (const w of (G.worlds || [])) if (w && w.id !== 'home' && w.coord) add(String(w.coord).split('-').slice(0, 3).join('-'), 'system', { colony: w.name });
   const sigBy = {}; for (const sg of Object.values(sigs)) if (sg && sg.system) (sigBy[sg.system] = sigBy[sg.system] || []).push(sg);
   for (const [k, list] of Object.entries(sigBy)) add(k, 'system');
-  for (const k of Object.keys(G.hiddenPorts || {})) add(k, 'system', { port: (G.hiddenPorts[k] || {}).name || 'Lieu caché' });
+  const portName = (k) => ((G.hiddenPorts || {})[k] || {}).name || ((G.routes || []).find(r => r.portSys === k) || {}).dockName || ((G.routes || []).find(r => r.portSys === k) || {}).name || 'Station';
+  for (const k of Object.keys(G.hiddenPorts || {})) add(k, 'system', { port: portName(k) });
+  for (const r of (G.routes || [])) if (r && r.portSys) add(r.portSys, 'system', { port: portName(r.portSys) });
+  for (const o of (G.openedRoutes || [])) if (o && o.to) add(o.to, 'system', { port: o.name || portName(o.to) });
+  for (const p of Object.values(P)) if (p.port === undefined && ((G.hiddenPorts || {})[p.key] || (G.routes || []).some(r => r.portSys === p.key))) p.port = portName(p.key);
   // dessin
   for (const p of Object.values(P)) {
     if (p.kind === 'system') {
@@ -361,13 +368,17 @@ function makeAmasReal(D) {
       const col = p.home ? 0x7fd0ff : p.colony ? 0x9fe08a : p.port ? 0xffb066 : 0xffe0b0;
       g.add(spr(glow('rgba(255,255,250,1)', 'rgba(255,190,110,.55)'), p.home ? 26 : 17, col)); g.add(spr(glow('rgba(255,220,170,.4)', 'rgba(255,150,70,.08)'), 50, col, .4));
       const ns = (sigBy[p.key] || []).filter(x => !x.resolved).length;
-      const lb = label((p.home ? 'TA PLANÈTE · ' : p.colony ? p.colony + ' · ' : p.port ? p.port.toUpperCase() + ' · ' : '') + p.key + (ns ? `  ·  ${ns} sig.` : ''), p.home ? '#9fdcff' : p.port ? '#ffcf96' : '#e8d8b8', p.home || p.port ? 1.25 : 1); lb.position.set(0, 9, 0); g.add(lb); g.userData.lb = lb;
+      const lb = label((p.home ? 'TA PLANÈTE · ' : p.colony ? p.colony + ' · ' : p.port ? p.port.toUpperCase() + ' · ' : '') + p.key + (ns ? `  ·  ${ns} sig.` : ''), p.home ? '#9fdcff' : p.port ? '#ffcf96' : '#e8d8b8', p.home || p.port ? 1.25 : 1); lb.position.set(0, 9, 0); g.add(lb); g.userData.lb = lb; if (p.port || p.home) lb.userData.always = true;
+      if (p.port) {   // une station : anneau doré qui tourne, plus visible que les soleils
+        const ring = new THREE.Mesh(new THREE.RingGeometry(20, 23, 6), new THREE.MeshBasicMaterial({ color: 0xffb066, transparent: true, opacity: .85, side: THREE.DoubleSide, depthWrite: false })); ring.rotation.x = -Math.PI / 2; g.add(ring); g.userData.ring = ring;
+        g.add(spr(glow('rgba(255,220,170,.9)', 'rgba(255,150,60,.3)'), 60, 0xffb066, .6));
+      }
       S.add(g);
       // corps du système (pour le plan du système)
       const bodies = [];
       for (const pl of ((known[p.key] || {}).planets || [])) bodies.push(['planete', ((pl.playerName ? pl.playerName + ' · ' : pl.isMine ? 'TOI · ' : '') + (pl.coord || '')).toUpperCase(), pl.playerName ? '#ffb0a0' : '#bfe6c0']);
       for (const sg of (sigBy[p.key] || [])) bodies.push(sg.resolved ? [sg.resolvedType === 'moving' ? 'asteroides' : 'planete', `${sg.id} · ${(sg.resolvedType === 'moving' ? 'cible mouvante' : (sg.fixedClass || 'corps fixe')).toUpperCase()}`, '#ffd9a0'] : ['signature', `${sg.id} · ${(sg.typeLabel || 'écho').toUpperCase()}`, '#cdb8ff']);
-      items.push({ kind: 'system', name: p.key, x: p.x, z: p.z, r: 20, obj: g, seed: hash(p.key), home: !!p.home, bodies: bodies.length ? bodies.slice(0, 9) : [['signature', 'AUCUNE SIGNATURE CONNUE', '#7f93a8']] });
+      items.push({ kind: 'system', name: p.key, port: p.port, home: !!p.home, colony: p.colony, sigs: (sigBy[p.key] || []), planets: ((known[p.key] || {}).planets || []).length, x: p.x, z: p.z, r: 20, obj: g, seed: hash(p.key), home: !!p.home, bodies: bodies.length ? bodies.slice(0, 9) : [['signature', 'AUCUNE SIGNATURE CONNUE', '#7f93a8']] });
     } else {
       const m = spr(glow('rgba(255,120,80,.9)', 'rgba(200,60,40,.25)'), 16, 0xff6a4a, .55); m.position.set(p.x, 0, p.z); m.userData.pulse = hash(p.key) % 60 / 10; S.add(m);
       items.push({ kind: 'mass', name: p.key + ' · entendu, jamais vu', x: p.x, z: p.z, r: 16, obj: m });
@@ -380,7 +391,7 @@ function makeAmasReal(D) {
   for (const l of (G.spottedLegs || [])) { const r = line(l.from, l.to, l.npc ? 0xff9a6a : 0xffc864); if (r) { const a = new THREE.Mesh(new THREE.ConeGeometry(4, 10, 3), new THREE.MeshBasicMaterial({ color: l.npc ? 0xff9a6a : 0xffc864 })); a.position.set((r.pa.x + r.pb.x) / 2, .3, (r.pa.z + r.pb.z) / 2); a.rotation.x = Math.PI / 2; a.rotation.z = -Math.atan2(r.pb.x - r.pa.x, r.pb.z - r.pa.z) + Math.PI; tac.add(a); } }
   // balises posées (toutes mes planètes)
   const allProbes = [].concat(G.probesPool || [], ...((G.worlds || []).map(w => (w && w.data && w.data.probesPool) || [])));
-  for (const b of allProbes) { if (b.tier !== 'beacon' || b.state !== 'deployed') continue; const k = String(b.deployedSystem || '').split('-').slice(0, 3).join('-'); const p = P[k] || add(k, 'mass'); if (!p) continue;
+  const beaconAt = {}; for (const b of allProbes) { if (b.tier !== 'beacon' || b.state !== 'deployed') continue; const k = String(b.deployedSystem || '').split('-').slice(0, 3).join('-'); beaconAt[k] = (beaconAt[k] || 0) + 1; const p = P[k] || add(k, 'mass'); if (!p) continue;
     const g = new THREE.LineSegments(new THREE.BufferGeometry().setFromPoints([V(-8, 0, 0), V(8, 0, 0), V(0, 0, -8), V(0, 0, 8)]), new THREE.LineBasicMaterial({ color: 0xc89bff })); g.position.set(p.x + 14, .6, p.z - 12); tac.add(g); }
   // missions en vol : un point qui avance du départ à la cible
   const flights = [];
@@ -401,9 +412,9 @@ function makeAmasReal(D) {
   const st = { sys: Object.values(P).filter(p => p.kind === 'system').length, mass: Object.values(P).filter(p => p.kind === 'mass').length, flights: flights.length };
   return {
     key: 'amasReal', scene: S, unit: 1.2e14, hMin: 12, hMax: 2200, h0: 900, bounds: 1600, title: `Amas A · ${D.pseudo || 'ma partie'} · ${st.sys} systèmes · ${st.flights} en vol`, kind: 'amas',
-    hint: 'Ta partie : secteurs, systèmes vus, masses entendues, tronçons de lignes, balises et missions en vol · zoome sur un système pour y plonger',
-    items, update(t, h) {
-      for (const it of items) { if (it.kind === 'mass') it.obj.material.opacity = .3 + .25 * Math.sin(t * 2 + it.obj.userData.pulse); if (it.obj && it.obj.userData.lb) it.obj.userData.lb.material.opacity = clamp((700 - h) / 250, 0, 1); }
+    hint: 'Touche un système, une station ou une masse : sa fiche et ses actions · pince vers un système (ou « Plonger ») pour y entrer',
+    items, beaconAt, update(t, h) {
+      for (const it of items) { if (it.obj && it.obj.userData.ring) it.obj.userData.ring.rotation.z = t * .3; if (it.kind === 'mass') it.obj.material.opacity = .3 + .25 * Math.sin(t * 2 + it.obj.userData.pulse); if (it.obj && it.obj.userData.lb) it.obj.userData.lb.material.opacity = it.obj.userData.lb.userData.always ? 1 : clamp((700 - h) / 250, 0, 1); }
       
       const n = Date.now();
       for (const f of flights) { const k = clamp((n - f.t0) / (f.t1 - f.t0), 0, 1); f.dot.position.set(lerp(f.pa.x, f.pb.x, k), .8, lerp(f.pa.z, f.pb.z, k)); f.lb.position.set(f.dot.position.x, 6, f.dot.position.z); f.dot.material.opacity = .6 + .4 * Math.sin(t * 5); }
@@ -496,7 +507,33 @@ function tap(e) {
   if (plan.kind === 'amas') { const b = plan.items.find(i => i.kind === 'border' && Math.abs(i.x - pt.x) < i.r); if (b) { goAmas(b.to); return; } }
   // toucher un objet : on glisse vers lui
   let best = null, bd = Infinity; for (const it of plan.items) { if (it.wide) continue; const d = Math.hypot(it.x - pt.x, it.z - pt.z); if (d < it.r * 2.2 && d < bd) { bd = d; best = it; } }
-  if (best) { gx = best.x; gz = best.z; flashTip(e, best.name + (best.kind === 'mass' ? ' · envoie une Radar pour la résoudre' : ' · zoome pour y plonger')); }
+  if (best) { gx = best.x; gz = best.z; openCard(best); } else closeCard();
+}
+const cardEl = document.getElementById('card');
+function closeCard() { cardEl.style.display = 'none'; }
+document.getElementById('cd-x').onclick = closeCard;
+function openCard(it) {
+  const btn = (t, sub, fn, main) => `<button data-a="${fn}" style="flex:1 1 45%;padding:9px 10px;border-radius:10px;border:1px solid ${main ? 'rgba(127,208,255,.6)' : 'rgba(255,255,255,.14)'};background:${main ? 'rgba(47,143,208,.25)' : 'rgba(255,255,255,.03)'};color:#e6f0ff;text-align:left;font:600 12px/1.25 -apple-system,system-ui,sans-serif">${t}<br><span style="font-weight:400;font-size:10.5px;color:#9fb2c2">${sub}</span></button>`;
+  let k = '', t = it.name, sub = '', acts = '';
+  if (plan.kind === 'amas' && it.kind === 'system') {
+    const ns = (it.sigs || []).filter(x => !x.resolved).length, nr = (it.sigs || []).length - ns, nb = (plan.beaconAt || {})[it.name] || 0;
+    k = it.home ? 'Ton système' : it.colony ? 'Ta colonie · ' + it.colony : it.port ? 'Station · ' + it.port : 'Système découvert';
+    sub = [it.planets ? it.planets + ' monde' + (it.planets > 1 ? 's' : '') : null, ns ? ns + ' signature' + (ns > 1 ? 's' : '') + ' à résoudre' : null, nr ? nr + ' résolue' + (nr > 1 ? 's' : '') : null, nb ? nb + ' balise' + (nb > 1 ? 's' : '') + ' posée' + (nb > 1 ? 's' : '') : null].filter(Boolean).join(' · ') || 'Rien de relevé pour l\u2019instant';
+    acts = btn('Plonger ▸', 'voir le système', 'dive', true) + (it.port ? btn('Entrer dans la station', 'docks, bar, comptoir', 'game') : '') + btn('Balayer', 'Radar · nouvelles signatures', 'game') + (ns ? btn('Résoudre', 'Légère · ' + ns + ' signature' + (ns > 1 ? 's' : ''), 'game') : '') + btn(nb ? 'Rappeler la balise' : 'Poser une balise', 'surveiller les convois', 'game') + btn('Envoyer un tanker', 'route, poste, commerce', 'game');
+  } else if (it.kind === 'mass') {
+    k = 'Masse chaude · entendue, jamais vue'; t = it.name.split(' ·')[0]; sub = 'Ton antenne ou tes balises l\u2019ont entendue passer. Une Radar la révélera.';
+    acts = btn('Balayer', 'Radar · la révéler', 'game', true) + btn('Poser une balise', 'voir les convois', 'game');
+  } else if (plan.kind === 'systeme') {
+    k = it.kind === 'signature' ? 'Signature non résolue' : it.kind === 'planete' ? 'Monde' : 'Signature résolue'; sub = 'Dans le système · zoome dessus pour la rejoindre';
+    acts = btn('Rejoindre ▸', 'plonger vers elle', 'dive', true) + (it.kind === 'signature' ? btn('Résoudre', 'Légère', 'game') : btn('Exploiter', 'tanker', 'game'));
+  } else { k = 'Objet'; sub = 'Zoome encore pour descendre sous la matière'; acts = btn('Plonger ▸', '', 'dive', true); }
+  document.getElementById('cd-k').textContent = k; document.getElementById('cd-t').textContent = t; document.getElementById('cd-s').textContent = sub;
+  const a = document.getElementById('cd-a'); a.innerHTML = acts;
+  a.querySelectorAll('button').forEach(b => b.onclick = () => {
+    if (b.dataset.a === 'dive') { closeCard(); gx = it.x; gz = it.z; gh = plan.hMin; setTimeout(() => dive(V(it.x, 0, it.z)), 650); }
+    else flashTip({ clientX: innerWidth / 2 - 120, clientY: innerHeight - 200 }, 'Labo : les actions partiront de la vraie carte, dans le jeu');
+  });
+  cardEl.style.display = 'block';
 }
 function flashTip(e, txt) { tip.textContent = txt; tip.style.display = 'block'; tip.style.left = Math.min(innerWidth - 240, e.clientX + 12) + 'px'; tip.style.top = (e.clientY - 34) + 'px'; clearTimeout(flashTip.t); flashTip.t = setTimeout(() => tip.style.display = 'none', 1800); }
 function hover(e) { if (plan.kind !== 'mur') return; showWallTip(e, groundAt(e.clientX, e.clientY)); }
@@ -542,6 +579,7 @@ function stepTrans(dt) {
 /* ═════════════ HUD ═════════════ */
 const planEl = document.getElementById('plan'), subEl = document.getElementById('sub'), pathEl = document.getElementById('path'), hintEl = document.getElementById('hint'), scaleEl = document.querySelector('#scale span');
 function enterPlan() {
+  try { closeCard(); } catch (e) {}
   planEl.textContent = { amas: 'Plan de l’amas', systeme: 'Plan du système', sig: 'Plan de la signature', vide: 'Plan du vide', quantique: 'Plan quantique', mur: 'Plan des tags' }[plan.kind];
   subEl.textContent = plan.title; hintEl.textContent = plan.hint;
   pathEl.textContent = stack.map(s => s.plan.title).concat(plan.title).join('  ›  ');
