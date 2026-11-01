@@ -46,7 +46,11 @@
     if (m >= LY * 0.5) return (m / LY).toFixed(m / LY < 10 ? 1 : 0) + ' a.l.';
     if (m >= 1e9) return Math.round(m / 1e9).toLocaleString('fr-CH') + ' millions de km';
     if (m >= 1e3) return Math.round(m / 1e3).toLocaleString('fr-CH') + ' km';
-    return Math.max(1, Math.round(m)) + ' m';
+    if (m >= 1) return Math.round(m) + ' m';
+    if (m >= 0.01) return Math.round(m * 100) + ' cm';
+    if (m >= 1e-5) return Math.round(m * 1e6) + ' µm';
+    if (m >= 1e-34) return '10⁻' + Math.round(-Math.log10(m)) + ' m';
+    return '≈ longueur de Planck';
   }
   const escN = (e) => typeof e === 'number' ? e : !e ? 0 : /aucune|sans|none/i.test(e) ? 0 : /lourde|heavy|forte/i.test(e) ? 4 : /légère|legere|light|faible/i.test(e) ? 1 : 2;
   const escTxt = (e) => typeof e === 'number' ? (e ? 'escorte ' + e : 'sans escorte') : (e ? String(e) : 'sans escorte');
@@ -512,6 +516,52 @@
           for (const m of motes) { const u = m.userData; u.a += u.sp * 0.01; m.position.set(Math.cos(u.a) * u.d, u.y, Math.sin(u.a) * u.d); } } };
     }
 
+    /* ───────────── le vide, la structure quantique, le mur des tags ───────────── */
+    function makeVoid(seed, ci, sysKey) {
+      const S = sceneBase(0x000104), R = rng(seed);
+      const d1 = dust(900, 200, seed, 1.4, 0.5, 0.8), d2 = dust(400, 200, seed + 1, 2.4, 0.25, 0.8); S.add(d1, d2);
+      for (let k = 0; k < 4; k++) S.add(at(spr(glow('rgba(120,140,220,.25)', 'rgba(60,70,140,.05)'), 140 + R() * 100, 0x5a6ac0, 0.25), (R() - 0.5) * 300, -60, (R() - 0.5) * 300));
+      return { kind: 'vide', scene: S, unit: 1e8, hMin: 4, hMax: 260, h0: 180, bounds: 180, title: 'Vide interstellaire', ci, sys: sysKey,
+        hint: 'Rien. Le vide. Zoome encore, au hasard : sous le vide, la structure', items: [],
+        update(t) { d1.position.x = Math.sin(t * 0.05) * 6; d2.position.z = Math.cos(t * 0.04) * 8; } };
+    }
+    function makeQuantum(seed) {
+      const S = sceneBase(0x03010c), R = rng(seed), lines = [], N = lite ? 26 : 46, P = lite ? 90 : 160;
+      for (let i = 0; i < N; i++) {
+        const g = new T.BufferGeometry(); g.setAttribute('position', new T.BufferAttribute(new Float32Array(P * 3), 3));
+        const col = new T.Color().setHSL(0.55 + R() * 0.35, 0.9, 0.62);
+        const l = new T.Line(g, new T.LineBasicMaterial({ color: col, transparent: true, opacity: 0.75, blending: T.AdditiveBlending }));
+        l.userData = { z: (i - N / 2) * 4.2 * (46 / N), f: 1 + R() * 4, a: 0.6 + R() * 2.4, ph: R() * 6, sp: 0.6 + R() * 1.8, closed: R() < 0.3, cx: (R() - 0.5) * 150, r: 2 + R() * 6 };
+        S.add(l); lines.push(l);
+      }
+      S.add(at(spr(glow('rgba(255,255,255,.6)', 'rgba(160,100,255,.15)'), 120, 0xa37dff, 0.3), 0, -10, 0));
+      return { kind: 'quantique', scene: S, unit: 1e-30, hMin: 3, hMax: 220, h0: 160, bounds: 140, title: 'Structure quantique', hint: 'Les cordes vibrent · zoome encore : au bout, le mur des tags', items: [],
+        update(t) { for (const l of lines) { const u = l.userData, p = l.geometry.attributes.position; for (let k = 0; k < P; k++) { const sx = k / (P - 1);
+          if (u.closed) { const a = sx * Math.PI * 2, rr = u.r * (1 + 0.25 * Math.sin(a * u.f * 2 + t * u.sp * 3)); p.setXYZ(k, u.cx + Math.cos(a) * rr, Math.sin(a * 3 + t) * 0.6, u.z + Math.sin(a) * rr); }
+          else { const x = (sx - 0.5) * 300; p.setXYZ(k, x, Math.sin(sx * u.f * 9 + t * u.sp + u.ph) * u.a, u.z + Math.sin(sx * u.f * 5 - t * u.sp * 0.7) * u.a * 0.6); } } p.needsUpdate = true; } } };
+    }
+    // le mur des tags : pas encore ouvert (modération et paiement à décider) — on le montre vierge, « bientôt »
+    let _wallTex = null;
+    function wallTex() {
+      if (_wallTex) return _wallTex;
+      const c = document.createElement('canvas'); c.width = c.height = 1000; const x = c.getContext('2d');
+      x.fillStyle = '#0b0a14'; x.fillRect(0, 0, 1000, 1000);
+      x.textAlign = 'center'; x.fillStyle = '#ffd27a'; x.font = 'bold 54px monospace'; x.fillText('STARBYTE', 500, 500);
+      x.fillStyle = '#7fd0ff'; x.font = 'bold 22px monospace'; x.fillText('LE MUR DES TAGS · BIENTÔT', 500, 540);
+      _wallTex = new T.CanvasTexture(c); _wallTex.magFilter = T.NearestFilter; _wallTex.colorSpace = T.SRGBColorSpace; _wallTex.userData = { shared: true };
+      return _wallTex;
+    }
+    function makeWall() {
+      const S = sceneBase(0x05030c);
+      const mat = new T.ShaderMaterial({ uniforms: { map: { value: wallTex() }, uGrid: { value: 0 } },
+        vertexShader: 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }',
+        fragmentShader: 'uniform sampler2D map; uniform float uGrid; varying vec2 vUv; void main(){ vec4 c = texture2D(map, vUv); vec2 g = fract(vUv * 1000.0); float e = max(step(.93, g.x), step(.93, g.y)); vec3 base = c.rgb + vec3(.02,.03,.05) * (1. - e); gl_FragColor = vec4(mix(base, base*.5 + vec3(.05,.08,.12), e*uGrid), 1.0); }' });
+      const w = new T.Mesh(new T.PlaneGeometry(200, 200), mat); w.rotation.x = -Math.PI / 2; S.add(w);
+      return { kind: 'mur', scene: S, unit: 8e-35, hMin: 0.35, hMax: 300, h0: 230, bounds: 100, title: 'Le mur des tags', hint: 'Un million d’espaces, un mur commun à tous les commandants · bientôt', items: [{ kind: 'wall', x: 0, z: 0, r: 140 }],
+        update(t, hh) { mat.uniforms.uGrid.value = clamp((12 - hh) / 8, 0, 1); } };
+    }
+    const wallCard = () => ({ k: 'Le mur des tags', t: 'Bientôt', s: 'Un million d’espaces sur un mur commun à tous les commandants, sous la matière de l’univers. Il n’est pas encore ouvert.', acts: '' });
+
     /* ───────────── plan de la station ───────────── */
     function makeStation(b, sysKey) {
       const S = sceneBase(0x01020a); S.add(dust(1800, 700, hash(sysKey), 1.1, 0.55));
@@ -695,11 +745,12 @@
         const lg = nearStar(wx, wz, Math.max(26, h * 0.03)) ? null : legAt(P, wx, wz, Math.max(12, h * 0.02)); const s = sysAtCell(wx, wz);
         if (s && !(lg && lg.lineId)) return { plan: getPlan('sys:' + s.key, () => makeSystem(s.key)) };
         if (lg && lg.lineId) return { plan: getPlan('route:' + lg.lineId, () => makeRoute(lg.lineId, lg.npc ? (lg.pseudo || 'Ligne marchande') : 'Convoi ' + (lg.pseudo || 'impérial'), lg.id)) };
-        return null;
+        const c = cellAtWorld(wx / K, wz / K), ci = c ? c.idx : -1;
+        return { plan: getPlan('vide:' + ci + ':' + Math.round(wx / 40) + ':' + Math.round(wz / 40), () => makeVoid(hash('v' + ci + Math.round(wx / 40) + Math.round(wz / 40)), ci, null)) };
       }
       if (P.kind === 'univers') { const c = bodyAt(P, wx, wz, 1.4); if (c && c.key === P.mine) return { plan: AMAS, top: true }; if (c) showOwn(clusterCard(c)); return null; }
       if (P.kind === 'systeme') {
-        const b = bodyAt(P, wx, wz); if (!b) return null;
+        const b = bodyAt(P, wx, wz); if (!b) return { plan: getPlan('vide:s:' + P.sys, () => makeVoid(hash('vs' + P.sys), -1, P.sys)) };
         if (b.kind === 'planet' || (b.kind === 'sig' && b.obj && b.obj.resolved)) return { plan: getPlan('w:' + b.key, () => makeWorld(b, P.sys)) };
         if (b.kind === 'sig') return { plan: getPlan('g:' + b.key, () => makeSigPlane(b, P.sys)) };
         if (b.kind === 'target') return { plan: getPlan('f:' + b.key, () => makeField(b, P.sys)) };
@@ -708,6 +759,8 @@
         if (b.kind === 'beacon') return { plan: getPlan('bal:' + P.sys, () => makeBeacon({ key: P.sys, beacon: b.beacon, n: 1 })) };
         return null;
       }
+      if (P.kind === 'signature' || P.kind === 'gisement' || P.kind === 'vide') return { plan: getPlan('q:' + P.key, () => makeQuantum(hash('q' + P.key))) };
+      if (P.kind === 'quantique') return { plan: getPlan('mur', makeWall) };
       if (P.kind === 'route') {
         const o = bodyAt(P, wx, wz, 2.5); if (!o) return null;
         if (o.kind === 'jalon') return { plan: getPlan('sys:' + o.key, () => makeSystem(o.key)) };
@@ -720,7 +773,7 @@
     function dive0(pt) {
       if (trans) return;
       const c = childOf(pt.x, pt.z);
-      if (!c) { if (!plan._arrived && (plan.kind === 'station' || plan.kind === 'monde' || plan.kind === 'gisement' || plan.kind === 'signature' || plan.kind === 'formation' || plan.kind === 'balise')) arrive(); return; }
+      if (!c) { if (!plan._arrived && (plan.kind === 'station' || plan.kind === 'monde' || plan.kind === 'formation' || plan.kind === 'balise' || plan.kind === 'mur')) arrive(); return; }
       if (c.board) { startTrans('board', c.board, pt); return; }
       if (c.top) { startTrans('fromTop', AMAS, pt); return; }
       startTrans('in', c.plan, pt);
@@ -743,6 +796,8 @@
       if (P.kind === 'monde' || P.kind === 'gisement' || P.kind === 'signature') { const b = P.body; if (b && b.kind && b.key) onPick({ kind: b.kind, key: b.key }); return; }
       if (P.kind === 'station') { const ci = ST.cell['sys:' + P.sys]; if (ci !== undefined) onPickCell(ci); return; }
       if (P.kind === 'formation') { showOwn(formationCard(P.src)); return; }
+      if (P.kind === 'vide') { if (P.ci > 0) onPickCell(P.ci); else if (P.sys) { const ci = ST.cell['sys:' + P.sys]; if (ci !== undefined) onPickCell(ci); } return; }
+      if (P.kind === 'mur') { showOwn(wallCard()); return; }
       if (P.kind === 'balise') { showOwn(beaconCard(P.src)); return; }
       if (P.kind === 'route' && P.legId) { onPick({ kind: 'leg', key: P.legId }); return; }
     }
@@ -823,7 +878,7 @@
     }
 
     /* ───────────── HUD ───────────── */
-    const NAMES = { univers: 'Plan des amas', amas: 'Plan de l’amas', systeme: 'Plan du système', monde: 'Plan du monde', station: 'Plan de la station', route: 'Plan de la ligne', formation: 'Plan du convoi', balise: 'Plan de la balise', gisement: 'Plan du gisement', signature: 'Plan de la signature' };
+    const NAMES = { univers: 'Plan des amas', amas: 'Plan de l’amas', systeme: 'Plan du système', monde: 'Plan du monde', station: 'Plan de la station', route: 'Plan de la ligne', formation: 'Plan du convoi', balise: 'Plan de la balise', gisement: 'Plan du gisement', signature: 'Plan de la signature', vide: 'Plan du vide', quantique: 'Plan quantique', mur: 'Plan des tags' };
     function enterPlan(keepSel) {
       closeCard(); hideChips(); if (!keepSel) try { if (ctx.clearSel) ctx.clearSel(); } catch (e) {}
       if (hud) { hud.querySelector('.pl-n').textContent = plan.kind === 'formation' && plan.src && plan.src.kind !== 'convoi' ? 'Plan de la flotte' : (NAMES[plan.kind] || ''); hud.querySelector('.pl-p').textContent = stack.map(s => s.plan.title).concat(plan.title).join('  ›  '); hud.querySelector('.pl-h').textContent = plan.hint || ''; }
