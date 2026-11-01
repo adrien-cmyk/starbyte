@@ -456,7 +456,7 @@
         gl_FragColor = vec4(col * (.04 + lit * 1.05) + night * (1. - lit) + vec3(.35, .6, 1.) * rim * (.25 + lit * .9), 1.); }`;
     function makeWorld(b, sysKey) {
       const S = sceneBase(0x010208), pl = b.obj || {}, seed = hash(b.key);
-      const cls = String((pl.fromSig && pl.fromSig.fixedClass) || pl.type || '').toLowerCase();
+      const cls = String((pl.fromSig && pl.fromSig.fixedClass) || pl.fixedClass || pl.type || '').toLowerCase();
       const dead = /dead|type5|type1|lunar/.test(cls), gas = /gas|type4/.test(cls);
       const pal = dead ? [0x6e6258, 0x8a7a68, 0xb8aa98, 0x2a2622, 0.0, 0] : gas ? [0xc9a06a, 0xe0c090, 0xfff0d0, 0xb08050, 0.0, 0] : [0x3f6a3a, 0x8a7a50, 0xe8e8e8, 0x1d4f8a, 0.5, 0.8];
       const Rp = 2000, sunDir = V(-0.22, 0.28, -0.93).normalize();
@@ -492,6 +492,23 @@
       return { key: 'f:' + b.key, kind: 'gisement', scene: S, unit: 1e3, hMin: 20, hMax: 260, h0: 120, bounds: 200, title: bodyName(b), sys: sysKey, body: b,
         hint: 'Le gisement de près · sa fiche te dit quoi en faire', items: [{ kind: 'field', x: 0, z: 0, r: 140 }],
         update(t, hh, dt) { for (const r of spin) { r.rotation.x += r.userData.spin.x * dt; r.rotation.y += r.userData.spin.y * dt; } } };
+    }
+
+    /* ───────────── plan d'une signature non résolue : un écho, rien de plus ───────────── */
+    function makeSigPlane(b, sysKey) {
+      const seed = hash(b.key), R = rng(seed), S = sceneBase(0x01020a);
+      S.add(dust(1400, 400, seed, 1, 0.5));
+      for (let k = 0; k < 6; k++) S.add(at(spr(glow('rgba(190,170,255,.35)', 'rgba(120,90,255,.06)'), 120 + R() * 160, 0x9a7dff, 0.14), (R() - 0.5) * 120, -4, (R() - 0.5) * 120));
+      const core = new T.Mesh(new T.IcosahedronGeometry(9, 0), new T.MeshBasicMaterial({ color: 0xa37dff, wireframe: true })); S.add(core);
+      const inner = new T.Mesh(new T.IcosahedronGeometry(4, 1), new T.MeshBasicMaterial({ color: 0xcdb8ff, wireframe: true, transparent: true, opacity: 0.6 })); S.add(inner);
+      S.add(spr(glow('rgba(230,220,255,1)', 'rgba(160,120,255,.4)'), 30, 0xb89bff, 0.8));
+      const waves = []; for (let i = 0; i < 3; i++) { const w = new T.Mesh(new T.RingGeometry(0.96, 1, 96), new T.MeshBasicMaterial({ color: 0xc89bff, transparent: true, side: T.DoubleSide, depthWrite: false })); w.rotation.x = -Math.PI / 2; S.add(w); waves.push(w); }
+      const motes = []; for (let i = 0; i < (lite ? 40 : 90); i++) { const m = spr(glow('rgba(255,255,255,1)', 'rgba(180,160,255,.4)'), 1.5 + R() * 2.5, 0xd8ccff, 0.5 + R() * 0.4); const a = R() * 6.28, d = 18 + R() * 70; m.userData = { a, d, sp: (R() - 0.5) * 0.3, y: (R() - 0.5) * 10 }; S.add(m); motes.push(m); }
+      return { key: 'g:' + b.key, kind: 'signature', scene: S, unit: 50, hMin: 40, hMax: 360, h0: 170, bounds: 160, title: bodyName(b), sys: sysKey, body: b,
+        hint: 'Un écho non identifié · sa fiche dit quelle sonde le révélera', items: [{ kind: 'echo', x: 0, z: 0, r: 60 }],
+        update(t) { core.rotation.y = t * 0.4; core.rotation.x = t * 0.25; inner.rotation.y = -t * 0.7; inner.scale.setScalar(1 + 0.12 * Math.sin(t * 2.3));
+          waves.forEach((w, i) => { const k = (t * 0.25 + i / 3) % 1; w.scale.setScalar(10 + k * 120); w.material.opacity = 0.6 * (1 - k); });
+          for (const m of motes) { const u = m.userData; u.a += u.sp * 0.01; m.position.set(Math.cos(u.a) * u.d, u.y, Math.sin(u.a) * u.d); } } };
     }
 
     /* ───────────── plan de la station ───────────── */
@@ -682,7 +699,8 @@
       if (P.kind === 'univers') { const c = bodyAt(P, wx, wz, 1.4); if (c && c.key === P.mine) return { plan: AMAS, top: true }; if (c) showOwn(clusterCard(c)); return null; }
       if (P.kind === 'systeme') {
         const b = bodyAt(P, wx, wz); if (!b) return null;
-        if (b.kind === 'planet') return { plan: getPlan('w:' + b.key, () => makeWorld(b, P.sys)) };
+        if (b.kind === 'planet' || (b.kind === 'sig' && b.obj && b.obj.resolved)) return { plan: getPlan('w:' + b.key, () => makeWorld(b, P.sys)) };
+        if (b.kind === 'sig') return { plan: getPlan('g:' + b.key, () => makeSigPlane(b, P.sys)) };
         if (b.kind === 'target') return { plan: getPlan('f:' + b.key, () => makeField(b, P.sys)) };
         if (b.kind === 'station') return { plan: getPlan('st:' + P.sys, () => makeStation(b, P.sys)) };
         if (b.kind === 'mine') return { board: b.wid };
@@ -701,7 +719,7 @@
     function dive0(pt) {
       if (trans) return;
       const c = childOf(pt.x, pt.z);
-      if (!c) { if (!plan._arrived && (plan.kind === 'station' || plan.kind === 'monde' || plan.kind === 'gisement' || plan.kind === 'formation' || plan.kind === 'balise')) arrive(); return; }
+      if (!c) { if (!plan._arrived && (plan.kind === 'station' || plan.kind === 'monde' || plan.kind === 'gisement' || plan.kind === 'signature' || plan.kind === 'formation' || plan.kind === 'balise')) arrive(); return; }
       if (c.board) { startTrans('board', c.board, pt); return; }
       if (c.top) { startTrans('fromTop', AMAS, pt); return; }
       startTrans('in', c.plan, pt);
@@ -721,7 +739,7 @@
       const P = plan; if (!P || !ST || destroyed) return; P._arrived = true;
       if (ctx.avoiding && ctx.avoiding()) return;   // mode « éviter un système » : seul un vrai toucher choisit
       if (P.kind === 'systeme') { const ci = ST.cell['sys:' + P.sys]; if (ci !== undefined) onPickCell(ci); return; }
-      if (P.kind === 'monde' || P.kind === 'gisement') { const b = P.body; if (b && b.kind && b.key) onPick({ kind: b.kind, key: b.key }); return; }
+      if (P.kind === 'monde' || P.kind === 'gisement' || P.kind === 'signature') { const b = P.body; if (b && b.kind && b.key) onPick({ kind: b.kind, key: b.key }); return; }
       if (P.kind === 'station') { const ci = ST.cell['sys:' + P.sys]; if (ci !== undefined) onPickCell(ci); return; }
       if (P.kind === 'formation') { showOwn(formationCard(P.src)); return; }
       if (P.kind === 'balise') { showOwn(beaconCard(P.src)); return; }
@@ -804,7 +822,7 @@
     }
 
     /* ───────────── HUD ───────────── */
-    const NAMES = { univers: 'Plan des amas', amas: 'Plan de l’amas', systeme: 'Plan du système', monde: 'Plan du monde', station: 'Plan de la station', route: 'Plan de la ligne', formation: 'Plan du convoi', balise: 'Plan de la balise', gisement: 'Plan du gisement' };
+    const NAMES = { univers: 'Plan des amas', amas: 'Plan de l’amas', systeme: 'Plan du système', monde: 'Plan du monde', station: 'Plan de la station', route: 'Plan de la ligne', formation: 'Plan du convoi', balise: 'Plan de la balise', gisement: 'Plan du gisement', signature: 'Plan de la signature' };
     function enterPlan(keepSel) {
       closeCard(); hideChips(); if (!keepSel) try { if (ctx.clearSel) ctx.clearSel(); } catch (e) {}
       if (hud) { hud.querySelector('.pl-n').textContent = plan.kind === 'formation' && plan.src && plan.src.kind !== 'convoi' ? 'Plan de la flotte' : (NAMES[plan.kind] || ''); hud.querySelector('.pl-p').textContent = stack.map(s => s.plan.title).concat(plan.title).join('  ›  '); hud.querySelector('.pl-h').textContent = plan.hint || ''; }
@@ -1014,7 +1032,7 @@
         let label0 = null, go = null;
         if (plan === AMAS && (sel.kind === 'system' || sel.kind === 'home')) { const ci = ST && ST.cell['sys:' + sel.key]; if (ci !== undefined) { label0 = sel.kind === 'home' ? 'Entrer dans mon système ▸' : 'Entrer dans le système ▸'; go = () => { const p = AMAS.sysPos[sel.key] || W(ci); gx = p.x; gz = p.z; gh = AMAS.hMin; setTimeout(() => { if (!trans && plan === AMAS) startTrans('in', getPlan('sys:' + sel.key, () => makeSystem(sel.key)), V(p.x, 0, p.z)); }, 450); }; } }
         else if (plan === AMAS && sel.kind === 'leg') { const lg = AMAS.legHits.find(l => l.id === sel.key); if (lg && lg.lineId) { label0 = 'Voir la ligne de près ▸'; go = () => { const x = (lg.ax + lg.bx) / 2, z = (lg.az + lg.bz) / 2; gx = x; gz = z; startTrans('in', getPlan('route:' + lg.lineId, () => makeRoute(lg.lineId, lg.npc ? (lg.pseudo || 'Ligne marchande') : 'Convoi ' + (lg.pseudo || 'impérial'), lg.id)), V(x, 0, z)); }; } }
-        else if (plan.kind === 'systeme' && (sel.kind === 'planet' || sel.kind === 'target')) { const b = plan.items.find(x => x.kind === sel.kind && x.key === sel.key); if (b) { label0 = sel.kind === 'planet' ? 'S’approcher du monde ▸' : 'S’approcher du gisement ▸'; go = () => dive({ x: b.x, z: b.z }); } }
+        else if (plan.kind === 'systeme' && (sel.kind === 'planet' || sel.kind === 'target' || sel.kind === 'sig')) { const b = plan.items.find(x => x.kind === sel.kind && x.key === sel.key); if (b) { label0 = sel.kind === 'planet' ? 'S’approcher du monde ▸' : sel.kind === 'target' ? 'S’approcher du gisement ▸' : (b.obj && b.obj.resolved ? 'S’approcher du corps ▸' : 'S’approcher de l’écho ▸'); go = () => dive({ x: b.x, z: b.z }); } }
         else if (plan.kind === 'systeme' && sel.kind === 'home') { const b = plan.items.find(x => x.kind === 'mine'); if (b) { label0 = 'Ouvrir mon plateau ▸'; go = () => startTrans('board', b.wid, { x: b.x, z: b.z }); } }
         else if (plan.kind === 'systeme' && sel.kind === 'system') { const b = plan.items.find(x => x.kind === 'station'), m = plan.items.find(x => x.kind === 'mine'); if (b) { label0 = 'S’approcher de la station ▸'; go = () => dive({ x: b.x, z: b.z }); } else if (m) { label0 = 'Ouvrir le plateau de ma colonie ▸'; go = () => startTrans('board', m.wid, { x: m.x, z: m.z }); } }
         if (!label0) return true;
