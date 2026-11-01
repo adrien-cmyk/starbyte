@@ -1677,9 +1677,11 @@
   let E = E0;
   if (!_classic && window.SBPlans && typeof window.SBPlans.engine === 'function') {
     try {
-      E = window.SBPlans.engine({ CELLS, CELL, BOARD, cellAtWorld, mySystemKey, waitSB3D,
-        onPick: (sel) => onPick(sel), onPickCell: (i) => onPickCell(i), fail: (why) => _fail(why),
-        clearSel: () => { if (_sel) API.clear(); }, hasSel: () => !!_sel });
+      const _pe = window.SBPlans.engine({ CELLS, CELL, BOARD, cellAtWorld, mySystemKey, waitSB3D,
+        onPick: (sel) => onPick(sel), onPickCell: (i) => onPickCell(i), fail: (why) => { if (E === _pe) _fail(why); },
+        clearSel: () => { if (_sel) API.clear(); }, hasSel: () => !!_sel, avoiding: () => !!_pickAvoid,
+        refreshIfChanged: () => refreshIfChanged() });
+      E = _pe;
     } catch (e) { console.warn('[SpaceMap] plans indisponibles', e); E = E0; }
   }
 
@@ -1830,7 +1832,7 @@
     _sel = sel; refresh(true);
     const i = selCell(st);
     // « Voir sur la carte » : on arrive au plus près, système ouvert, objet entouré
-    if (i >= 0) E.moveTo(CELLS[i].x, CELLS[i].z, ['system', 'home', 'sig', 'target', 'planet'].includes(sel.kind) ? NEAR_DIST : Math.min(560, E.dist()), 900);
+    if (i >= 0) E.moveTo(CELLS[i].x, CELLS[i].z, ['system', 'home', 'sig', 'target', 'planet'].includes(sel.kind) ? NEAR_DIST : Math.min(560, E.lastAmasDist ? E.lastAmasDist() : E.dist()), 900);
   }
 
   async function sweep(sysKey) {
@@ -2529,7 +2531,7 @@
       if (E.cardExtra) {
         if (!xh) { xh = document.createElement('div'); xh.className = 'pl-xh'; inn.parentNode.insertBefore(xh, inn); }
         const xk = JSON.stringify(_sel) + '|' + (E.planKey ? E.planKey() : '');
-        if (xh.dataset.k !== xk) { xh.dataset.k = xk; xh.innerHTML = ''; try { E.cardExtra(_sel, xh); } catch (e) { console.warn('[SpaceMap] fiche', e); } }
+        if (xh.dataset.k !== xk) { xh.innerHTML = ''; let ok = false; try { ok = E.cardExtra(_sel, xh) !== false; } catch (e) { console.warn('[SpaceMap] fiche', e); } xh.dataset.k = ok ? xk : ''; }
       } else if (xh) xh.innerHTML = '';
       this.card.classList.add('on');
     },

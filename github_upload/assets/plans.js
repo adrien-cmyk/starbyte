@@ -60,8 +60,9 @@
     let plan = null, stack = [], trans = null, ST = null, AMAS = null, UNIV = null;
     let tx = 0, tz = 0, h = 1300, gx = 0, gz = 0, gh = 1300;
     let zoomPt = { x: 0, y: 0 };
-    let selIdx = -1, selCk = null, hiRoute = null;
-    let tOff = 0, lastNow = 0, ferr = 0, offZ = 0, oldCard = null;
+    let selIdx = -1, selCk = null, hiRoute = null, buildN = 0;
+    let tOff = 0, lastNow = 0, ferr = 0, offZ = 0, oldCard = null, destroyed = false, lastCheck = 0, ro = null, onLost = null, amasH = 1300, subErr = 0;
+    const safeFail = (why) => { if (!destroyed) fail(why); };
 
     /* ───────────── outils de dessin ───────────── */
     const V = (x, y, z) => new T.Vector3(x, y, z);
@@ -113,7 +114,7 @@
     }
     function disposeTree(o) {
       o.traverse((x) => {
-        if (x.geometry && !x.geometry.userData.shared) x.geometry.dispose();
+        if (x.geometry && !x.isSprite && !x.geometry.userData.shared) x.geometry.dispose();
         const ms = x.material ? (Array.isArray(x.material) ? x.material : [x.material]) : [];
         for (const m of ms) { if (m.map && !(m.map.userData && m.map.userData.shared)) m.map.dispose(); if (!m.userData.shared) m.dispose(); }
       });
@@ -206,7 +207,7 @@
             if (d.lb) { d.lb.position.set(0, base * 1.3, 0); d.lb.material.opacity = d.lb.userData.always ? 1 : clamp((1100 - hh) / 400, 0, 1); }
           }
           const n = Date.now();
-          for (const f of this.flights) { const k = f.t1 > f.t0 ? clamp((n - f.t0) / (f.t1 - f.t0), 0, 1) : 0.5; const p = f.at(k); f.dot.position.set(p.x, 0.8, p.z); f.lb.position.set(p.x, 8, p.z); f.dot.scale.setScalar(Math.max(10, hh * 0.014)); f.x = p.x; f.z = p.z; }
+          for (const f of this.flights) { const k = (f.t1 > f.t0 && isFinite(f.t0)) ? clamp((n - f.t0) / (f.t1 - f.t0), 0, 1) : 0.5; const p = f.at(k); f.dot.position.set(p.x, 0.8, p.z); f.lb.position.set(p.x, 8, p.z); f.dot.scale.setScalar(Math.max(10, hh * 0.014)); f.x = p.x; f.z = p.z; }
           for (const l of this.legHits) if (l.arrow) l.arrow.scale.setScalar(Math.max(1, hh / 700));
           if (sel.visible) sel.material.opacity = 0.65 + 0.25 * Math.sin(t * 2.4);
         },
@@ -562,7 +563,7 @@
       return { key: 'route:' + lineKey, kind: 'route', scene: S, unit: 4e12, hMin: 380, hMax: 1800, h0: 760, bounds: N * step, title: title || 'Ligne de convois', lineKey, legId,
         hint: 'La ligne · les convois vus par tes balises, leur escorte, ta flotte · pince sur un convoi, une flotte, une balise ou un jalon', items,
         update(t) { for (const m of movers) { if (m.userData && m.userData.tick) m.userData.tick(t); else m.rotation.y = t; }
-          const n = Date.now(); for (const c of conv) { const k = c.t1 ? clamp((n - c.t0) / Math.max(1, c.t1 - c.t0), 0, 1) * (N - 1) : c.i + clamp((n - c.t0) / (40 * 60e3), 0, 1) * (c.j - c.i);
+          const n = Date.now(); for (const c of conv) { if (!isFinite(c.t0)) c.t0 = n; const k = (c.t1 && isFinite(c.t1)) ? clamp((n - c.t0) / Math.max(1, c.t1 - c.t0), 0, 1) * (N - 1) : c.i + clamp((n - c.t0) / (40 * 60e3), 0, 1) * (c.j - c.i);
             const i0 = clamp(Math.floor(k), 0, N - 1), f = k - i0, i1 = Math.min(N - 1, i0 + 1), x = lerp(X(i0), X(i1), f), z = lerp(Zf(i0), Zf(i1), f); c.g.position.set(x, 4, z + (c.mine ? -30 : 30));
             c.g.rotation.y = c.j >= c.i ? -Math.PI / 2 : Math.PI / 2; c.it.x = x; c.it.z = z + (c.mine ? -30 : 30); } } };
     }
@@ -664,7 +665,7 @@
     const getPlan = (key, make) => PLANS[key] || (PLANS[key] = Object.assign(make(), { key }));
     function dropPlan(key) { const p = PLANS[key]; if (!p || p === AMAS || p === plan || stack.some(s => s.plan === p)) return; disposeTree(p.scene); delete PLANS[key]; }
     function gcPlans() { for (const k of Object.keys(PLANS)) if (k !== 'amas' && k !== 'univers') dropPlan(k); }
-    function startTrans(dir, next, atPt) { trans = { dir, t: 0, next, at: atPt }; closeCard(); hideChips(); }
+    function startTrans(dir, next, atPt) { if (trans) return false; trans = { dir, t: 0, next, at: atPt }; closeCard(); hideChips(); return true; }
     function bodyAt(P, wx, wz, mul = 1.8) { let best = null, bd = Infinity; for (const it of P.items || []) { const d = Math.hypot(it.x - wx, it.z - wz); if (d < Math.max(it.r * mul, 12) && d < bd) { bd = d; best = it; } } return best; }
     function legAt(P, wx, wz, tol) { let best = null, bd = tol; for (const l of P.legHits || []) { const dx = l.bx - l.ax, dz = l.bz - l.az, L = dx * dx + dz * dz || 1, u = clamp(((wx - l.ax) * dx + (wz - l.az) * dz) / L, 0, 1), d = Math.hypot(wx - (l.ax + u * dx), wz - (l.az + u * dz)); if (d < bd) { bd = d; best = l; } } return best; }
     function nearStar(wx, wz, tol) { if (!AMAS) return false; for (const q of Object.values(AMAS.sysPos)) if (Math.hypot(q.x - wx, q.z - wz) < tol) return true; return false; }
@@ -696,10 +697,11 @@
       }
       return null;
     }
-    function dive(pt) {
+    function dive(pt) { try { dive0(pt); } catch (e) { console.warn('[Plans] plonger', e); trans = null; drawStreaks(0); } }
+    function dive0(pt) {
       if (trans) return;
       const c = childOf(pt.x, pt.z);
-      if (!c) { if (plan.kind === 'station' || plan.kind === 'monde' || plan.kind === 'gisement' || plan.kind === 'formation' || plan.kind === 'balise') arrive(); return; }
+      if (!c) { if (!plan._arrived && (plan.kind === 'station' || plan.kind === 'monde' || plan.kind === 'gisement' || plan.kind === 'formation' || plan.kind === 'balise')) arrive(); return; }
       if (c.board) { startTrans('board', c.board, pt); return; }
       if (c.top) { startTrans('fromTop', AMAS, pt); return; }
       startTrans('in', c.plan, pt);
@@ -716,7 +718,8 @@
     }
     // l'arrivée dans un plan : la fiche qui va avec
     function arrive() {
-      const P = plan; if (!P || !ST) return;
+      const P = plan; if (!P || !ST || destroyed) return; P._arrived = true;
+      if (ctx.avoiding && ctx.avoiding()) return;   // mode « éviter un système » : seul un vrai toucher choisit
       if (P.kind === 'systeme') { const ci = ST.cell['sys:' + P.sys]; if (ci !== undefined) onPickCell(ci); return; }
       if (P.kind === 'monde' || P.kind === 'gisement') { const b = P.body; if (b && b.kind && b.key) onPick({ kind: b.kind, key: b.key }); return; }
       if (P.kind === 'station') { const ci = ST.cell['sys:' + P.sys]; if (ci !== undefined) onPickCell(ci); return; }
@@ -794,7 +797,7 @@
           const k = (t - 0.5) / 0.5; h = lerp(AMAS.hMax * 0.9, AMAS.h0, 1 - Math.pow(1 - k, 3)); drawStreaks(1 - k, true); }
       } else if (tr.dir === 'board') {
         drawStreaks(Math.min(1, t / 0.6), true);
-        if (t >= 0.6 && !tr.swapped) { tr.swapped = true; openBoard(tr.next); }
+        if (t >= 0.6 && !tr.swapped) { tr.swapped = true; trans = null; drawStreaks(0); openBoard(tr.next); return; }
         if (t >= 1) { trans = null; drawStreaks(0); return; }
       }
       if (t >= 1) { trans = null; drawStreaks(0); gh = h; if (tr.dir !== 'out' && tr.dir !== 'top') setTimeout(arrive, 60); }
@@ -806,7 +809,7 @@
       closeCard(); hideChips(); if (!keepSel) try { if (ctx.clearSel) ctx.clearSel(); } catch (e) {}
       if (hud) { hud.querySelector('.pl-n').textContent = plan.kind === 'formation' && plan.src && plan.src.kind !== 'convoi' ? 'Plan de la flotte' : (NAMES[plan.kind] || ''); hud.querySelector('.pl-p').textContent = stack.map(s => s.plan.title).concat(plan.title).join('  ›  '); hud.querySelector('.pl-h').textContent = plan.hint || ''; }
       if (upBtn) { const par = stack.length ? stack[stack.length - 1].plan : (plan.kind === 'amas' ? null : null); upBtn.style.display = par ? '' : 'none'; if (par) upBtn.textContent = '◂ ' + (par.kind === 'amas' ? 'La carte' : par.title); }
-      plan._auto = false;
+      plan._auto = false; plan._arrived = false;
       try { if (plan.kind === 'systeme') syncSysSel(plan); } catch (e) {}
     }
 
@@ -828,7 +831,8 @@
       const k = 1 - nh / gh; gx += (before.x - gx) * k; gz += (before.z - gz) * k; gh = nh;
       gx = clamp(gx, -plan.bounds * 1.3, plan.bounds * 1.3); gz = clamp(gz, -plan.bounds * 1.3, plan.bounds * 1.3);
     }
-    function tap(cx, cy) {
+    function tap(cx, cy) { try { tap0(cx, cy); } catch (e) { console.warn('[Plans] toucher', e); } }
+    function tap0(cx, cy) {
       if (trans) return;
       const pt = groundAt(cx, cy), P = plan;
       if (P.kind === 'amas') {
@@ -859,15 +863,16 @@
     function bindGestures(el) {
       const ptrs = new Map(); let pinch0 = 0, moved = 0, downT = 0;
       el.addEventListener('wheel', (e) => { e.preventDefault(); const r = el.getBoundingClientRect(); zoomBy(Math.exp(e.deltaY * 0.0016), e.clientX - r.left, e.clientY - r.top); }, { passive: false });
-      el.addEventListener('pointerdown', (e) => { try { el.setPointerCapture(e.pointerId); } catch (er) {} const r = el.getBoundingClientRect(); ptrs.set(e.pointerId, { x: e.clientX - r.left, y: e.clientY - r.top }); moved = 0; downT = performance.now(); if (ptrs.size === 2) { const [a, b] = [...ptrs.values()]; pinch0 = Math.hypot(a.x - b.x, a.y - b.y); } });
+      el.addEventListener('pointerdown', (e) => { try { el.setPointerCapture(e.pointerId); } catch (er) {} const r = el.getBoundingClientRect(); ptrs.set(e.pointerId, { x: e.clientX - r.left, y: e.clientY - r.top }); if (ptrs.size === 1) { moved = 0; downT = performance.now(); } else moved = 99; if (ptrs.size === 2) { const [a, b] = [...ptrs.values()]; pinch0 = Math.hypot(a.x - b.x, a.y - b.y); } });
       el.addEventListener('pointermove', (e) => {
         const p = ptrs.get(e.pointerId); if (!p) return; const r = el.getBoundingClientRect(), x = e.clientX - r.left, y = e.clientY - r.top;
-        if (ptrs.size === 1 && !trans && !plan.cam) { const a = groundAt(p.x, p.y), b = groundAt(x, y); gx -= b.x - a.x; gz -= b.z - a.z; gx = clamp(gx, -plan.bounds * 1.3, plan.bounds * 1.3); gz = clamp(gz, -plan.bounds * 1.3, plan.bounds * 1.3); tx = gx; tz = gz; moved += Math.abs(x - p.x) + Math.abs(y - p.y); }
+        if (ptrs.size === 1) moved += Math.abs(x - p.x) + Math.abs(y - p.y);
+        if (ptrs.size === 1 && !trans && !plan.cam) { const a = groundAt(p.x, p.y), b = groundAt(x, y); gx -= b.x - a.x; gz -= b.z - a.z; gx = clamp(gx, -plan.bounds * 1.3, plan.bounds * 1.3); gz = clamp(gz, -plan.bounds * 1.3, plan.bounds * 1.3); tx = gx; tz = gz; }
         p.x = x; p.y = y;
         if (ptrs.size === 2) { const [a, b] = [...ptrs.values()], d = Math.hypot(a.x - b.x, a.y - b.y); if (pinch0 && d > 0) zoomBy(pinch0 / d, (a.x + b.x) / 2, (a.y + b.y) / 2); pinch0 = d; moved = 99; }
       });
       const up = (e) => { const was = ptrs.get(e.pointerId); ptrs.delete(e.pointerId); if (ptrs.size < 2) pinch0 = 0; if (was && moved < 8 && !ptrs.size && performance.now() - downT < 600) tap(was.x, was.y); };
-      el.addEventListener('pointerup', up); el.addEventListener('pointercancel', (e) => { ptrs.delete(e.pointerId); if (ptrs.size < 2) pinch0 = 0; });
+      el.addEventListener('pointerup', up); const drop = (e) => { ptrs.delete(e.pointerId); if (ptrs.size < 2) pinch0 = 0; }; el.addEventListener('pointercancel', drop); el.addEventListener('lostpointercapture', drop);
     }
 
     function injectCss() {
@@ -903,7 +908,9 @@
     /* ───────────── boucle ───────────── */
     function visible() { return !!(host && host.isConnected && host.offsetParent !== null && !host.closest('.screen.hidden') && !document.hidden); }
     function frame(now) {
-      if (!visible()) { lastNow = now; return; }
+      if (!visible()) { lastNow = now; if (trans) { const tr = trans; trans = null; drawStreaks(0); if (tr.dir === 'in' && tr.swapped) gh = h = plan.h0; } return; }
+      if (!trans && now - lastCheck > 1000) { lastCheck = now; try { ctx.refreshIfChanged && ctx.refreshIfChanged(); } catch (e) {} }
+      if (plan === AMAS && !trans) amasH = h;
       const dt = Math.min((now - (lastNow || now)) / 1000, 0.05); lastNow = now; tOff += dt; const time = tOff;
       if (trans) stepTrans(dt);
       else { const k = 1 - Math.exp(-dt * 7); h += (gh - h) * k; tx += (gx - tx) * k; tz += (gz - tz) * k; }
@@ -931,7 +938,7 @@
       async init(el) {
         const S = await waitSB3D(12000);
         T = this.T = S.THREE;
-        const probe = document.createElement('canvas'); if (!(probe.getContext('webgl2') || probe.getContext('webgl'))) throw new Error('WebGL indisponible');
+        { const probe = document.createElement('canvas'), gl = probe.getContext('webgl2'); if (!gl) throw new Error('WebGL2 indisponible'); try { const x = gl.getExtension('WEBGL_lose_context'); x && x.loseContext(); } catch (e) {} }
         lite = !!(window.SBPerf && SBPerf.level >= 2);
         host = el; injectCss();
         renderer = this.renderer = new T.WebGLRenderer({ antialias: !lite, powerPreference: 'high-performance' });
@@ -947,24 +954,28 @@
         card = document.createElement('div'); card.className = 'pl-card';
         scr.appendChild(card); scr.appendChild(hud); scr.appendChild(upBtn);
         bindGestures(cv);
-        new ResizeObserver(() => resize()).observe(host); resize();
+        ro = new ResizeObserver(() => resize()); ro.observe(host); resize();
         AMAS = PLANS.amas = makeAmas();
         plan = AMAS; stack = []; tx = gx = 0; tz = gz = 0; h = gh = AMAS.h0;
-        enterPlan();
+        enterPlan(true);
         renderer.setAnimationLoop((now) => {
           try { frame(now); ferr = 0; }
           catch (e) { if (++ferr === 1) console.warn('[Plans] image: ' + (e && e.message) + ' ' + String(e && e.stack || '').split('\n').slice(1, 3).join(' ').replace(/https?:\/\/[^/]+\//g, '').slice(0, 160));
-            if (ferr > 40) { renderer.setAnimationLoop(null); this.ready = false; fail('les plans plantent'); } }
+            if (plan !== AMAS && ferr > 3) { const bad = plan; ferr = 0; subErr++; try { trans = null; drawStreaks(0); goAmas(0, 0, AMAS.h0 * 0.6, true); delete PLANS[bad.key]; } catch (er) {} if (subErr < 6) return; }
+            if (ferr > 40 || subErr >= 6) { renderer.setAnimationLoop(null); this.ready = false; safeFail('les plans plantent'); } }
         });
-        cv.addEventListener('webglcontextlost', (ev) => { ev.preventDefault(); console.warn('[Plans] contexte WebGL perdu'); setTimeout(() => { if (renderer.getContext().isContextLost()) { renderer.setAnimationLoop(null); this.ready = false; fail('contexte WebGL perdu'); } }, 4000); });
+        onLost = (ev) => { ev.preventDefault(); if (destroyed) return; console.warn('[Plans] contexte WebGL perdu'); setTimeout(() => { if (!destroyed && renderer.getContext().isContextLost()) { renderer.setAnimationLoop(null); this.ready = false; safeFail('contexte WebGL perdu'); } }, 4000); };
+        cv.addEventListener('webglcontextlost', onLost);
         this.ready = true;
         console.log('[Plans] carte des plans d’existence prête');
       },
       dist() { return plan === AMAS ? h / DIST_TO_H : 0; },
+      lastAmasDist() { return amasH / DIST_TO_H; },
       paint() {},
       build(st) {
         ST = st;
         if (!AMAS) return;
+        buildN++;
         try { buildAmas(AMAS, st); } catch (e) { console.warn('[Plans] amas', e); }
         try { if (plan && plan.refresh) plan.refresh(); for (const s of stack) if (s.plan.refresh) s.plan.refresh(); } catch (e) { console.warn('[Plans] plan', e); }
       },
@@ -978,29 +989,34 @@
       moveTo(x, z, dist, ms) { if (!AMAS) return; goAmas(x * K, z * K, (dist == null ? h / DIST_TO_H : dist) * DIST_TO_H, ms != null && ms <= 1); },
       // un bouton « Voir de près ▸ » sous la fiche de l'ancienne carte, quand un plan s'ouvre en dessous
       cardExtra(sel, el) {
-        if (!sel || !el || trans) return;
+        if (!sel || !el || trans) return false;
         let label0 = null, go = null;
-        if (plan === AMAS && (sel.kind === 'system' || sel.kind === 'home')) { const ci = ST && ST.cell['sys:' + sel.key]; if (ci !== undefined) { label0 = sel.kind === 'home' ? 'Entrer dans mon système ▸' : 'Entrer dans le système ▸'; go = () => { const p = AMAS.sysPos[sel.key] || W(ci); gx = p.x; gz = p.z; gh = AMAS.hMin; setTimeout(() => { if (!trans) startTrans('in', getPlan('sys:' + sel.key, () => makeSystem(sel.key)), V(p.x, 0, p.z)); }, 450); }; } }
+        if (plan === AMAS && (sel.kind === 'system' || sel.kind === 'home')) { const ci = ST && ST.cell['sys:' + sel.key]; if (ci !== undefined) { label0 = sel.kind === 'home' ? 'Entrer dans mon système ▸' : 'Entrer dans le système ▸'; go = () => { const p = AMAS.sysPos[sel.key] || W(ci); gx = p.x; gz = p.z; gh = AMAS.hMin; setTimeout(() => { if (!trans && plan === AMAS) startTrans('in', getPlan('sys:' + sel.key, () => makeSystem(sel.key)), V(p.x, 0, p.z)); }, 450); }; } }
         else if (plan === AMAS && sel.kind === 'leg') { const lg = AMAS.legHits.find(l => l.id === sel.key); if (lg && lg.lineId) { label0 = 'Voir la ligne de près ▸'; go = () => { const x = (lg.ax + lg.bx) / 2, z = (lg.az + lg.bz) / 2; gx = x; gz = z; startTrans('in', getPlan('route:' + lg.lineId, () => makeRoute(lg.lineId, lg.npc ? (lg.pseudo || 'Ligne marchande') : 'Convoi ' + (lg.pseudo || 'impérial'), lg.id)), V(x, 0, z)); }; } }
         else if (plan.kind === 'systeme' && (sel.kind === 'planet' || sel.kind === 'target')) { const b = plan.items.find(x => x.kind === sel.kind && x.key === sel.key); if (b) { label0 = sel.kind === 'planet' ? 'S’approcher du monde ▸' : 'S’approcher du gisement ▸'; go = () => dive({ x: b.x, z: b.z }); } }
         else if (plan.kind === 'systeme' && sel.kind === 'home') { const b = plan.items.find(x => x.kind === 'mine'); if (b) { label0 = 'Ouvrir mon plateau ▸'; go = () => startTrans('board', b.wid, { x: b.x, z: b.z }); } }
         else if (plan.kind === 'systeme' && sel.kind === 'system') { const b = plan.items.find(x => x.kind === 'station'), m = plan.items.find(x => x.kind === 'mine'); if (b) { label0 = 'S’approcher de la station ▸'; go = () => dive({ x: b.x, z: b.z }); } else if (m) { label0 = 'Ouvrir le plateau de ma colonie ▸'; go = () => startTrans('board', m.wid, { x: m.x, z: m.z }); } }
-        if (!label0) return;
+        if (!label0) return true;
         const d = document.createElement('div'); d.className = 'pl-xtra'; d.innerHTML = btn(label0, '', 'go', true);
         d.querySelector('button').onclick = (e) => { e.stopPropagation(); try { go(); } catch (er) { console.warn('[Plans]', er); } };
         el.appendChild(d);
+        return true;
       },
       // diagnostic (tests)
       _state() { return { plan: plan && plan.kind, key: plan && plan.key, title: plan && plan.title, stack: stack.map(s => s.plan.kind), h, busy: !!trans, items: plan && plan.items ? plan.items.map(i => ({ kind: i.kind, key: i.key, x: i.x, z: i.z })) : [] }; },
       _dive(x, z) { dive({ x, z }); }, _surface() { surface(); }, _zoom(f) { zoomBy(f); }, _tap(x, z) { const v = V(x, 0, z).project(camera); tap((v.x + 1) / 2 * host.clientWidth, (1 - v.y) / 2 * host.clientHeight); },
       _settle() { h = gh; tx = gx; tz = gz; }, _look(x, z, hh) { gx = tx = x; gz = tz = z; if (hh) gh = h = hh; }, _sysPos(k) { return AMAS && AMAS.sysPos[k]; }, _legs() { return AMAS ? AMAS.legHits.map(l => ({ id: l.id, lineId: l.lineId, x: (l.ax + l.bx) / 2, z: (l.az + l.bz) / 2 })) : []; },
       goHome() { goAmas(0, 0, AMAS ? AMAS.h0 * 0.6 : 800); },
-      planKey() { return (plan && plan.key) || ''; },
+      planKey() { return ((plan && plan.key) || '') + ':' + buildN; },
+      _resize() { resize(); },
       destroy() {
+        destroyed = true;
         try { renderer && renderer.setAnimationLoop(null); } catch (e) {}
+        try { ro && ro.disconnect(); if (onLost && renderer) renderer.domElement.removeEventListener('webglcontextlost', onLost); } catch (e) {}
+        try { const st = document.getElementById('pl-style'); if (st) st.remove(); } catch (e) {}
         for (const el of [hud, card, upBtn, ...Object.values(chips)]) try { el && el.remove(); } catch (e) {}
         try { renderer && renderer.domElement.remove(); fx && fx.remove(); } catch (e) {}
-        try { for (const k of Object.keys(PLANS)) disposeTree(PLANS[k].scene); renderer && renderer.dispose(); } catch (e) {}
+        try { for (const k of Object.keys(PLANS)) disposeTree(PLANS[k].scene); if (UNIV && !PLANS.univers) disposeTree(UNIV.scene); renderer && renderer.dispose(); } catch (e) {}
         this.ready = false;
       },
     };
