@@ -886,7 +886,8 @@
         .pl-hud .pl-sc{margin-top:5px;font:600 11px/1 ui-monospace,Menlo,monospace;color:#9fd0ff}
         .pl-hud .pl-sc i{display:block;width:72px;height:5px;border:1px solid rgba(159,208,255,.55);border-top:0;margin-bottom:3px}
         .pl-hud .pl-h{margin-top:4px;font-size:11px;color:#7f93a8}
-        .sm-world .smw-card.on ~ .pl-hud .pl-h, .pl-card.on ~ .pl-hud .pl-h{display:none}
+        .sm-world .smw-card.on ~ .pl-hud, .pl-card.on ~ .pl-hud{opacity:0}
+        .pl-hud{transition:opacity .18s ease}
         .pl-up{position:absolute;left:12px;top:calc(env(safe-area-inset-top,0px) + 92px);z-index:4;padding:7px 12px;border-radius:14px;border:1px solid rgba(127,208,255,.35);background:rgba(8,14,22,.78);color:#bfe6ff;font:600 11px/1 -apple-system,system-ui,sans-serif;letter-spacing:.04em;max-width:60%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
         .pl-chip{position:absolute;z-index:4;padding:6px 10px;border-radius:12px;border:1px solid rgba(255,255,255,.25);background:rgba(10,8,20,.7);color:#f0e6ff;font:600 11px/1 -apple-system,system-ui,sans-serif;letter-spacing:.08em;display:none}
         .pl-card{position:absolute;left:10px;right:10px;bottom:calc(var(--sab,0px) + 92px);z-index:24;background:rgba(8,13,20,.95);border:1px solid rgba(127,208,255,.3);border-radius:14px;padding:12px 14px;display:none;color:#e6f0ff;font-family:-apple-system,system-ui,sans-serif}
@@ -901,6 +902,25 @@
         .pl-b small{display:block;font-weight:400;font-size:10.5px;color:#9fb2c2}
         .pl-xtra{margin:0 0 6px}
         .sm-world .smw-hint{display:none!important}
+        /* la fiche de l'ancienne carte, habillée comme la fiche du labo (Adrien, 01/11) : compacte, actions en grille */
+        .pl-on .smw-card{background:rgba(8,13,20,.95);border:1px solid rgba(127,208,255,.3);border-radius:14px;padding:12px 14px 13px;font-family:-apple-system,system-ui,sans-serif;max-height:50%;-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px)}
+        .pl-on .smw-card .smw-cx{top:2px;right:2px;font-size:22px;color:#9aa6b4}
+        .pl-on .smw-card .sm-panel{padding:0;margin:0;background:none;border:0;-webkit-backdrop-filter:none;backdrop-filter:none;display:flex;flex-wrap:wrap;gap:6px;align-items:stretch}
+        .pl-on .smw-card .sm-panel > *{flex:1 1 100%;min-width:0}
+        .pl-on .smw-card .sm-ptitle,.pl-on .smw-card .sm-psub,.pl-on .smw-card .smc-k,.pl-on .smw-card .smc-t{padding-right:30px}
+        .pl-on .smw-card .sm-ptitle{font:700 15px/1.25 -apple-system,system-ui,sans-serif;letter-spacing:0;text-transform:none;color:#e6f0ff}
+        .pl-on .smw-card .sm-psub{font-size:11.5px;line-height:1.4;color:#9fb2c2;letter-spacing:0;margin-top:0}
+        .pl-on .smw-card .sig-next{position:relative;gap:0;margin-right:0!important}
+        .pl-on .smw-card .sm-panel > .sig-next{flex:1 1 calc(50% - 6px);margin:4px 0 0!important}
+        .pl-on .smw-card .smc-enter{margin:8px 0 2px!important;width:100%!important;box-sizing:border-box;padding:12px;letter-spacing:.22em}
+        .pl-on .smw-card .sig-next button{min-height:50px;height:100%;padding:9px 10px 21px;border-radius:10px;align-items:flex-start;justify-content:flex-start}
+        .pl-on .smw-card .sig-next .lab{font:600 12px/1.25 -apple-system,system-ui,sans-serif;letter-spacing:0;text-transform:none}
+        .pl-on .smw-card .sig-next .arr{display:none}
+        .pl-on .smw-card .sig-next .sub{position:absolute;left:11px;right:8px;bottom:7px;padding:0;font-size:10px;letter-spacing:0;color:#9fb2c2;pointer-events:none;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+        .pl-on .smw-card .sig-next .off{min-height:50px;height:100%;border-radius:10px;font-size:11px}
+        .pl-on .smw-card .sig-next .sub:empty{display:none}
+        .pl-on .smw-card .pl-xh{margin:0 30px 8px 0}
+        .pl-on .smw-card .pl-xh .pl-b{width:100%}
         .pl-xh:empty{display:none}`;
       document.head.appendChild(s);
     }
@@ -949,6 +969,7 @@
         const cv = renderer.domElement; cv.style.cssText = 'display:block;width:100%;height:100%;touch-action:none'; host.appendChild(cv);
         fx = document.createElement('canvas'); fx.className = 'pl-fx'; host.appendChild(fx); fxc = fx.getContext('2d');
         const scr = scrEl = host.closest('#scr-prospect') || host.parentNode;
+        scr.classList.add('pl-on');
         hud = document.createElement('div'); hud.className = 'pl-hud'; hud.innerHTML = '<div class="pl-n"></div><div class="pl-p"></div><div class="pl-sc"><i></i><span></span></div><div class="pl-h"></div>';
         upBtn = document.createElement('button'); upBtn.className = 'pl-up'; upBtn.style.display = 'none'; upBtn.onclick = () => surface();
         card = document.createElement('div'); card.className = 'pl-card';
@@ -1011,6 +1032,7 @@
       _resize() { resize(); },
       destroy() {
         destroyed = true;
+        try { scrEl && scrEl.classList.remove('pl-on'); } catch (e) {}
         try { renderer && renderer.setAnimationLoop(null); } catch (e) {}
         try { ro && ro.disconnect(); if (onLost && renderer) renderer.domElement.removeEventListener('webglcontextlost', onLost); } catch (e) {}
         try { const st = document.getElementById('pl-style'); if (st) st.remove(); } catch (e) {}
