@@ -870,7 +870,7 @@
       gl_FragColor = vec4(base * edge + uLine * la, max(edge * 0.9, la));
     }`;
 
-  const E = {
+  const E0 = {
     ready: false, loading: null,
 
     async init(host) {
@@ -1669,6 +1669,20 @@
   };
 
   /* ═══════════════════ Liaison jeu ↔ plateau ═══════════════════ */
+  // PATCH_0111_PLANS (Adrien, 01/11) — la carte des plans d'existence (assets/plans.js) remplace le DESSIN du plateau.
+  // Tout le reste (lecture de la partie, positions figées G.mapCells, fiches, actions) ne change pas : le nouveau moteur
+  // parle la même interface que l'ancien. ?carte=classique (ou localStorage sb_carte = classique) garde l'ancien plateau ;
+  // si les plans échouent (WebGL, plantage), on repasse tout seul sur l'ancien plateau 3D, puis sur la carte simple.
+  const _classic = (() => { try { return /[?&]carte=classique/.test(location.search) || localStorage.getItem('sb_carte') === 'classique'; } catch (e) { return false; } })();
+  let E = E0;
+  if (!_classic && window.SBPlans && typeof window.SBPlans.engine === 'function') {
+    try {
+      E = window.SBPlans.engine({ CELLS, CELL, BOARD, cellAtWorld, mySystemKey, waitSB3D,
+        onPick: (sel) => onPick(sel), onPickCell: (i) => onPickCell(i), fail: (why) => _fail(why),
+        clearSel: () => { if (_sel) API.clear(); }, hasSel: () => !!_sel });
+    } catch (e) { console.warn('[SpaceMap] plans indisponibles', e); E = E0; }
+  }
+
   function selCell(st) {
     if (!_sel) return -1;
     if (_sel.cell != null) return _sel.cell;
@@ -1781,6 +1795,14 @@
   // PATCH_2210_CARTE_FILET : si le plateau 3D ne vient pas (ou plante), on passe à la carte simple au lieu d'un écran noir
   function _fail(why) {
     if (_fallback) return;
+    if (E !== E0) {   // PATCH_0111_PLANS : les plans ont échoué → l'ancien plateau 3D, sans perdre la sélection
+      console.warn('[SpaceMap] plans → plateau classique : ' + why);
+      try { clearTimeout(E._wd); if (E.destroy) E.destroy(); } catch (e) {}
+      E = E0; _sigStr = ''; try { API._e = E0; } catch (e) {}
+      const v = _root && _root.querySelector('.sm3-view'); if (v) v.innerHTML = '<div class="sm3-load">Chargement du plateau…</div>';
+      setTimeout(render, 0);
+      return;
+    }
     console.warn('[SpaceMap] carte simple : ' + why);
     try { if (E.renderer) { E.renderer.setAnimationLoop(null); E.renderer.domElement.remove(); } } catch (e) {}
     loadFallback();
@@ -1798,7 +1820,7 @@
         _sigStr = '';
         refresh(true);
         if (_pendingFocus) { const f = _pendingFocus; _pendingFocus = null; focusSel(f); }
-      }).catch((e) => { console.warn('[SpaceMap]', e); loadFallback(); });
+      }).catch((e) => { console.warn('[SpaceMap]', e); _fail(String((e && e.message) || e)); });
     }
   }
 
@@ -2502,6 +2524,13 @@
       if (!_sel) { this.card.classList.remove('on'); return; }
       const h = panelMarkup(st);
       if (inn.innerHTML !== h) inn.innerHTML = h;
+      // PATCH_0111_PLANS : « Entrer dans le système ▸ », « Voir la ligne de près ▸ »… quand un plan s'ouvre sous l'objet
+      let xh = this.card.querySelector('.pl-xh');
+      if (E.cardExtra) {
+        if (!xh) { xh = document.createElement('div'); xh.className = 'pl-xh'; inn.parentNode.insertBefore(xh, inn); }
+        const xk = JSON.stringify(_sel) + '|' + (E.planKey ? E.planKey() : '');
+        if (xh.dataset.k !== xk) { xh.dataset.k = xk; xh.innerHTML = ''; try { E.cardExtra(_sel, xh); } catch (e) { console.warn('[SpaceMap] fiche', e); } }
+      } else if (xh) xh.innerHTML = '';
       this.card.classList.add('on');
     },
   };
