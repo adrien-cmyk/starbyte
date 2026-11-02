@@ -10,7 +10,7 @@ create table if not exists public.bm_categories (
   cap      int  not null                  -- plafond par joueur, tous modèles de la catégorie confondus
 );
 insert into public.bm_categories (category, label, cap) values
-  ('sport', 'Cuirassé Sport', 10),
+  ('sport', 'Cuirassé de Héro', 10),   -- clé interne « sport », nom affiché renommé le 02/11
   ('dread', 'Dreadnought', 3),
   ('arche', 'Arche fondatrice', 1)
 on conflict (category) do update set label = excluded.label, cap = excluded.cap;

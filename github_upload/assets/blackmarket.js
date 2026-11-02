@@ -8,7 +8,7 @@
 
   const CATS = {
     sport: {
-      label: 'Cuirassé Sport', plural: 'Cuirassés Sport', price: 12, cap: 10,
+      label: 'Cuirassé de Héro', plural: 'Cuirassés de Héro', price: 12, cap: 10,
       rule: 'Cuirassé T3 · +20 % vitesse et puissance de feu · réparation plus lente',
     },
     dread: {
