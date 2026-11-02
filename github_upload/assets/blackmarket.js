@@ -36,7 +36,7 @@
   // Serveur (schema_mp_v31_blackmarket.sql + fonctions bm-checkout / bm-webhook)
   const SB = 'https://elupnpdcblztpfywnhjl.supabase.co';
   const KEY = 'sb_publishable_tXGrQIROzH2DwBrny1GcHQ_iKJKoBOQ';
-  let owned = {};                                 // item_id → nombre possédé (payé, non remboursé)
+  let owned = (() => { try { return JSON.parse(localStorage.getItem('bm_owned_cache') || '{}') || {}; } catch (e) { return {}; } })();   // item_id → nombre possédé (payé, non remboursé)
   function token() {
     try { const a = JSON.parse(localStorage.getItem('starbyte_auth') || 'null'); return a && (a.access_token || (a.currentSession && a.currentSession.access_token)); } catch (e) { return null; }
   }
@@ -51,6 +51,7 @@
     try {
       const st = await call('/rest/v1/rpc/bm_state', {});
       owned = {}; (st && st.owned || []).forEach(o => { owned[o.item_id] = (owned[o.item_id] || 0) + 1; });
+      try { localStorage.setItem('bm_owned_cache', JSON.stringify(owned)); } catch (e) {}
     } catch (e) { /* v31 pas encore lancé : rien à afficher */ }
   }
 
@@ -76,6 +77,7 @@
 #bm-root .bm-card::before { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 4px; background: var(--a); }
 #bm-root .bm-card:active { background: rgba(255,255,255,.06); }
 #bm-root .bm-card .t { flex: 1; min-width: 0; }
+#bm-root .bm-card .bm-th { flex: 0 0 58px; height: 58px; border-radius: 8px; background: #000 center/cover no-repeat; border: 1px solid #222930; }
 #bm-root .bm-card b { display: block; font-size: 17px; font-weight: 600; }
 #bm-root .bm-card span { display: block; font-size: 12px; color: #8d98a3; margin-top: 2px; }
 #bm-root .bm-price { font: 500 14px 'JetBrains Mono', monospace; color: #f1d27a; white-space: nowrap; }
@@ -115,6 +117,8 @@
 #bm-root .bm-buy-sub { text-align: center; font: 400 10px 'JetBrains Mono', monospace; color: #6f7a84; margin-top: 6px; }
 `;
 
+  const STAR = (sz) => `<svg width="${sz}" height="${sz}" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.2l2.9 6.1 6.7.8-4.9 4.6 1.3 6.6L12 17l-6 3.3 1.3-6.6-4.9-4.6 6.7-.8z" fill="#f1d27a" stroke="#7a5a1c" stroke-width="1"/></svg>`;
+  const thumb = (id) => `assets/blackmarket/thumbs/${id}.jpg?v=20261102`;
   const fmt = (n) => Math.round(n).toLocaleString('fr-CH').replace(/ |\s/g, ' ');
   const chf = (n) => 'CHF ' + n + '.–';
   const esc = (s) => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -154,6 +158,7 @@
       return `<h2>${c.plural}</h2><div class="bm-rule">${c.rule} · max ${c.cap} par joueur</div>` +
         SHIPS.filter(s => s.cat === cat).map(s => `
           <button class="bm-card" style="--a:${s.accent}" data-ship="${s.id}">
+            <div class="bm-th" style="background-image:url('${thumb(s.id)}')"></div>
             <div class="t"><b>${esc(s.name)}</b><span>${esc(s.line)}</span>${owned[s.id] ? `<div class="bm-own">À TOI ×${owned[s.id]}</div>` : ''}</div>
             <div class="bm-price">${chf(c.price)}</div><div class="bm-chev">›</div>
           </button>`).join('');
@@ -161,30 +166,31 @@
     root.querySelector('.bm-cat').innerHTML = `
       <div class="bm-eyebrow">Marché noir · Docks francs</div>
       <h1>BLACKMARKET</h1>
-      <div class="bm-dev">Aperçu réservé à ton compte · paiement pas encore branché</div>
+      <div class="bm-dev">Aperçu réservé à ton compte · paiement en mode test</div>
       <div class="bm-merchant"><div class="bm-face">${face}</div>
         <div class="bm-say">${esc(LINES[line % LINES.length])}<small>PAULINE · REINE DU NOIR</small></div></div>
       ${section('sport')}${section('dread')}`;
     line++;
   }
 
-  function openShip(id) {
+  let fromFleet = false;
+  function openShip(id, mine) {
     const s = SHIPS.find(x => x.id === id); if (!s) return;
     const c = CATS[s.cat];
     const pane = root.querySelector('.bm-ship');
     const stats = statsOf(s.cat).map(x => `<div><i>${x.k}</i><b>${x.v != null ? fmt(x.v) : x.txt}</b>${x.d ? `<em class="${x.neg ? 'neg' : /^(=|standard)$/.test(x.d) ? 'neu' : ''}">${x.d}</em>` : ''}</div>`).join('');
     pane.innerHTML = `
       <iframe src="assets/blackmarket/${s.id}.html?embed&v=${VERSION}" title="${esc(s.name)} en 3D" allow="fullscreen"></iframe>
-      <div class="bm-top"><button class="bm-back" data-cat>‹ Catalogue</button></div>
+      <div class="bm-top"><button class="bm-back" ${mine ? 'data-close' : 'data-cat'}>‹ ${mine ? 'Flotte' : 'Catalogue'}</button></div>
       <div class="bm-sheet" style="--a:${s.accent}">
         <div class="bm-grip" data-grip></div>
-        <div class="cat">${c.label}</div>
-        <div class="nm"><b>${esc(s.name)}</b><span class="bm-price">${chf(c.price)}</span></div>
+        <div class="cat">${mine ? `${STAR(11)} Vaisseau d'exception · ` : ''}${c.label}</div>
+        <div class="nm"><b>${esc(s.name)}</b><span class="bm-price">${mine ? `À toi ×${owned[s.id] || 1}` : chf(c.price)}</span></div>
         <div class="bm-stats">${stats}</div>
         <div class="bm-note">Comparé à un cuirassé T3 construit. Jamais détruit : vaincu, il est mis hors service et répare à quai 24 h minimum.
           Max ${c.cap} ${c.plural.toLowerCase()} par joueur, tous modèles confondus.</div>
-        <button class="bm-buy" data-buy="${s.id}">Acheter · ${chf(c.price)}</button>
-        <div class="bm-buy-sub">${owned[s.id] ? `Tu en as déjà ${owned[s.id]} · ` : ''}Paiement par Stripe · mode test</div>
+        ${mine ? `<div class="bm-buy-sub" style="text-align:left;color:#a7b1ba">À quai à ta capitale. Pas encore engageable dans une flotte : ça arrive à la prochaine étape.</div>` : `<button class="bm-buy" data-buy="${s.id}">Acheter · ${chf(c.price)}</button>
+        <div class="bm-buy-sub">${owned[s.id] ? `Tu en as déjà ${owned[s.id]} · ` : ''}Paiement par Stripe · mode test</div>`}
       </div>`;
     pane.classList.add('on');
     fitView();
@@ -218,7 +224,7 @@
     const card = t.closest('[data-ship]'); if (card) return openShip(card.dataset.ship);
     const buy = t.closest('[data-buy]'); if (buy) return startBuy(buy);
     if (t.closest('[data-cat]')) return closeShip();
-    if (t.closest('[data-close]')) return close();
+    if (t.closest('[data-close]')) { close(); if (fromFleet) { fromFleet = false; try { renderFleetScreen(); } catch (e) {} } return; }
     if (t.closest('[data-grip]')) { const sh = root.querySelector('.bm-sheet'); if (sh) { sh.classList.toggle('min'); setTimeout(fitView, 270); } }
   });
 
@@ -304,6 +310,48 @@
   }
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') setTimeout(() => checkPending().catch(() => {}), 800); });
   window.addEventListener('focus', () => setTimeout(() => checkPending().catch(() => {}), 800));
+  function openOwned(id) {
+    build(); closeShip(); root.classList.add('on'); fromFleet = true;
+    root.querySelector('.bm-cat').innerHTML = '';
+    openShip(id, true);
+  }
+  function fleetSection() {
+    const list = document.getElementById('fleet-stationed-list'); if (!list) return;
+    const label = list.previousElementSibling;
+    let box = document.getElementById('bm-fleet');
+    const mine = SHIPS.filter(s => owned[s.id] > 0);
+    if (!mine.length) { if (box) box.remove(); return; }
+    if (!box) {
+      box = document.createElement('div'); box.id = 'bm-fleet';
+      (label && label.classList.contains('section-label') ? label : list).before(box);
+      box.addEventListener('click', (e) => { const c = e.target.closest && e.target.closest('[data-own]'); if (c) openOwned(c.dataset.own); });
+    }
+    const b = baseT3();
+    box.innerHTML = `<div class="section-label"><span>Vaisseaux d'exception</span></div>` + mine.map(s => {
+      const c = CATS[s.cat], atk = s.cat === 'sport' ? b.atk * 1.2 : b.atk * 2, def = s.cat === 'sport' ? b.def : b.def * 2;
+      return `<div data-own="${s.id}" style="margin:0 16px 8px;padding:10px 12px 10px 10px;display:flex;align-items:center;gap:12px;cursor:pointer;
+          background:linear-gradient(90deg,rgba(241,210,122,.09),rgba(241,210,122,.02));border:1px solid rgba(241,210,122,.32);border-radius:10px">
+        <div style="position:relative;flex:0 0 64px;height:64px;border-radius:8px;background:#000 url('${thumb(s.id)}') center/cover;border:1px solid rgba(241,210,122,.45)">
+          <div style="position:absolute;top:-7px;right:-7px;width:22px;height:22px;border-radius:50%;background:#15110a;border:1px solid rgba(241,210,122,.6);display:grid;place-items:center">${STAR(14)}</div>
+        </div>
+        <div style="flex:1;min-width:0">
+          <div style="font-size:14px;font-weight:600;color:#f3ead2">${esc(s.name)}${owned[s.id] > 1 ? ` <span style="color:#c9a45a;font-weight:500">×${owned[s.id]}</span>` : ''}</div>
+          <div style="font-size:10px;color:#c9a45a;letter-spacing:.08em;text-transform:uppercase;margin-top:2px">${c.label} · À quai</div>
+          <div style="font-size:11px;color:var(--mut);margin-top:3px;font-family:'SF Mono',monospace"><span style="color:var(--red)">${fmt(atk)} atk</span> · <span>${fmt(def)} déf</span></div>
+        </div>
+        <div style="color:var(--mut);font-size:16px">›</div></div>`;
+    }).join('');
+  }
+  let lastFleetLoad = 0;
+  if (typeof window.renderFleetScreen === 'function') {
+    const origF = window.renderFleetScreen;
+    window.renderFleetScreen = function () {
+      const r = origF.apply(this, arguments);
+      try { fleetSection(); } catch (e) {}
+      if (Date.now() - lastFleetLoad > 60000) { lastFleetLoad = Date.now(); loadOwned().then(() => { try { fleetSection(); } catch (e) {} }); }   // l'écran se redessine souvent : serveur 1×/min
+      return r;
+    };
+  }
   window.addEventListener('resize', () => { try { fitView(); } catch (e) {} });
-  window.SBBlackmarket = { open, close, ships: SHIPS, cats: CATS };
+  window.SBBlackmarket = { open, close, openOwned, ships: SHIPS, cats: CATS, owned: () => owned };
 })();
