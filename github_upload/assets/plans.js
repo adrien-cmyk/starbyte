@@ -206,6 +206,8 @@
           const u = grid.material.uniforms; u.uTime.value = t; u.uLens.value.set(tx, tz); u.uTac.value = tacK;
           decor.traverse(o => { if (o.material && o.material.userData.base !== undefined) o.material.opacity = o.material.userData.base * (1 - 0.85 * tacK); });
           tacG.visible = tacK > 0.02;
+          if (this.skipFill) this.skipFill.material.opacity = 0.1 + 0.32 * tacK;
+          if (this.skipLine) this.skipLine.material.opacity = 0.18 + 0.75 * tacK;
           for (const ti of this.tacItems) { ti.lb.material.opacity = tacK; ti.lb.position.set(ti.x, Math.max(6, hh * 0.012) * 1.3 + hh * 0.022, ti.z); if (ti.ring) { ti.ring.scale.setScalar(Math.max(16, hh * 0.02) * (1 + 0.06 * Math.sin(t * 3 + ti.ph))); ti.ring.material.opacity = tacK * 0.95; } }
           if (tacOn && Date.now() - tacAt > 20000) buildTac(this);
           const pt = hh * 0.012, near = clamp((900 - hh) / 700, 0, 1);
@@ -246,7 +248,18 @@
         return (P.sysPos[k] = { x: c.x + Math.cos(a) * d, z: c.z + Math.sin(a) * d, ci });
       };
       // cases dégagées : celles de mes systèmes connus, à peine plus claires que le noir
-      { const occ = []; for (const [idx, o] of st.occ) { const s = st.systems[o.key]; if (o.kind === 'system' && s && s.known) occ.push(idx); }
+      { const occ = [], skip = []; const tags = G.systemTags || {};
+        for (const [idx, o] of st.occ) { const s = st.systems[o.key]; if (o.kind !== 'system' || !s) continue; if (tags[o.key] === 'skip') skip.push(idx); else if (s.known) occ.push(idx); }
+        P.skipFill = null; P.skipLine = null;
+        if (skip.length) {
+          const hexG = new T.CircleGeometry(50 * K / Math.sqrt(3) * 0.985, 6); hexG.rotateZ(Math.PI / 6 + Math.PI / 2); hexG.rotateX(-Math.PI / 2);
+          const im = new T.InstancedMesh(hexG, new T.MeshBasicMaterial({ color: 0xff2a2a, transparent: true, opacity: 0.1, depthWrite: false }), skip.length);
+          const pts = [], R = 50 * K / Math.sqrt(3) * 0.97, m4 = new T.Matrix4();
+          skip.forEach((i, n) => { const c = W(i); m4.makeTranslation(c.x, -1.8, c.z); im.setMatrixAt(n, m4);
+            for (let k = 0; k < 6; k++) { const a0 = Math.PI / 6 + k * Math.PI / 3, a1 = a0 + Math.PI / 3; pts.push(V(c.x + Math.cos(a0) * R, 0.4, c.z + Math.sin(a0) * R), V(c.x + Math.cos(a1) * R, 0.4, c.z + Math.sin(a1) * R)); } });
+          C.add(im); P.skipFill = im;
+          const ln = new T.LineSegments(new T.BufferGeometry().setFromPoints(pts), new T.LineBasicMaterial({ color: 0xff3b3b, transparent: true, opacity: 0 })); C.add(ln); P.skipLine = ln;
+        }
         if (occ.length) { const hexG = new T.CircleGeometry(50 * K / Math.sqrt(3) * 0.985, 6); hexG.rotateZ(Math.PI / 6 + Math.PI / 2); hexG.rotateX(-Math.PI / 2);
           const im = new T.InstancedMesh(hexG, new T.MeshBasicMaterial({ color: 0x0f2236, transparent: true, opacity: 0.45, depthWrite: false }), occ.length);
           const m4 = new T.Matrix4(); occ.forEach((i, n) => { const c = W(i); m4.makeTranslation(c.x, -2, c.z); im.setMatrixAt(n, m4); }); C.add(im); } }
@@ -352,11 +365,15 @@
         const nsig = list.filter(i => i.kind === 'sig' && !(i.obj && i.obj.resolved)).length, nid = list.filter(i => i.kind === 'sig' && i.obj && i.obj.resolved).length;
         const ntg = list.filter(i => i.kind === 'target' && !(i.obj && i.obj.kt && i.obj.kt.status === 'engaged')).length;
         const npl = list.filter(i => i.kind === 'planet' && i.obj && i.obj.playerName).length;
+        const skipped = (G.systemTags || {})[s.key] === 'skip';   // marqué « sans intérêt » : on ne le met plus en avant (sauf une mission qui y va)
+        if (skipped) { if (!bits.length) continue; }
+        else {
         if (nsig) bits.push({ t: nsig + ' à identifier', c: '#8fc4ff', p: 2 });
         if (nid) bits.push({ t: nid + ' à verrouiller', c: '#7fe0a4', p: 2 });
         if (ntg) bits.push({ t: ntg > 1 ? ntg + ' gisements' : 'gisement', c: '#ffd27a', p: 2 });
         if (npl) bits.push({ t: npl > 1 ? npl + ' commandants' : 'commandant', c: '#ff9a8a', p: 2 });
         if ((s.beacons || []).length) bits.push({ t: 'balise', c: '#c89bff', p: 1 });
+        }
         if (!bits.length) continue;
         bits.sort((a, b) => b.p - a.p);
         const top = bits[0], txt = bits.slice(0, 3).map(b => b.t).join(' · ') + (bits.length > 3 ? ' +' + (bits.length - 3) : '');
@@ -1040,6 +1057,9 @@
         .pl-b.on{border-color:rgba(127,208,255,.6);background:rgba(47,143,208,.25)}
         .pl-b small{display:block;font-weight:400;font-size:10.5px;color:#9fb2c2}
         .pl-xtra{margin:0 0 6px}
+        .pl-on .smw-card .sm-tags{margin-top:2px}
+        .pl-on .smw-card .sm-tag{padding:8px 0;border-radius:9px;font:600 11px/1 -apple-system,system-ui,sans-serif;letter-spacing:.04em;text-transform:none}
+        .pl-on .smw-card .sm-tag[onclick*="skip"].on{--c:#ff5a4a}
         .smw-tools .pl-tac.on{color:#5fffe8;border-color:rgba(95,255,232,.7);box-shadow:0 0 14px rgba(95,255,232,.35)}
         .pl-legend{position:absolute;left:12px;right:72px;top:calc(env(safe-area-inset-top,0px) + 132px);z-index:4;display:none;flex-wrap:wrap;gap:4px 10px;pointer-events:none;font:600 10px/1.2 -apple-system,system-ui,sans-serif;letter-spacing:.04em;color:#cfdbe6}
         .pl-legend.on{display:flex}
@@ -1124,7 +1144,7 @@
         const tools = scr.querySelector('.smw-tools');
         if (tools) { tacBtn = document.createElement('button'); tacBtn.className = 'pl-tac'; tacBtn.setAttribute('aria-label', 'Vue tactique'); tacBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><path d="M12 3l7.5 4.3v8.4L12 20l-7.5-4.3V7.3z"/><path d="M12 3v17M4.5 7.3l15 8.4M19.5 7.3l-15 8.4" opacity=".55"/></svg>'; tacBtn.onclick = () => setTac(!tacOn); tools.appendChild(tacBtn); }
         legend = document.createElement('div'); legend.className = 'pl-legend';
-        legend.innerHTML = '<span style="--c:#7fe0a4">Légère</span><span style="--c:#b9a8ff">Moyenne</span><span style="--c:#ffc864">Tanker</span><span style="--c:#8fc4ff">À identifier</span><span style="--c:#ffd27a">Gisement</span><span style="--c:#ff9a8a">Commandant</span><span style="--c:#c89bff">Balise</span>';
+        legend.innerHTML = '<span style="--c:#7fe0a4">Légère</span><span style="--c:#b9a8ff">Moyenne</span><span style="--c:#ffc864">Tanker</span><span style="--c:#8fc4ff">À identifier</span><span style="--c:#ffd27a">Gisement</span><span style="--c:#ff9a8a">Commandant</span><span style="--c:#c89bff">Balise</span><span style="--c:#ff3b3b">Sans intérêt</span>';
         scr.appendChild(legend);
         scr.appendChild(card); scr.appendChild(hud); scr.appendChild(upBtn);
         bindGestures(cv);
@@ -1181,6 +1201,7 @@
       _dive(x, z) { dive({ x, z }); }, _surface() { surface(); }, _zoom(f) { zoomBy(f); }, _tap(x, z) { const v = V(x, 0, z).project(camera); tap((v.x + 1) / 2 * host.clientWidth, (1 - v.y) / 2 * host.clientHeight); },
       _settle() { h = gh; tx = gx; tz = gz; }, _look(x, z, hh) { gx = tx = x; gz = tz = z; if (hh) gh = h = hh; }, _sysPos(k) { return AMAS && AMAS.sysPos[k]; }, _legs() { return AMAS ? AMAS.legHits.map(l => ({ id: l.id, lineId: l.lineId, x: (l.ax + l.bx) / 2, z: (l.az + l.bz) / 2 })) : []; },
       goHome() { goAmas(0, 0, AMAS ? AMAS.h0 * 0.6 : 800); },
+      inSystem(k) { return !!(plan && plan.kind === 'systeme' && plan.sys === k); },
       planKey() { return ((plan && plan.key) || '') + ':' + buildN; },
       _resize() { resize(); },
       destroy() {

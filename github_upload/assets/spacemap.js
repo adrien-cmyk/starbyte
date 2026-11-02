@@ -734,6 +734,7 @@
         else act = _sigOff(st.why);
       }
       const insp = (window.SBSystem && !E.plans && sys && (sys.known || sys.scanning)) ? _sigBtn(COL.cyan, 'Inspecter le système', `SBSystem.open('${esc(s.key)}')`, '', true) : '';   // PATCH_0111_PLANS
+      const tags = (E.plans && E.inSystem && E.inSystem(s.key)) ? tagChips(s.key) : '';   // PATCH_0211_MARQUES : dans le plan du système
       const tag = (G.systemTags || {})[s.key];
       const tagTxt = tag === 'star' ? ' · <span style="color:#ffc864">intéressant</span>' : tag === 'skip' ? ' · <span style="color:#ff4a3a">sans intérêt</span>' : '';
       const li = sys && sys.li;
@@ -743,9 +744,9 @@
       const _stU = li && li.port && typeof stationUI === 'function' ? stationUI(li.port.dockId) : null;
       if (_stU && typeof crownEnter === 'function') {
         const cs = typeof crownState === 'function' ? crownState(li.port.dockId) : { label: '' };
-        return `<div class="sm-panel"><div class="smc-k">${esc(_stU.kicker)}</div><div class="smc-t">${esc(li.port.name)}</div><div class="sm-psub"><span class="mono">${esc(s.key)}</span> · ${esc(cs.label)}</div><button class="cr-big smc-enter" onclick="event.stopPropagation();crownEnter('${esc(li.port.dockId)}')">ENTRER</button>${laneHtml(s.key, li)}${postsHtml(s.key)}${spottedHtml(s.key)}${beaconAction(s.key, sys)}</div>`;
+        return `<div class="sm-panel"><div class="smc-k">${esc(_stU.kicker)}</div><div class="smc-t">${esc(li.port.name)}</div><div class="sm-psub"><span class="mono">${esc(s.key)}</span> · ${esc(cs.label)}</div>${tags}<button class="cr-big smc-enter" onclick="event.stopPropagation();crownEnter('${esc(li.port.dockId)}')">ENTRER</button>${laneHtml(s.key, li)}${postsHtml(s.key)}${spottedHtml(s.key)}${beaconAction(s.key, sys)}</div>`;
       }
-      return `<div class="sm-panel"><div class="sm-ptitle"${li && li.port ? ' style="color:#ffc864"' : ''}>${title}</div><div class="sm-psub">${sub}${tagTxt}</div>${laneHtml(s.key, li)}${postsHtml(s.key)}${spottedHtml(s.key)}${insp}${act}${scoutHtml(s.key, sys)}${beaconAction(s.key, sys)}</div>`;
+      return `<div class="sm-panel"><div class="sm-ptitle"${li && li.port ? ' style="color:#ffc864"' : ''}>${title}</div><div class="sm-psub">${sub}${tagTxt}</div>${tags}${laneHtml(s.key, li)}${postsHtml(s.key)}${spottedHtml(s.key)}${insp}${act}${scoutHtml(s.key, sys)}${beaconAction(s.key, sys)}</div>`;
     }
     if (s.kind === 'sig') {
       const sig = G.signatures && G.signatures[s.key];
@@ -1853,6 +1854,7 @@
   /* ─── Marques de systèmes (13/10) : intéressant / sans intérêt — gardées même sans rapport ─── */
   function tagChips(key) {
     const t = (G.systemTags || {})[key];
+    if (!key) return '';
     const chip = (v, l, c) => `<button class="sm-tag${t === v ? ' on' : ''}" style="--c:${c}" onclick="event.stopPropagation();SBMap.tag('${esc(key)}','${v}')">${l}</button>`;
     return `<div class="sm-tags">${chip('star', 'Intéressant', '#ffc864')}${chip('skip', 'Sans intérêt', '#9aa6ae')}</div>`;
   }
