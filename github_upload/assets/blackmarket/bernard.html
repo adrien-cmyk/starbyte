@@ -251,7 +251,7 @@ const engineLights = NOZZLES.map((nz) => {   // une lueur par tuyère, sinon seu
 
 /* ================================================================== lookdev procédural (sans UV) */
 // Atelier des logos : peinture chargée seulement avec ?lg=1 (vaisseau possédé ou croisé), jamais au catalogue
-const LOGO = /[?&]lg=1/.test(location.search) ? (await import('./logo-paint.js?v=20261103a')).createLogoPaint(THREE, 'bernard') : null;
+const LOGO = /[?&]lg=1/.test(location.search) ? (await import('./logo-paint.js?v=20261103b')).createLogoPaint(THREE, 'bernard') : null;
 const LOOK = {
   M_FD_PLATE:  { cell: [5.0, 3.6], seam: .20, depth: .30, tint: .22, rough: .18, grime: .42, wear: .60 },
   M_FD_PLATE2: { cell: [5.0, 3.6], seam: .20, depth: .30, tint: .22, rough: .18, grime: .46, wear: .55 },
