@@ -85,7 +85,9 @@ function post(m) { try { if (parent !== window) parent.postMessage(Object.assign
 
 /* ═══════════════ moteur ═══════════════ */
 const stage = document.getElementById('stage');
-const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
+const CAPTURE = new URLSearchParams(location.search).has('capture');   // tournage image par image (bande-annonce)
+let capDt = 1 / 30;
+const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance', preserveDrawingBuffer: CAPTURE });
 let PR = Math.min(devicePixelRatio, 1.6);
 renderer.setPixelRatio(PR);
 renderer.setSize(innerWidth, innerHeight);
@@ -1104,7 +1106,9 @@ function applyState(t) {
   for (const m of navMats) m.emissiveIntensity = m.name === 'M_KV_STROBE' ? ((t % 2.2) < .08 ? 12 : .2) : 2.5 + 2 * (.5 + .5 * Math.sin(t * 2.4));
   for (const m of feuMats) m.emissiveIntensity = st.inside ? 1.1 + 0.8 * Math.sin(t * 9) * Math.sin(t * 3.3) : 1.6;
 }
+const CAMQ = (Q.get('cam') || '').split(',').map(Number);   // tournage : ?cam=px,py,pz,lx,ly,lz,fov[,roll] force la caméra
 function applyCamera() {
+  if (CAMQ.length >= 7 && CAMQ.every(v => isFinite(v))) { _camP.set(CAMQ[0], CAMQ[1], CAMQ[2]); _camL.set(CAMQ[3], CAMQ[4], CAMQ[5]); st.fov = CAMQ[6]; if (CAMQ.length > 7) st.roll = CAMQ[7]; }
   if (st.shake > 0.001) {
     const T = PLASMA_T.value, a = st.shake * (REDUCED ? .3 : 1);
     _camP.x += a * (Math.sin(T * 41.3) * .6 + Math.sin(T * 23.1) * .4); _camP.y += a * (Math.sin(T * 37.7 + 1) * .6 + Math.sin(T * 19.3) * .4);
@@ -1113,8 +1117,9 @@ function applyCamera() {
   placeCam(_camP, _camL, st.roll, st.fov);
 }
 const _cw = V3(), _ct = V3(), _cc = V3();
+const CLAWK = +(Q.get('clawk') || 1);   // tournage : atténue l'embrasement des griffes
 function applyClaws(t) {
-  const k = st.claw;
+  const k = st.claw * CLAWK;
   claws.visible = k > 0.002 && shipReady;
   for (const m of crocMats) { m.emissive.setRGB(1.0, .48, .18); m.emissiveIntensity = 4.0 * k * (0.85 + 0.15 * Math.sin(t * 17)); }
   if (!claws.visible) return;
@@ -1193,7 +1198,7 @@ const clock = new THREE.Clock();
 let frames = 0, perfT = 0, perfDone = false, lastPhaseEnd = 0;
 const clockEl = document.getElementById('clock');
 function frame() {
-  const dt = Math.min(clock.getDelta(), .05) * CFG.rate;
+  const dt = CAPTURE ? capDt : Math.min(clock.getDelta(), .05) * CFG.rate;
   if (!freeze && shipReady) { pt += dt; if (phase === 'voyage' || phase === 'exit') loopT += dt; }
   PLASMA_T.value += dt;
   const t = pt;
@@ -1217,11 +1222,11 @@ function frame() {
   renderer.setRenderTarget(dst); finQuad.render(renderer);
   renderer.setRenderTarget(null); blitQuad.material.uniforms.t.value = dst.texture; blitQuad.render(renderer);
   histI = 1 - histI;
-  if (!perfDone && shipReady && !freeze) {
+  if (!perfDone && shipReady && !freeze && !CAPTURE) {
     frames++; perfT += dt;
     if (perfT > 3) { perfDone = true; const fps = frames / perfT; if (fps < 30) { PR = 1; renderer.setPixelRatio(1); resize(); } if (fps < 22) { key.castShadow = false; } }
   }
-  requestAnimationFrame(frame);
+  if (!CAPTURE) requestAnimationFrame(frame);
 }
 
 /* ═══════════════ chargement ═══════════════ */
@@ -1258,6 +1263,6 @@ addEventListener('message', (e) => {
 });
 document.querySelectorAll('.ctl button').forEach(b => b.onclick = () => play(b.dataset.p === 'exit' ? (phase === 'voyage' ? 'exit' : 'voyage') : b.dataset.p));
 window.__dbg = { DEF, FIN, lensPass, st, bloom, composer };
-window.TAXI_CINE = { play, CFG, seek: (s) => { pt = s; loopT = s; }, get phase() { return phase; }, get t() { return pt; }, freeze: (v) => { freeze = v; } };
+window.TAXI_CINE = { step: (dt) => { capDt = dt; frame(); }, play, CFG, seek: (s) => { pt = s; loopT = s; }, get phase() { return phase; }, get t() { return pt; }, freeze: (v) => { freeze = v; } };
 </script>
 </body></html>
