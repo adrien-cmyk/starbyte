@@ -33,6 +33,26 @@
     "T'as vu l'acier ? Ça, ça se construit pas dans ton petit chantier.",
   ];
   const VERSION = '20261031';
+  // Serveur (schema_mp_v31_blackmarket.sql + fonctions bm-checkout / bm-webhook)
+  const SB = 'https://elupnpdcblztpfywnhjl.supabase.co';
+  const KEY = 'sb_publishable_tXGrQIROzH2DwBrny1GcHQ_iKJKoBOQ';
+  let owned = {};                                 // item_id → nombre possédé (payé, non remboursé)
+  function token() {
+    try { const a = JSON.parse(localStorage.getItem('starbyte_auth') || 'null'); return a && (a.access_token || (a.currentSession && a.currentSession.access_token)); } catch (e) { return null; }
+  }
+  async function call(path, body) {
+    const tok = token(); if (!tok) throw new Error('not_signed_in');
+    const r = await fetch(SB + path, { method: 'POST', headers: { 'Content-Type': 'application/json', apikey: KEY, Authorization: 'Bearer ' + tok }, body: JSON.stringify(body || {}) });
+    let j = null; try { j = await r.json(); } catch (e) {}
+    if (!r.ok) { const er = new Error((j && (j.error || j.message)) || ('http_' + r.status)); er.data = j; throw er; }
+    return j;
+  }
+  async function loadOwned() {
+    try {
+      const st = await call('/rest/v1/rpc/bm_state', {});
+      owned = {}; (st && st.owned || []).forEach(o => { owned[o.item_id] = (owned[o.item_id] || 0) + 1; });
+    } catch (e) { /* v31 pas encore lancé : rien à afficher */ }
+  }
 
   const css = `
 #bm-root { position: fixed; inset: 0; z-index: 9000; background: #07090b; color: #e6edf2; font-family: 'Space Grotesk', system-ui, sans-serif;
@@ -89,6 +109,9 @@
 #bm-root .bm-note { font-size: 12px; color: #a7b1ba; line-height: 1.45; margin-bottom: 12px; }
 #bm-root .bm-buy { width: 100%; padding: 15px; border-radius: 10px; border: 0; background: #3a2f16; color: #8c7a4e;
   font: 600 14px 'Space Grotesk', sans-serif; letter-spacing: .08em; text-transform: uppercase; }
+#bm-root .bm-buy:not([disabled]) { background: #c9a45a; color: #15110a; cursor: pointer; }
+#bm-root .bm-buy-sub.err { color: #d9845a; }
+#bm-root .bm-own { font: 500 10px 'JetBrains Mono', monospace; color: #7fbf7a; letter-spacing: .08em; margin-top: 3px; }
 #bm-root .bm-buy-sub { text-align: center; font: 400 10px 'JetBrains Mono', monospace; color: #6f7a84; margin-top: 6px; }
 `;
 
@@ -131,7 +154,7 @@
       return `<h2>${c.plural}</h2><div class="bm-rule">${c.rule} · max ${c.cap} par joueur</div>` +
         SHIPS.filter(s => s.cat === cat).map(s => `
           <button class="bm-card" style="--a:${s.accent}" data-ship="${s.id}">
-            <div class="t"><b>${esc(s.name)}</b><span>${esc(s.line)}</span></div>
+            <div class="t"><b>${esc(s.name)}</b><span>${esc(s.line)}</span>${owned[s.id] ? `<div class="bm-own">À TOI ×${owned[s.id]}</div>` : ''}</div>
             <div class="bm-price">${chf(c.price)}</div><div class="bm-chev">›</div>
           </button>`).join('');
     };
@@ -160,8 +183,8 @@
         <div class="bm-stats">${stats}</div>
         <div class="bm-note">Comparé à un cuirassé T3 construit. Jamais détruit : vaincu, il est mis hors service et répare à quai 24 h minimum.
           Max ${c.cap} ${c.plural.toLowerCase()} par joueur, tous modèles confondus.</div>
-        <button class="bm-buy" disabled>Acheter · ${chf(c.price)}</button>
-        <div class="bm-buy-sub">Paiement Stripe pas encore branché</div>
+        <button class="bm-buy" data-buy="${s.id}">Acheter · ${chf(c.price)}</button>
+        <div class="bm-buy-sub">${owned[s.id] ? `Tu en as déjà ${owned[s.id]} · ` : ''}Paiement par Stripe · mode test</div>
       </div>`;
     pane.classList.add('on');
     fitView();
@@ -184,6 +207,7 @@
   function open() {
     if (!allowed()) return;
     build(); renderCatalog(); closeShip();
+    loadOwned().then(() => { if (root.classList.contains('on') && !root.querySelector('.bm-ship.on')) renderCatalog(); });
     root.classList.add('on');
   }
   function close() { if (!root) return; closeShip(); root.classList.remove('on'); }
@@ -192,6 +216,7 @@
     if (!root || !root.classList.contains('on')) return;
     const t = e.target.closest ? e.target : null; if (!t) return;
     const card = t.closest('[data-ship]'); if (card) return openShip(card.dataset.ship);
+    const buy = t.closest('[data-buy]'); if (buy) return startBuy(buy);
     if (t.closest('[data-cat]')) return closeShip();
     if (t.closest('[data-close]')) return close();
     if (t.closest('[data-grip]')) { const sh = root.querySelector('.bm-sheet'); if (sh) { sh.classList.toggle('min'); setTimeout(fitView, 270); } }
@@ -218,6 +243,35 @@
     window.renderCommerceScreen = function () { const r = orig.apply(this, arguments); try { entry(); } catch (e) {} return r; };
   }
 
+  async function startBuy(btn) {
+    const sub = btn.parentNode.querySelector('.bm-buy-sub');
+    const say = (txt, err) => { if (sub) { sub.textContent = txt; sub.classList.toggle('err', !!err); } };
+    btn.disabled = true; say('Pauline prépare la facture…');
+    try {
+      const r = await call('/functions/v1/bm-checkout', { item_id: btn.dataset.buy });
+      if (r && r.url) { location.href = r.url; return; }
+      throw new Error('no_url');
+    } catch (e) {
+      const m = e.message;
+      say(m === 'cap_reached' ? `Plafond atteint : ${e.data && e.data.cap} ${(e.data && e.data.label || '').toLowerCase()} max. « T'en as assez, non ? »`
+        : m === 'not_signed_in' ? 'Connecte ton compte (cloud) pour acheter.'
+        : m === 'stripe_not_configured' ? 'Clé Stripe absente côté serveur (secret STRIPE_SECRET_KEY).'
+        : 'Paiement indisponible pour le moment (' + m + ').', true);
+      btn.disabled = false;
+    }
+  }
+  // Retour de Stripe : ?bm=ok&item=… ou ?bm=annule
+  (function back() {
+    try {
+      const u = new URL(location.href), st = u.searchParams.get('bm'); if (!st) return;
+      const item = SHIPS.find(x => x.id === u.searchParams.get('item'));
+      u.searchParams.delete('bm'); u.searchParams.delete('item');
+      history.replaceState(history.state, '', u.pathname + (u.search || '') + u.hash);
+      const msg = st === 'ok' ? `Paiement reçu. ${item ? item.name : 'Ton vaisseau'} est à toi. Pauline : « Fais-en bon usage. »` : 'Achat annulé. Pauline : « Reviens quand t\'auras les moyens. »';
+      const show = (n) => { if (typeof toast === 'function') toast(msg); else if (n < 20) setTimeout(() => show(n + 1), 500); };
+      setTimeout(() => show(0), 2500);
+    } catch (e) {}
+  })();
   window.addEventListener('resize', () => { try { fitView(); } catch (e) {} });
   window.SBBlackmarket = { open, close, ships: SHIPS, cats: CATS };
 })();
