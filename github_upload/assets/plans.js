@@ -1142,6 +1142,8 @@
         upBtn = document.createElement('button'); upBtn.className = 'pl-up'; upBtn.style.display = 'none'; upBtn.onclick = () => surface();
         card = document.createElement('div'); card.className = 'pl-card';
         const tools = scr.querySelector('.smw-tools');
+        // « vue d'ensemble » : doublon du bouton cible et du dézoom (Adrien, 02/11) — retiré avec les plans
+        { const wide = tools && tools.querySelector('[data-a="wide"]'); if (wide) wide.style.display = 'none'; }
         if (tools) { tacBtn = document.createElement('button'); tacBtn.className = 'pl-tac'; tacBtn.setAttribute('aria-label', 'Vue tactique'); tacBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 10.2h19"/><path d="M3.2 10.2l.6 4.3a2.6 2.6 0 0 0 2.6 2.2h1.8a2.6 2.6 0 0 0 2.5-1.9l.6-2.2c.3-.9 1.1-.9 1.4 0l.6 2.2a2.6 2.6 0 0 0 2.5 1.9h1.8a2.6 2.6 0 0 0 2.6-2.2l.6-4.3"/><path d="M5 12.4l2.2-1.6M16.6 12.4l2.2-1.6" opacity=".55"/></svg>'; tacBtn.onclick = () => setTac(!tacOn); tools.appendChild(tacBtn); }
         legend = document.createElement('div'); legend.className = 'pl-legend';
         legend.innerHTML = '<span style="--c:#7fe0a4">Légère</span><span style="--c:#b9a8ff">Moyenne</span><span style="--c:#ffc864">Tanker</span><span style="--c:#8fc4ff">À identifier</span><span style="--c:#ffd27a">Gisement</span><span style="--c:#ff9a8a">Commandant</span><span style="--c:#c89bff">Balise</span><span style="--c:#ff3b3b">Sans intérêt</span>';
@@ -1206,6 +1208,7 @@
       _resize() { resize(); },
       destroy() {
         destroyed = true;
+        try { const wide = scrEl && scrEl.querySelector('.smw-tools [data-a="wide"]'); if (wide) wide.style.display = ''; } catch (e) {}
         try { scrEl && scrEl.classList.remove('pl-on'); } catch (e) {}
         try { renderer && renderer.setAnimationLoop(null); } catch (e) {}
         try { ro && ro.disconnect(); if (onLost && renderer) renderer.domElement.removeEventListener('webglcontextlost', onLost); } catch (e) {}
