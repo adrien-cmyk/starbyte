@@ -140,7 +140,7 @@
       <h1>BLACKMARKET</h1>
       <div class="bm-dev">Aperçu réservé à ton compte · paiement pas encore branché</div>
       <div class="bm-merchant"><div class="bm-face">${face}</div>
-        <div class="bm-say">${esc(LINES[line % LINES.length])}<small>LE MARCHAND</small></div></div>
+        <div class="bm-say">${esc(LINES[line % LINES.length])}<small>PAULINE · REINE DU NOIR</small></div></div>
       ${section('sport')}${section('dread')}`;
     line++;
   }
