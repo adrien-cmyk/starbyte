@@ -513,6 +513,25 @@
   });
   // retour d'un raid : le serveur a peut-être mis des vaisseaux hors service
   wrap('mpReturnRaid', () => { lastFleetLoad = 0; loadOwned().then(() => { try { fleetSection(); } catch (e) {} }); });
+  // défense tombée face à un raid : les vaisseaux d'exception des flottes en orbite de cette planète passent hors service
+  // (jamais détruits). mpApplyDefenseLosses tourne déjà « dans » la planète visée (sbWithWorld).
+  wrap('mpApplyDefenseLosses', (out, ctx, args) => {
+    const combat = args[0], raidWon = args[1], ph1 = combat && combat.phases && combat.phases.phase1;
+    if (!ph1 || !(raidWon || ph1.won)) return;
+    const ids = [];
+    for (const f of fleetsWithPremium()) {
+      if ((f.status || 'prepared') !== 'deployed' || (typeof _sbMine === 'function' && !_sbMine(f))) continue;
+      for (const p of f.premium) { const u = unitOf(p.pid); if (u && !isDown(u)) ids.push(p.pid); }
+    }
+    if (!ids.length) return;
+    const now = Date.now();
+    ids.forEach(id => { const u = unitOf(id); if (u) u.down = Math.max(u.down || 0, now + (u.cat === 'sport' ? 36 : 24) * 3600e3); });
+    try { localStorage.setItem('bm_units_cache', JSON.stringify(units)); } catch (e) {}
+    call('/rest/v1/rpc/bm_disable', { p_ids: ids }).catch(e => console.warn('[Blackmarket] hors service :', e.message));
+    if (out && out.ships) out.ships["Vaisseaux d'exception (hors service)"] = { destroyed: 0, damaged: ids.length };
+  });
+  // embuscades : le serveur a peut-être mis des vaisseaux hors service
+  wrap('mpIngestPiracy', () => { if (Date.now() - lastFleetLoad > 60000 && fleetsWithPremium().length) { lastFleetLoad = Date.now(); loadOwned(); } });
   // défense orbitale : une flotte DÉPLOYÉE défend avec ses vaisseaux d'exception (même règle que les autres)
   if (typeof window.getOrbitalDefenseFromFleets === 'function') {
     const origD = window.getOrbitalDefenseFromFleets;

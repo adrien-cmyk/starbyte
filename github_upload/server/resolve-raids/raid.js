@@ -90,13 +90,13 @@ function fleetAttack(comp) {
 }
 
 export function resolveIntercept(ambush, convoy) {
-  const fleet = cleanFleet({ composition: ambush?.fleet?.composition, soldiers: {}, heroes: ambush?.fleet?.heroes });
+  const fleet = cleanFleet({ composition: ambush?.fleet?.composition, soldiers: {}, heroes: ambush?.fleet?.heroes, premium: ambush?.fleet?.premium });   // premium : vérifié par index.ts
   fleet.soldiers = { garde: 0, lourd: 0 };            // embuscade spatiale : pas de débarquement
   const tier = Math.max(1, Math.min(3, Number(convoy?.tanker_tier) || 1));
   const tk = TANKER_STATS[tier];
   const cargo = convoy?.cargo || {};
   const resources = { metal: Number(cargo.metal) || 0, energie: Number(cargo.energie) || 0, cristal: Number(cargo.cristal) || 0 };
-  const pirateAtk = fleetAttack(fleet.composition);
+  const pirateAtk = fleetAttack(fleet.composition) + fleet.premium.reduce((n, p) => n + (p.cat === 'dread' ? 27000 : 16200), 0);   // BLACKMARKET : vaisseaux d'exception
   if ((Number(convoy?.knowledge) || 0) >= 5 && tk.atk > pirateAtk) {
     return { outcome: 'evaded', loot: {}, fleet_after: { composition: fleet.composition }, tanker: { tier, atk: tk.atk }, pirate_atk: pirateAtk };
   }
@@ -114,5 +114,6 @@ export function resolveIntercept(ambush, convoy) {
     losses: combat.finalLosses?.ships || {},
     tanker: { tier, def: tk.def },
     pirate_atk: pirateAtk,
+    premium_down: !!combat.premiumDown,
   };
 }

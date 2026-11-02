@@ -18,6 +18,22 @@ function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: { ...CORS, 'Content-Type': 'application/json' } });
 }
 
+// BLACKMARKET (v32-v34) : ne garde que les vaisseaux d'exception de ce joueur, payés et pas hors service
+async function validPremium(admin: any, owner: string | null | undefined, list: any): Promise<{ pid: string; cat: string; item: string }[]> {
+  const ask = Array.isArray(list) ? list.filter((p: any) => p && typeof p.pid === 'string').slice(0, 13) : [];
+  if (!ask.length || !owner) return [];
+  const { data: own } = await admin.from('bm_purchases').select('id, item_id, category, disabled_until')
+    .eq('user_id', owner).eq('status', 'paid').in('id', ask.map((p: any) => p.pid));
+  const now = Date.now();
+  return (own || []).filter((o: any) => !o.disabled_until || new Date(o.disabled_until).getTime() <= now).map((o: any) => ({ pid: o.id, cat: o.category, item: o.item_id }));
+}
+async function premiumDown(admin: any, list: { pid: string; cat: string }[]) {
+  for (const cat of ['sport', 'dread']) {
+    const ids = list.filter(p => p.cat === cat).map(p => p.pid);
+    if (ids.length) await admin.from('bm_purchases').update({ disabled_until: new Date(Date.now() + (cat === 'sport' ? 36 : 24) * 3600e3).toISOString() }).in('id', ids);
+  }
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: CORS });
 
@@ -60,15 +76,7 @@ Deno.serve(async (req) => {
       const extra = gar.reduce((s, x) => s + x.def, 0);
       // BLACKMARKET (v32) : on ne garde que les vaisseaux d'exception qui appartiennent vraiment à l'attaquant,
       // payés et pas hors service (le jeu ne peut pas en inventer)
-      const askPremium = Array.isArray(raid.fleet?.premium) ? raid.fleet.premium.filter((p: any) => p && typeof p.pid === 'string').slice(0, 13) : [];
-      let premiumOk: { pid: string; cat: string; item: string }[] = [];
-      if (askPremium.length) {
-        const { data: own } = await admin.from('bm_purchases').select('id, item_id, category, disabled_until')
-          .eq('user_id', raid.attacker_id).eq('status', 'paid').in('id', askPremium.map((p: any) => p.pid));
-        const now = Date.now();
-        premiumOk = (own || []).filter((o: any) => !o.disabled_until || new Date(o.disabled_until).getTime() <= now)
-          .map((o: any) => ({ pid: o.id, cat: o.category, item: o.item_id }));
-      }
+      const premiumOk = await validPremium(admin, raid.attacker_id, raid.fleet?.premium);
       raid.fleet = { ...(raid.fleet || {}), premium: premiumOk };
       const result: any = dw
         ? resolveRaid(raid, extra > 0 ? { ...dw, defense: (Number(dw.defense) || 0) + extra, ground_defense: Number(dw.defense) || 0 } : dw)
@@ -76,12 +84,7 @@ Deno.serve(async (req) => {
       if (gar.length && result.outcome !== 'aborted') result.garrisons = gar.map(x => ({ owner: x.owner_pseudo, fleet: x.fleet_name, def: x.def }));
       const { data: fin, error: finErr } = await admin.rpc('mp_finish_raid', { p_raid: raid.id, p_result: result });
       if (finErr) throw finErr;
-      if (premiumOk.length && result.combat?.premiumDown) {
-        for (const cat of ['sport', 'dread']) {
-          const ids = premiumOk.filter(p => p.cat === cat).map(p => p.pid);
-          if (ids.length) await admin.from('bm_purchases').update({ disabled_until: new Date(Date.now() + (cat === 'sport' ? 36 : 24) * 3600e3).toISOString() }).in('id', ids);
-        }
-      }
+      if (premiumOk.length && result.combat?.premiumDown) await premiumDown(admin, premiumOk);
       if (gar.length && result.outcome !== 'aborted') {
         const { error: ea } = await admin.rpc('mp_garrison_apply_raid', { p_raid: raid.id, p_ids: gar.map(x => x.id), p_victory: result.outcome === 'victory' });
         if (ea) console.warn('garnisons :', ea.message);
@@ -98,7 +101,12 @@ Deno.serve(async (req) => {
   if (!claim2Err) {
     for (const it of due2 || []) {
       try {
-        const result = resolveIntercept(it.ambush, it.convoy);
+        // embuscade : vaisseaux d'exception vérifiés (propriétaire de l'embuscade), hors service si elle échoue
+        const owner = it.ambush?.user_id ?? it.ambush?.owner_id ?? it.ambush?.pirate_id ?? null;
+        const prem = await validPremium(admin, owner, it.ambush?.fleet?.premium);
+        const amb = { ...(it.ambush || {}), fleet: { ...(it.ambush?.fleet || {}), premium: prem } };
+        const result: any = resolveIntercept(amb, it.convoy);
+        if (prem.length && result.premium_down) await premiumDown(admin, prem);
         const { data: fin, error: finErr } = await admin.rpc('mp_finish_intercept', { p_intercept: it.intercept_id, p_result: result });
         if (finErr) throw finErr;
         intercepts.push({ id: it.intercept_id, won: !!fin?.won });
