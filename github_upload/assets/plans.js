@@ -65,6 +65,10 @@
     let tx = 0, tz = 0, h = 1300, gx = 0, gz = 0, gh = 1300;
     let zoomPt = { x: 0, y: 0 };
     let selIdx = -1, selCk = null, hiRoute = null, buildN = 0;
+    // vue tactique (« lunettes polarisantes », Adrien 02/11) : le décor s'éteint, tout ce qui compte ressort
+    let tacOn = (() => { try { return localStorage.getItem('sb_carte_tac') === '1'; } catch (e) { return false; } })(), tacK = tacOn ? 1 : 0, tacBtn = null, legend = null, tacAt = 0;
+    function setTac(on) { tacOn = !!on; try { localStorage.setItem('sb_carte_tac', tacOn ? '1' : '0'); } catch (e) {} syncTacUi(); if (AMAS && ST) buildTac(AMAS); }
+    function syncTacUi() { const show = plan === AMAS; if (tacBtn) { tacBtn.style.display = show ? '' : 'none'; tacBtn.classList.toggle('on', tacOn); } if (legend) legend.classList.toggle('on', tacOn && show && !trans); }
     let tOff = 0, lastNow = 0, ferr = 0, offZ = 0, oldCard = null, destroyed = false, lastCheck = 0, ro = null, onLost = null, amasH = 1300, subErr = 0;
     const safeFail = (why) => { if (!destroyed) fail(why); };
 
@@ -151,7 +155,7 @@
 
     /* ───────────── plan de l'amas : la carte ───────────── */
     const GRID_FS = `
-      uniform float uCell, uLensR, uTime, uLit; uniform vec2 uLens; varying vec2 vP;
+      uniform float uCell, uLensR, uTime, uLit, uTac; uniform vec2 uLens; varying vec2 vP;
       vec2 hexd(vec2 P, float C) { float H = 0.8660254; float r = P.y / (C * H), q = P.x / C - r * 0.5, s = -q - r;
         float rq = floor(q + .5), rr = floor(r + .5), rs = floor(s + .5); float dq = abs(rq - q), dr = abs(rr - r), ds = abs(rs - s);
         if (dq > dr && dq > ds) rq = -rr - rs; else if (dr > ds) rr = -rq - rs;
@@ -163,11 +167,11 @@
         float d = length(vP - uLens) / (uLensR * 2.2);
         float ph = fract(uTime * .18 - d); float ping = smoothstep(.0, .25, ph) * (1. - ph) * lens;
         float lit = 1. - smoothstep(uLit - uCell * .4, uLit + uCell * .6, length(vP)) * .55;
-        float a = line * max(lens * .55 + ping * .5, home) * lit;
+        float a = line * max(max(lens * .55 + ping * .5, home), uTac * .5) * lit;
         gl_FragColor = vec4(vec3(.45, .78, 1.) * a, a); }`;
     function makeGrid() {
       const m = new T.ShaderMaterial({ transparent: true, depthWrite: false, blending: T.AdditiveBlending,
-        uniforms: { uCell: { value: 50 * K }, uLensR: { value: 50 * K * 3.6 }, uTime: { value: 0 }, uLens: { value: new T.Vector2() }, uLit: { value: 99999 } },
+        uniforms: { uCell: { value: 50 * K }, uLensR: { value: 50 * K * 3.6 }, uTime: { value: 0 }, uLens: { value: new T.Vector2() }, uLit: { value: 99999 }, uTac: { value: 0 } },
         vertexShader: 'varying vec2 vP; void main(){ vec4 w = modelMatrix * vec4(position,1.0); vP = w.xz; gl_Position = projectionMatrix * viewMatrix * w; }', fragmentShader: GRID_FS });
       if (m.extensions) m.extensions.derivatives = true;
       const g = new T.Mesh(new T.PlaneGeometry(9000, 9000), m); g.rotation.x = -Math.PI / 2; g.position.y = -1.5; return g;
@@ -182,12 +186,14 @@
     function colonyWorldAt(key) { return safe(() => (G.worlds || []).find(w => w && w.id !== 'home' && w.coord && sysOf(w.coord) === key), null); }
 
     function makeAmas() {
-      const S = sceneBase(0x01030a); S.add(dust(7000, 5200, 3, 1.05, 0.6));
+      const S = sceneBase(0x01030a), decor = new T.Group(); S.add(decor); decor.add(dust(7000, 5200, 3, 1.05, 0.6));
       const grid = makeGrid(); S.add(grid);
-      for (const [x, z, c] of [[-7000, -4000, 0x6a4cff], [8000, 2500, 0x2fb0a0], [1500, 8500, 0xff7a5a]]) for (let k = 0; k < 5; k++) S.add(at(spr(glow('rgba(255,255,255,.45)', 'rgba(255,255,255,.08)'), 2600 + k * 700, c, 0.1), x + k * 300, -6, z - k * 200));
+      for (const [x, z, c] of [[-7000, -4000, 0x6a4cff], [8000, 2500, 0x2fb0a0], [1500, 8500, 0xff7a5a]]) for (let k = 0; k < 5; k++) decor.add(at(spr(glow('rgba(255,255,255,.45)', 'rgba(255,255,255,.08)'), 2600 + k * 700, c, 0.1), x + k * 300, -6, z - k * 200));
       { const r = rng(hash(safe(() => mySystemKey(), 'A'))); const cols = [0x2f6fb0, 0x6a3fb0, 0xb0603f, 0x2fa08a, 0x8a3f6a];
         for (let z = 0; z < 10; z++) { const cx = (r() - 0.5) * 5200, cz = (r() - 0.5) * 5200, rad = 380 + r() * 520, col = cols[z % cols.length];
-          for (let k = 0; k < 6; k++) S.add(at(spr(glow('rgba(255,255,255,.45)', 'rgba(255,255,255,.08)'), rad * (1 + r()), col, 0.1), cx + (r() - 0.5) * rad, -4, cz + (r() - 0.5) * rad)); } }
+          for (let k = 0; k < 6; k++) decor.add(at(spr(glow('rgba(255,255,255,.45)', 'rgba(255,255,255,.08)'), rad * (1 + r()), col, 0.1), cx + (r() - 0.5) * rad, -4, cz + (r() - 0.5) * rad)); } }
+      decor.traverse(o => { if (o.material) o.material.userData.base = o.material.opacity; });
+      const tacG = new T.Group(); S.add(tacG);
       const content = new T.Group(); S.add(content);
       // sélection : un hexagone cyan sur la case
       const selPts = []; const R = 50 * K / Math.sqrt(3) * 0.97; for (let i = 0; i <= 6; i++) { const a = Math.PI / 6 + i * Math.PI / 3; selPts.push(V(Math.cos(a) * R, 0, Math.sin(a) * R)); }
@@ -195,9 +201,13 @@
       const P = {
         key: 'amas', kind: 'amas', scene: S, unit: 6e13, hMin: 40, hMax: 3950, h0: 1300, bounds: 4200, title: 'Amas ' + safe(() => mySystemKey().split('-')[0], 'A'),
         hint: 'Touche une case ou un objet · pince vers un système pour y entrer · dézoome au-delà de 30 années-lumière : les amas',
-        content, grid, sel, suns: [], flights: [], legs: [], sysPos: {}, routeLines: {},
+        content, grid, sel, decor, tacG, tacItems: [], suns: [], flights: [], legs: [], sysPos: {}, routeLines: {},
         update(t, hh) {
-          const u = grid.material.uniforms; u.uTime.value = t; u.uLens.value.set(tx, tz);
+          const u = grid.material.uniforms; u.uTime.value = t; u.uLens.value.set(tx, tz); u.uTac.value = tacK;
+          decor.traverse(o => { if (o.material && o.material.userData.base !== undefined) o.material.opacity = o.material.userData.base * (1 - 0.85 * tacK); });
+          tacG.visible = tacK > 0.02;
+          for (const ti of this.tacItems) { ti.lb.material.opacity = tacK; ti.lb.position.set(ti.x, Math.max(6, hh * 0.012) * 1.3 + hh * 0.022, ti.z); if (ti.ring) { ti.ring.scale.setScalar(Math.max(16, hh * 0.02) * (1 + 0.06 * Math.sin(t * 3 + ti.ph))); ti.ring.material.opacity = tacK * 0.95; } }
+          if (tacOn && Date.now() - tacAt > 20000) buildTac(this);
           const pt = hh * 0.012, near = clamp((900 - hh) / 700, 0, 1);
           for (const g of this.suns) { const d = g.userData;
             if (d.home) { const s = Math.max(16, hh * 0.032) * (1 + 0.08 * Math.sin(t * 3)); d.ring.scale.setScalar(s); d.core.scale.setScalar(Math.max(8, hh * 0.016)); d.lb.position.set(0, s * 0.9, 0); continue; }
@@ -208,10 +218,11 @@
             if (d.tick) { d.tick.scale.setScalar(Math.max(2.2, pt * 0.42)); d.tick.position.set(base * 0.9, 0.5, -base * 0.6); }
             if (d.cross) d.cross.scale.setScalar(Math.max(1, hh / 900));
             if (d.pulse) { const k = (t * 0.4 + d.ph) % 1; d.pulse.scale.setScalar(base * (1.2 + k * 3)); d.pulse.material.opacity = 0.5 * (1 - k); }
-            if (d.lb) { d.lb.position.set(0, base * 1.3, 0); d.lb.material.opacity = d.lb.userData.always ? 1 : clamp((1100 - hh) / 400, 0, 1); }
+            if (d.lb) { d.lb.position.set(0, base * 1.3, 0); d.lb.material.opacity = d.lb.userData.always ? 1 : Math.max(tacK * (d.dim ? 0.55 : 1), clamp((1100 - hh) / 400, 0, 1)); }
+            if (tacK > 0) { d.core.scale.multiplyScalar(1 + 0.5 * tacK); if (d.tick) d.tick.scale.multiplyScalar(1 + 0.8 * tacK); }
           }
           const n = Date.now();
-          for (const f of this.flights) { const k = (f.t1 > f.t0 && isFinite(f.t0)) ? clamp((n - f.t0) / (f.t1 - f.t0), 0, 1) : 0.5; const p = f.at(k); f.dot.position.set(p.x, 0.8, p.z); f.lb.position.set(p.x, 8, p.z); f.dot.scale.setScalar(Math.max(10, hh * 0.014)); f.x = p.x; f.z = p.z; }
+          for (const f of this.flights) { const k = (f.t1 > f.t0 && isFinite(f.t0)) ? clamp((n - f.t0) / (f.t1 - f.t0), 0, 1) : 0.5; const p = f.at(k); f.dot.position.set(p.x, 0.8, p.z); f.lb.position.set(p.x, 8, p.z); f.dot.scale.setScalar(Math.max(10, hh * 0.014) * (1 + 0.6 * tacK)); f.x = p.x; f.z = p.z; if (f.line) f.line.material.opacity = 0.4 + 0.5 * tacK; }
           for (const l of this.legHits) if (l.arrow) l.arrow.scale.setScalar(Math.max(1, hh / 700));
           if (sel.visible) sel.material.opacity = 0.65 + 0.25 * Math.sin(t * 2.4);
         },
@@ -311,15 +322,49 @@
         let raw = (f.path && f.path.length > 1 ? f.path : [f.from, f.to]).map(cellPt);
         if (f.toCk && st.cell[f.toCk] !== undefined) raw[raw.length - 1] = cellPt(st.cell[f.toCk]);
         const pts = raw.length > 2 ? smooth(raw) : raw;
-        const ln = new T.Line(new T.BufferGeometry().setFromPoints(pts.map(q => V(q.x, 0.3, q.z))), new T.LineDashedMaterial({ color: c, dashSize: 8, gapSize: 8, transparent: true, opacity: 0.4 })); ln.computeLineDistances(); C.add(ln);
+        const ln = new T.Line(new T.BufferGeometry().setFromPoints(pts.map(q => V(q.x, 0.3, q.z))), new T.LineDashedMaterial({ color: c, dashSize: 8, gapSize: 8, transparent: true, opacity: 0.4 })); ln.computeLineDistances(); C.add(ln); ln.userData.fl = 1;
         const segL = []; let tot = 0; for (let i = 1; i < pts.length; i++) { const d = Math.hypot(pts[i].x - pts[i - 1].x, pts[i].z - pts[i - 1].z); segL.push(d); tot += d; }
         const atK = (k) => { let d = k * tot; for (let i = 0; i < segL.length; i++) { if (d <= segL[i] || i === segL.length - 1) { const u = segL[i] ? clamp(d / segL[i], 0, 1) : 0; return { x: lerp(pts[i].x, pts[i + 1].x, u), z: lerp(pts[i].z, pts[i + 1].z, u) }; } d -= segL[i]; } return pts[pts.length - 1]; };
         const dot = spr(glow('rgba(255,255,255,1)', 'rgba(127,208,255,.6)'), 14, c); C.add(dot);
         const lb = label(f.label || '', '#' + new T.Color(c).getHexString(), 0.9); lb.userData.always = true; C.add(lb);
-        P.flights.push({ id: f.id, kind: f.kind, fleetId: f.fleetId, t0: f.departedAt || 0, t1: f.arrivalAt || 0, at: atK, dot, lb, x: pts[0].x, z: pts[0].z });
+        P.flights.push({ id: f.id, kind: f.kind, fleetId: f.fleetId, t0: f.departedAt || 0, t1: f.arrivalAt || 0, at: atK, dot, lb, line: ln, x: pts[0].x, z: pts[0].z });
       }
       applySel(P);
       applyRouteHi(P);
+      buildTac(P);
+    }
+    // la couche tactique : sur chaque système, ce qui s'y passe (missions en route et leur temps, signatures, gisements, commandants, balise)
+    const TIER_N = { light: 'Légère', medium: 'Moyenne', radar: 'Radar', stealth: 'Furtive', beacon: 'Balise', interstellar: 'Interstellaire' };
+    const dur = (ms) => { ms = Math.max(0, ms); if (typeof formatTankerDuration === 'function') { try { return formatTankerDuration(ms); } catch (e) {} } const m = Math.round(ms / 60000); return m < 60 ? m + ' min' : Math.floor(m / 60) + ' h ' + String(m % 60).padStart(2, '0'); };
+    function buildTac(P) {
+      tacAt = Date.now();
+      clearGroup(P.tacG); P.tacItems = [];
+      if (!ST || !tacOn) return;
+      const now = Date.now(), go = {};
+      const push = (k, x) => { if (okSys(k)) (go[k] = go[k] || []).push(x); };
+      for (const m of (G.probeMissions || [])) { if (m.status !== 'in_transit') continue; const tc = String(m.targetCoords || ''); const k = /^SIG-/.test(tc) ? sysOf(((G.signatures || {})[tc] || {}).system) : sysOf(tc); push(k, { t: (TIER_N[m.tier] || 'Sonde') + ' · ' + dur((m.arrivalAt || now) - now), c: m.tier === 'medium' ? '#b9a8ff' : m.tier === 'light' ? '#7fe0a4' : '#e6f0ff', p: 3 }); }
+      for (const m of (G.tankerMissions || [])) { const k = sysOf(m.portSys || m.targetCoords); if (m.status === 'in_transit') push(k, { t: 'Tanker · ' + dur((m.arrivalAt || now) - now), c: '#ffc864', p: 3 }); else if (m.status === 'exploring') push(k, { t: 'Tanker sur place', c: '#ffc864', p: 3 }); else if (m.kind === 'route_post' && m.status === 'posted') push(k, { t: 'Poste', c: '#ffc864', p: 1 }); }
+      for (const f of ((G.fleet && G.fleet.prepared) || [])) { const a = f.ambush; if (!a || !a.system) continue; push(sysOf(a.system), { t: (f.name || 'Flotte') + (a.phase === 'going' ? ' · ' + dur((a.arrivesAt || now) - now) : ' · embuscade'), c: '#ff8a7a', p: 3 }); }
+      for (const s of Object.values(ST.systems)) {
+        const q = P.sysPos[s.key]; if (!q || s.key === ST.home) continue;
+        const list = (ST.items && ST.items[s.key]) || [];
+        const bits = (go[s.key] || []).slice();
+        const nsig = list.filter(i => i.kind === 'sig' && !(i.obj && i.obj.resolved)).length, nid = list.filter(i => i.kind === 'sig' && i.obj && i.obj.resolved).length;
+        const ntg = list.filter(i => i.kind === 'target' && !(i.obj && i.obj.kt && i.obj.kt.status === 'engaged')).length;
+        const npl = list.filter(i => i.kind === 'planet' && i.obj && i.obj.playerName).length;
+        if (nsig) bits.push({ t: nsig + ' à identifier', c: '#8fc4ff', p: 2 });
+        if (nid) bits.push({ t: nid + ' à verrouiller', c: '#7fe0a4', p: 2 });
+        if (ntg) bits.push({ t: ntg > 1 ? ntg + ' gisements' : 'gisement', c: '#ffd27a', p: 2 });
+        if (npl) bits.push({ t: npl > 1 ? npl + ' commandants' : 'commandant', c: '#ff9a8a', p: 2 });
+        if ((s.beacons || []).length) bits.push({ t: 'balise', c: '#c89bff', p: 1 });
+        if (!bits.length) continue;
+        bits.sort((a, b) => b.p - a.p);
+        const top = bits[0], txt = bits.slice(0, 3).map(b => b.t).join(' · ') + (bits.length > 3 ? ' +' + (bits.length - 3) : '');
+        const lb = label(txt, top.c, 1.15); lb.material.opacity = tacK; P.tacG.add(lb);
+        let ring = null;
+        if (top.p >= 2) { ring = new T.Mesh(new T.RingGeometry(0.86, 1, 48), new T.MeshBasicMaterial({ color: new T.Color(top.c), transparent: true, opacity: tacK, side: T.DoubleSide, depthWrite: false })); ring.rotation.x = -Math.PI / 2; ring.position.set(q.x, 0.5, q.z); P.tacG.add(ring); }
+        P.tacItems.push({ lb, ring, x: q.x, z: q.z, ph: (hash(s.key) % 60) / 10 });
+      }
     }
     function applySel(P) {
       if (!P || !P.sel) return;
@@ -903,6 +948,7 @@
       if (hud) { hud.querySelector('.pl-n').textContent = plan.kind === 'formation' && plan.src && plan.src.kind !== 'convoi' ? 'Plan de la flotte' : (NAMES[plan.kind] || ''); hud.querySelector('.pl-p').textContent = stack.map(s => s.plan.title).concat(plan.title).join('  ›  '); hud.querySelector('.pl-h').textContent = plan.hint || ''; }
       if (upBtn) { const par = stack.length ? stack[stack.length - 1].plan : (plan.kind === 'amas' ? null : null); upBtn.style.display = par ? '' : 'none'; if (par) upBtn.textContent = '◂ ' + (par.kind === 'amas' ? 'La carte' : par.title); }
       plan._auto = false; plan._arrived = false;
+      try { syncTacUi(); } catch (e) {}
       try { if (plan.kind === 'systeme') syncSysSel(plan); } catch (e) {}
     }
 
@@ -994,6 +1040,12 @@
         .pl-b.on{border-color:rgba(127,208,255,.6);background:rgba(47,143,208,.25)}
         .pl-b small{display:block;font-weight:400;font-size:10.5px;color:#9fb2c2}
         .pl-xtra{margin:0 0 6px}
+        .smw-tools .pl-tac.on{color:#5fffe8;border-color:rgba(95,255,232,.7);box-shadow:0 0 14px rgba(95,255,232,.35)}
+        .pl-legend{position:absolute;left:12px;right:72px;top:calc(env(safe-area-inset-top,0px) + 132px);z-index:4;display:none;flex-wrap:wrap;gap:4px 10px;pointer-events:none;font:600 10px/1.2 -apple-system,system-ui,sans-serif;letter-spacing:.04em;color:#cfdbe6}
+        .pl-legend.on{display:flex}
+        .pl-tacon .pl-hud .pl-h{display:none}
+        .pl-legend span{display:inline-flex;align-items:center;gap:4px}
+        .pl-legend span::before{content:'';width:7px;height:7px;border-radius:50%;background:var(--c);box-shadow:0 0 6px var(--c)}
         .sm-world .smw-hint{display:none!important}
         /* la fiche de l'ancienne carte, habillée comme la fiche du labo (Adrien, 01/11) : compacte, actions en grille */
         .pl-on .smw-card{background:rgba(8,13,20,.95);border:1px solid rgba(127,208,255,.3);border-radius:14px;padding:12px 14px 13px;font-family:-apple-system,system-ui,sans-serif;max-height:50%;-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px)}
@@ -1027,13 +1079,16 @@
       const dt = Math.min((now - (lastNow || now)) / 1000, 0.05); lastNow = now; tOff += dt; const time = tOff;
       if (trans) stepTrans(dt);
       else { const k = 1 - Math.exp(-dt * 7); h += (gh - h) * k; tx += (gx - tx) * k; tz += (gz - tz) * k; }
+      { const want = tacOn && plan === AMAS ? 1 : 0; tacK += (want - tacK) * Math.min(1, dt * 5); }
+      if (legend) { const lo = tacOn && plan === AMAS && !trans; legend.classList.toggle('on', lo); if (scrEl) scrEl.classList.toggle('pl-tacon', lo); }
       // une fiche ouverte en bas : on remonte la vue pour qu'elle ne cache pas ce qu'on regarde
       if (!oldCard || !oldCard.isConnected) oldCard = scrEl && scrEl.querySelector('.smw-card');
       const cardOn = (card && card.classList.contains('on')) || (oldCard && oldCard.classList.contains('on'));
       offZ += ((cardOn && !trans ? h * 0.3 : 0) - offZ) * Math.min(1, dt * 6);
       if (plan.cam && !trans) plan.cam(camera, time); else { camera.position.set(tx, h, tz + offZ + h * TILT); camera.lookAt(tx, 0, tz + offZ); }
       const sc = h * 0.0105;
-      plan.scene.traverse(o => { if (o.isSprite && o.userData.ar) { const s = sc * o.userData.k; o.scale.set(s * o.userData.ar, s, 1); } });
+      const lm = plan === AMAS ? 1 + 0.35 * tacK : 1;
+      plan.scene.traverse(o => { if (o.isSprite && o.userData.ar) { const s = sc * o.userData.k * lm; o.scale.set(s * o.userData.ar, s, 1); } });
       plan.update(time, h, dt);
       if (plan.kind === 'station' && !trans && !plan._auto && h < 95) { plan._auto = true; arrive(); }
       if (hud) hud.querySelector('.pl-sc span').textContent = fmtLen(h * 1.2 * plan.unit);
@@ -1066,6 +1121,11 @@
         hud = document.createElement('div'); hud.className = 'pl-hud'; hud.innerHTML = '<div class="pl-n"></div><div class="pl-p"></div><div class="pl-sc"><i></i><span></span></div><div class="pl-h"></div>';
         upBtn = document.createElement('button'); upBtn.className = 'pl-up'; upBtn.style.display = 'none'; upBtn.onclick = () => surface();
         card = document.createElement('div'); card.className = 'pl-card';
+        const tools = scr.querySelector('.smw-tools');
+        if (tools) { tacBtn = document.createElement('button'); tacBtn.className = 'pl-tac'; tacBtn.setAttribute('aria-label', 'Vue tactique'); tacBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><path d="M12 3l7.5 4.3v8.4L12 20l-7.5-4.3V7.3z"/><path d="M12 3v17M4.5 7.3l15 8.4M19.5 7.3l-15 8.4" opacity=".55"/></svg>'; tacBtn.onclick = () => setTac(!tacOn); tools.appendChild(tacBtn); }
+        legend = document.createElement('div'); legend.className = 'pl-legend';
+        legend.innerHTML = '<span style="--c:#7fe0a4">Légère</span><span style="--c:#b9a8ff">Moyenne</span><span style="--c:#ffc864">Tanker</span><span style="--c:#8fc4ff">À identifier</span><span style="--c:#ffd27a">Gisement</span><span style="--c:#ff9a8a">Commandant</span><span style="--c:#c89bff">Balise</span>';
+        scr.appendChild(legend);
         scr.appendChild(card); scr.appendChild(hud); scr.appendChild(upBtn);
         bindGestures(cv);
         ro = new ResizeObserver(() => resize()); ro.observe(host); resize();
@@ -1129,7 +1189,7 @@
         try { renderer && renderer.setAnimationLoop(null); } catch (e) {}
         try { ro && ro.disconnect(); if (onLost && renderer) renderer.domElement.removeEventListener('webglcontextlost', onLost); } catch (e) {}
         try { const st = document.getElementById('pl-style'); if (st) st.remove(); } catch (e) {}
-        for (const el of [hud, card, upBtn, ...Object.values(chips)]) try { el && el.remove(); } catch (e) {}
+        for (const el of [hud, card, upBtn, tacBtn, legend, ...Object.values(chips)]) try { el && el.remove(); } catch (e) {}
         try { renderer && renderer.domElement.remove(); fx && fx.remove(); } catch (e) {}
         try { for (const k of Object.keys(PLANS)) disposeTree(PLANS[k].scene); if (UNIV && !PLANS.univers) disposeTree(UNIV.scene); renderer && renderer.dispose(); } catch (e) {}
         this.ready = false;
