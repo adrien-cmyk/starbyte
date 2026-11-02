@@ -118,7 +118,7 @@
     if (root) return root;
     const st = document.createElement('style'); st.textContent = css; document.head.appendChild(st);
     root = document.createElement('div'); root.id = 'bm-root';
-    root.innerHTML = `<div class="bm-cat"></div><div class="bm-ship"></div>`;
+    root.innerHTML = `<div class="bm-cat"></div><div class="bm-foot"><button class="bm-btn" data-close>← Retour</button></div><div class="bm-ship"></div>`;   // pied hors du défilement : reste collé en bas
     document.body.appendChild(root);
     return root;
   }
@@ -141,8 +141,7 @@
       <div class="bm-dev">Aperçu réservé à ton compte · paiement pas encore branché</div>
       <div class="bm-merchant"><div class="bm-face">${face}</div>
         <div class="bm-say">${esc(LINES[line % LINES.length])}<small>LE MARCHAND</small></div></div>
-      ${section('sport')}${section('dread')}
-      <div class="bm-foot"><button class="bm-btn" data-close>← Retour</button></div>`;
+      ${section('sport')}${section('dread')}`;
     line++;
   }
 
