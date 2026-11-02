@@ -66,7 +66,7 @@
   font: 600 13px 'Space Grotesk', sans-serif; letter-spacing: .1em; text-transform: uppercase; cursor: pointer; }
 #bm-root .bm-ship { position: absolute; inset: 0; display: none; background: #000; }
 #bm-root .bm-ship.on { display: block; }
-#bm-root iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; background: #000; }
+#bm-root iframe { position: absolute; left: 0; top: 0; width: 100%; height: 100%; border: 0; background: #000; }
 #bm-root .bm-top { position: absolute; left: 0; right: 0; top: 0; padding: calc(env(safe-area-inset-top) + 10px) 12px 10px; display: flex;
   align-items: center; gap: 10px; pointer-events: none; }
 #bm-root .bm-back { pointer-events: auto; border: 1px solid rgba(255,255,255,.18); background: rgba(7,9,11,.6); color: #e6edf2; border-radius: 20px;
@@ -165,6 +165,16 @@
         <div class="bm-buy-sub">Paiement Stripe pas encore branché</div>
       </div>`;
     pane.classList.add('on');
+    fitView();
+  }
+  // La vitrine s'arrête au bord haut du tiroir : le vaisseau se centre dans la partie visible
+  // (le tiroir arrondi chevauche de 16 px). Tiroir replié → la vitrine reprend presque tout l'écran.
+  function fitView() {
+    const pane = root && root.querySelector('.bm-ship.on'); if (!pane) return;
+    const fr = pane.querySelector('iframe'), sh = pane.querySelector('.bm-sheet'); if (!fr || !sh) return;
+    const r = sh.getBoundingClientRect(), H = window.innerHeight;
+    fr.style.height = Math.max(200, Math.round(r.top + 16)) + 'px';
+    if (H - r.top < 40) fr.style.height = H + 'px';
   }
   function closeShip() {
     const pane = root.querySelector('.bm-ship');
@@ -185,7 +195,7 @@
     const card = t.closest('[data-ship]'); if (card) return openShip(card.dataset.ship);
     if (t.closest('[data-cat]')) return closeShip();
     if (t.closest('[data-close]')) return close();
-    if (t.closest('[data-grip]')) { const sh = root.querySelector('.bm-sheet'); if (sh) sh.classList.toggle('min'); }
+    if (t.closest('[data-grip]')) { const sh = root.querySelector('.bm-sheet'); if (sh) { sh.classList.toggle('min'); setTimeout(fitView, 270); } }
   });
 
   // Entrée provisoire : carte en haut de l'écran Commerce, visible seulement sur le compte d'Adrien
@@ -209,5 +219,6 @@
     window.renderCommerceScreen = function () { const r = orig.apply(this, arguments); try { entry(); } catch (e) {} return r; };
   }
 
+  window.addEventListener('resize', () => { try { fitView(); } catch (e) {} });
   window.SBBlackmarket = { open, close, ships: SHIPS, cats: CATS };
 })();
