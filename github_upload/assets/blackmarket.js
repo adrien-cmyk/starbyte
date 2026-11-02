@@ -601,6 +601,40 @@
       return r;
     };
   }
+  // ── Hors service = interdit de sortie (retour d'Adrien 02/11 : une flotte repartait avec son Héro HS) ──
+  // Avant toute sortie (mission, raid, embuscade) : les vaisseaux d'exception hors service restent à quai, ou la sortie est annulée.
+  async function guardDown(fleet) {
+    if (!fleet || !Array.isArray(fleet.premium) || !fleet.premium.length) return true;
+    const down = fleet.premium.filter(p => isDown(unitOf(p.pid)));
+    if (!down.length) return true;
+    const names = down.map(p => { const sh = SHIPS.find(x => x.id === p.item), u = unitOf(p.pid); return `<strong>${esc(sh ? sh.name : p.item)}</strong> (encore ${hoursLeft(u)})`; }).join(', ');
+    const alone = compShips(fleet.composition) === 0 && down.length === fleet.premium.length;
+    if (alone) {
+      if (typeof sbConfirmWarning === 'function') await sbConfirmWarning('Hors service', `${names} répare à quai : cette escadre ne peut pas sortir avant la fin des réparations.`, 'Compris');
+      else if (typeof toast === 'function') toast('Vaisseau d\'exception hors service : sortie impossible');
+      return false;
+    }
+    const ok = typeof sbConfirmWarning === 'function'
+      ? await sbConfirmWarning('Hors service', `${names} répare à quai et ne peut pas partir.<br><br>Envoyer la flotte sans ${down.length > 1 ? 'eux' : 'lui'} ?`, 'Partir sans')
+      : false;
+    if (!ok) return false;
+    fleet.premium = fleet.premium.filter(p => !down.includes(p));
+    if (typeof saveGame === 'function') saveGame();
+    return true;
+  }
+  function guardWrap(name, fleetOf) {
+    const orig = window[name]; if (typeof orig !== 'function') return;
+    window[name] = async function () {
+      let f = null; try { f = fleetOf.apply(this, arguments); } catch (e) {}
+      if (f && !(await guardDown(f))) return;
+      return orig.apply(this, arguments);
+    };
+  }
+  const curFleet = () => (G.fleet.prepared || []).find(f => f.id === selectedFleetId);
+  guardWrap('openFleetTargetSelection', curFleet);
+  guardWrap('confirmSendMission', curFleet);
+  guardWrap('mpAmbushStart', (id) => (G.fleet.prepared || []).find(f => f.id === id));
+
   // ── TAXI : largage à l'aveugle (v34) ──
   function taxiFlight() { try { const t = G.fleet.bmTaxi; return t && !t.done ? t : null; } catch (e) { return null; } }
   function taxiLayer() {
