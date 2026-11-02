@@ -38,7 +38,10 @@ function cleanFleet(f) {
     const h = f?.heroes?.[type];
     if (h && typeof h.name === 'string') heroes[type] = { name: h.name.slice(0, 60), dead: !!h.dead };
   }
-  return { composition: comp, soldiers, heroes };
+  // BLACKMARKET (v32) : vaisseaux d'exception déjà vérifiés par index.ts (propriétaire, payés, pas hors service)
+  const premium = (Array.isArray(f?.premium) ? f.premium : []).filter(p => p && typeof p.pid === 'string' && (p.cat === 'sport' || p.cat === 'dread')).slice(0, 13)
+    .map(p => ({ pid: p.pid, cat: p.cat, item: String(p.item || '').slice(0, 40) }));
+  return { composition: comp, soldiers, heroes, premium };
 }
 
 // Résout un raid. Renvoie le résultat à passer à mp_finish_raid :

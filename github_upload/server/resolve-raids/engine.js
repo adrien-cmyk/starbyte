@@ -201,6 +201,15 @@ function applyShipRecovery(destroyedCount, shipType, closeness) {
   return { destroyed, recovered };
 }
 
+// BLACKMARKET (v32) — vaisseaux d'exception : Cuirassé de Héro = cuirassé T3 +20 % d'attaque, Dreadnought = 2 cuirassés T3.
+// Hors de la composition : ils ne subissent jamais de pertes ; orbite perdue → mis hors service (result.premiumDown).
+function premiumFleetAttack(fleet) {
+  const base = (SHIP_TIERS.cuirasse && SHIP_TIERS.cuirasse[3] && SHIP_TIERS.cuirasse[3].atk) || 13500;
+  let atk = 0;
+  for (const p of (Array.isArray(fleet && fleet.premium) ? fleet.premium : [])) atk += p && p.cat === 'dread' ? base * 2 : p && p.cat === 'sport' ? base * 1.2 : 0;
+  return atk;
+}
+
 function computeFleetOrbitalAttack(composition) {
   let atk = 0;
   for (const type of ['fregate', 'cuirasse']) {
@@ -270,12 +279,14 @@ function resolveCombat(fleet, target) {
   };
 
   // ═══ PHASE 1 — BATAILLE ORBITALE ═══
-  const atkOrbital = computeFleetOrbitalAttack(composition) * fleetIntegrityEfficiency(fleet);   // avaries : efficacité dégressive
+  const atkOrbital = computeFleetOrbitalAttack(composition) * fleetIntegrityEfficiency(fleet)   // avaries : efficacité dégressive
+    + premiumFleetAttack(fleet);   // BLACKMARKET : vaisseaux d'exception (jamais avariés)
   const defOrbital = target.defense || 0;
   const atkEffective = atkOrbital * combatRand(COMBAT_CONSTS.RAND_MIN, COMBAT_CONSTS.RAND_MAX);
   const defEffective = defOrbital * combatRand(COMBAT_CONSTS.RAND_MIN, COMBAT_CONSTS.RAND_MAX);
 
   const phase1Won = defOrbital <= 0 || atkEffective > defEffective;
+  if (Array.isArray(fleet.premium) && fleet.premium.length) result.premiumDown = !phase1Won;   // BLACKMARKET : jamais détruits, mis hors service
 
   // Compter les vaisseaux orbitaux engagés (frégates + cuirassés)
   const orbitalEngaged = {

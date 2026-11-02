@@ -58,12 +58,30 @@ Deno.serve(async (req) => {
         if (!eg && Array.isArray(g)) gar = g.map((x: any) => ({ id: x.id, owner_pseudo: x.owner_pseudo, fleet_name: x.fleet_name, def: Math.max(0, Number(x.def) || 0) }));
       }
       const extra = gar.reduce((s, x) => s + x.def, 0);
+      // BLACKMARKET (v32) : on ne garde que les vaisseaux d'exception qui appartiennent vraiment à l'attaquant,
+      // payés et pas hors service (le jeu ne peut pas en inventer)
+      const askPremium = Array.isArray(raid.fleet?.premium) ? raid.fleet.premium.filter((p: any) => p && typeof p.pid === 'string').slice(0, 13) : [];
+      let premiumOk: { pid: string; cat: string; item: string }[] = [];
+      if (askPremium.length) {
+        const { data: own } = await admin.from('bm_purchases').select('id, item_id, category, disabled_until')
+          .eq('user_id', raid.attacker_id).eq('status', 'paid').in('id', askPremium.map((p: any) => p.pid));
+        const now = Date.now();
+        premiumOk = (own || []).filter((o: any) => !o.disabled_until || new Date(o.disabled_until).getTime() <= now)
+          .map((o: any) => ({ pid: o.id, cat: o.category, item: o.item_id }));
+      }
+      raid.fleet = { ...(raid.fleet || {}), premium: premiumOk };
       const result: any = dw
         ? resolveRaid(raid, extra > 0 ? { ...dw, defense: (Number(dw.defense) || 0) + extra, ground_defense: Number(dw.defense) || 0 } : dw)
         : { outcome: 'aborted', reason: 'defender_gone', loot: { metal: 0, energie: 0, cristal: 0 }, damaged_building: null };
       if (gar.length && result.outcome !== 'aborted') result.garrisons = gar.map(x => ({ owner: x.owner_pseudo, fleet: x.fleet_name, def: x.def }));
       const { data: fin, error: finErr } = await admin.rpc('mp_finish_raid', { p_raid: raid.id, p_result: result });
       if (finErr) throw finErr;
+      if (premiumOk.length && result.combat?.premiumDown) {
+        for (const cat of ['sport', 'dread']) {
+          const ids = premiumOk.filter(p => p.cat === cat).map(p => p.pid);
+          if (ids.length) await admin.from('bm_purchases').update({ disabled_until: new Date(Date.now() + (cat === 'sport' ? 36 : 24) * 3600e3).toISOString() }).in('id', ids);
+        }
+      }
       if (gar.length && result.outcome !== 'aborted') {
         const { error: ea } = await admin.rpc('mp_garrison_apply_raid', { p_raid: raid.id, p_ids: gar.map(x => x.id), p_victory: result.outcome === 'victory' });
         if (ea) console.warn('garnisons :', ea.message);
