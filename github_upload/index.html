@@ -9620,7 +9620,11 @@ function _mpFinishRaid(fleet, raid) {
 var DEF_LOSS = { ORBIT_LOST: [0.40, 0.75], GROUND_LOST: [0.60, 0.90], HELD: [0.10, 0.25], DESTROYED_SHARE: 0.5 };
 var DEF_TURRETS = ['tourelle', 'tourelle_lourde'], DEF_SOLDIERS = ['garde', 'lourd'];
 function _defLossPct(range, ratio, held) {
-  const k = held ? Math.max(0, Math.min(1, ratio)) : Math.max(0, Math.min(1, (ratio - 1) / 2));
+  // PATCH_0211_DEF_TENUE (Adrien 02/11) : défense tenue = pertes proportionnelles à la menace, sans plancher.
+  // Avant : 10 % minimum même contre 1 tanker → 24 raids d'un tanker rasaient la défense.
+  // Maintenant : 25 % × (attaque/défense)² — 1 tanker ≈ 0, moitié de la défense ≈ 6 %, attaque presque égale ≈ 25 %.
+  if (held) { const r = Math.max(0, Math.min(1, ratio)); return range[1] * r * r; }
+  const k = Math.max(0, Math.min(1, (ratio - 1) / 2));
   return range[0] + (range[1] - range[0]) * k;
 }
 function _defHitUnits(keys, pct, out) {
