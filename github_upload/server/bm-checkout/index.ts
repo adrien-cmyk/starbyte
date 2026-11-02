@@ -45,6 +45,11 @@ Deno.serve(async (req) => {
   const { count } = await admin.from('bm_purchases').select('id', { count: 'exact', head: true })
     .eq('user_id', user.id).eq('category', item.category).eq('status', 'paid');
   if (cat && (count || 0) >= cat.cap) return json({ error: 'cap_reached', cap: cat.cap, label: cat.label }, 409);
+  // v34 : TAXI — 100 exemplaires en tout
+  if (item.category === 'arche') {
+    const { count: sold } = await admin.from('bm_purchases').select('id', { count: 'exact', head: true }).eq('category', 'arche').eq('status', 'paid');
+    if ((sold || 0) >= 100) return json({ error: 'sold_out' }, 409);
+  }
 
   // page de paiement Stripe (API REST, sans dépendance)
   const f = new URLSearchParams();

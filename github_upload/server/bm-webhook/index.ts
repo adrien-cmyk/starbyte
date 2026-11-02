@@ -57,6 +57,10 @@ Deno.serve(async (req) => {
     if (error) return new Response(error.message, { status: 500 });   // Stripe réessaiera
     if (!ins || !ins.length) return new Response('duplicate', { status: 200 });
 
+    // v34 : TAXI — édition de 100 épuisée (le déclencheur a mis over_cap) → remboursé
+    const { data: row } = await admin.from('bm_purchases').select('status').eq('id', ins[0].id).maybeSingle();
+    if (row && row.status === 'over_cap') { if (s.payment_intent) await refund(stripeKey, s.payment_intent); return new Response('sold out, refunded', { status: 200 }); }
+
     // plafond : si ce paiement fait dépasser, il est annulé et remboursé
     const { data: cat } = await admin.from('bm_categories').select('cap').eq('category', item.category).maybeSingle();
     const { data: rows } = await admin.from('bm_purchases').select('id').eq('user_id', userId).eq('category', item.category)

@@ -49551,7 +49551,7 @@ if (G.knownTargets && Array.isArray(G.tankerMissions)) {
    Les deux habillages modifient la même scène : on charge le bon au démarrage, et un changement de planète qui change d'habillage recharge la page. */
 (function () {
   window.sbTerrainVariant = function () {
-    try { const w = (G.worlds || []).find(x => x && x.id === G.activeWorld); return w && w.kind === 'colony' ? 'desert' : 'jardin'; } catch (e) { return 'jardin'; }
+    try { const w = (G.worlds || []).find(x => x && x.id === G.activeWorld); return w && w.kind === 'colony' && !w.garden ? 'desert' : 'jardin'; } catch (e) { return 'jardin'; }   // TAXI : colonie planète-jardin (w.garden)
   };
   const v = window.sbTerrainVariant();
   window.__sbTerrainLoaded = v;
@@ -49967,7 +49967,7 @@ if (G.knownTargets && Array.isArray(G.tankerMissions)) {
 <!-- PATCH_1610_SKILLS — skills des bâtiments : apprendre, découvrir, effets -->
 <script src="assets/skills.js?v=20261021-1130"></script>
 <script src="assets/maj.js?v=20261025-1800"></script>
-<script src="assets/blackmarket.js?v=20261102-1340"></script>   <!-- Blackmarket v0 : aperçu du catalogue, réservé au compte d'Adrien -->
+<script src="assets/blackmarket.js?v=20261102-1500b"></script>   <!-- Blackmarket v0 : aperçu du catalogue, réservé au compte d'Adrien -->
 <!-- PATCH_1510_CROWN — The Drifting Crown en 3D (assets/station3d.js, sur le moteur partagé window.SB3D) -->
 <script type="module" src="assets/station3d.js?v=20261022-1047"></script>
 <!-- FORMATION3D — flotte déployée en orbite, vue de haut en formation (remplace la vue orbite) -->

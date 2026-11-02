@@ -15,6 +15,10 @@
       label: 'Dreadnought', plural: 'Dreadnoughts', price: 20, cap: 3,
       rule: 'Deux fois un cuirassé T3',
     },
+    arche: {
+      label: 'TAXI', plural: 'Édition légendaire', price: 150, cap: 1,
+      rule: 'Transport par Arche eXtra-Interstellaire · 100 exemplaires numérotés · un par joueur',
+    },
   };
   const SHIPS = [
     { id: 'fulgurant',    name: 'Le Fulgurant',   cat: 'sport', accent: '#f2c230', line: 'Lance jaune, nacelles en lames' },
@@ -24,7 +28,9 @@
     { id: 'requiem',      name: 'Le Requiem',     cat: 'dread', accent: '#e6e1d6', line: 'Proue fendue en croix, trois tours' },
     { id: 'souverain',    name: 'Le Souverain',   cat: 'dread', accent: '#c9a45a', line: 'Château en pagode, quatre cerclages' },
     { id: 'brise-monde',  name: 'Le Brise-Monde', cat: 'dread', accent: '#e0682c', line: "Arme de proue : anomalie d'antimatière" },
+    { id: 'taxi',         name: 'TAXI',           cat: 'arche', accent: '#b98cff', line: 'Perce la trame et te dépose un monde. Une fois.' },
   ];
+  let taxiLeft = null;                            // exemplaires restants (serveur)
   const LINES = [
     'Ouais. Tu veux quoi ?',
     "Regarde, mais touche pas. Y en a pas deux pareils dans l'amas.",
@@ -53,7 +59,9 @@
     try {
       const st = await call('/rest/v1/rpc/bm_state', {});
       units = (st && st.owned || []).filter(o => o && o.id && SHIPS.some(x => x.id === o.item_id))
-        .map(o => ({ id: o.id, item: o.item_id, cat: o.category, down: o.disabled_until ? new Date(o.disabled_until).getTime() : 0 }));
+        .map(o => ({ id: o.id, item: o.item_id, cat: o.category, down: o.disabled_until ? new Date(o.disabled_until).getTime() : 0,
+          ed: o.edition_no || null, used: o.taxi_used_at ? new Date(o.taxi_used_at).getTime() : 0, addr: o.taxi_address || null, showPseudo: !!o.show_pseudo }));
+      if (st && typeof st.taxi_left === 'number') taxiLeft = st.taxi_left;
       owned = {}; units.forEach(u => { owned[u.item] = (owned[u.item] || 0) + 1; });
       try { localStorage.setItem('bm_owned_cache', JSON.stringify(owned)); localStorage.setItem('bm_units_cache', JSON.stringify(units)); } catch (e) {}
     } catch (e) { /* v31 pas encore lancé : rien à afficher */ }
@@ -134,6 +142,10 @@
   // Règles du GDD (§4-5) — v0 : même stats pour tous les modèles d'une catégorie
   function statsOf(cat) {
     const b = baseT3();
+    if (cat === 'arche') return [
+      { k: 'Largage', v: null, txt: '1×', d: 'à l\'aveugle' }, { k: 'Voyage', v: null, txt: '1 h', d: 'trame percée' },
+      { k: 'Planète', v: null, txt: 'jardin', d: 'luxuriante' }, { k: 'Bouclier', v: null, txt: '72 h', d: 'à l\'arrivée' },
+    ];
     if (cat === 'sport') return [
       { k: 'Attaque', v: b.atk * 1.2, d: '+20 %' }, { k: 'Défense', v: b.def, d: '=' },
       { k: 'Vitesse', v: null, txt: '×1,2', d: '+20 %' }, { k: 'Réparation', v: null, txt: 'lente', d: 'contrepartie', neg: true },
@@ -159,7 +171,7 @@
       <circle cx="13" cy="9.5" r="4.5"/><path d="M4.5 23c1.2-4.6 4.6-7 8.5-7s7.3 2.4 8.5 7"/><path d="M8.6 8.4h8.8" stroke="#c9a45a"/></svg>`;
     const section = (cat) => {
       const c = CATS[cat];
-      return `<h2>${c.plural}</h2><div class="bm-rule">${c.rule} · max ${c.cap} par joueur</div>` +
+      return `<h2>${c.plural}</h2><div class="bm-rule">${c.rule}${cat === 'arche' ? (taxiLeft != null ? ` · <b style="color:#d9c2ff">${taxiLeft} restant${taxiLeft > 1 ? 's' : ''}</b>` : '') : ` · max ${c.cap} par joueur`}</div>` +
         SHIPS.filter(s => s.cat === cat).map(s => `
           <button class="bm-card" style="--a:${s.accent}" data-ship="${s.id}">
             <div class="bm-th" style="background-image:url('${thumb(s.id)}')"></div>
@@ -173,7 +185,7 @@
       <div class="bm-dev">Aperçu réservé à ton compte · paiement en mode test</div>
       <div class="bm-merchant"><div class="bm-face">${face}</div>
         <div class="bm-say">${esc(LINES[line % LINES.length])}<small>PAULINE · REINE DU NOIR</small></div></div>
-      ${section('sport')}${section('dread')}`;
+      ${section('sport')}${section('dread')}${section('arche')}`;
     line++;
   }
 
@@ -184,20 +196,22 @@
   function openShip(id, mine) {
     const s = SHIPS.find(x => x.id === id); if (!s) return;
     const c = CATS[s.cat];
+    const tx = s.cat === 'arche' ? units.find(u => u.cat === 'arche') : null;   // mon TAXI (s'il est à moi)
     const pane = root.querySelector('.bm-ship');
     const stats = statsOf(s.cat).map(x => `<div><i>${x.k}</i><b>${x.v != null ? fmt(x.v) : x.txt}</b>${x.d ? `<em class="${x.neg ? 'neg' : /^(=|standard)$/.test(x.d) ? 'neu' : ''}">${x.d}</em>` : ''}</div>`).join('');
     pane.innerHTML = `
-      <iframe src="assets/blackmarket/${s.id}.html?embed&v=${VERSION}" title="${esc(s.name)} en 3D" allow="fullscreen"></iframe>
+      <iframe src="assets/blackmarket/${s.id}.html?embed${mine && tx && tx.used ? '&dead' : ''}&v=${VERSION}" title="${esc(s.name)} en 3D" allow="fullscreen"></iframe>
       <div class="bm-top"><button class="bm-back" ${mine ? 'data-close' : 'data-cat'}>‹ ${mine ? 'Flotte' : 'Catalogue'}</button></div>
       <div class="bm-sheet" style="--a:${s.accent}">
         <div class="bm-grip" data-grip></div>
-        <div class="cat">${mine ? `${STAR(11)} Vaisseau d'exception · ` : ''}${c.label}</div>
-        <div class="nm"><b>${esc(s.name)}</b><span class="bm-price">${mine ? `À toi ×${owned[s.id] || 1}` : chf(c.price)}</span></div>
+        <div class="cat">${mine ? `${STAR(11)} Vaisseau d'exception · ` : ''}${s.cat === 'arche' ? 'Édition légendaire' : c.label}</div>
+        <div class="nm"><b>${esc(s.name)}${tx && tx.ed ? ` <span style="font:500 13px 'JetBrains Mono',monospace;color:#d9c2ff">n° ${String(tx.ed).padStart(3, '0')} / 100</span>` : ''}</b><span class="bm-price">${mine ? (s.cat === 'arche' ? '' : `À toi ×${owned[s.id] || 1}`) : chf(c.price)}</span></div>
         <div class="bm-stats">${stats}</div>
-        <div class="bm-note">Comparé à un cuirassé T3 construit. Jamais détruit : vaincu, il est mis hors service et répare à quai 24 h minimum.
-          Max ${c.cap} ${c.plural.toLowerCase()} par joueur, tous modèles confondus.</div>
-        ${mine ? `<div class="bm-buy-sub" style="text-align:left;color:#a7b1ba">${esc(mineStatus(s.id))}</div>` : `<button class="bm-buy" data-buy="${s.id}">Acheter · ${chf(c.price)}</button>
-        <div class="bm-buy-sub">${owned[s.id] ? `Tu en as déjà ${owned[s.id]} · ` : ''}Paiement par Stripe · mode test</div>`}
+        <div class="bm-note">${s.cat === 'arche'
+          ? `Transport par Arche eXtra-Interstellaire. Tu choisis un secteur, même inconnu : le TAXI perce la trame et te crée un monde dans un système vide, tiré au sort. Tu ne sais où qu'en arrivant. Planète-jardin luxuriante, 72 h de protection, aucune ressource. Un seul largage ; ensuite, il reste dans ta flotte, coque morte. 100 exemplaires numérotés, un par joueur.`
+          : `Comparé à un cuirassé T3 construit. Jamais détruit : vaincu, il est mis hors service et répare à quai 24 h minimum. Max ${c.cap} ${c.plural.toLowerCase()} par joueur, tous modèles confondus.`}</div>
+        ${mine ? (tx && !tx.used && !taxiFlight() ? `<button class="bm-buy" data-taxi style="background:#5b3fa0;color:#f1e8ff">Larguer le TAXI</button><div class="bm-buy-sub">Une seule fois · à l'aveugle</div>` : `<div class="bm-buy-sub" style="text-align:left;color:#a7b1ba">${esc(mineStatus(s.id))}</div>`) : (s.cat === 'arche' && taxiLeft === 0 ? `<div class="bm-buy-sub">Édition épuisée. Les 100 TAXI ont trouvé preneur.</div>` : `<button class="bm-buy" data-buy="${s.id}">Acheter · ${chf(c.price)}</button>
+        <div class="bm-buy-sub">${owned[s.id] ? `Tu en as déjà ${owned[s.id]} · ` : ''}Paiement par Stripe · mode test</div>`)}
       </div>`;
     pane.classList.add('on');
     fitView();
@@ -230,6 +244,10 @@
     const t = e.target.closest ? e.target : null; if (!t) return;
     const card = t.closest('[data-ship]'); if (card) return openShip(card.dataset.ship);
     const buy = t.closest('[data-buy]'); if (buy) return startBuy(buy);
+    if (t.closest('[data-taxi]')) return taxiPicker();
+    const sec = t.closest('[data-sector]'); if (sec) return taxiConfirm(sec.dataset.sector);
+    if (t.closest('[data-taxigo]')) return taxiDrop(t.closest('[data-taxigo]').dataset.taxigo);
+    if (t.closest('[data-taxiback]')) return taxiPicker();
     if (t.closest('[data-cat]')) return closeShip();
     if (t.closest('[data-close]')) { close(); if (fromFleet) { fromFleet = false; try { renderFleetScreen(); } catch (e) {} } return; }
     if (t.closest('[data-grip]')) { const sh = root.querySelector('.bm-sheet'); if (sh) { sh.classList.toggle('min'); setTimeout(fitView, 270); } }
@@ -269,7 +287,7 @@
       throw new Error('no_url');
     } catch (e) {
       const m = e.message;
-      say(m === 'cap_reached' ? `Plafond atteint : ${e.data && e.data.cap} ${(e.data && e.data.label || '').toLowerCase()} max. « T'en as assez, non ? »`
+      say(m === 'sold_out' ? 'Édition épuisée : les 100 TAXI sont partis.' : m === 'cap_reached' ? `Plafond atteint : ${e.data && e.data.cap} ${(e.data && e.data.label || '').toLowerCase()} max. « T'en as assez, non ? »`
         : m === 'not_signed_in' ? 'Connecte ton compte (cloud) pour acheter.'
         : m === 'stripe_not_configured' ? 'Clé Stripe absente côté serveur (secret STRIPE_SECRET_KEY).'
         : 'Paiement indisponible pour le moment (' + m + ').', true);
@@ -338,6 +356,11 @@
   function unitDef(cat) { const b = baseT3(); return cat === 'dread' ? b.def * 2 : b.def; }
   function hoursLeft(u) { const h = Math.ceil((u.down - Date.now()) / 3600e3); return h <= 1 ? 'moins d\'1 h' : h + ' h'; }
   function unitStatus(u) {
+    if (u && u.cat === 'arche') {
+      const fl = taxiFlight();
+      if (fl) return { txt: 'En route · ' + Math.max(1, Math.ceil((fl.arriveAt - Date.now()) / 60000)) + ' min', col: '#d9c2ff' };
+      return u.used ? { txt: 'Coque morte · travail accompli', col: '#8d98a3' } : { txt: 'Prêt à larguer', col: '#d9c2ff' };
+    }
     if (isDown(u)) return { txt: 'Hors service · ' + hoursLeft(u), col: '#d9845a' };
     const f = fleetOfUnit(u.id);
     if (f) return { txt: (f.status === 'in_mission' ? 'En mission' : f.status === 'deployed' ? 'En orbite' : 'En flotte') + ' · ' + f.name, col: '#b8d0ff' };
@@ -345,7 +368,7 @@
   }
   function freeHere(exceptFleetId) {
     const L = locs(), w = here();
-    return units.filter(u => !isDown(u) && (L[u.id] || 'home') === w && !fleetsWithPremium().some(f => f.id !== exceptFleetId && f.premium.some(p => p.pid === u.id)));
+    return units.filter(u => u.cat !== 'arche' && !isDown(u) && (L[u.id] || 'home') === w && !fleetsWithPremium().some(f => f.id !== exceptFleetId && f.premium.some(p => p.pid === u.id)));
   }
   const thumbBox = (id, sz) => `<div style="position:relative;flex:0 0 ${sz}px;height:${sz}px;border-radius:8px;background:#000 url('${thumb(id)}') center/cover;border:1px solid rgba(241,210,122,.45)">
       <div style="position:absolute;top:-7px;right:-7px;width:22px;height:22px;border-radius:50%;background:#15110a;border:1px solid rgba(241,210,122,.6);display:grid;place-items:center">${STAR(14)}</div></div>`;
@@ -366,11 +389,11 @@
       const s = shipOf(u), c = CATS[s.cat], st = unitStatus(u);
       return `<div data-own="${s.id}" style="margin:0 16px 8px;padding:10px 12px 10px 10px;display:flex;align-items:center;gap:12px;cursor:pointer;${isDown(u) ? 'opacity:.72;' : ''}
           background:linear-gradient(90deg,rgba(241,210,122,.09),rgba(241,210,122,.02));border:1px solid rgba(241,210,122,.32);border-radius:10px">
-        ${thumbBox(s.id, 64)}
+        ${thumbBox(s.id === 'taxi' && u.used ? 'taxi-dead' : s.id, 64)}
         <div style="flex:1;min-width:0">
-          <div style="font-size:14px;font-weight:600;color:#f3ead2">${esc(s.name)}</div>
+          <div style="font-size:14px;font-weight:600;color:#f3ead2">${esc(s.name)}${u.ed ? ` <span style="font:500 11px 'JetBrains Mono',monospace;color:#d9c2ff">n° ${String(u.ed).padStart(3, '0')}</span>` : ''}</div>
           <div style="font-size:10px;letter-spacing:.08em;text-transform:uppercase;margin-top:2px"><span style="color:#c9a45a">${c.label}</span> · <span style="color:${st.col}">${esc(st.txt)}</span></div>
-          <div style="font-size:11px;color:var(--mut);margin-top:3px;font-family:'SF Mono',monospace"><span style="color:var(--red)">${fmt(unitAtk(s.cat))} atk</span> · <span>${fmt(unitDef(s.cat))} déf</span></div>
+          <div style="font-size:11px;color:var(--mut);margin-top:3px;font-family:'SF Mono',monospace">${s.cat === 'arche' ? (u.used ? 'Hors combat · trophée' : 'Largage à l\'aveugle · 1×') : `<span style="color:var(--red)">${fmt(unitAtk(s.cat))} atk</span> · <span>${fmt(unitDef(s.cat))} déf</span>`}</div>
         </div>
         <div style="color:var(--mut);font-size:16px">›</div></div>`;
     }).join('');
@@ -578,6 +601,99 @@
       return r;
     };
   }
+  // ── TAXI : largage à l'aveugle (v34) ──
+  function taxiFlight() { try { const t = G.fleet.bmTaxi; return t && !t.done ? t : null; } catch (e) { return null; } }
+  function taxiLayer() {
+    let el = root.querySelector('.bm-taxi');
+    if (!el) { el = document.createElement('div'); el.className = 'bm-taxi'; root.appendChild(el); }
+    el.style.cssText = 'position:absolute;inset:0;z-index:5;background:radial-gradient(120% 70% at 50% 100%,rgba(140,80,255,.22),transparent 60%),#06050a;overflow-y:auto;padding:calc(env(safe-area-inset-top) + 18px) 16px calc(env(safe-area-inset-bottom) + 24px)';
+    return el;
+  }
+  function closeTaxiLayer() { const el = root && root.querySelector('.bm-taxi'); if (el) el.remove(); }
+  function taxiPicker() {
+    const el = taxiLayer();
+    const homeSec = (typeof MY_ADDRESS !== 'undefined' && MY_ADDRESS && MY_ADDRESS.sector) || '';
+    const colSecs = new Set(((G.worlds || []).filter(w => w.kind === 'colony').map(w => (String(w.coord || '').split('-')[1] || ''))));
+    const known = new Set(Object.values(G.knownSystems || {}).map(x => x && x.sector).filter(Boolean));
+    const cells = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('').map(L => {
+      const mark = L === homeSec ? 'Capitale' : colSecs.has(L) ? 'Colonie' : known.has(L) ? 'Exploré' : '';
+      const lit = mark ? (L === homeSec ? '#f1d27a' : '#b98cff') : '#3a3350';
+      return `<button data-sector="${L}" style="aspect-ratio:1;border-radius:10px;border:1px solid ${lit};background:${mark ? 'rgba(185,140,255,.08)' : 'rgba(255,255,255,.02)'};color:#e6edf2;font:600 18px 'Space Grotesk',sans-serif;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;cursor:pointer">
+        ${L}<span style="font:400 8px 'JetBrains Mono',monospace;letter-spacing:.06em;color:${mark ? lit : '#5a5470'};text-transform:uppercase">${mark || 'inconnu'}</span></button>`;
+    }).join('');
+    el.innerHTML = `<div style="font:500 10px 'JetBrains Mono',monospace;letter-spacing:.18em;color:#9b8fc0;text-transform:uppercase">TAXI · Transport par Arche eXtra-Interstellaire</div>
+      <h1 style="margin:6px 0 4px;font-size:26px">Où percer la trame ?</h1>
+      <div style="font-size:14px;color:#b7aed6;line-height:1.5;margin-bottom:16px">Choisis un secteur, même inconnu. Le TAXI y crée un monde dans un système vide tiré au sort : tu ne sauras où qu'en arrivant, dans 1 h. Une seule fois.</div>
+      <div style="display:grid;grid-template-columns:repeat(6,1fr);gap:7px">${cells}</div>
+      <button class="bm-btn" style="margin-top:18px" onclick="this.closest('.bm-taxi').remove()">Annuler</button>`;
+  }
+  function taxiConfirm(L) {
+    const el = taxiLayer();
+    el.innerHTML = `<div style="min-height:100%;display:flex;flex-direction:column;justify-content:center;text-align:center">
+      <div style="font:500 10px 'JetBrains Mono',monospace;letter-spacing:.18em;color:#9b8fc0;text-transform:uppercase">Largage à l'aveugle</div>
+      <div style="font-size:72px;font-weight:600;line-height:1;margin:14px 0 6px;color:#d9c2ff">${esc(L)}</div>
+      <div style="font-size:15px;color:#c7bfe3;line-height:1.55;max-width:30ch;margin:0 auto 22px">Secteur ${esc(L)}. Un système vide, tiré au sort. Une planète-jardin créée pour toi, 72 h de protection.<br>Arrivée dans 1 h. On ne revient pas en arrière.</div>
+      <button class="bm-buy" data-taxigo="${esc(L)}" style="background:#5b3fa0;color:#f1e8ff">Percer la trame</button>
+      <div class="bm-buy-sub" style="margin-bottom:14px">Pauline : « T'es sûr ? Le TAXI, il fait pas de marche arrière. »</div>
+      <button class="bm-btn" data-taxiback>Choisir un autre secteur</button></div>`;
+  }
+  async function taxiDrop(L) {
+    const go = root.querySelector('[data-taxigo]'); if (go) { go.disabled = true; go.textContent = 'Le TAXI s\'arrache…'; }
+    try {
+      const r = await call('/rest/v1/rpc/bm_taxi_drop', { p_sector: L });
+      if (!r || !r.address) throw new Error('no_address');
+      G.fleet.bmTaxi = { address: r.address, ed: r.edition_no || null, departAt: Date.now(), arriveAt: Date.now() + 3600e3, sector: L };
+      const u = units.find(x => x.cat === 'arche'); if (u) { u.used = Date.now(); u.addr = r.address; }
+      try { localStorage.setItem('bm_units_cache', JSON.stringify(units)); } catch (e) {}
+      if (typeof saveGame === 'function') saveGame();
+      closeTaxiLayer(); close();
+      taxiCinema('depart');
+    } catch (e) {
+      const m = e.message || '';
+      const sub = root.querySelector('.bm-taxi .bm-buy-sub');
+      if (sub) sub.innerHTML = m === 'taxi_used' ? 'Ton TAXI a déjà fait son voyage.' : m === 'no_taxi' ? 'Aucun TAXI à ton nom (paiement pas encore reçu ?).'
+        : m === 'not_signed_in' ? 'Connecte ton compte (cloud) pour larguer.' : 'La trame résiste (' + esc(m) + '). Réessaie dans un instant.';
+      if (go) { go.disabled = false; go.textContent = 'Percer la trame'; }
+    }
+  }
+  // cinématique provisoire : la vitrine du TAXI (trou noir) en plein écran, avec le récit ; la vraie viendra avec le modèle final
+  function taxiCinema(kind, done) {
+    const ov = document.createElement('div');
+    ov.style.cssText = 'position:fixed;inset:0;z-index:10050;background:#000;opacity:0;transition:opacity .6s ease';
+    ov.innerHTML = `<iframe src="assets/blackmarket/taxi.html?embed&v=${VERSION}" style="position:absolute;inset:0;width:100%;height:100%;border:0;transition:filter 2.4s ease, transform 2.4s ease"></iframe>
+      <div class="cap" style="position:absolute;left:0;right:0;bottom:calc(env(safe-area-inset-bottom) + 70px);text-align:center;color:#f1e8ff;font:600 20px 'Space Grotesk',sans-serif;letter-spacing:.04em;text-shadow:0 2px 18px #000;padding:0 24px;transition:opacity .5s"></div>
+      <button style="position:absolute;right:16px;top:calc(env(safe-area-inset-top) + 12px);border:1px solid rgba(255,255,255,.25);background:rgba(0,0,0,.4);color:#fff;border-radius:18px;padding:7px 14px;font:500 12px 'Space Grotesk',sans-serif">Passer</button>`;
+    document.body.appendChild(ov); requestAnimationFrame(() => { ov.style.opacity = '1'; });
+    const cap = ov.querySelector('.cap'), fr = ov.querySelector('iframe');
+    const lines = kind === 'depart'
+      ? [[1500, 'Le TAXI émerge du trou noir.'], [5000, 'Il force la trame de l\'univers.'], [8500, 'Destination inconnue. Arrivée dans 1 h.']]
+      : [[1200, 'La trame se déchire. Le TAXI surgit.'], [4800, 'Il ouvre sa gueule et dépose le monde.'], [8400, 'Le trou noir le reprend, sans ménagement.']];
+    const timers = lines.map(([t, txt]) => setTimeout(() => { cap.style.opacity = '0'; setTimeout(() => { cap.textContent = txt; cap.style.opacity = '1'; }, 300); }, t));
+    if (kind !== 'depart') timers.push(setTimeout(() => { fr.style.filter = 'brightness(.25) blur(2px)'; fr.style.transform = 'scaleY(1.6) translateY(30%)'; }, 8600));
+    const end = () => { timers.forEach(clearTimeout); ov.style.opacity = '0'; setTimeout(() => { ov.remove(); if (done) done(); }, 650); };
+    timers.push(setTimeout(end, 12500));
+    ov.querySelector('button').onclick = end;
+  }
+  // arrivée : la colonie (planète-jardin) est fondée chez le joueur ; elle est déjà inscrite sur le serveur
+  let taxiLanding = false;
+  function taxiTick() {
+    const t = taxiFlight(); if (!t || taxiLanding || Date.now() < t.arriveAt || typeof sbFoundColony !== 'function') return;
+    if ((G.worlds || []).some(w => w.coord === t.address)) { t.done = true; return; }
+    taxiLanding = true;
+    try {
+      const w = sbFoundColony({ name: 'TAXI-' + String(t.ed || 0).padStart(3, '0'), coord: t.address });
+      w.garden = true; w.taxi = t.ed || true; w.mpClaimed = true;
+      t.done = true; t.landedAt = Date.now(); t.colonyId = w.id;
+      if (typeof saveGame === 'function') saveGame();
+      taxiCinema('arrive', async () => {
+        try { if (typeof sbAskColonyName === 'function') await sbAskColonyName(w.id, true); } catch (e) {}
+        const go = typeof sbConfirmWarning === 'function' ? await sbConfirmWarning('◈ ' + w.name + ' est née',
+          `Le TAXI a percé la trame et déposé <strong>${esc(w.name)}</strong> (${esc(w.coord)}) : une planète-jardin, protégée 72 h. Tout est à bâtir.<br><br>Le TAXI, lui, est rentré dans ta flotte : coque morte, travail accompli.`, 'Y aller') : true;
+        if (go && typeof sbSwitchWorld === 'function') { sbSwitchWorld(w.id); try { goto('planet'); } catch (e) {} }
+      });
+    } finally { taxiLanding = false; }
+  }
+  setInterval(() => { try { taxiTick(); } catch (e) { console.warn('[TAXI]', e); } }, 5000);
   window.addEventListener('resize', () => { try { fitView(); } catch (e) {} });
   window.SBBlackmarket = { open, close, openOwned, ships: SHIPS, cats: CATS, owned: () => owned, units: () => units, reload: loadOwned };
 })();

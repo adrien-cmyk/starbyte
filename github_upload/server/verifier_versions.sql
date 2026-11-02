@@ -1,4 +1,4 @@
--- Vérifie quels scripts SQL du multijoueur sont passés (v15 → v33). « oui » = déjà lancé.
+-- Vérifie quels scripts SQL du multijoueur sont passés (v15 → v34). « oui » = déjà lancé.
 -- À coller dans Supabase → SQL Editor → Run. Lancer les « NON » dans l'ordre des numéros.
 select v as script, case when ok then 'oui' else 'NON — à lancer' end as lance from (values
   ('v15 ordres',             exists (select 1 from pg_proc where proname = 'mp_ambush_orders')),
@@ -20,5 +20,6 @@ select v as script, case when ok then 'oui' else 'NON — à lancer' end as lanc
   ('v30 parrainage',         exists (select 1 from pg_proc where proname = 'mp_ref_claim')),
   ('v31 blackmarket',        to_regclass('public.bm_purchases') is not null),
   ('v32 blackmarket flotte', exists (select 1 from pg_proc where proname = 'bm_disable')),
-  ('v33 escadre de héros',  exists (select 1 from pg_trigger where tgname = 'bm_raid_speed'))
+  ('v33 escadre de héros',  exists (select 1 from pg_trigger where tgname = 'bm_raid_speed')),
+  ('v34 TAXI',               exists (select 1 from pg_proc where proname = 'bm_taxi_drop'))
 ) t(v, ok);
