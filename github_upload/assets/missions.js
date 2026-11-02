@@ -49,6 +49,8 @@
     return { key: s, label: s || '—', color: '#9fb3bf' };
   }
   const KIND = { route_run: 'Route commerciale', route_post: 'Poste de route', exploration: 'Exploration', dropoff: 'Transport', rapatriation: 'Rapatriement' };
+  // vaisseau amiral du Blackmarket parti en ambassade : « Vaisseau amiral · Dreadnought » plutôt que « Tanker T3 »
+  const envoyKind = (m) => { if (!m.bmEnvoy) return null; const c = window.SBBlackmarket && SBBlackmarket.cats && SBBlackmarket.cats[m.bmEnvoy.cat]; return 'Vaisseau amiral' + (c ? ' · ' + c.label : ''); };
   const kindLabel = (m) => KIND[m.kind] || (m.mpTarget ? 'Ambassade' : m.targetType === 'vein' || m.targetType === 'veine' ? 'Exploitation' : 'Mission tanker');
   function cargoOf(m) {
     const c = m.cargo || {};
@@ -105,7 +107,7 @@
       const ph = phaseOf(m, now), d = destOf(m);
       // PATCH_2110_NOMS : la destination en gros, le nom du tanker en petit
       const _dl = (m.mpTarget && m.mpTarget.pseudo) ? m.mpTarget.pseudo : (!m.dock && !m.targetLabel && typeof sbDestLabel === 'function' && m.targetCoords) ? sbDestLabel(m.targetCoords).label : d.label;
-      html += row({ kind: `Tanker T${tierOf(m)}${ph.key === 'back' ? ' · retour' : ''}`, name: (ph.key === 'back' ? '← ' : '→ ') + _dl, color: ph.color,
+      html += row({ kind: `${envoyKind(m) || 'Tanker T' + tierOf(m)}${ph.key === 'back' ? ' · retour' : ''}`, name: (ph.key === 'back' ? '← ' : '→ ') + _dl, color: ph.color,
         dest: `${d.coords && d.coords !== _dl ? `<span class="mono">${esc(d.coords)}</span> · ` : ''}<span style="opacity:.6">${esc(m.tankerName || 'Tanker')}</span>`,
         state: ph.left != null && ph.left > 0 ? `${ph.label} · ${dur(ph.left)}` : ph.label, t0: ph.t0, t1: ph.t1, onclick: `SBMissions.open('${esc(m.id)}')` });
     }
@@ -205,15 +207,22 @@
     const _sc = el.querySelector('.sbm-scroll'), _sp = el.querySelector('.sbm-space');
     heroGestures(_sp, () => _open && _open.el === el ? _open.ship : null, () => { if (_sc.scrollTop > 30) heroScrollTo(_sc, 0); });
     heroFade(_sc, _sp, el);
-    // le vaisseau, comme sur sa fiche d'unité
+    // le vaisseau, comme sur sa fiche d'unité — un vaisseau amiral (Blackmarket) se montre dans sa vitrine, avec son logo (03/11)
     const model = (typeof UNIT_SHIP3D_MODELS !== 'undefined') ? UNIT_SHIP3D_MODELS.tanker : null;
     const hero = el.querySelector('.sbm-3d');
+    const envoyHero = m.bmEnvoy && window.SBBlackmarket && SBBlackmarket.missionHero ? SBBlackmarket.missionHero(hero, m.bmEnvoy.item) : null;
+    if (envoyHero) {
+      _open.frame = envoyHero; el.classList.add('sbm-frame'); hero.classList.add('on');
+      const dr = document.createElement('div'); dr.className = 'sbm-drawer'; dr.innerHTML = '<div class="sbm-grip"><i></i></div>';
+      dr.appendChild(el.querySelector('.sbm-body')); el.appendChild(dr);
+      dr.querySelector('.sbm-grip').onclick = () => dr.classList.toggle('max');
+    }
     const start = () => {
       if (!_open || _open.el !== el || !model) return;
       try { _open.ship = window.Ship3D.mount(hero, { url: model.url, shiftY: 0.15, ship: model.profile && window.Ship3D.profiles ? window.Ship3D.profiles[model.profile] : undefined,
         onReady: () => hero.classList.add('on'), onError: () => hero.classList.add('fail') }); } catch (e) {}
     };
-    if (window.WebGLRenderingContext && model) { if (window.Ship3D) start(); else window.addEventListener('ship3d-ready', start, { once: true }); }
+    if (!envoyHero && window.WebGLRenderingContext && model) { if (window.Ship3D) start(); else window.addEventListener('ship3d-ready', start, { once: true }); }
     render();
     _open.timer = setInterval(render, 1000);
   }
@@ -221,6 +230,7 @@
     if (!_open) return;
     clearInterval(_open.timer);
     try { if (_open.ship) _open.ship.dispose(); } catch (e) {}
+    try { if (_open.frame) _open.frame.dispose(); } catch (e) {}
     _open.el.remove();
     _open = null;
   }
@@ -236,7 +246,7 @@
       return;
     }
     const now = Date.now(), ph = phaseOf(m, now), d = destOf(m), cg = cargoOf(m);
-    el.querySelector('.sbm-kind').textContent = `${kindLabel(m)} · Tanker T${tierOf(m)}`;
+    el.querySelector('.sbm-kind').textContent = `${kindLabel(m)} · ${envoyKind(m) || 'Tanker T' + tierOf(m)}`;
     el.querySelector('.sbm-name').textContent = m.tankerName || 'Tanker';
     const st = el.querySelector('.sbm-state');
     st.textContent = ph.left != null && ph.left > 0 ? `${ph.label} · ${ph.key === 'dock' ? 'départ dans' : 'arrivée dans'} ${dur(ph.left)}` : ph.label;
@@ -307,7 +317,7 @@
     css();
     return `<div style="padding:12px 0 2px"><div class="sbm-h">Tankers en mission · ${ts.length}</div>` + ts.map(m => {
       const ph = phaseOf(m, now), d = destOf(m);
-      return row({ kind: `Tanker T${tierOf(m)} · ${kindLabel(m)}`, name: m.tankerName || 'Tanker', color: ph.color,
+      return row({ kind: `${envoyKind(m) || 'Tanker T' + tierOf(m)} · ${kindLabel(m)}`, name: m.tankerName || 'Tanker', color: ph.color,
         dest: `${ph.key === 'back' ? '← ' : '→ '}${esc(d.label)}${d.coords && d.coords !== d.label ? ` <span class="mono">${esc(d.coords)}</span>` : ''}`,
         state: ph.left != null && ph.left > 0 ? `${ph.label} · ${dur(ph.left)}` : ph.label, t0: ph.t0, t1: ph.t1, onclick: `SBMissions.open('${esc(m.id)}')` });
     }).join('') + '</div>';
@@ -335,6 +345,12 @@
       #sbm-view .sbm-scroll{position:absolute;inset:0;z-index:2;overflow-y:auto;overflow-x:hidden;-webkit-overflow-scrolling:touch;overscroll-behavior:contain}
       #sbm-view .sbm-space{height:calc(100% - 230px);min-height:260px;touch-action:none}
       #sbm-view .sbm-3d{position:absolute;inset:0}
+      /* vaisseau amiral : sa vitrine (iframe) prend tout l'écran et ses gestes ; la fiche vit dans un tiroir qui défile seul (pas de pointer-events:none sur un conteneur qui défile, iPhone) */
+      #sbm-view.sbm-frame .sbm-scroll{display:none}
+      #sbm-view .sbm-drawer{position:absolute;left:0;right:0;bottom:0;z-index:3;max-height:46%;overflow-y:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;background:linear-gradient(180deg,rgba(5,8,13,0),rgba(5,8,13,.94) 34px);transition:max-height .25s ease}
+      #sbm-view .sbm-drawer.max{max-height:88%}
+      #sbm-view .sbm-grip{position:sticky;top:0;z-index:1;height:30px;display:flex;align-items:center;justify-content:center;cursor:pointer}
+      #sbm-view .sbm-grip i{width:40px;height:4px;border-radius:2px;background:rgba(255,255,255,.35)}
       #sbm-view .sbm-top{position:absolute;left:0;right:0;top:0;padding:calc(14px + env(safe-area-inset-top,0px)) 60px 26px 16px;pointer-events:none;background:linear-gradient(180deg,rgba(5,8,13,.92),rgba(5,8,13,.55) 65%,rgba(5,8,13,0));text-shadow:0 1px 6px rgba(0,0,0,.9);z-index:1}
       #sbm-view .sbm-x{z-index:5}
       #sbm-view .sbm-kind{font:600 10px/1.3 'Space Grotesk',system-ui,sans-serif;letter-spacing:.14em;text-transform:uppercase;color:#9fb3bf}

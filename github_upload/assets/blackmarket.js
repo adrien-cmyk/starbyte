@@ -39,7 +39,7 @@
     'Tu négocies ? Retourne compter tes cailloux au match-3.',
     "T'as vu l'acier ? Ça, ça se construit pas dans ton petit chantier.",
   ];
-  const VERSION = '20261103a';
+  const VERSION = '20261103b';
   // Serveur (schema_mp_v31_blackmarket.sql + fonctions bm-checkout / bm-webhook)
   const SB = 'https://elupnpdcblztpfywnhjl.supabase.co';
   const KEY = 'sb_publishable_tXGrQIROzH2DwBrny1GcHQ_iKJKoBOQ';
@@ -879,9 +879,20 @@
   const LOGO_BASE = SB + '/storage/v1/object/public/ship-logos/';
   const logoUrl = (p) => p ? LOGO_BASE + p.split('/').map(encodeURIComponent).join('/') : null;
   let atelierShip = null, atelierSlots = [];
+  // Fiche de mission (missions.js) : le vaisseau amiral en route est montré dans sa vitrine, avec sa peinture (03/11, Adrien)
+  const heroFrames = new Map();   // iframe → item_id
+  function missionHero(host, item) {
+    if (!host || !SHIPS.some(x => x.id === item)) return null;
+    const f = document.createElement('iframe');
+    f.src = `assets/blackmarket/${item}.html?embed&lg=1&v=${VERSION}`; f.title = 'Vaisseau amiral en 3D'; f.allow = 'fullscreen';
+    f.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;border:0;background:#000';
+    heroFrames.set(f, item); host.appendChild(f);
+    return { frame: f, dispose() { heroFrames.delete(f); f.remove(); } };
+  }
   addEventListener('message', (ev) => {
     if (ev.origin !== location.origin || !ev.data || !ev.data.bmReady) return;
     const src = ev.source;
+    for (const [f, item] of heroFrames) if (f.contentWindow === src) { const p = paint[item] || {}; src.postMessage({ bmLogo: { url: logoUrl(p.path), slots: p.slots || [], outline: p.outline !== false } }, location.origin); return; }
     if (viewerFace && viewerFrame && src === viewerFrame.contentWindow) { src.postMessage({ bmLogo: { url: logoUrl(viewerFace.path), slots: viewerFace.slots || [], outline: viewerFace.outline !== false, focus: (viewerFace.slots || [])[0] } }, location.origin); return; }
     if (!root || ev.data.bmReady !== atelierShip) return;
     atelierSlots = ev.data.slots || [];
@@ -1044,5 +1055,5 @@
     c.dataset.bmEnvoy = '1'; c.style.marginBottom = '10px';
     host.insertBefore(c, host.firstChild);
   }
-  window.SBBlackmarket = { open, close, openOwned, ships: SHIPS, cats: CATS, owned: () => owned, units: () => units, reload: loadOwned, fillRaidFaces, fillFlagship, fillEnvoy, interceptShip, envoyChoices, envoyRows, envoyLost, shipThumbHtml };
+  window.SBBlackmarket = { open, close, openOwned, ships: SHIPS, cats: CATS, owned: () => owned, units: () => units, reload: loadOwned, fillRaidFaces, fillFlagship, fillEnvoy, interceptShip, envoyChoices, envoyRows, envoyLost, shipThumbHtml, missionHero };
 })();
