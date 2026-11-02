@@ -692,11 +692,11 @@
     }
   }
   // ── cinématique du TAXI (taxi-cine.html) : 1. départ → 2. traversée (boucle pendant l'heure) → 3. livraison, puis le rapport ──
-  const CINE_V = '20261102-1';
+  const CINE_V = '20261102-2';
   let cine = null;                                   // { ov, fr, kind, done, timers }
   const CAPS = {
-    depart: { calme: 'Le TAXI emporte ton monde, à l\'abri dans sa gueule.', ouverture: 'Devant lui, la trame de l\'univers cède.', franchissement: 'Il force le passage.', fermeture: 'L\'anomalie se referme sur lui.' },
-    arrivee: { ouverture: 'Quelque part, la trame se déchire.', emergence: 'Le TAXI s\'extirpe de l\'anomalie.', gueule: 'Il ouvre sa gueule…', naissance: '…et rend un monde à l\'univers.', rappel: 'L\'anomalie le rappelle.', effondrement: '', fin: 'Un monde neuf. Le tien.' },
+    depart: { calme: 'Le TAXI emporte ton monde, à l\'abri dans sa gueule.', griffes: 'Ses griffes s\'embrasent…', ouverture: '…et déchirent la trame de l\'univers.', franchissement: 'L\'anomalie l\'avale, l\'étire, le dévore.', fermeture: 'L\'anomalie se referme sur lui.' },
+    arrivee: { ouverture: 'Quelque part, la trame se déchire.', emergence: 'Le TAXI jaillit de l\'anomalie.', gueule: 'Il ouvre sa gueule…', naissance: '…et rend un monde à l\'univers.', rappel: 'L\'anomalie le rappelle.', effondrement: '', fin: 'Un monde neuf. Le tien.' },
   };
   function cineCountdown() {
     const fl = taxiFlight(); if (!fl) return '';
