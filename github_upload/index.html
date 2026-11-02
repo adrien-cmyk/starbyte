@@ -8390,7 +8390,7 @@ function _tankerMissionTier(m) { return m.tier || m.tankerTier || 0; }
 // PATCH_2010_FLOTTES — chaque flotte, mission et garnison appartient à la planète d'où elle est partie
 function _sbMine(x) { return ((x && x.world) || 'home') === ((typeof G !== 'undefined' && G.activeWorld) || 'home'); }
 function sbTagWorld(x) { if (x && !x.world) x.world = (typeof G !== 'undefined' && G.activeWorld) || 'home'; return x; }
-function _busyTankerMissions() { return (G.tankerMissions || []).filter(m => TANKER_BUSY_STATUSES.includes(m.status) && _sbMine(m)); }
+function _busyTankerMissions() { return (G.tankerMissions || []).filter(m => !m.bmEnvoy && TANKER_BUSY_STATUSES.includes(m.status) && _sbMine(m)); }   // PATCH_0211_AMBASSADEUR : un vaisseau d'exception en mission ne bloque aucun tanker
 function _tankersInFleets(t, excludeFleetId) {
   let n = 0;
   for (const f of (G.fleet && G.fleet.prepared) || []) {
@@ -10030,7 +10030,7 @@ function mpTradeDeliver(key) {
   if (typeof renderTankerCompose === 'function') renderTankerCompose();
 }
 function _mpTradeFill(c) {
-  const cap = (SHIP_TIERS.tanker[c.tankerSelected] || {}).cargo || 0;
+  const cap = _composeCargoMax(c);
   const s = mpTradeSurplus();
   let free = cap;
   c.cargo.resources = { metal: 0, energie: 0, cristal: 0 };
@@ -10894,7 +10894,7 @@ function renderDiploReportDetail(r) {
   const k = d.pactId ? _mpDiplo().pacts[d.pactId] : null;
   let html = '';
   if (d.type === 'embassy_in') {
-    html += box(`Le tanker <strong>${d.tanker || '?'}</strong> de <strong>${d.pseudo}</strong> a pris orbite au-dessus de ta colonie. Tant qu'il reste, son ambassade est ouverte : il peut te hisser des pavillons et te proposer un pacte.${addr}`);
+    html += box(`${window.SBBlackmarket && SBBlackmarket.shipThumbHtml(d.tanker) ? 'Le vaisseau' : 'Le tanker'} <strong>${d.tanker || '?'}</strong> de <strong>${d.pseudo}</strong> a pris orbite au-dessus de ta colonie. Tant qu'il reste, son ambassade est ouverte : il peut te hisser des pavillons et te proposer un pacte.${addr}`);
     let cargoHtml;
     if (!cargoLine) cargoHtml = `<div style="font-size:12px;color:var(--mut);font-style:italic;text-align:center;padding:8px">Cale vide : une simple présence.</div>`;
     else if (d.state === 'accepted') cargoHtml = `<div style="font-size:12px;color:var(--green);text-align:center;padding:8px">Cale acceptée : +${cargoLine}</div>`;
@@ -10946,6 +10946,8 @@ function renderDiploReportDetail(r) {
     html += box(`<strong>${d.pseudo}</strong> a refusé la cale de ${d.tanker || 'ton tanker'}${cargoLine ? ` (${cargoLine})` : ''}. Elle reste à bord : rappelle le tanker pour la récupérer.${addr}`);
   }
   el.innerHTML = html;
+  // PATCH_0211_AMBASSADEUR — la fiche du vaisseau en orbite, avec son logo
+  try { if (d.type === 'embassy_in' && window.SBBlackmarket) SBBlackmarket.fillEnvoy(el, d.presenceId, d.tanker); } catch (e) {}
 }
 
 // Bloc « Ambassade » sur la fiche d'une planète tenue par un vrai commandant
@@ -11138,13 +11140,15 @@ function mpEmbassyRender() {
   if (!status) {
     const rows = [];
     if (m) rows.push(`<div style="font-size:12px;color:#e6f0ff">${_esc(m.tankerName)} en orbite chez ${_esc(pseudo)}</div>`);
-    if (inc) rows.push(`<div style="font-size:12px;color:#e6f0ff">Son tanker ${_esc(inc.tanker || '')} est en orbite chez toi</div>`);
+    if (inc) rows.push(`<div style="font-size:12px;color:#e6f0ff">${window.SBBlackmarket && SBBlackmarket.shipThumbHtml(inc.tanker) ? '' : 'Son tanker '}${_esc(inc.tanker || '')} est en orbite chez toi</div>`);
     const _post = typeof _mpPostWith === 'function' ? _mpPostWith(addr) : null;   // PATCH_1310_POSTES
     if (_post) rows.push(`<div style="font-size:12px;color:#e6f0ff">Vos postes se font face à <span style="font-family:var(--font-mono)">${_post.system}</span></div>`);
     if (!rows.length) rows.push(`<div style="font-size:12px;color:var(--mut)">Aucun tanker en orbite entre vous : l'ambassade est fermée.</div>`);
     status = `<div class="emb-label">Ambassade</div>${rows.join('')}`;
   }
   document.getElementById('emb-status').innerHTML = status;
+  // PATCH_0211_AMBASSADEUR — un vaisseau d'exception en orbite : sa fiche avec le logo
+  try { if (window.SBBlackmarket) SBBlackmarket.fillEnvoy(document.getElementById('emb-status'), (m && m.bmEnvoy && m.mpPresenceId) || (inc && inc.presenceId) || null, m && m.bmEnvoy ? null : inc && inc.tanker); } catch (e) {}
   // actions : pavillon, sa planète, rappeler mon tanker
   const acts = [];
   if (planet) acts.push(_mpDiploBtn('⚑ Pavillon', `openMessagePlayer('${addr}')`));
@@ -11223,6 +11227,15 @@ function mpEmbassyMountHero(m, inc, pseudo) {
   const scr = document.getElementById('scr-embassy');
   const scroll = scr.querySelector('.screen-scroll');
   const model = typeof UNIT_SHIP3D_MODELS !== 'undefined' && UNIT_SHIP3D_MODELS.tanker;
+  // PATCH_0211_AMBASSADEUR — pas de modèle de tanker au-dessus d'un vaisseau d'exception : c'est sa fiche qui le montre
+  const _isEnvoy = (m && m.bmEnvoy) || (!m && inc && window.SBBlackmarket && SBBlackmarket.shipThumbHtml(inc.tanker));
+  if (_isEnvoy) {
+    if (_emb.hero) { try { _emb.hero.dispose(); } catch (e) {} _emb.hero = null; }
+    const _h = document.getElementById('emb-hero'), _s = document.getElementById('emb-space');
+    if (_h) _h.style.display = 'none'; if (_s) _s.style.display = 'none';
+    scr.classList.remove('ud-hero', 'ud-ship');
+    return;
+  }
   if (!model || !window.WebGLRenderingContext) { scr.classList.remove('ud-hero', 'ud-ship'); return; }
   let hero = document.getElementById('emb-hero');
   if (!hero) { hero = document.createElement('div'); hero.id = 'emb-hero'; hero.className = 'u3d u3d-hero'; scr.insertBefore(hero, scroll); }
@@ -11530,6 +11543,8 @@ function renderPiracyReportDetail(r) {
     story = `L'équipage de <strong>${d.pseudo || 'ce convoi'}</strong> connaissait sa route par cœur : il a pris un couloir que ta flotte n'a pas vu venir.`;
   } else if (d.type === 'robbed_empty') {
     story = `Ta flotte a arraisonné le convoi de <strong>${d.pseudo || 'un commandant'}</strong>, mais ses cales étaient pleines ou sans tanker : rien n'a pu être emporté.`;
+    // PATCH_0211_AMBASSADEUR — vaincre un vaisseau d'exception sans cale : l'honneur, et c'est tout
+    if (!d.npc && d.tanker && window.SBBlackmarket && SBBlackmarket.shipThumbHtml(d.tanker)) story = `Tu as vaincu <strong>${_esc(d.tanker)}</strong> de <strong>${d.pseudo || 'un commandant'}</strong>. Sa cale est vide. Il te salue.`;
   } else if (d.type === 'spied') {
     story = `Tu as laissé passer le convoi de <strong>${d.pseudo || 'un commandant'}</strong> sans te montrer. Ta flotte a relevé sa route.<br><br>Il ne sait pas que tu sais. Au premier abordage, il l'apprendra.`;
     rows = (d.address ? line('Monde d\'origine', `${d.address} · dans ton carnet`) : '') + line('Trajet', `${d.from || '?'} → ${d.to || '?'}`) + (d.dock ? line('Dock', d.dock) : '');
@@ -11543,6 +11558,7 @@ function renderPiracyReportDetail(r) {
     story = `<strong>${d.pseudo || 'Un pirate'}</strong> attendait ton tanker <strong>${d.tanker || ''}</strong> en embuscade. Ton équipage connaissait la route : il l'a semé.`;
   } else if (d.type === 'convoy_boarded') {
     story = `<strong>${d.pseudo || 'Un pirate'}</strong> a arraisonné ton tanker <strong>${d.tanker || ''}</strong> ${_mpLegLabel(d)}, mais n'a rien pu emporter.`;
+    if (window.SBBlackmarket && SBBlackmarket.shipThumbHtml(d.tanker)) story = `<strong>${d.pseudo || 'Un pirate'}</strong> a vaincu <strong>${_esc(d.tanker)}</strong> ${_mpLegLabel(d)}. La cale était vide. Ton équipage l'a salué.`;   // PATCH_0211_AMBASSADEUR
   }
   if (d.npc) {   // PATCH_1510_ORDRES — convoi PNJ d'une ligne
     const who = `<strong>${d.who || 'un convoi'}</strong> (${d.ships || '?'} vaisseaux, ${d.escort || 'escorte inconnue'})`;
@@ -11664,8 +11680,10 @@ async function mpIngestPiracy(d, meId) {
       const type = i.outcome === 'won' ? 'robbed_ok' : i.outcome === 'evaded' ? 'robbed_evaded' : i.outcome === 'empty' ? 'robbed_empty' : 'robbed_fail';
       if (type === 'robbed_ok' && window.SBLines && SBLines.noteRobbery) SBLines.noteRobbery(i.victim, i.system);   // PATCH_1410_MARCHE (+ système : PATCH_1510_ORDRES) — dévaliser son acheteur = trahison
       const lossLine = i.losses ? _mpLossLine(i.losses, { tanker: {}, fregate: {}, cuirasse: {} }) : '';
-      _mpPirReport(type, { icon: '⚔', pseudo: i.victim, system: i.system, fleet: f ? f.name : '', loot: i.loot,
+      const _rep = _mpPirReport(type, { icon: '⚔', pseudo: i.victim, system: i.system, fleet: f ? f.name : '', loot: i.loot,
         dock: i.dock_name, leg: i.leg, kind: i.kind, lossLine }, 'itc-' + i.id);
+      // PATCH_0211_AMBASSADEUR — sans butin : le registre dit qui était à bord (v38 ; sans elle, le rapport reste celui d'un convoi)
+      if (type === 'robbed_empty' && _rep && window.SBBlackmarket) SBBlackmarket.interceptShip(i.id).then(n => { if (n && _rep.piracy) { _rep.piracy.tanker = n; if (typeof saveGame === 'function') saveGame(); } });
       const _v = i.victim || 'pavillon impérial';
       toast(type === 'robbed_ok' ? `⚔ Convoi (${_v}) dévalisé : +${_mpResLine(i.loot)} en cale` : type === 'robbed_fail' ? `⚔ Le convoi (${_v}) a repoussé ton abordage` : `⚔ Le convoi (${_v}) t'a échappé`);
       _mpLedgerSet(key, { settled: true });
@@ -11905,7 +11923,7 @@ function _mpRenderInterceptSheet() {
     <div style="font-size:18px;color:#e6f0ff;font-weight:700;margin:6px 0 12px">${d.pseudo || 'Pavillon impérial'}</div>
     <div style="margin-bottom:14px">
       ${line('Identification', d.pseudo ? `${t.confidence} % de confiance` : 'masquée (voie balisée)')}
-      ${line('Tanker', 'T' + t.tankerTier)}
+      ${window.SBBlackmarket && SBBlackmarket.shipThumbHtml(d && d.tanker_name) ? line('Vaisseau', _esc(d.tanker_name)) : line('Tanker', 'T' + t.tankerTier)}
       ${line('Cale estimée', t.cargoEstimate)}
       ${line('Trajet', _mpLegLabel({ leg: d.leg, dock: d.dock, kind: d.leg === 'out' && !d.dock ? 'embassy' : 'route' }))}
       ${d.next ? line('Cap relevé', `<span onclick="closeMpInterceptSheet();openSystemOnMap('${d.next}')" style="cursor:pointer;text-decoration:underline dotted;text-underline-offset:3px;font-family:var(--font-mono)">${d.next}</span>${d.onRoute ? ' · route privée' : ''}`, '#ff9a6a') : ''}
@@ -12491,6 +12509,23 @@ function _mpRumorText(r) {
     }
     case 'bounty_claimed': return `${r.actor} a touché la prime impériale sur la tête de ${r.target}${s}${r.payload && r.payload.bounty ? ' : ' + fmt(r.payload.bounty) + ' CG' : ''}. Les chasseurs de primes affûtent leurs canons.`;   // PATCH_2210_EMPIRE
     case 'route_sold': return `${r.actor} vend des cartes${r.target ? ` au comptoir de ${r.target}` : ''}. Vraies ou fausses, ça reste à voir.`;
+    // PATCH_0211_AMBASSADEUR — la parade fait parler
+    case 'envoy_dock': case 'envoy_orbit': {
+      const sh = window.SBBlackmarket && SBBlackmarket.ships.find(x => x.id === (r.payload && r.payload.item));
+      if (!sh) return '';
+      const of = /^[aeiouyàâéèêëîïôöùûü]/i.test(String(r.actor || '')) ? `d'${r.actor}` : `de ${r.actor}`;
+      const V = r.kind === 'envoy_dock' ? [
+        `${sh.name} ${of} a accosté à ${r.target || 'un port franc'}. Personne n'a osé lui demander de se garer ailleurs.`,
+        `${sh.name} ${of} est à quai à ${r.target || 'un port franc'}. Il prend deux places. Personne ne dit rien.`,
+        `On a vu ${sh.name} ${of} à ${r.target || 'un port franc'}. Le bar a baissé d'un ton.`,
+        `${sh.name} ${of} vient d'arriver à ${r.target || 'un port franc'}. Les dockers ont retrouvé leur politesse.`,
+      ] : [
+        `${sh.name} ${of} a pris orbite chez quelqu'un. On ne sait pas chez qui. Lui, il le sait.`,
+        `${sh.name} ${of} tourne au-dessus d'un monde, en ambassade. Une visite de courtoisie, paraît-il.`,
+        `${r.actor} a envoyé ${sh.name} en ambassade. Difficile de refuser de le recevoir.`,
+      ];
+      return V[Math.abs((r.payload && r.payload.v) || 0) % V.length];
+    }
     default: return '';
   }
 }
@@ -12539,7 +12574,7 @@ function _renderDockPlayersSection(mission, dock) {
       const crew = (CREW_PHYSICAL_LABELS[c.crew_state] || CREW_PHYSICAL_LABELS.sobre);
       return `
         <div onclick="openMpConvoySheet('${c.presence_id}')" style="display:flex;align-items:center;gap:10px;padding:10px 12px;background:rgba(95,168,232,.04);border:1px solid rgba(95,168,232,.30);border-radius:6px;cursor:pointer;margin-bottom:6px">
-          <div style="font-size:13px;color:#5fa8e8;width:18px;text-align:center">⚑</div>
+          ${(window.SBBlackmarket && SBBlackmarket.shipThumbHtml(c.tanker_name)) || `<div style="font-size:13px;color:#5fa8e8;width:18px;text-align:center">⚑</div>`}
           <div style="flex:1;min-width:0">
             <div style="display:flex;align-items:baseline;gap:8px;flex-wrap:wrap">
               <span style="font-size:13px;color:#e6f0ff;font-weight:600">${c.pseudo}</span>
@@ -13237,7 +13272,7 @@ function renderTankerMissionCard(mission, opts) {
   // ─── D5.3 : Cas exploration (tanker parti sur une piste) ───
   if (isExploring) {
     const margin = opts.inline ? '0' : '0 16px 10px';
-    const tankerIcon = PNG_ILLUSTRATIONS.tanker
+    const tankerIcon = m.bmEnvoy && window.SBBlackmarket ? SBBlackmarket.shipThumbHtml(m.tankerName) : PNG_ILLUSTRATIONS.tanker
       ? `<img src="${PNG_ILLUSTRATIONS.tanker}" alt="Tanker" onerror="pngFallback(this, 'tanker')">`
       : `${icon('tanker', {size:18})}`;
     const remainingMs = Math.max(0, (m.returnArrivalAt || m.arrivalAt) - Date.now());
@@ -13272,7 +13307,7 @@ function renderTankerMissionCard(mission, opts) {
   // ─── D2 : Cas docked (tanker en séjour au dock) ───
   if (isDocked) {
     const margin = opts.inline ? '0' : '0 16px 10px';
-    const tankerIcon = PNG_ILLUSTRATIONS.tanker
+    const tankerIcon = m.bmEnvoy && window.SBBlackmarket ? SBBlackmarket.shipThumbHtml(m.tankerName) : PNG_ILLUSTRATIONS.tanker
       ? `<img src="${PNG_ILLUSTRATIONS.tanker}" alt="Tanker" onerror="pngFallback(this, 'tanker')">`
       : `${icon('tanker', {size:18})}`;
     const dockName = m.dock?.name || 'dock inconnu';
@@ -13313,7 +13348,7 @@ function renderTankerMissionCard(mission, opts) {
     const onclickAttr = clickable ? (m.mpTarget && m.mpTarget.address ? `onclick="openEmbassy('${m.mpTarget.address}')"` : `onclick="openPlanetDetail('${m.destinationPlanetCoord || m.targetCoords}')"`) : '';
     const cursorStyle = clickable ? 'cursor:pointer;' : '';
 
-    const tankerIcon = PNG_ILLUSTRATIONS.tanker
+    const tankerIcon = m.bmEnvoy && window.SBBlackmarket ? SBBlackmarket.shipThumbHtml(m.tankerName) : PNG_ILLUSTRATIONS.tanker
       ? `<img src="${PNG_ILLUSTRATIONS.tanker}" alt="Tanker" onerror="pngFallback(this, 'tanker')">`
       : `${icon('tanker', {size:18})}`;
 
@@ -13378,7 +13413,7 @@ function renderTankerMissionCard(mission, opts) {
   const cursorStyle = clickable ? 'cursor:pointer;' : '';
 
   // Illustration tanker (chunk D+ 14/05) — réutilise la classe .hangar-icon (44x44)
-  const tankerIcon = PNG_ILLUSTRATIONS.tanker
+  const tankerIcon = m.bmEnvoy && window.SBBlackmarket ? SBBlackmarket.shipThumbHtml(m.tankerName) : PNG_ILLUSTRATIONS.tanker
     ? `<img src="${PNG_ILLUSTRATIONS.tanker}" alt="Tanker" onerror="pngFallback(this, 'tanker')">`
     : `${icon('tanker', {size:18})}`;
 
@@ -26256,7 +26291,8 @@ function handleTankerReturn(missionId) {
   if (isLost) {
     // Tanker perdu : retirer de la flotte (priorité t1, sinon t2, sinon t3)
     const stat = G.fleet?.stationed?.tanker;
-    if (stat) {
+    if (mission.bmEnvoy) { if (window.SBBlackmarket) SBBlackmarket.envoyLost(mission); }   // PATCH_0211_AMBASSADEUR
+    else if (stat) {
       if (stat.t1 > 0) stat.t1 -= 1;
       else if (stat.t2 > 0) stat.t2 -= 1;
       else if (stat.t3 > 0) stat.t3 -= 1;
@@ -26273,7 +26309,7 @@ function handleTankerReturn(missionId) {
     storeTankerReturnReport(mission, null, true);
 
     if (typeof toast === 'function') {
-      toast(`${mission.tankerName} ne reviendra pas — anomalie magnétique`);
+      toast(mission.bmEnvoy ? `${mission.tankerName} sort de l'anomalie magnétique hors service` : `${mission.tankerName} ne reviendra pas — anomalie magnétique`);
     }
   } else {
     // Calcul du loot
@@ -26514,6 +26550,7 @@ function generateTankerReturnNarrative(mission, loot, isLost) {
 }
 
 function _narrateTankerLoss(mission) {
+  if (mission.bmEnvoy) return `${mission.tankerName} est ressorti de là la cale vide et la coque fumante. Il rentre à quai, hors service. Personne à bord ne veut en parler.`;   // PATCH_0211_AMBASSADEUR
   const crew = pickSpaceWorkerName();
   return `Le tanker ${mission.tankerName}, sous commandement de ${crew}, n'a pas répondu à l'appel après son entrée dans la zone d'anomalie ${mission.targetCoords}.\n\nLes dernières transmissions étaient incohérentes — les capteurs rapportaient des champs gravitationnels qui ne correspondaient à aucun modèle connu. Le contact a été perdu treize minutes après l'arrivée prévue.\n\nLa mission de recherche a été annulée. L'équipage a été déclaré disparu au cycle suivant. ${crew} était à bord depuis huit cycles.`;
 }
@@ -26817,8 +26854,9 @@ function openTankerCompose(planetCoord) {
   const inMission = (G.tankerMissions || []).filter(m => m.status === 'in_transit' || m.status === 'returning').length;
   const inRelay   = (G.tankerMissions || []).filter(m => m.status === 'orbital_relay').length;
   const available = tankerAvailability(null);
+  const _envoys = window.SBBlackmarket ? SBBlackmarket.envoyChoices() : [];   // PATCH_0211_AMBASSADEUR
 
-  if (available <= 0) {
+  if (available <= 0 && !_envoys.length) {
     if (typeof toast === 'function') toast('Aucun tanker disponible');
     return;
   }
@@ -26827,6 +26865,11 @@ function openTankerCompose(planetCoord) {
   const planet = findPlanetByCoord(planetCoord);
   if (!planet) {
     if (typeof toast === 'function') toast('Planète introuvable');
+    return;
+  }
+  // PATCH_0211_AMBASSADEUR — phase 1 : l'ambassadeur ne va que chez un vrai commandant
+  if (available <= 0 && !planet.isReal) {
+    if (typeof toast === 'function') toast('Aucun tanker disponible');
     return;
   }
 
@@ -26851,6 +26894,7 @@ function openTankerCompose(planetCoord) {
     planetPlayerName: planet.playerName || null,  // ← Si non-null = planète occupée par joueur
     realPlayer: planet.isReal ? { address: planet.mpAddress || planetCoord, pseudo: planet.playerName } : null,
     tankerSelected: defaultTier,
+    envoy: available <= 0 ? _envoys[0] : null,   // PATCH_0211_AMBASSADEUR
     cargo: {
       soldiers: { garde: 0, lourd: 0 },
       resources: { metal: 0, energie: 0, cristal: 0 },
@@ -26943,7 +26987,7 @@ function renderTankerComposeTankers() {
 
     const tierData = SHIP_TIERS.tanker[t];
     const cargoMax = tierData?.cargo || 0;
-    const isSelected = c.tankerSelected === t;
+    const isSelected = !c.envoy && c.tankerSelected === t;
 
     html += `
       <div onclick="selectComposeTanker(${t})" style="margin-bottom:8px;padding:10px 12px;background:${isSelected ? 'rgba(255,200,100,.10)' : 'rgba(40,40,40,.3)'};border:1px solid ${isSelected ? '#ffc864' : 'var(--border)'};border-radius:6px;cursor:pointer;display:flex;align-items:center;gap:10px">
@@ -26959,12 +27003,30 @@ function renderTankerComposeTankers() {
   if (!anyTier) {
     html += '<div style="padding:10px;color:var(--mut);font-style:italic;text-align:center;font-size:11px">Aucun tanker disponible</div>';
   }
+  // PATCH_0211_AMBASSADEUR — sous les tankers, les vaisseaux d'exception libres (vers un vrai commandant, phase 1)
+  if (c.realPlayer && window.SBBlackmarket) {
+    html += SBBlackmarket.envoyRows(c.envoy && c.envoy.pid, 'selectComposeEnvoy', { needCargo: !!c.trade });
+  }
   html += '</div>';
   list.innerHTML = html;
+}
+// PATCH_0211_AMBASSADEUR — la capacité de la cale, qu'on envoie un tanker ou un vaisseau d'exception
+function _composeCargoMax(c) { return c && c.envoy ? (c.envoy.cargo || 0) : ((SHIP_TIERS.tanker[c && c.tankerSelected] || {}).cargo || 0); }
+function selectComposeEnvoy(pid) {
+  const c = G.tankerComposing; if (!c || !window.SBBlackmarket) return;
+  const e = SBBlackmarket.envoyChoices().find(x => x.pid === pid); if (!e) return;
+  c.envoy = e;
+  c.cargo.soldiers = { garde: 0, lourd: 0 };
+  if (computeComposeCargoUsed() > (e.cargo || 0)) {
+    c.cargo.resources = { metal: 0, energie: 0, cristal: 0 };
+    if (e.cargo && typeof toast === 'function') toast('Cale réinitialisée (capacité réduite)');
+  }
+  renderTankerCompose();
 }
 
 function selectComposeTanker(tier) {
   if (!G.tankerComposing) return;
+  G.tankerComposing.envoy = null;   // PATCH_0211_AMBASSADEUR
   G.tankerComposing.tankerSelected = tier;
   // Si la cale dépasse la nouvelle capacité, la réduit proportionnellement
   const cargoMax = SHIP_TIERS.tanker[tier]?.cargo || 0;
@@ -26985,8 +27047,11 @@ function renderTankerComposeCargo() {
   const list = document.getElementById('tanker-compose-cargo');
   if (!list) return;
   const c = G.tankerComposing;
-  const tierData = SHIP_TIERS.tanker[c.tankerSelected];
-  const cargoMax = tierData?.cargo || 0;
+  const cargoMax = _composeCargoMax(c);   // PATCH_0211_AMBASSADEUR
+  if (c.envoy && !cargoMax) {
+    list.innerHTML = `<div style="padding:0 16px"><div style="padding:12px 14px;border:1px dashed rgba(201,164,90,.4);border-radius:8px;font-size:12px;line-height:1.5;color:var(--mut)"><span style="color:#c9a45a">${c.envoy.name}</span> n'a pas de cale. Il ne vient rien livrer : il vient pour être vu.</div></div>`;
+    return;
+  }
   const used = computeComposeCargoUsed();
   const usedPct = cargoMax > 0 ? (used / cargoMax) * 100 : 0;
 
@@ -27158,7 +27223,7 @@ function adjustComposeCargoSoldier(sk, delta) {
   if (!c) return;
   const unit = DEFENSE_UNITS[sk];
   if (!unit) return;
-  const cargoMax = SHIP_TIERS.tanker[c.tankerSelected]?.cargo || 0;
+  const cargoMax = _composeCargoMax(c);
   const used = computeComposeCargoUsed();
   const weight = unit.soldierWeight;
   const cargoFree = cargoMax - used;
@@ -27197,7 +27262,7 @@ function adjustComposeCargoResource(rk, delta) {
   if (!c) return;
   const r = G.res?.[rk];
   if (!r) return;
-  const cargoMax = SHIP_TIERS.tanker[c.tankerSelected]?.cargo || 0;
+  const cargoMax = _composeCargoMax(c);
   const used = computeComposeCargoUsed();
   const cargoFree = cargoMax - used;
   const owned = Math.floor(r.v);
@@ -27525,16 +27590,20 @@ function confirmTankerComposition() {
   // Les soldats ne sont pas "consommés" — ils sont engagés (compte via getAvailableSoldiers)
 
   // Générer un nom de tanker
-  const tankerName = pickTankerName();
+  // PATCH_0211_AMBASSADEUR — un vaisseau d'exception garde son nom, le Héro va 20 % plus vite
+  const _envoy = c.envoy && window.SBBlackmarket ? SBBlackmarket.envoyChoices().find(x => x.pid === c.envoy.pid) : null;
+  if (c.envoy && !_envoy) { toast('Ce vaisseau n\'est plus disponible'); c.envoy = null; renderTankerCompose(); return; }
+  const tankerName = _envoy ? _envoy.name : pickTankerName();
   const now = Date.now();
   // AMBASSADES_1210 — vers un vrai commandant : vrai trajet (même règle que les raids, aller simple)
-  const durationMs = (c.realPlayer && typeof mpRaidTravelMs === 'function') ? mpRaidTravelMs({ mpAddress: c.realPlayer.address }) : 5 * 60 * 1000;
+  const durationMs = ((c.realPlayer && typeof mpRaidTravelMs === 'function') ? mpRaidTravelMs({ mpAddress: c.realPlayer.address }) : 5 * 60 * 1000) * (_envoy ? _envoy.speed : 1);
 
   // Créer la mission
   const mission = {
     id: 'tm-' + now + '-' + Math.random().toString(36).slice(2, 6),
     tankerName,
-    tankerTier: c.tankerSelected,
+    tankerTier: _envoy ? 3 : c.tankerSelected,   // PATCH_0211_AMBASSADEUR : abordé comme un Tanker T3
+    bmEnvoy: _envoy ? { pid: _envoy.pid, item: _envoy.item, cat: _envoy.cat, name: _envoy.name, cargo: _envoy.cargo } : undefined,
     departedAt: now,
     arrivalAt: now + durationMs,
     status: 'in_transit',
@@ -39656,7 +39725,8 @@ function renderPlanetDetailScreen() {
     const totalTankers = (stat.t1 || 0) + (stat.t2 || 0) + (stat.t3 || 0);
     // AMBASSADES_1210 — même règle de réservation que partout (missions, ambassades, quais)
     const availableTankers = typeof tankerAvailability === 'function' ? tankerAvailability(null) : totalTankers;
-    const showTankerBtn = availableTankers > 0;
+    // PATCH_0211_AMBASSADEUR : chez un vrai commandant, un vaisseau d'exception libre suffit
+    const showTankerBtn = availableTankers > 0 || (p.isReal && window.SBBlackmarket && SBBlackmarket.envoyChoices().length > 0);
 
     // Bloc garnison si présente
     const garrisons = getGarrisonsAt(p.coord);
@@ -43566,7 +43636,7 @@ function routeReleaseMission(route, missionId) {
   if (live.length) { route.status = route.status === 'collapsed' ? 'collapsed' : 'in_use'; route.activeMissionId = live[live.length - 1].id; }
   else { route.activeMissionId = null; if (route.status === 'in_use') route.status = 'active'; }
 }
-function launchTankerOnRoute(routeId, tierKey, cargo) {
+function launchTankerOnRoute(routeId, tierKey, cargo, envoyIn) {
   if (!Array.isArray(G.tankerMissions)) G.tankerMissions = [];
   const route = (G.routes || []).find(r => r.id === routeId);
   if (!route) {
@@ -43579,8 +43649,11 @@ function launchTankerOnRoute(routeId, tierKey, cargo) {
   }
   // PATCH_1510_ROUTE_MULTI : un 2e tanker peut suivre le 1er sur la même route
 
-  const tier = parseInt(String(tierKey).replace('t', ''), 10);
-  const tierCfg = TANKER_TIER_CONFIG[tier];
+  // PATCH_0211_AMBASSADEUR — un vaisseau d'exception à la place du tanker : abordé comme un T3, sa propre cale, son propre carburant
+  const _envoy = envoyIn && window.SBBlackmarket ? SBBlackmarket.envoyChoices().find(x => x.pid === envoyIn.pid) : null;
+  if (envoyIn && !_envoy) { if (typeof toast === 'function') toast('Ce vaisseau n\'est plus disponible'); return null; }
+  const tier = _envoy ? 3 : parseInt(String(tierKey).replace('t', ''), 10);
+  const tierCfg = _envoy ? { fuelCost: _envoy.fuel, cargoCapacity: _envoy.cargo, label: _envoy.name } : TANKER_TIER_CONFIG[tier];
   if (!tierCfg) {
     if (typeof toast === 'function') toast('Tier de tanker invalide');
     return null;
@@ -43593,7 +43666,7 @@ function launchTankerOnRoute(routeId, tierKey, cargo) {
     (m.status === 'in_transit' || m.status === 'docked' || m.status === 'returning')
     && m.tier === tier
   ).length;
-  if (tankerAvailability(tier) <= 0) {
+  if (!_envoy && tankerAvailability(tier) <= 0) {
     if (typeof toast === 'function') toast(`Aucun tanker T${tier} disponible`);
     return null;
   }
@@ -43641,11 +43714,12 @@ function launchTankerOnRoute(routeId, tierKey, cargo) {
   const now = Date.now();
   const TEST_MIN_MS = 5 * 60 * 1000;
   const TEST_MAX_MS = 10 * 60 * 1000;
-  const durationMs = TEST_MIN_MS + Math.random() * (TEST_MAX_MS - TEST_MIN_MS);
+  const durationMs = (TEST_MIN_MS + Math.random() * (TEST_MAX_MS - TEST_MIN_MS)) * (_envoy ? _envoy.speed : 1);
 
   const mission = {
     id: 'tm-' + now + '-' + Math.random().toString(36).slice(2, 6),
-    tankerName: 'Σ-' + Math.floor(Math.random() * 99 + 1),
+    tankerName: _envoy ? _envoy.name : 'Σ-' + Math.floor(Math.random() * 99 + 1),
+    bmEnvoy: _envoy ? { pid: _envoy.pid, item: _envoy.item, cat: _envoy.cat, name: _envoy.name, cargo: _envoy.cargo } : undefined,   // PATCH_0211_AMBASSADEUR
     kind: 'route_run',           // ← marqueur Chunk D
     tier,
     routeId,
@@ -45207,7 +45281,7 @@ function _renderExplorationLauncher() {
   const inMission = (G.tankerMissions || []).filter(m =>
     ['in_transit', 'docked', 'returning', 'exploring'].includes(m.status)
   );
-  const availableByTier = (t) => (stat['t' + t] || 0) - inMission.filter(m => m.tier === t).length;
+  const availableByTier = (t) => (stat['t' + t] || 0) - inMission.filter(m => m.tier === t && !m.bmEnvoy).length;
 
   const tierButtons = [1, 2, 3].map(t => {
     const avail = availableByTier(t);
@@ -46243,14 +46317,15 @@ function _completeRouteRunReturn(missionId) {
 
   // ─── Tanker vide → route vexée (option A canon) ───
   const wasEmpty = (mission.cargoTotal || 0) === 0;
-  if (route && wasEmpty) {
+  if (route && wasEmpty && !mission.bmEnvoy) {   // PATCH_0211_AMBASSADEUR : un Dreadnought n'a pas de cale, ce n'est pas un tanker vide
     route.stability = Math.max(0, (route.stability || 50) - 5);
   }
 
   if (isLost) {
     // Perte tanker : consomme un T<tier> de la flotte
     const stat = G.fleet?.stationed?.tanker;
-    if (stat && stat['t' + mission.tier] > 0) stat['t' + mission.tier] -= 1;
+    if (mission.bmEnvoy) { if (window.SBBlackmarket) SBBlackmarket.envoyLost(mission); }   // PATCH_0211_AMBASSADEUR : jamais détruit, hors service
+    else if (stat && stat['t' + mission.tier] > 0) stat['t' + mission.tier] -= 1;
     if (route) {
       route.lost = (route.lost || 0) + 1;
       route.stability = Math.max(0, (route.stability || 50) - 7);
@@ -46268,10 +46343,10 @@ function _completeRouteRunReturn(missionId) {
     // Rapport
     mission._protectionApplied = protectionApplied;
     mission._dockInteractions = _summarizeDockInteractions(mission);
-    const lostNarrative = _generateRouteRunNarrative(mission, route, mood, null, true);
+    const lostNarrative = mission.bmEnvoy ? _narrateTankerLoss(mission) : _generateRouteRunNarrative(mission, route, mood, null, true);   // PATCH_0211_AMBASSADEUR
     storeRouteRunReport(mission, route, mood, null, true, lostNarrative);
     G.tankerMissions.splice(idx, 1);
-    if (typeof toast === 'function') toast(`${mission.tankerName} ne reviendra pas`);
+    if (typeof toast === 'function' && !mission.bmEnvoy) toast(`${mission.tankerName} ne reviendra pas`);   // PATCH_0211_AMBASSADEUR : envoyLost a déjà parlé
     if (typeof refreshCurrentScreen === 'function') refreshCurrentScreen();
     return null;
   }
@@ -46324,11 +46399,14 @@ function _completeRouteRunReturn(missionId) {
     route.cumulativeLoot.runs += 1;
     // Drift d'humeur (Chunk D : on accumule, basculement après 5 passages)
     if (!route.driftScores) route.driftScores = { nerveuse:0, grasse:0, morte:0, noire:0, imperiale:0 };
-    if (mission.cargoTotal > (TANKER_TIER_CONFIG[mission.tier].cargoCapacity * 0.5)) {
+    const _capDrift = mission.bmEnvoy ? (mission.bmEnvoy.cargo || 0) : TANKER_TIER_CONFIG[mission.tier].cargoCapacity;   // PATCH_0211_AMBASSADEUR
+    if (mission.bmEnvoy && !_capDrift) {
+      route.driftScores.imperiale += 1;   // un Dreadnought à la parade : la route se tient droite
+    } else if (mission.cargoTotal > (_capDrift * 0.5)) {
       route.driftScores.grasse += 2;
     } else if (mission.cargoTotal === 0) {
       route.driftScores.morte += 2;
-    } else if (mission.cargoTotal < (TANKER_TIER_CONFIG[mission.tier].cargoCapacity * 0.25)) {
+    } else if (mission.cargoTotal < (_capDrift * 0.25)) {
       route.driftScores.nerveuse += 1;
     } else {
       route.driftScores.imperiale += 1;
@@ -46628,17 +46706,19 @@ function openTankerComposeForRoute(routeId) {
   if (!route) return;
   // Trouver tier dispo (priorité T1 → T3)
   const stat = G.fleet?.stationed?.tanker || { t1:0, t2:0, t3:0 };
+  const _envoys = window.SBBlackmarket ? SBBlackmarket.envoyChoices() : [];   // PATCH_0211_AMBASSADEUR
   let defaultTier = 1;
   if (stat.t1 > 0) defaultTier = 1;
   else if (stat.t2 > 0) defaultTier = 2;
   else if (stat.t3 > 0) defaultTier = 3;
-  else {
+  else if (!_envoys.length) {
     if (typeof toast === 'function') toast('Aucun tanker disponible. Construis-en un au Chantier orbital.');
     return;
   }
   _composeState = {
     routeId,
     tier: defaultTier,
+    envoy: (stat.t1 > 0 || stat.t2 > 0 || stat.t3 > 0) ? null : _envoys[0],
     cargo: { metal: 0, energie: 0, cristal: 0 },
   };
   renderTankerComposeSheet(routeId);
@@ -46652,11 +46732,12 @@ function renderTankerComposeSheet(routeId) {
   if (!route) return;
   const mood = ROUTE_MOODS[route.moodKey] || ROUTE_MOODS.nerveuse;
   const stat = G.fleet?.stationed?.tanker || { t1:0, t2:0, t3:0 };
-  const tierCfg = TANKER_TIER_CONFIG[_composeState.tier];
+  const _envoy = _composeState.envoy;   // PATCH_0211_AMBASSADEUR
+  const tierCfg = _envoy ? { fuelCost: _envoy.fuel, cargoCapacity: _envoy.cargo, label: _envoy.name } : TANKER_TIER_CONFIG[_composeState.tier];
   const cargoTotal = (_composeState.cargo.metal || 0) + (_composeState.cargo.energie || 0) + (_composeState.cargo.cristal || 0);
   const cargoLeft = tierCfg.cargoCapacity - cargoTotal;
   const fuelOK = (G.fuel || 0) >= tierCfg.fuelCost;
-  const tankerOK = stat['t' + _composeState.tier] > 0;
+  const tankerOK = !!_envoy || stat['t' + _composeState.tier] > 0;
   const canLaunch = fuelOK && tankerOK;
 
   document.getElementById('commerce-sheet-title').textContent = 'Envoyer un tanker';
@@ -46666,7 +46747,7 @@ function renderTankerComposeSheet(routeId) {
   const tierButtons = [1, 2, 3].map(t => {
     const cfg = TANKER_TIER_CONFIG[t];
     const stock = stat['t' + t] || 0;
-    const isSelected = _composeState.tier === t;
+    const isSelected = !_envoy && _composeState.tier === t;
     const disabled = stock === 0;
     return `
       <button onclick="onComposeTierClick(${t})" ${disabled ? 'disabled' : ''} style="
@@ -46707,21 +46788,23 @@ function renderTankerComposeSheet(routeId) {
     <div style="margin-bottom:14px">
       <div style="font-size:10px;color:var(--mut);letter-spacing:.1em;text-transform:uppercase;margin-bottom:8px">Tanker à envoyer</div>
       <div style="display:flex;gap:6px">${tierButtons}</div>
+      ${window.SBBlackmarket ? SBBlackmarket.envoyRows(_envoy && _envoy.pid, 'onComposeEnvoyClick', { fuel: true }) : ''}
     </div>
 
     <!-- Cargo -->
+    ${_envoy && !_envoy.cargo ? `<div style="margin-bottom:14px;padding:12px 14px;border:1px dashed rgba(201,164,90,.4);border-radius:8px;font-size:12px;line-height:1.5;color:var(--mut)"><span style="color:#c9a45a">${_envoy.name}</span> n'a pas de cale. Il ne vient pas commercer : il vient pour être vu.</div>` : `
     <div style="margin-bottom:14px;padding-top:10px;border-top:1px solid var(--border-soft)">
       <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:10px">
         <div style="font-size:10px;color:var(--mut);letter-spacing:.1em;text-transform:uppercase">Cargo de départ</div>
         <div style="font-size:11px;font-family:'SF Mono',monospace;color:${cargoTotal > tierCfg.cargoCapacity ? '#e87a7a' : '#ffc864'}">${cargoTotal} / ${tierCfg.cargoCapacity}</div>
       </div>
       ${cargoRows}
-      ${cargoTotal === 0 ? `
+      ${cargoTotal === 0 && !_envoy ? `
         <div style="margin-top:8px;padding:8px 10px;background:rgba(232,122,122,.08);border:1px solid rgba(232,122,122,.25);border-radius:4px;font-size:10px;color:#e87a7a;line-height:1.5">
           ⚠ Tanker vide : la route n'aime pas ça. Stabilité -5% au retour.
         </div>
       ` : ''}
-    </div>
+    </div>`}
 
     <!-- Récap -->
     <div style="padding-top:10px;border-top:1px solid var(--border-soft);font-size:11px;color:var(--mut);line-height:1.7">
@@ -46732,7 +46815,7 @@ function renderTankerComposeSheet(routeId) {
 
   document.getElementById('commerce-sheet-actions').innerHTML = `
     <button class="commerce-sheet-btn commerce-sheet-btn-primary" ${canLaunch ? '' : 'disabled style="opacity:.4;cursor:not-allowed"'} onclick="onLaunchTankerOnRouteClick()">
-      ${canLaunch ? 'Lancer le tanker' : (!fuelOK ? 'Carburant insuffisant' : 'Aucun tanker disponible')}
+      ${canLaunch ? (_envoy ? 'Envoyer ' + _envoy.name : 'Lancer le tanker') : (!fuelOK ? 'Carburant insuffisant' : 'Aucun tanker disponible')}
     </button>
     <button class="commerce-sheet-btn commerce-sheet-btn-secondary" onclick="openCommerceSheet('route','${routeId}')">
       ← Retour route
@@ -46740,8 +46823,18 @@ function renderTankerComposeSheet(routeId) {
   `;
 }
 
+// PATCH_0211_AMBASSADEUR
+function onComposeEnvoyClick(pid) {
+  if (!_composeState || !window.SBBlackmarket) return;
+  const e = SBBlackmarket.envoyChoices().find(x => x.pid === pid); if (!e) return;
+  _composeState.envoy = e;
+  const total = (_composeState.cargo.metal || 0) + (_composeState.cargo.energie || 0) + (_composeState.cargo.cristal || 0);
+  if (total > (e.cargo || 0)) _composeState.cargo = { metal: 0, energie: 0, cristal: 0 };
+  renderTankerComposeSheet(_composeState.routeId);
+}
 function onComposeTierClick(tier) {
   if (!_composeState) return;
+  _composeState.envoy = null;   // PATCH_0211_AMBASSADEUR
   _composeState.tier = tier;
   // Reset cargo si capacité réduite
   const cfg = TANKER_TIER_CONFIG[tier];
@@ -46760,7 +46853,7 @@ function onComposeCargoChange(resKey, val) {
 
 function onLaunchTankerOnRouteClick() {
   if (!_composeState) return;
-  const mission = launchTankerOnRoute(_composeState.routeId, 't' + _composeState.tier, _composeState.cargo);
+  const mission = launchTankerOnRoute(_composeState.routeId, 't' + _composeState.tier, _composeState.cargo, _composeState.envoy);
   if (mission) {
     _composeState = null;
     // Bascule sur la fiche route mise à jour (badge tanker en route)
@@ -47243,6 +47336,9 @@ function crownShowBar() {
 }
 
 function renderDockScreen() {
+  // PATCH_0211_AMBASSADEUR — le bouton nomme ce qui est à quai
+  const _rb = document.querySelector('button[onclick="onRecallTankerFromDock()"]');
+  if (_rb) { const _dm = (G.tankerMissions || []).find(m => m.id === _activeDockMissionId); _rb.textContent = _dm && _dm.bmEnvoy ? '⌂ RAPPELER ' + _dm.tankerName.toUpperCase() : '⌂ RAPPELER LE TANKER'; }
   if (!_activeDockMissionId) return;
   const mission = (G.tankerMissions || []).find(m => m.id === _activeDockMissionId);
   if (!mission || mission.status !== 'docked') {
@@ -47286,10 +47382,10 @@ function renderDockScreen() {
 
     <!-- Stats voyage -->
     <div style="margin-bottom:18px;padding:12px 14px;background:rgba(255,255,255,.02);border-radius:6px">
-      <div style="font-size:10px;color:var(--mut);letter-spacing:.12em;text-transform:uppercase;margin-bottom:8px">Tanker amarré</div>
+      <div style="font-size:10px;color:var(--mut);letter-spacing:.12em;text-transform:uppercase;margin-bottom:8px">${mission.bmEnvoy ? 'Vaisseau amarré' : 'Tanker amarré'}</div>
       <div style="display:flex;justify-content:space-between;align-items:baseline;padding:4px 0;font-size:12px">
         <span style="color:var(--mut)">Vaisseau</span>
-        <span style="color:#ffc864;font-family:'SF Mono',monospace">${mission.tankerName} (T${mission.tier})</span>
+        <span style="color:#ffc864;font-family:'SF Mono',monospace">${mission.tankerName}${mission.bmEnvoy ? '' : ` (T${mission.tier})`}</span>
       </div>
       <div style="display:flex;justify-content:space-between;align-items:baseline;padding:4px 0;font-size:12px">
         <span style="color:var(--mut)">Route</span>
@@ -50013,7 +50109,7 @@ if (G.knownTargets && Array.isArray(G.tankerMissions)) {
 <!-- PATCH_1610_SKILLS — skills des bâtiments : apprendre, découvrir, effets -->
 <script src="assets/skills.js?v=20261021-1130"></script>
 <script src="assets/maj.js?v=20261025-1800"></script>
-<script src="assets/blackmarket.js?v=20261102-logos"></script>   <!-- Blackmarket v0 : aperçu du catalogue, réservé au compte d'Adrien -->
+<script src="assets/blackmarket.js?v=20261102-ambassadeur"></script>   <!-- Blackmarket v0 : aperçu du catalogue, réservé au compte d'Adrien -->
 <!-- PATCH_1510_CROWN — The Drifting Crown en 3D (assets/station3d.js, sur le moteur partagé window.SB3D) -->
 <script type="module" src="assets/station3d.js?v=20261022-1047"></script>
 <!-- FORMATION3D — flotte déployée en orbite, vue de haut en formation (remplace la vue orbite) -->
