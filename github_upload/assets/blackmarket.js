@@ -28,6 +28,7 @@
     { id: 'requiem',      name: 'Le Requiem',     cat: 'dread', accent: '#e6e1d6', line: 'Proue fendue en croix, trois tours' },
     { id: 'souverain',    name: 'Le Souverain',   cat: 'dread', accent: '#c9a45a', line: 'Château en pagode, quatre cerclages' },
     { id: 'brise-monde',  name: 'Le Brise-Monde', cat: 'dread', accent: '#e0682c', line: "Arme de proue : anomalie d'antimatière" },
+    { id: 'bernard',      name: 'Bernard',        cat: 'dread', accent: '#c9452a', line: 'Tête de taureau d\'Hérens, boosters à propergol solide' },
     { id: 'taxi',         name: 'TAXI',           cat: 'arche', accent: '#b98cff', line: 'Perce la trame et te dépose un monde. Une fois.' },
   ];
   let taxiLeft = null;                            // exemplaires restants (serveur)
@@ -38,7 +39,7 @@
     'Tu négocies ? Retourne compter tes cailloux au match-3.',
     "T'as vu l'acier ? Ça, ça se construit pas dans ton petit chantier.",
   ];
-  const VERSION = '20261102d';
+  const VERSION = '20261103a';
   // Serveur (schema_mp_v31_blackmarket.sql + fonctions bm-checkout / bm-webhook)
   const SB = 'https://elupnpdcblztpfywnhjl.supabase.co';
   const KEY = 'sb_publishable_tXGrQIROzH2DwBrny1GcHQ_iKJKoBOQ';
@@ -152,7 +153,7 @@
 `;
 
   const STAR = (sz) => `<svg width="${sz}" height="${sz}" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.2l2.9 6.1 6.7.8-4.9 4.6 1.3 6.6L12 17l-6 3.3 1.3-6.6-4.9-4.6 6.7-.8z" fill="#f1d27a" stroke="#7a5a1c" stroke-width="1"/></svg>`;
-  const thumb = (id) => `assets/blackmarket/thumbs/${id}.jpg?v=20261102`;
+  const thumb = (id) => `assets/blackmarket/thumbs/${id}.jpg?v=20261103`;
   const fmt = (n) => Math.round(n).toLocaleString('fr-CH').replace(/ |\s/g, ' ');
   const chf = (n) => 'CHF ' + n + '.–';
   const esc = (s) => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));

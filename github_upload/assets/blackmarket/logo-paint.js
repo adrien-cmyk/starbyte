@@ -17,6 +17,7 @@ export const SLOTS = {
   'brise-monde': [{ id: 'pont', label: 'Pont', c: [0, 63, 200], u: [0, 0, -1], v: [-1, 0, 0], w: 300, d: 16 }],
   fulgurant: side('flanc', 'Flanc', 220, 5, 40, 260, 90),
   triumvirat: [{ id: 'coque', label: 'Coque', c: [0, 42, 200], u: [0, 0, -1], v: [-1, 0, 0], w: 125, d: 28 }],
+  bernard: [...side('flanc', 'Flanc', 228, 20, -180, 240, 90), { id: 'front', label: 'Front', c: [0, 138, 318], u: [-1, 0, 0], v: [0, 0, 1], w: 120, d: 40 }],
 };
 
 export function createLogoPaint(THREE, shipId) {
