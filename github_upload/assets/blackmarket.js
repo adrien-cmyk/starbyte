@@ -57,6 +57,9 @@
   let units = (() => { try { return JSON.parse(localStorage.getItem('bm_units_cache') || '[]') || []; } catch (e) { return []; } })();
   // Atelier des logos (v35) : ma bibliothèque et la peinture de chaque modèle
   let logos = [], paint = {};
+  // Le vaisseau amiral (un seul) : c'est lui, et lui seul, qui peut faire l'ambassadeur. Gardé pour les écrans ouverts avant la relève.
+  let flagItem = (() => { try { return localStorage.getItem('bm_flagship_cache') || null; } catch (e) { return null; } })();
+  function setFlagItem(id) { flagItem = id || null; try { if (flagItem) localStorage.setItem('bm_flagship_cache', flagItem); else localStorage.removeItem('bm_flagship_cache'); } catch (e) {} }
   async function loadOwned() {
     try {
       const st = await call('/rest/v1/rpc/bm_state', {});
@@ -65,6 +68,7 @@
           ed: o.edition_no || null, used: o.taxi_used_at ? new Date(o.taxi_used_at).getTime() : 0, addr: o.taxi_address || null, showPseudo: !!o.show_pseudo }));
       if (st && typeof st.taxi_left === 'number') taxiLeft = st.taxi_left;
       logos = (st && st.logos) || []; paint = {}; ((st && st.paint) || []).forEach(p => { paint[p.item_id] = p; });
+      setFlagItem(((st && st.paint) || []).filter(p => p.flagship).map(p => p.item_id)[0] || null);
       owned = {}; units.forEach(u => { owned[u.item] = (owned[u.item] || 0) + 1; });
       try { localStorage.setItem('bm_owned_cache', JSON.stringify(owned)); localStorage.setItem('bm_units_cache', JSON.stringify(units)); } catch (e) {}
     } catch (e) { /* v31 pas encore lancé : rien à afficher */ }
@@ -390,13 +394,90 @@
       return u.used ? { txt: 'Coque morte · travail accompli', col: '#8d98a3' } : { txt: 'Prêt à larguer', col: '#d9c2ff' };
     }
     if (isDown(u)) return { txt: 'Hors service · ' + hoursLeft(u), col: '#d9845a' };
+    const em = envoyMission(u && u.id);
+    if (em) return { txt: em.status === 'docked' ? 'À quai · ' + ((em.dock && em.dock.name) || 'port franc')
+      : em.status === 'orbital_relay' ? 'En ambassade · chez ' + ((em.mpTarget && em.mpTarget.pseudo) || '?')
+      : em.status === 'returning' ? 'Sur le retour' : 'En route · ' + ((em.mpTarget && em.mpTarget.pseudo) || (em.dock && em.dock.name) || ''), col: '#f1d27a' };
     const f = fleetOfUnit(u.id);
     if (f) return { txt: (f.status === 'in_mission' ? 'En mission' : f.status === 'deployed' ? 'En orbite' : 'En flotte') + ' · ' + f.name, col: '#b8d0ff' };
     return { txt: 'À quai', col: '#c9a45a' };
   }
+  // ── Ambassadeur (v38) : un vaisseau d'exception fait une mission de tanker ──
+  // GDD claude/starbyte_GDD_vaisseau_ambassadeur.md. Le vaisseau est « occupé » tant qu'une mission porte son id : aucun état à part.
+  const ENVOY = { sport: { cargo: 5000, fuel: 150, speed: 0.8 }, dread: { cargo: 0, fuel: 400, speed: 1 } };
+  function envoyMission(pid) {
+    try { return (G.tankerMissions || []).find(m => m.bmEnvoy && m.bmEnvoy.pid === pid && TANKER_BUSY_STATUSES.includes(m.status)) || null; } catch (e) { return null; }
+  }
+  // Un seul ambassadeur à la fois : le vaisseau amiral (décision d'Adrien, 02/11). Rend le vaisseau, ou la raison de son absence.
+  function envoyState() {
+    try {
+      const mine = units.filter(u => ENVOY[u.cat] && shipOf(u));
+      if (!mine.length) return { choice: null, reason: null };
+      const gone = (G.tankerMissions || []).find(m => m.bmEnvoy && TANKER_BUSY_STATUSES.includes(m.status));
+      if (gone) return { choice: null, reason: gone.bmEnvoy.name + ' est déjà en mission', item: gone.bmEnvoy.item };
+      if (!flagItem) return { choice: null, reason: 'Choisis ton vaisseau amiral à l\'Atelier pour l\'envoyer ici' };
+      const fl = mine.filter(u => u.item === flagItem), s = SHIPS.find(x => x.id === flagItem);
+      if (!fl.length) return { choice: null, reason: 'Choisis ton vaisseau amiral à l\'Atelier pour l\'envoyer ici' };
+      const free = freeHere(null).find(u => u.item === flagItem);
+      if (free) {
+        const e = ENVOY[free.cat];
+        return { choice: { pid: free.id, item: free.item, cat: free.cat, name: s.name, cargo: e.cargo, fuel: e.fuel, speed: e.speed } };
+      }
+      const down = fl.find(isDown), f = fl.map(u => fleetOfUnit(u.id)).find(Boolean);
+      return { choice: null, item: flagItem, reason: down ? s.name + ' est hors service · ' + hoursLeft(down)
+        : f ? s.name + ' est dans la flotte ' + f.name : s.name + ' est sur une autre planète' };
+    } catch (e) { return { choice: null, reason: null }; }
+  }
+  function envoyChoices() { const c = envoyState().choice; return c ? [c] : []; }
+  function envoyRows(selected, fn, o) {
+    o = o || {};
+    const st = envoyState(), e = st.choice;
+    const head = `<div style="margin:12px 0 8px;font-size:10px;color:#c9a45a;letter-spacing:.1em;text-transform:uppercase">Ton vaisseau amiral</div>`;
+    const why = !e ? st.reason : (o.needCargo && !e.cargo ? e.name + ' n\'a pas de cale : rien à livrer' : null);
+    if (why) {
+      const it = (e && e.item) || st.item;
+      return head + `<div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;padding:8px 12px 8px 8px;min-height:44px;border:1px dashed var(--border);border-radius:6px;opacity:.75">
+        ${it ? `<img src="${thumb(it)}" alt="" style="flex:none;width:58px;height:38px;object-fit:cover;border-radius:4px;background:#000;filter:saturate(.4)">` : ''}
+        <div style="flex:1;min-width:0;font-size:11px;line-height:1.4;color:var(--mut)">${esc(why)}</div></div>`;
+    }
+    if (!e) return '';
+    const on = selected === e.pid;
+    return head + `<div onclick="${fn}('${e.pid}')" style="display:flex;align-items:center;gap:10px;margin-bottom:8px;padding:8px 12px 8px 8px;min-height:44px;background:${on ? 'rgba(201,164,90,.14)' : 'rgba(40,40,40,.3)'};border:1px solid ${on ? '#c9a45a' : 'var(--border)'};border-radius:6px;cursor:pointer">
+        <img src="${thumb(e.item)}" alt="" style="flex:none;width:58px;height:38px;object-fit:cover;border-radius:4px;background:#000">
+        <div style="flex:1;min-width:0"><div style="font-size:12px;color:${on ? '#f1d27a' : 'var(--text)'};font-weight:${on ? 600 : 400}">${esc(e.name)}</div>
+          <div style="font-size:10px;color:var(--mut);margin-top:2px">${e.cargo ? 'Cale : ' + e.cargo.toLocaleString('fr-CH') : 'Sans cale · pure parade'}${o.fuel ? ' · -' + e.fuel + ' carburant' : ''}</div></div>
+        ${on ? '<div style="color:#c9a45a;font-size:14px">✓</div>' : ''}</div>`;
+  }
+  // Perdu là où un tanker le serait : jamais détruit, hors service à son retour
+  function envoyLost(m) {
+    const pid = m && m.bmEnvoy && m.bmEnvoy.pid, u = unitOf(pid); if (!u) return;
+    u.down = Math.max(u.down || 0, Date.now() + (u.cat === 'sport' ? 36 : 24) * 3600e3);
+    try { localStorage.setItem('bm_units_cache', JSON.stringify(units)); } catch (e) {}
+    call('/rest/v1/rpc/bm_disable', { p_ids: [pid] }).catch(e => console.warn('[Blackmarket] hors service :', e.message));
+    if (typeof toast === 'function') toast(m.bmEnvoy.name + ' rentre hors service : la cale est perdue, la coque tient');
+  }
+  // À l'arrivée : le registre apprend quel vaisseau est là, et le comptoir en parle
+  const envoyTried = {};
+  function envoyTick() {
+    let list = []; try { list = (G.tankerMissions || []).filter(m => m.bmEnvoy && !m.bmEnvoy.announced && (m.status === 'docked' || m.status === 'orbital_relay')); } catch (e) { return; }
+    for (const m of list) {
+      if (envoyTried[m.id] && Date.now() - envoyTried[m.id] < 300000) continue;
+      envoyTried[m.id] = Date.now();
+      const dock = m.status === 'docked';
+      call('/rest/v1/rpc/bm_envoy_arrive', { p_mission: m.id, p_item: m.bmEnvoy.item, p_kind: dock ? 'dock' : 'orbit', p_place: dock ? ((m.dock && m.dock.name) || null) : null })
+        .then(() => { m.bmEnvoy.announced = true; if (typeof saveGame === 'function') saveGame(); })
+        .catch(e => console.warn('[Blackmarket] ambassadeur :', e.message));
+    }
+  }
+  setInterval(() => { try { envoyTick(); } catch (e) { console.warn('[Ambassadeur]', e); } }, 15000);
+  // Vignette d'un vaisseau d'après son nom affiché (ligne du bar) : vide pour un tanker ordinaire
+  function shipThumbHtml(name) {
+    const s = SHIPS.find(x => x.name === name && x.cat !== 'arche');
+    return s ? `<img src="${thumb(s.id)}" alt="" style="flex:none;width:52px;height:34px;object-fit:cover;border-radius:4px;background:#000;border:1px solid rgba(201,164,90,.4)">` : '';
+  }
   function freeHere(exceptFleetId) {
     const L = locs(), w = here();
-    return units.filter(u => u.cat !== 'arche' && !isDown(u) && (L[u.id] || 'home') === w && !fleetsWithPremium().some(f => f.id !== exceptFleetId && f.premium.some(p => p.pid === u.id)));
+    return units.filter(u => u.cat !== 'arche' && !isDown(u) && !envoyMission(u.id) && (L[u.id] || 'home') === w && !fleetsWithPremium().some(f => f.id !== exceptFleetId && f.premium.some(p => p.pid === u.id)));
   }
   const thumbBox = (id, sz) => `<div style="position:relative;flex:0 0 ${sz}px;height:${sz}px;border-radius:8px;background:#000 url('${thumb(id)}') center/cover;border:1px solid rgba(241,210,122,.45)">
       <div style="position:absolute;top:-7px;right:-7px;width:22px;height:22px;border-radius:50%;background:#15110a;border:1px solid rgba(241,210,122,.6);display:grid;place-items:center">${STAR(14)}</div></div>`;
@@ -838,7 +919,7 @@
       <div class="bm-at-row">${atelierSlots.map(s => `<button class="bm-chip ${(p.slots || []).includes(s.id) ? 'on' : ''}" data-lgslot="${esc(s.id)}">${esc(s.label)}</button>`).join('')}
         <button class="bm-chip ${p.outline !== false ? 'on' : ''}" data-lgout>Contour sombre</button></div>` : ''}
       <div class="bm-at-row"><button class="bm-chip ${p.flagship ? 'on' : ''}" data-lgflag>${p.flagship ? 'Vaisseau amiral' : 'En faire mon vaisseau amiral'}</button></div>
-      <div class="bm-at-msg ${err ? 'err' : ''}" aria-live="polite">${msg ? esc(msg) : (logos.length ? 'Ton logo est vu quand tu raides quelqu\'un et, pour ton vaisseau amiral, au bar des docks.' : 'PNG à fond transparent : le plus beau rendu.')}</div>`;
+      <div class="bm-at-msg ${err ? 'err' : ''}" aria-live="polite">${msg ? esc(msg) : (logos.length ? 'Ton logo est vu quand tu raides quelqu\'un. Ton vaisseau amiral peut remplacer un tanker : il va en ambassade et dans les ports francs, et tout le monde le voit.' : 'PNG à fond transparent : le plus beau rendu.')}</div>`;
     const inp = box.querySelector('#bm-lg-file'); if (inp) inp.addEventListener('change', () => { if (inp.files[0]) atelierImport(inp.files[0]); });
     setTimeout(fitView, 50);
   }
@@ -903,6 +984,7 @@
     const item = atelierShip, was = !!(paint[item] && paint[item].flagship);
     Object.values(paint).forEach(p => { p.flagship = false; });
     const p = paint[item] = paint[item] || { item_id: item }; p.flagship = !was;
+    setFlagItem(was ? null : item);
     renderAtelier();
     try { await call('/rest/v1/rpc/bm_flagship_set', { p_item: was ? null : item }); } catch (e) { renderAtelier(lgErr(e), true); }
   }
@@ -938,13 +1020,28 @@
   }
   async function fillFlagship(modal, presenceId, sel) {
     if (!modal || !presenceId) return;
-    let f = null; try { f = await call('/rest/v1/rpc/bm_flagship_of', { p_presence: presenceId }); } catch (e) { return; }
+    let f = null, env = false;
+    try { f = await call('/rest/v1/rpc/bm_envoy_face', { p_kind: 'dock', p_presence: presenceId }); env = !!(f && f.item_id); } catch (e) {}   // v38 : le vaisseau présent d'abord
+    if (!env) { try { f = await call('/rest/v1/rpc/bm_flagship_of', { p_presence: presenceId }); } catch (e) { return; } }
     if (!f || !f.item_id || !modal.isConnected) return;
-    const c = faceCard(f, 'Son vaisseau amiral', 'Touche pour le voir de près'); if (!c) return;
+    const c = faceCard(f, env ? 'À quai, en personne' : 'Son vaisseau amiral', 'Touche pour le voir de près'); if (!c) return;
     c.style.margin = '10px 0';
     const host = (sel && modal.querySelector(sel)) || modal.firstElementChild || modal;
     host.insertBefore(c, host.children[1] || null);
   }
 
-  window.SBBlackmarket = { open, close, openOwned, ships: SHIPS, cats: CATS, owned: () => owned, units: () => units, reload: loadOwned, fillRaidFaces, fillFlagship };
+  // Ambassade : la fiche du vaisseau en orbite, au-dessus de l'état de l'ambassade (host est reconstruit à chaque rendu)
+  async function interceptShip(id) { try { const n = await call('/rest/v1/rpc/bm_intercept_ship', { p_intercept: id }); return typeof n === 'string' && shipThumbHtml(n) ? n : null; } catch (e) { return null; } }
+  const envoyFaces = {};
+  async function fillEnvoy(host, presenceId, tankerName) {
+    if (!host || !presenceId) return;
+    if (tankerName && !shipThumbHtml(tankerName)) return;   // un tanker ordinaire : rien à demander
+    let f = envoyFaces[presenceId];
+    if (f === undefined) { try { f = await call('/rest/v1/rpc/bm_envoy_face', { p_kind: 'orbit', p_presence: presenceId }); } catch (e) { return; } envoyFaces[presenceId] = f || null; }
+    if (!f || !f.item_id || !host.isConnected || host.querySelector('[data-bm-envoy]')) return;
+    const c = faceCard(f, 'En orbite, en personne', 'Touche pour le voir de près'); if (!c) return;
+    c.dataset.bmEnvoy = '1'; c.style.marginBottom = '10px';
+    host.insertBefore(c, host.firstChild);
+  }
+  window.SBBlackmarket = { open, close, openOwned, ships: SHIPS, cats: CATS, owned: () => owned, units: () => units, reload: loadOwned, fillRaidFaces, fillFlagship, fillEnvoy, interceptShip, envoyChoices, envoyRows, envoyLost, shipThumbHtml };
 })();
