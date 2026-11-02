@@ -252,7 +252,7 @@
         for (const [idx, o] of st.occ) { const s = st.systems[o.key]; if (o.kind !== 'system' || !s) continue; if (tags[o.key] === 'skip') skip.push(idx); else if (s.known) occ.push(idx); }
         P.skipFill = null; P.skipLine = null;
         if (skip.length) {
-          const hexG = new T.CircleGeometry(50 * K / Math.sqrt(3) * 0.985, 6); hexG.rotateZ(Math.PI / 6 + Math.PI / 2); hexG.rotateX(-Math.PI / 2);
+          const hexG = new T.CircleGeometry(50 * K / Math.sqrt(3) * 0.985, 6); hexG.rotateZ(Math.PI / 6); hexG.rotateX(-Math.PI / 2);
           const im = new T.InstancedMesh(hexG, new T.MeshBasicMaterial({ color: 0xff2a2a, transparent: true, opacity: 0.1, depthWrite: false }), skip.length);
           const pts = [], R = 50 * K / Math.sqrt(3) * 0.97, m4 = new T.Matrix4();
           skip.forEach((i, n) => { const c = W(i); m4.makeTranslation(c.x, -1.8, c.z); im.setMatrixAt(n, m4);
@@ -260,7 +260,7 @@
           C.add(im); P.skipFill = im;
           const ln = new T.LineSegments(new T.BufferGeometry().setFromPoints(pts), new T.LineBasicMaterial({ color: 0xff3b3b, transparent: true, opacity: 0 })); C.add(ln); P.skipLine = ln;
         }
-        if (occ.length) { const hexG = new T.CircleGeometry(50 * K / Math.sqrt(3) * 0.985, 6); hexG.rotateZ(Math.PI / 6 + Math.PI / 2); hexG.rotateX(-Math.PI / 2);
+        if (occ.length) { const hexG = new T.CircleGeometry(50 * K / Math.sqrt(3) * 0.985, 6); hexG.rotateZ(Math.PI / 6); hexG.rotateX(-Math.PI / 2);
           const im = new T.InstancedMesh(hexG, new T.MeshBasicMaterial({ color: 0x0f2236, transparent: true, opacity: 0.45, depthWrite: false }), occ.length);
           const m4 = new T.Matrix4(); occ.forEach((i, n) => { const c = W(i); m4.makeTranslation(c.x, -2, c.z); im.setMatrixAt(n, m4); }); C.add(im); } }
       const STAR = [0xffe6c0, 0xfff4e0, 0xffc890, 0xc8dcff];
@@ -1142,7 +1142,7 @@
         upBtn = document.createElement('button'); upBtn.className = 'pl-up'; upBtn.style.display = 'none'; upBtn.onclick = () => surface();
         card = document.createElement('div'); card.className = 'pl-card';
         const tools = scr.querySelector('.smw-tools');
-        if (tools) { tacBtn = document.createElement('button'); tacBtn.className = 'pl-tac'; tacBtn.setAttribute('aria-label', 'Vue tactique'); tacBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><path d="M12 3l7.5 4.3v8.4L12 20l-7.5-4.3V7.3z"/><path d="M12 3v17M4.5 7.3l15 8.4M19.5 7.3l-15 8.4" opacity=".55"/></svg>'; tacBtn.onclick = () => setTac(!tacOn); tools.appendChild(tacBtn); }
+        if (tools) { tacBtn = document.createElement('button'); tacBtn.className = 'pl-tac'; tacBtn.setAttribute('aria-label', 'Vue tactique'); tacBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 10.2h19"/><path d="M3.2 10.2l.6 4.3a2.6 2.6 0 0 0 2.6 2.2h1.8a2.6 2.6 0 0 0 2.5-1.9l.6-2.2c.3-.9 1.1-.9 1.4 0l.6 2.2a2.6 2.6 0 0 0 2.5 1.9h1.8a2.6 2.6 0 0 0 2.6-2.2l.6-4.3"/><path d="M5 12.4l2.2-1.6M16.6 12.4l2.2-1.6" opacity=".55"/></svg>'; tacBtn.onclick = () => setTac(!tacOn); tools.appendChild(tacBtn); }
         legend = document.createElement('div'); legend.className = 'pl-legend';
         legend.innerHTML = '<span style="--c:#7fe0a4">Légère</span><span style="--c:#b9a8ff">Moyenne</span><span style="--c:#ffc864">Tanker</span><span style="--c:#8fc4ff">À identifier</span><span style="--c:#ffd27a">Gisement</span><span style="--c:#ff9a8a">Commandant</span><span style="--c:#c89bff">Balise</span><span style="--c:#ff3b3b">Sans intérêt</span>';
         scr.appendChild(legend);
