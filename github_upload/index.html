@@ -15567,7 +15567,7 @@ function mountFleetFormation3D(fleet, mode = 'orbit') {
   });
   shipHeroGestures('scr-fleet-detail', () => fleetFormation3D && fleetFormation3D.handle, (hit) => showFormationSelection(hit));
   syncFleetIntegrity(fleet);
-  const sig = JSON.stringify([fleet.composition, fleet.integrity, mode]);
+  const sig = JSON.stringify([fleet.composition, fleet.integrity, mode, (fleet.premium || []).map(p => p.pid)]);   // BLACKMARKET : vaisseaux d'exception en tête
   if (fleetFormation3D && fleetFormation3D.id === fleet.id && fleetFormation3D.sig === sig) return true;
   unmountFleetFormation3D(true);
   hero.classList.add('u3d-loading');
@@ -15580,6 +15580,7 @@ function showFormationSelection(hit) {
   if (!hit || (box.dataset.idx === String(hit.index) && box.classList.contains('on'))) {   // second toucher : désélection
     box.classList.remove('on'); box.dataset.idx = ''; fleetFormation3D.handle.select(null); return;
   }
+  if (typeof hit.type === 'string' && hit.type.indexOf('bm:') === 0 && window.SBBlackmarket) { window.SBBlackmarket.openOwned(hit.type.slice(3)); return; }   // BLACKMARKET : toucher le vaisseau d'exception = sa vitrine
   fleetFormation3D.handle.select(hit.index);
   const meta = SHIP_UNITS[hit.type] || {}, td = (SHIP_TIERS[hit.type] || {})[hit.tier] || {};
   box.dataset.idx = String(hit.index);
@@ -49966,10 +49967,10 @@ if (G.knownTargets && Array.isArray(G.tankerMissions)) {
 <!-- PATCH_1610_SKILLS — skills des bâtiments : apprendre, découvrir, effets -->
 <script src="assets/skills.js?v=20261021-1130"></script>
 <script src="assets/maj.js?v=20261025-1800"></script>
-<script src="assets/blackmarket.js?v=20261102-1300"></script>   <!-- Blackmarket v0 : aperçu du catalogue, réservé au compte d'Adrien -->
+<script src="assets/blackmarket.js?v=20261102-1340"></script>   <!-- Blackmarket v0 : aperçu du catalogue, réservé au compte d'Adrien -->
 <!-- PATCH_1510_CROWN — The Drifting Crown en 3D (assets/station3d.js, sur le moteur partagé window.SB3D) -->
 <script type="module" src="assets/station3d.js?v=20261022-1047"></script>
 <!-- FORMATION3D — flotte déployée en orbite, vue de haut en formation (remplace la vue orbite) -->
-<script src="assets/formation3d.js?v=20261021-1655"></script>
+<script src="assets/formation3d.js?v=20261102-1330"></script>
 </body>
 </html>

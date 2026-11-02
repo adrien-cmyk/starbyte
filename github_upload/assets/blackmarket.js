@@ -178,6 +178,9 @@
   }
 
   let fromFleet = false;
+  function mineStatus(item) {
+    try { const us = units.filter(u => u.item === item); if (!us.length) return ''; return us.map(u => unitStatus(u).txt).join(' · '); } catch (e) { return ''; }
+  }
   function openShip(id, mine) {
     const s = SHIPS.find(x => x.id === id); if (!s) return;
     const c = CATS[s.cat];
@@ -193,7 +196,7 @@
         <div class="bm-stats">${stats}</div>
         <div class="bm-note">Comparé à un cuirassé T3 construit. Jamais détruit : vaincu, il est mis hors service et répare à quai 24 h minimum.
           Max ${c.cap} ${c.plural.toLowerCase()} par joueur, tous modèles confondus.</div>
-        ${mine ? `<div class="bm-buy-sub" style="text-align:left;color:#a7b1ba">À quai à ta capitale. Pas encore engageable dans une flotte : ça arrive à la prochaine étape.</div>` : `<button class="bm-buy" data-buy="${s.id}">Acheter · ${chf(c.price)}</button>
+        ${mine ? `<div class="bm-buy-sub" style="text-align:left;color:#a7b1ba">${esc(mineStatus(s.id))}</div>` : `<button class="bm-buy" data-buy="${s.id}">Acheter · ${chf(c.price)}</button>
         <div class="bm-buy-sub">${owned[s.id] ? `Tu en as déjà ${owned[s.id]} · ` : ''}Paiement par Stripe · mode test</div>`}
       </div>`;
     pane.classList.add('on');
@@ -493,18 +496,28 @@
     if (x && f && isHeroSquad(f) && !x.bmFast) { x.arriveAt = x.departAt + Math.round((x.arriveAt - x.departAt) / 1.2); x.bmFast = true; if (typeof saveGame === 'function') saveGame(); }
   }, () => (typeof _sbXfer !== 'undefined' && _sbXfer) ? _sbXfer.fleetId : null);
   // fiche d'une flotte : ses vaisseaux d'exception
+  // fiche d'une flotte : ses vaisseaux d'exception dans la liste « Composition » (toucher = sa vitrine, même en mission)
   wrap('renderFleetDetail', () => {
-    const scr = document.getElementById('scr-fleet-detail'), sc = scr && scr.querySelector('.screen-scroll'); if (!sc) return;
+    const old = document.getElementById('bm-fd'); if (old) old.remove();
+    const comp = document.getElementById('fleet-detail-composition'); if (!comp) return;
     const f = (G.fleet.prepared || []).find(x => x.id === selectedFleetId);
-    let box = document.getElementById('bm-fd');
-    if (!f || !Array.isArray(f.premium) || !f.premium.length) { if (box) box.remove(); return; }
-    if (!box) { box = document.createElement('div'); box.id = 'bm-fd'; const h = sc.querySelector('.head'); (h ? h.nextSibling : sc.firstChild) ? sc.insertBefore(box, h ? h.nextSibling : sc.firstChild) : sc.appendChild(box); }
-    box.innerHTML = `<div class="section-label"><span>Vaisseaux d'exception</span></div>` + f.premium.map(p => {
+    if (!f || !Array.isArray(f.premium) || !f.premium.length) return;
+    comp.insertAdjacentHTML('afterbegin', f.premium.map(p => {
       const s = SHIPS.find(x => x.id === p.item); if (!s) return ''; const u = unitOf(p.pid);
-      return `<div style="margin:0 16px 8px;padding:8px 12px 8px 8px;display:flex;align-items:center;gap:12px;border-radius:10px;border:1px solid rgba(241,210,122,.32);background:rgba(241,210,122,.05)">
-        ${thumbBox(s.id, 48)}<div style="flex:1"><div style="font-size:13px;font-weight:600;color:#f3ead2">${esc(s.name)}</div>
-        <div style="font-size:10px;color:var(--mut);font-family:'SF Mono',monospace;margin-top:2px">${CATS[s.cat].label} · ${u && isDown(u) ? `<span style="color:#d9845a">hors service · ${hoursLeft(u)}</span>` : `<span style="color:var(--red)">+${fmt(unitAtk(s.cat))} atk</span>`}</div></div></div>`;
-    }).join('');
+      const st = u && isDown(u) ? `<span style="color:#d9845a">hors service · ${hoursLeft(u)}</span>`
+        : `<span style="color:var(--red)">${fmt(unitAtk(s.cat))} atk</span> · <span style="color:var(--cyan)">${fmt(unitDef(s.cat))} def</span>${s.cat === 'sport' ? ' · <span style="color:var(--amber)">5k cargo</span>' : ''}`;
+      return `<div class="hangar-row" data-bmown="${s.id}" style="cursor:pointer;border-color:rgba(241,210,122,.4);background:linear-gradient(90deg,rgba(241,210,122,.08),rgba(241,210,122,.02))">
+        <div class="hangar-icon" style="overflow:visible">${thumbBox(s.id, 46)}</div>
+        <div class="hangar-info"><div class="hangar-name" style="color:#f3ead2">${esc(s.name)} <span style="color:#c9a45a;font-weight:400;font-size:.8em">${CATS[s.cat].label}</span></div>
+          <div class="hangar-stats">${st}</div></div>
+        <div style="color:var(--mut);font-size:16px;align-self:center">›</div></div>`;
+    }).join(''));
+    const meta = document.getElementById('fleet-detail-meta');
+    if (meta && !meta.querySelector('.bm-meta')) {
+      const atk = f.premium.filter(p => !isDown(unitOf(p.pid))).reduce((n, p) => n + unitAtk(p.cat), 0);
+      meta.insertAdjacentHTML('beforeend', ` · <span class="bm-meta" style="color:#f1d27a">★ ${f.premium.length} d'exception${atk ? ' · +' + fmt(atk) + ' atk' : ''}</span>`);
+    }
+    if (!comp._bmClick) { comp._bmClick = true; comp.addEventListener('click', (e) => { const r = e.target.closest && e.target.closest('[data-bmown]'); if (r) openOwned(r.dataset.bmown); }); }
   });
   // raid entre commandants : la flotte envoyée au serveur emmène ses vaisseaux d'exception (vérifiés là-bas)
   wrap('_mpFleetPayload', (r, ctx, args) => {

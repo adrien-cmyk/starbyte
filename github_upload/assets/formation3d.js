@@ -23,6 +23,14 @@
   const GLOSS = { M_AK_HULL: [0.62, 0.0], M_AK_HULL2: [0.64, 0.0], M_AK_ORANGE: [0.5, 0.2], M_AK_GUNMETAL: [0.45, 0.7], M_AK_DARK: [0.5, 0.45], M_AK_STEEL: [0.45, 0.7], M_TK_ARMOR_JAUNE: [0.40, 0.08], M_KV_ARMOR_WHITE: [0.38, 0.0], M_KV_ARMOR_RED: [0.28, 0.3], M_KV_GUNMETAL: [0.26, 0.85],
                   M_KV_STRUCT_BLACK: [0.30, 0.55], M_TK_GRAPHITE: [0.30, 0.6], M_SR_VERRIERE: [0.06, 0.4] };
   const cache = {};
+  // BLACKMARKET (02/11) : vaisseaux d'exception (fleet.premium) — modèle de leur vitrine (assets/3d/bm/<id>.glb.gz),
+  // même échelle que le cuirassé (0,22 par mètre), en tête de formation, vaisseau amiral
+  const isBM = (type) => typeof type === 'string' && type.indexOf('bm:') === 0;
+  function bmRegister(item) {
+    const type = 'bm:' + item;
+    if (!MODELS[type]) { MODELS[type] = { url: 'assets/3d/bm/' + item + '.glb.gz?v=20261031', scale: 0.22, glow: [], glowSize: 0, color: 0x9ccaff, ring: 170 }; DIM[type] = [120, 300]; }
+    return type;
+  }
 
   // liste des vaisseaux affichés, par type puis par tier (les plus hauts tiers d'abord), + le reste de la flotte (armada lointaine)
   // hp : intégrité de coque (0–100) lue dans fleet.integrity[type]['tN'][i] (triée du plus sain au plus abîmé)
@@ -43,6 +51,10 @@
         }
       }
     }
+    for (const p of (fleet && Array.isArray(fleet.premium) ? fleet.premium : []).slice(0, 13)) {
+      if (!p || !/^[a-z0-9-]{2,40}$/.test(String(p.item || ''))) continue;
+      out.push({ type: bmRegister(p.item), tier: 3, hp: 100, premium: p }); total++;
+    }
     out.overflow = overflow; out.total = total;
     return out;
   }
@@ -51,7 +63,8 @@
   // frégates en escadrilles de 6 en chevron (avant-garde puis flancs), tankers en convoi derrière
   function place(list) {
     const by = { cuirasse: [], fregate: [], tanker: [], colonial: [] };
-    list.forEach(s => by[s.type].push(s));
+    const bm = [];
+    list.forEach(s => (isBM(s.type) ? bm : by[s.type]).push(s));
     by.colonial.forEach(s => { s.x = 0; s.z = 0; s.sq = 0; s.wave = 0; });   // PATCH_2110_ARCHE_DEPART
     const [cw, cl] = DIM.cuirasse, [fw, fl] = DIM.fregate, [tw, tl] = DIM.tanker;
     const nc = by.cuirasse.length, perRank = 6, sx = cw * 4.5, rz = cl * 1.35;   // gros vaisseaux : de l'air entre eux
@@ -80,6 +93,8 @@
       const c = i % cols, r = Math.floor(i / cols);
       s.x = (c - (cols - 1) / 2) * tw * 3.2; s.z = rear + r * tl * 1.7; s.sq = 20 + r; s.wave = c;
     });
+    // vaisseaux d'exception : ligne de tête, devant tout le monde
+    bm.forEach((s, i) => { s.x = (i - (bm.length - 1) / 2) * 300; s.z = (nc ? -cl : 0) - (by.fregate.length ? 2 * dz + fl + 320 : 260) * (list.length > bm.length ? 1 : 0); s.sq = 0; s.wave = i; });
     return list;
   }
 
@@ -364,13 +379,19 @@
       }
     }
     const loader = new GLTFLoader();
-    const get = (url) => cache[url] || (cache[url] = new Promise((ok, ko) => loader.load(url, ok, undefined, ko)));
+    const get = (url) => cache[url] || (cache[url] = /\.glb\.gz(\?|$)/.test(url)
+      ? fetch(url).then(r => { if (!r.ok) throw new Error(r.status); return r.arrayBuffer(); }).then(async (ab) => {   // BLACKMARKET : modèle gzip (ou déjà décompressé par le serveur)
+          const u8 = new Uint8Array(ab);
+          const buf = (u8[0] === 0x1f && u8[1] === 0x8b) ? await new Response(new Blob([u8]).stream().pipeThrough(new DecompressionStream('gzip'))).arrayBuffer() : ab;
+          return new Promise((ok, ko) => loader.parse(buf, '', ok, ko));
+        })
+      : new Promise((ok, ko) => loader.load(url, ok, undefined, ko)));
     let alive = true;
     // ARMADA (20/10) : chaque pièce de chaque modèle est dessinée en une passe pour toute la flotte (InstancedMesh) ;
     // un porteur (Object3D) par vaisseau garde sa position animée et accroche plasma, panaches et fumées
     const inst = [];                                                   // { im, local, idx }
     const typeIdx = { cuirasse: [], fregate: [], tanker: [], colonial: [] };
-    list.forEach((s, i) => typeIdx[s.type].push(i));
+    list.forEach((s, i) => (typeIdx[s.type] || (typeIdx[s.type] = [])).push(i));
     list.forEach((s, i) => {
       const M = MODELS[s.type];
       const holder = new THREE.Group();
@@ -419,7 +440,7 @@
       // LOD du plasma : complet sur les cuirassés, une enveloppe + quelques filaments sur les 18 premières frégates
       // et les 12 premiers tankers, panaches à deux couches sur les 24 premiers ; les autres gardent leur lueur moteur
       const M = MODELS[type], gs = holder.userData.gs;
-      const capital = type === 'cuirasse' || type === 'colonial', near = capital || (type === 'fregate' ? k < 18 : k < 12);
+      const capital = type === 'cuirasse' || type === 'colonial' || isBM(type), near = capital || (type === 'fregate' ? k < 18 : k < 12);
       const sz = bb.getSize(new THREE.Vector3()), c = bb.getCenter(new THREE.Vector3());
       const L = sz.z, bow = bb.max.z + L * 0.1, hw = sz.x / 2, hhh = sz.y / 2;
       const R0 = Math.max(0.31 * L, 1.35 * Math.max(hw, hhh / 0.78));
@@ -430,7 +451,7 @@
           m.renderOrder = 2; m.frustumCulled = false; shock.add(m);
         });
         holder.add(shock);
-        holder.add(filaments(THREE, PT, Math.round(FIL_N[type] * (LITE ? .4 : capital ? 1 : .35)), bb.max.z, c.y, hw, hhh, L));
+        holder.add(filaments(THREE, PT, Math.round((FIL_N[type] || FIL_N.cuirasse) * (LITE ? .4 : capital ? 1 : .35)), bb.max.z, c.y, hw, hhh, L));
       }
       if (!capital && k >= 24) return;
       const pal = M.color === 0xffb070 ? PLUMES.amber : PLUMES.blue, thrust = 0.45 + 0.55 * hp / 100;
