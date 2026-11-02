@@ -20,8 +20,9 @@ export const SLOTS = {
   bernard: [...side('flanc', 'Flanc', 228, -40, -140, 480, 140), { id: 'front', label: 'Front', c: [0, 138, 318], u: [-1, 0, 0], v: [0, 0, 1], w: 120, d: 40 }],   // le logo couvre la majeure partie du flanc (corps ≈ 610 × 360)
 };
 
-export function createLogoPaint(THREE, shipId) {
-  const slots = SLOTS[shipId] || [];
+export function createLogoPaint(THREE, shipId, xf) {
+  // xf : repère de la fiche du jeu (Ship3D cuit la géométrie en m de scène : p' = p·k + (0, dy, dz))
+  const slots = (SLOTS[shipId] || []).map(s => xf ? Object.assign({}, s, { c: [s.c[0] * xf.k, s.c[1] * xf.k + (xf.dy || 0), s.c[2] * xf.k + (xf.dz || 0)], w: s.w * xf.k, d: s.d * xf.k }) : s);
   const N = slots.length;
   const blank = document.createElement('canvas'); blank.width = blank.height = 2;
   const uni = {

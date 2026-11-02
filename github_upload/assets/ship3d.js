@@ -68,6 +68,21 @@ const PROFIL_AK01 = {
   hull: [[0,10,120,120],[61,30,250,300],[300,30,265,450],[552,30,300,600],[800,30,265,450],[1044,30,250,300],[1150,60,240,330],[1600,40,280,420],[3000,0,330,520],[6000,-60,380,620]],
 };
 
+// Bernard — cuirassé FATHER-ID (Blackmarket, 03/11) : glTF en m, proue +Z à 664 (museau), poupe à −655 ; V 0,9 → 1 190 m de scène, relevé de 200 m
+// pour flotter au-dessus de la planète d'ambassade. Même vue que le tanker : la fiche du jeu, pas la vitrine. Logo peint dans le shader (opts.logo).
+const PROFIL_BERNARD = {
+  V: 0.9, bowGltf: 664.4, liftY: 200, axisY: 1.9, engineY: 1.6, engineZ: (600 - 1330 * 0.9) * 0.01, nozzleZ: 600 - (1296 + 14.4) * 0.9, targetY: 2.1, targetZ: [-0.6, 0.2], camDir: [0.62, 0.26, 0.73], planetPos: [25, -167.5, -135], idleGlow: 0.35, fit: 1.5,
+  nozzles: [[0, -30, 74], [170, -30, 70], [-170, -30, 70], [84, -204, 48], [-84, -204, 48]].map(([x, y, r]) => ({ x: x * 0.9, y: y * 0.9 + 200, r: r * 0.9 })),
+  bubbleK: 1.5, bowZ: 6.9, wakeZ: -20.0, minDist: 4.0,
+  engineColor: [1.0, 0.50, 0.22], plume: [0xb01800, 0xff3c06, 0xffa030, 0xfff0d0, 0xffb060, 0xff6a2a],   // propergol solide : rouge incandescent
+  gloss: { M_FD_ARMOR: [0.62, 0.55], M_FD_ARMORL: [0.60, 0.55], M_FD_PLATE: [0.64, 0.52], M_FD_PLATE2: [0.66, 0.50], M_FD_HULL: [0.68, 0.45], M_FD_STEEL: [0.42, 0.85], M_FD_MECH: [0.55, 0.75], M_FD_HORN: [0.38, 0.75], M_FD_HORN2: [0.40, 0.75], M_FD_SNOUT: [0.52, 0.5], M_FD_CABIN: [0.3, 0.1], M_KV_STRUCT_BLACK: [0.5, 0.55], M_FD_DECAL: [0.45, 0.2] }, glossEnv: 0.55,
+  // la vitrine est sombre et sale (Adrien) : les teintes glTF sont rabattues vers l'acier noir ; museau et cornes dans la matière de corne
+  mats: { M_FD_ARMOR: { dim: 0.13 }, M_FD_ARMORL: { dim: 0.13 }, M_FD_PLATE: { dim: 0.14 }, M_FD_PLATE2: { dim: 0.22 }, M_FD_STEEL: { dim: 0.32 }, M_FD_HULL: { dim: 0.9 }, M_FD_DECAL: { dim: 0.7 }, M_FD_CABIN: { dim: 0.8 }, M_FD_CABINL: { dim: 0.8 } },
+  tint: { M_FD_HORN: [1.4, 1.3, 1.14], M_FD_SNOUT: [0.68, 0.62, 0.54] },
+  // sections [s depuis la proue (m scène), bas, haut, demi-largeur] : corps (les cornes dépassent, la bulle les ignore)
+  hull: [[13,54,168,97],[134,14,281,171],[256,-12,335,212],[391,-14,338,212],[1066,-14,338,212],[1190,0,300,190],[1993,-52,371,270],[4513,-106,416,324]],
+};
+
 function mount(container, opts = {}) {
 const { THREE, GLTFLoader, OrbitControls, RoomEnvironment, EffectComposer, RenderPass, UnrealBloomPass, OutputPass } = libs();
 /* ================================================================== réglages */
@@ -202,7 +217,7 @@ if (P.ground) {                                    // bâtiment au sol : crépus
   ring.rotation.x = -Math.PI / 2; ring.position.y = 0.01; scene.add(ring);
 }
 if (P.planet) {                                    // planète sous la station : limbe à contre-jour + atmosphère
-  const PR = 165, PPOS = new THREE.Vector3(25, -PR - 2.5, 135), SD = new THREE.Vector3(-0.42, 0.03, 0.91).normalize();
+  const PR = 165, PPOS = P.planetPos ? new THREE.Vector3(...P.planetPos) : new THREE.Vector3(25, -PR - 2.5, 135), SD = new THREE.Vector3(-0.42, 0.03, P.planetPos ? -0.91 : 0.91).normalize();   // vaisseau vu de la proue : planète côté poupe
   const planet = new THREE.Mesh(new THREE.SphereGeometry(PR, 96, 72), new THREE.ShaderMaterial({
     uniforms: { uSun: { value: SD } },
     vertexShader: `varying vec3 vP; varying vec3 vW;
@@ -302,6 +317,17 @@ const LOOK = {
   M_KV_STRUCT_BLACK: { cell: [15.0, 8.5], seam: .20, depth: .12, tint: .16, rough: .18, grime: .18, wear: .25 },
   M_TK_ARMOR_JAUNE:  { cell: [9.0, 6.0], seam: .16, depth: .05, tint: .06, rough: .10, grime: .40, wear: .35 },
   M_TK_GRAPHITE:     { cell: [12.0, 8.0], seam: .18, depth: .20, tint: .12, rough: .16, grime: .22, wear: .35 },
+  // Bernard (FATHER-ID) : blindage noir usé, grandes plaques, crasse et coulures (vitrine « acier noir sale »)
+  M_FD_ARMOR:  { cell: [14.0, 9.0], seam: .20, depth: .18, tint: .18, rough: .16, grime: .55, wear: .45, plaques: 1 },
+  M_FD_ARMORL: { cell: [14.0, 9.0], seam: .20, depth: .18, tint: .18, rough: .16, grime: .55, wear: .45, plaques: 1 },
+  M_FD_PLATE:  { cell: [12.0, 8.0], seam: .18, depth: .16, tint: .16, rough: .16, grime: .50, wear: .45, plaques: 1 },
+  M_FD_PLATE2: { cell: [12.0, 8.0], seam: .18, depth: .16, tint: .16, rough: .16, grime: .50, wear: .40, plaques: 1 },
+  M_FD_HULL:   { cell: [16.0, 10.0], seam: .22, depth: .14, tint: .14, rough: .14, grime: .45, wear: .30, plaques: 1 },
+  M_FD_STEEL:  { cell: [6.0, 4.0],  seam: .14, depth: .20, tint: .08, rough: .14, grime: .30, wear: .50 },
+  M_FD_MECH:   { cell: [7.0, 5.0],  seam: .15, depth: .30, tint: .10, rough: .14, grime: .30, wear: .40 },
+  M_FD_HORN:   { cell: [9.0, 5.0],  seam: .12, depth: .10, tint: .12, rough: .14, grime: .35, wear: .55 },
+  M_FD_HORN2:  { cell: [9.0, 5.0],  seam: .12, depth: .10, tint: .12, rough: .14, grime: .35, wear: .50 },
+  M_FD_SNOUT:  { cell: [8.0, 5.0],  seam: .12, depth: .12, tint: .12, rough: .14, grime: .45, wear: .55 },
 };
 function premium(mat, p) {
   mat.onBeforeCompile = (sh) => {
@@ -371,9 +397,14 @@ function premium(mat, p) {
           vec3 grad = sign(det) * (dhx * r1 + dhy * r2);
           normal = normalize(abs(det) * normal - grad);
         }`);
+    if (LP && LP.paintable(mat)) {   // logo par-dessus la patine, sous la lumière
+      Object.assign(sh.uniforms, LP.uni);
+      sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\n' + LP.DECL).replace('#include <roughnessmap_fragment>', LP.APPLY + '\n#include <roughnessmap_fragment>')
+        .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\n totalEmissiveRadiance += logoGlow;');
+    }
     if (p.plaques) sh.fragmentShader = sh.fragmentShader.replace('uLook2.x * (grime * 1.7 + low * .9) + .55 * smoothstep(.15, .65, streak) + .7 * soot + .35 * leak + .12, 0.0, .9)', 'uLook2.x * (smoothstep(.32, .78, grime) * 1.5 + low * .6) + .5 * smoothstep(.2, .7, streak) + .7 * soot + .35 * leak + .05, 0.0, .88)');
   };
-  mat.customProgramCacheKey = () => 'kv-premium-' + mat.name;
+  mat.customProgramCacheKey = () => 'kv-premium-' + mat.name + (LP ? '-logo' : '');
 }
 
 /* ================================================================== panaches de propulsion */
@@ -622,6 +653,7 @@ ship.add(shockLight);
 /* ================================================================== chargement du modèle (glb gzip + base64) */
 const navMats = [];
 let scanParts = [];
+let LP = null;   // peinture du logo (createLogoPaint), si demandée
 const loader = new GLTFLoader();
 function prepMats(root, engineColor, engineInt) {
   root.traverse(o => {
@@ -636,6 +668,7 @@ function prepMats(root, engineColor, engineInt) {
       if (tn && !mat.userData.tinted) { mat.userData.tinted = 1; mat.color.multiply(new THREE.Color(...tn)); }
       const look = LOOK[mat.name];
       if (look && !mat.userData.kv) { mat.userData.kv = 1; premium(mat, look); }
+      else if (LP && !look && !mat.userData.kv && LP.paintable(mat)) { mat.userData.kv = 1; LP.only(mat); mat.customProgramCacheKey = () => 'logo-only-' + mat.name; }
       const mo = P.mats && P.mats[mat.name];   // réglages propres au modèle (verrières, eau, coque atténuée)
       if (mo && !mat.userData.mo) {
         mat.userData.mo = 1;
@@ -646,7 +679,7 @@ function prepMats(root, engineColor, engineInt) {
         if (mo.env != null) mat.envMapIntensity = mo.env;
       }
       if (mo && mo.engine) { mat.emissive.copy(engineColor); mat.emissiveIntensity = engineInt; mat.color.copy(engineColor); }
-      if (mat.name === 'M_KV_GLOW_MOTEUR') { mat.emissive.copy(engineColor); mat.emissiveIntensity = engineInt; mat.color.copy(engineColor); }
+      if (mat.name === 'M_KV_GLOW_MOTEUR') { mat.emissive.copy(engineColor); mat.emissiveIntensity = (!P.nozzles.length && P.idleGlow != null) ? P.idleGlow : engineInt; mat.color.copy(engineColor); }   // moteurs coupés (orbite) : braise
       else if (mat.name === 'M_KV_GLOW_ORANGE') { mat.emissiveIntensity = 2.2; }
       else if (mat.name === 'M_KV_GLOW_BLUE') { if (P.ground) { mat.emissive = new THREE.Color(0x48c8ff); mat.emissiveIntensity = 1.3; } else mat.emissiveIntensity = 1.8; }
       else if (mat.name.startsWith('M_KV_NAV_')) { if (!navMats.includes(mat)) navMats.push(mat); }
@@ -681,13 +714,23 @@ function pickAt(cx, cy) {
   return hit ? hit.object.userData.type || null : null;
 }
 function loadShip() {
-  return new Promise((ok, ko) => loader.load(opts.url, ok, (e) => { if (e.total && opts.onProgress) opts.onProgress(e.loaded / e.total); }, ko));
+  if (!/\.glb\.gz(\?|$)/.test(opts.url)) return new Promise((ok, ko) => loader.load(opts.url, ok, (e) => { if (e.total && opts.onProgress) opts.onProgress(e.loaded / e.total); }, ko));
+  // vaisseaux du Blackmarket : .glb.gz binaire (le serveur peut déjà l'avoir décompressé via Content-Encoding)
+  return fetch(opts.url).then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.arrayBuffer(); }).then(async (ab) => {
+    const raw = new Uint8Array(ab);
+    const buf = (raw[0] === 0x1f && raw[1] === 0x8b) ? await new Response(new Blob([raw]).stream().pipeThrough(new DecompressionStream('gzip'))).arrayBuffer() : ab;
+    return new Promise((ok, ko) => loader.parse(buf, '', ok, ko));
+  });
 }
-loadShip().then((gltf) => {
+// logo du commandant peint dans le shader de la coque (Atelier des logos) : emplacements convertis en m de scène
+const logoReady = opts.logo && opts.logo.ship ? import('./blackmarket/logo-paint.js?v=20261103c').then(mod => {
+  LP = mod.createLogoPaint(THREE, opts.logo.ship, { k: P.V, dy: P.liftY || 0, dz: P.bowGltf ? 600 - P.bowGltf * P.V : 0 });
+}).catch(e => { console.warn('[Ship3D] logo', e); }) : Promise.resolve();
+Promise.all([loadShip(), logoReady]).then(([gltf]) => {
   const m = gltf.scene;
-  if (P.V !== 1 || P.bowGltf) {   // autre vaisseau : géométrie passée en m de scène (le lookdev travaille en repère objet)
+  if (P.V !== 1 || P.bowGltf || P.liftY) {   // autre vaisseau : géométrie passée en m de scène (le lookdev travaille en repère objet)
     m.updateMatrixWorld(true);
-    const toScene = new THREE.Matrix4().makeTranslation(0, 0, P.bowGltf ? 600 - P.bowGltf * P.V : 0).multiply(new THREE.Matrix4().makeScale(P.V, P.V, P.V));
+    const toScene = new THREE.Matrix4().makeTranslation(0, P.liftY || 0, P.bowGltf ? 600 - P.bowGltf * P.V : 0).multiply(new THREE.Matrix4().makeScale(P.V, P.V, P.V));
     m.traverse(o => { if (o.isMesh) o.geometry.applyMatrix4(new THREE.Matrix4().multiplyMatrices(toScene, o.matrixWorld)); });
     m.traverse(o => { if (o !== m) { o.position.set(0, 0, 0); o.rotation.set(0, 0, 0); o.scale.set(1, 1, 1); } });
   }
@@ -702,14 +745,15 @@ loadShip().then((gltf) => {
   occ.traverse(o => { if (o.isMesh) { o.material = depthOnly; o.castShadow = o.receiveShadow = false; } });
   fxShip.add(occ);
   engineLight.intensity = P.nozzles.length ? 5 : 0;
+  if (LP && opts.logo.face) LP.setLogo(opts.logo.face).catch(() => {});
   if (opts.onReady) opts.onReady();
 }).catch((e) => { console.error(e); if (opts.onError) opts.onError(e); });
 
 /* ================================================================== caméra : orbite + pincer */
-const TARGET = new THREE.Vector3(0, P.targetY, P.center ? 0 : (W() / H() < 0.8 ? -1.8 : -0.2));   // vaisseau : cible vers la poupe en portrait ; station : centre
+const TARGET = new THREE.Vector3(0, P.targetY, P.center ? 0 : P.targetZ ? (W() / H() < 0.8 ? P.targetZ[0] : P.targetZ[1]) : (W() / H() < 0.8 ? -1.8 : -0.2));   // vaisseau : cible vers la poupe en portrait ; station : centre
 {
   const d = fitDistance();
-  camera.position.copy(TARGET).add((P.ground ? new THREE.Vector3(-0.45, 0.24, 0.86) : new THREE.Vector3(0.55, 0.24, -0.80)).normalize().multiplyScalar(d));   // antenne : face à la parabole
+  camera.position.copy(TARGET).add((P.ground ? new THREE.Vector3(-0.45, 0.24, 0.86) : P.camDir ? new THREE.Vector3(...P.camDir) : new THREE.Vector3(0.55, 0.24, -0.80)).normalize().multiplyScalar(d));   // antenne : face à la parabole
 }
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.target.copy(TARGET);
@@ -824,6 +868,7 @@ let alive = true, raf = requestAnimationFrame(frame);
     orbitBy(ax, ay, Math.exp(az));
   }
   return {
+    setLogo(face) { if (LP) LP.setLogo(face || {}).catch(() => {}); else if (opts.logo) opts.logo.face = face; },
     begin() { controls.autoRotate = false; clearTimeout(idleTimer); },
     pick(cx, cy) { return pickAt(cx, cy); },
     orbit(dx, dy) { pend.x += dx; pend.y += dy; },
@@ -842,9 +887,9 @@ function whenReady(cb) {
   if (window.SB3D) return cb();
   const t = setInterval(() => { if (window.SB3D) { clearInterval(t); cb(); } }, 100);
 }
-window.Ship3D = { profiles: { kv01: PROFIL_KV01, sr01: PROFIL_SR01, tk07: PROFIL_TK07, ak01: PROFIL_AK01, os01: PROFIL_OS01, pa01: PROFIL_PA01 }, mount: (c, o) => { let h = null, dead = false; whenReady(() => { if (!dead) h = mount(c, o); });
+window.Ship3D = { profiles: { kv01: PROFIL_KV01, sr01: PROFIL_SR01, tk07: PROFIL_TK07, ak01: PROFIL_AK01, os01: PROFIL_OS01, pa01: PROFIL_PA01, bernard: PROFIL_BERNARD }, mount: (c, o) => { let h = null, dead = false; whenReady(() => { if (!dead) h = mount(c, o); });
   return {
-    pick(x, y) { return h ? h.pick(x, y) : null; }, begin() { if (h) h.begin(); }, orbit(dx, dy) { if (h) h.orbit(dx, dy); }, dolly(k) { if (h) h.dolly(k); }, end() { if (h) h.end(); },
+    pick(x, y) { return h ? h.pick(x, y) : null; }, setLogo(f) { if (h) h.setLogo(f); else o.logo = Object.assign({}, o.logo || {}, { face: f }); }, begin() { if (h) h.begin(); }, orbit(dx, dy) { if (h) h.orbit(dx, dy); }, dolly(k) { if (h) h.dolly(k); }, end() { if (h) h.end(); },
     dispose() { dead = true; if (h) h.dispose(); },
   }; } };
 window.dispatchEvent(new Event('ship3d-ready'));

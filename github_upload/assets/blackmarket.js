@@ -39,7 +39,7 @@
     'Tu négocies ? Retourne compter tes cailloux au match-3.',
     "T'as vu l'acier ? Ça, ça se construit pas dans ton petit chantier.",
   ];
-  const VERSION = '20261103c';
+  const VERSION = '20261103d';
   // Serveur (schema_mp_v31_blackmarket.sql + fonctions bm-checkout / bm-webhook)
   const SB = 'https://elupnpdcblztpfywnhjl.supabase.co';
   const KEY = 'sb_publishable_tXGrQIROzH2DwBrny1GcHQ_iKJKoBOQ';
@@ -891,6 +891,18 @@
     // même interface que Ship3D.mount : les gestes de la fiche (shipHeroGestures) sont relayés à la vitrine
     return { frame: f, begin() { post({ bmGesture: 'begin' }); }, end() { post({ bmGesture: 'end' }); }, orbit(dx, dy) { post({ bmOrbit: [dx, dy] }); }, dolly(k) { post({ bmDolly: k }); }, dispose() { heroFrames.delete(f); f.remove(); } };
   }
+  // Fiche du jeu (Ship3D, comme le TK-07 : même planète, mêmes gestes) : modèle + profil d'un vaisseau du Blackmarket, s'il en a un (03/11, Adrien)
+  function shipModel(item) {
+    if (!item || !SHIPS.some(x => x.id === item) || !window.Ship3D || !window.Ship3D.profiles || !window.Ship3D.profiles[item]) return null;
+    return { url: `assets/3d/bm/${item}.glb.gz?v=${VERSION}`, profile: item, code: (SHIPS.find(x => x.id === item) || {}).name || item };
+  }
+  const heroLogo = (item, face) => { const p = face || paint[item] || {}; return { url: logoUrl(p.path), slots: p.slots || [], outline: p.outline !== false }; };
+  async function envoyFace(presenceId) {   // visage (vaisseau + peinture) du commandant en orbite chez moi
+    if (!presenceId) return null;
+    let f = envoyFaces[presenceId];
+    if (f === undefined) { try { f = await call('/rest/v1/rpc/bm_envoy_face', { p_kind: 'orbit', p_presence: presenceId }); } catch (e) { f = null; } envoyFaces[presenceId] = f || null; }
+    return f && f.item_id ? f : null;
+  }
   // Ambassade : le vaisseau amiral en orbite, en vue héros (le mien : ma peinture ; celui d'un visiteur : son visage via bm_envoy_face)
   function envoyHero(host, ownItem, presenceId) {
     if (!host) return null;
@@ -1073,5 +1085,5 @@
     c.dataset.bmEnvoy = '1'; c.style.marginBottom = '10px';
     host.insertBefore(c, host.firstChild);
   }
-  window.SBBlackmarket = { open, close, openOwned, ships: SHIPS, cats: CATS, owned: () => owned, units: () => units, reload: loadOwned, fillRaidFaces, fillFlagship, fillEnvoy, interceptShip, envoyChoices, envoyRows, envoyLost, shipThumbHtml, missionHero, envoyHero };
+  window.SBBlackmarket = { open, close, openOwned, ships: SHIPS, cats: CATS, owned: () => owned, units: () => units, reload: loadOwned, fillRaidFaces, fillFlagship, fillEnvoy, interceptShip, envoyChoices, envoyRows, envoyLost, shipThumbHtml, missionHero, envoyHero, shipModel, heroLogo, envoyFace };
 })();
