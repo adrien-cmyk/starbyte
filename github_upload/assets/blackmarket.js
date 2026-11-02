@@ -249,7 +249,10 @@
     btn.disabled = true; say('Pauline prépare la facture…');
     try {
       const r = await call('/functions/v1/bm-checkout', { item_id: btn.dataset.buy });
-      if (r && r.url) { location.href = r.url; return; }
+      if (r && r.url) {
+        try { localStorage.setItem('bm_pending', JSON.stringify({ item: btn.dataset.buy, n: owned[btn.dataset.buy] || 0, at: Date.now() })); } catch (e) {}
+        location.href = r.url; return;
+      }
       throw new Error('no_url');
     } catch (e) {
       const m = e.message;
@@ -267,11 +270,40 @@
       const item = SHIPS.find(x => x.id === u.searchParams.get('item'));
       u.searchParams.delete('bm'); u.searchParams.delete('item');
       history.replaceState(history.state, '', u.pathname + (u.search || '') + u.hash);
+      // App installée : iOS ouvre Stripe dans une fenêtre à part, qui revient ici SANS la partie du joueur
+      // (pas de session dans cette fenêtre). On n'y lance pas le jeu : on dit de fermer la fenêtre.
+      if (!token()) { sheetNotice(st === 'ok', item); return; }
+      try { localStorage.removeItem('bm_pending'); } catch (e) {}
       const msg = st === 'ok' ? `Paiement reçu. ${item ? item.name : 'Ton vaisseau'} est à toi. Pauline : « Fais-en bon usage. »` : 'Achat annulé. Pauline : « Reviens quand t\'auras les moyens. »';
       const show = (n) => { if (typeof toast === 'function') toast(msg); else if (n < 20) setTimeout(() => show(n + 1), 500); };
       setTimeout(() => show(0), 2500);
     } catch (e) {}
   })();
+  function sheetNotice(ok, item) {
+    const d = document.createElement('div');
+    d.style.cssText = 'position:fixed;inset:0;z-index:2147483000;background:#07090b;color:#e6edf2;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:32px;text-align:center;font-family:"Space Grotesk",system-ui,sans-serif';
+    d.innerHTML = `<div style="font:500 11px 'JetBrains Mono',monospace;letter-spacing:.18em;color:#8d98a3;text-transform:uppercase">Blackmarket</div>
+      <div style="font-size:26px;font-weight:600;margin:10px 0 14px">${ok ? 'Paiement reçu' : 'Achat annulé'}</div>
+      <div style="font-size:16px;line-height:1.5;color:#c7d0d8;max-width:30ch">${ok ? `${item ? esc(item.name) : 'Ton vaisseau'} t'attend au Blackmarket.` : 'Rien n\'a été débité.'}<br><br>
+      Ferme cette fenêtre (la croix en haut à gauche) pour retourner dans Starbyte.</div>
+      <div style="margin-top:22px;font-size:14px;color:#c9a45a">Pauline : « ${ok ? 'Fais-en bon usage.' : 'Reviens quand t\'auras les moyens.'} »</div>`;
+    const put = () => document.body ? document.body.appendChild(d) : setTimeout(put, 50);
+    put();
+  }
+  // Retour dans l'app après la fenêtre Stripe : on recharge ce que le joueur possède et on confirme l'achat
+  async function checkPending() {
+    let p = null; try { p = JSON.parse(localStorage.getItem('bm_pending') || 'null'); } catch (e) {}
+    if (!p || Date.now() - p.at > 3600e3) { if (p) try { localStorage.removeItem('bm_pending'); } catch (e) {} return; }
+    await loadOwned();
+    if ((owned[p.item] || 0) > p.n) {
+      try { localStorage.removeItem('bm_pending'); } catch (e) {}
+      const it = SHIPS.find(x => x.id === p.item);
+      if (typeof toast === 'function') toast(`Paiement reçu. ${it ? it.name : 'Ton vaisseau'} est à toi. Pauline : « Fais-en bon usage. »`);
+      if (root && root.classList.contains('on')) { if (root.querySelector('.bm-ship.on')) openShip(p.item); else renderCatalog(); }
+    }
+  }
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') setTimeout(() => checkPending().catch(() => {}), 800); });
+  window.addEventListener('focus', () => setTimeout(() => checkPending().catch(() => {}), 800));
   window.addEventListener('resize', () => { try { fitView(); } catch (e) {} });
   window.SBBlackmarket = { open, close, ships: SHIPS, cats: CATS };
 })();
