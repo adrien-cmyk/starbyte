@@ -63,7 +63,7 @@ const CFG = {
   jaw: { base: 32, tip: 22, teeth: 170, delay: 0.55 },             // ouverture des pinces (°), dégagement des crocs, décalage
   release: { to: [1.2, 3.5, 10.0], dur: 6.5, start: 9.0 },         // trajectoire de libération (repère du vaisseau), durée, début
   spaghetti: { depart: 6.0, burst: 9.0, recall: 4.0, voyage: 0.9 },  // étirement de la proue à la poupe (× longueur)
-  T: { loop: 8, exit: 2.4, openAt: 1.3, burstAt: 1.75, burstDur: 0.12, settleDur: 3.0, rematDur: 1.1, jawsAt: 5.4, jawsDur: 3.8, recallAfter: 0.4, hold: 3.8 },
+  T: { suckAt: 4.0, suckDur: 0.45, loop: 8, exit: 2.4, openAt: 1.3, burstAt: 1.75, burstDur: 0.12, settleDur: 3.0, rematDur: 1.1, jawsAt: 5.4, jawsDur: 3.8, recallAfter: 0.4, hold: 3.8 },
 };
 const Q = new URLSearchParams(location.search);
 function deepMerge(a, b) { for (const k in b) { if (b[k] && typeof b[k] === 'object' && !Array.isArray(b[k]) && a[k] && typeof a[k] === 'object') deepMerge(a[k], b[k]); else a[k] = b[k]; } return a; }
@@ -788,11 +788,18 @@ function placeCam(pos, look, roll, hfov) {
 /* ═══════════════ mise en scène ═══════════════ */
 // DÉPART : vitesse = dérive puis plongée (rampe douce), position en forme fermée
 const DEP = { z0: -7.0, P: 9.5, a: 3.0, b: 6.2 };
-const depX = (t) => CFG.ship.cruise * t + (CFG.ship.plunge - CFG.ship.cruise) * smInt(t, DEP.a, DEP.b);
+// dérive lente, puis à suckAt l'anomalie l'avale en un clin d'œil (suckDur)
+const depX = (t) => {
+  const T = CFG.T, x0 = CFG.ship.cruise * Math.min(t, T.suckAt);
+  if (t <= T.suckAt) return x0;
+  const need = DEP.P - STERN - DEP.z0 + 0.15 - x0;
+  const u = lin(T.suckAt, T.suckAt + T.suckDur, t);
+  return x0 + need * Math.pow(u, 2.2) + Math.max(0, t - T.suckAt - T.suckDur) * 2;
+};
 function depTimes() {
   const need = DEP.P - STERN - DEP.z0 + 0.15, needTip = DEP.P - (DEP.z0 + TIP);
-  let tS = 0, tTip = 0; for (let t = 0; t < 40; t += 0.01) { if (!tTip && depX(t) >= needTip) tTip = t; if (depX(t) >= need) { tS = t; break; } }
-  const close = tS + 0.8;
+  let tS = 0, tTip = 0; for (let t = 0; t < 40; t += 0.005) { if (!tTip && depX(t) >= needTip) tTip = t; if (depX(t) >= need) { tS = t; break; } }
+  const close = tS + 0.45;
   return { tTip, tS, close, end: close + 1.9 };
 }
 // ARRIVÉE
@@ -840,36 +847,35 @@ function stateDepart(t) {
   const T = D;
   st.shipZ = DEP.z0 + depX(t);
   st.shipVis = t < T.tS + 0.05;
-  st.escorts = true;
   st.portalOn = t < T.close + 0.4; st.pz = DEP.P; st.pDir = 1;
   // les griffes s'allument, leurs flux déchirent la trame devant la gueule, puis tiennent l'ouverture écartée
-  st.claw = sm(0.7, 2.0, t) * (1 - sm(T.tTip - 0.3, T.tTip + 0.7, t));
-  const open = sm(2.3, 4.8, t), shut = eiC(lin(T.close - 0.8, T.close, t));
+  st.claw = sm(0.5, 1.6, t) * (1 - sm(T.tTip - 0.05, T.tTip + 0.35, t));
+  const open = sm(1.9, 3.7, t), shut = eiC(lin(T.close - 0.5, T.close, t));
   st.R = CFG.portalRadius * (open * (1 + .04 * Math.sin(t * 2.3))) * (1 - shut);
-  st.Rlens = Math.max(st.R, CFG.portalRadius * 0.45 * sm(1.4, 3.0, t) * (1 - shut));
-  st.lensK = (sm(1.4, 3.2, t) * 0.68 + 0.5 * Math.exp(-Math.pow((t - T.close) / 0.18, 2))) * (1 - lin(T.close + 0.1, T.close + 0.9, t)) * CFG.distortion;
-  st.heat = sm(2.4, 4.4, t) * (1 + 1.2 * Math.exp(-Math.pow((t - T.close + 0.1) / 0.25, 2)));
+  st.Rlens = Math.max(st.R, CFG.portalRadius * 0.45 * sm(1.1, 2.6, t) * (1 - shut));
+  st.lensK = (sm(1.1, 2.8, t) * 0.68 + 0.5 * Math.exp(-Math.pow((t - T.close) / 0.18, 2))) * (1 - lin(T.close + 0.1, T.close + 0.9, t)) * CFG.distortion;
+  st.heat = sm(2.0, 3.6, t) * (1 + 1.2 * Math.exp(-Math.pow((t - T.close + 0.1) / 0.25, 2)));
   st.filCollapse = lin(T.close - 0.9, T.close, t);
   st.clip = 1;
   // aspiré : le TAXI s'étire de la proue à la poupe, comme un spaghetti avalé par l'anomalie
   // l'ancre est la poupe : elle ne recule jamais ; tout ce qui est devant elle est tiré vers l'avant, dans l'ouverture
-  st.G = CFG.spaghetti.depart * sm(T.tTip - 1.7, T.tTip + 0.35, t) * CFG.distortion; st.GA = STERN;
+  st.G = CFG.spaghetti.depart * sm(CFG.T.suckAt - 0.05, CFG.T.suckAt + 0.22, t) * CFG.distortion; st.GA = STERN;
   st.spag = sm(T.tTip - 0.6, T.tTip + 0.4, t) * 0.35 * CFG.distortion; st.spagL = 2.6;
   st.wave = 0.35 * sm(T.tTip - 0.5, T.tTip + 0.5, t) * CFG.distortion;
   st.trailMode = 1;
   // caméra : au ras du flanc, derrière la poupe, grand angle ; le titan s'éloigne vers l'ouverture
-  const k = sm(0, T.end, t), side = eio(lin(T.tTip - 2.6, T.tTip + 0.4, t));
+  const k = sm(0, T.end, t), side = eio(lin(1.2, CFG.T.suckAt - 0.1, t));
   _camP.set(-7.4 - 1.2 * k, 1.6, -15.5 + 3.0 * k);                               // au ras du flanc, derrière la poupe
   _camP.lerp(_tmp.set(-22.0, 4.2, -4.0), side);                                 // puis de côté : on voit le titan s'étirer dans l'anomalie
   const lookZ = THREE.MathUtils.lerp(-0.5, DEP.P - 1.0, sm(1.0, 6.0, t)) - 5.0 * side;
   _camL.set(2.4 * (1 - side), 0.6, lookZ);
   st.fov = 78 - 12 * side; st.roll = -0.06 * (1 - side) + 0.02 * Math.sin(t * .3);
-  st.shake = 0.03 * st.claw + 0.08 * sm(T.tTip - 0.5, T.tS, t) * (1 - lin(T.tS, T.tS + 0.6, t));
+  st.shake = 0.03 * st.claw + 0.25 * sm(CFG.T.suckAt - 0.05, CFG.T.suckAt + 0.1, t) * (1 - lin(T.tS, T.tS + 0.5, t));
   st.pinch = 0.18 * Math.exp(-Math.pow((t - T.close) / 0.12, 2)) * CFG.distortion;
   st.flash = 0.10 * Math.exp(-Math.pow((t - T.close) / 0.1, 2)) + 0.08 * Math.exp(-Math.pow((t - 2.4) / 0.15, 2));
   st.fade = lin(0, 0.6, t) < 1 ? 1 - lin(0, 0.6, t) : 0;
   if (!Q.has('only')) st.iris = 4 - 4 * eiC(lin(T.end - 0.7, T.end, t));   // le vide se referme sur un point : on entre dans l'anomalie
-  if (t > 0.2) beat('calme'); if (t > 1.2) beat('griffes'); if (t > 2.4) beat('ouverture'); if (t > T.tTip) beat('franchissement'); if (t > T.close - 0.8) beat('fermeture');
+  if (t > 0.2) beat('calme'); if (t > 0.7) beat('griffes'); if (t > 2.0) beat('ouverture'); if (t > CFG.T.suckAt) beat('franchissement'); if (t > T.close) beat('fermeture');
 }
 function voyageEnv(t) {      // la boucle : t périodique (période CFG.T.loop)
   const P = CFG.T.loop, ph = t / P * Math.PI * 2;
