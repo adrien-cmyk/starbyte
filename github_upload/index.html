@@ -5940,6 +5940,7 @@ svg.map {
   <button onclick="cheatToggleFastShips()" id="cheat-fastships-btn">⏱ Vaisseaux : durée normale</button>
   <button onclick="cheatArche()">◈ +1 Arche coloniale (skill débloqué)</button>
   <button onclick="cheatArcheArrive()">◈ Arche en route : arrivée immédiate</button>
+  <button onclick="cheatRemoveColony()" style="border-color:rgba(255,80,64,.4);color:var(--red)">◈ Retirer une colonie (test)</button>
   <button onclick="cheatPunisher()"><span class="icon-static" data-icon="anchor" data-icon-size="11" style="margin-right:5px"></span>Spawn Punisher 1</button>
 
   <div class="cheat-divider"></div>
@@ -48251,6 +48252,45 @@ function cheatArche() {
   toast(`◈ Arche coloniale prête (${G.fleet.colonial}) · ouvre une planète habitable libre et « Coloniser »`);
   try { saveGame(); } catch (e) {}
   refreshCurrentScreen();
+}
+// Retire une colonie de test, sur le serveur PUIS dans la partie. Une erreur serveur ne touche à rien.
+// Une colonie TAXI rend aussi le TAXI (nouveau largage possible). Jamais la planète affichée : changer de planète peut recharger le jeu.
+function cheatRemoveColony() {
+  if (typeof _sbDevAllowed === 'function' && !_sbDevAllowed()) return;
+  const cols = (G.worlds || []).filter(w => w && w.kind === 'colony');
+  if (!cols.length) { toast('Aucune colonie à retirer'); return; }
+  const old = document.getElementById('cheat-colony-pick'); if (old) old.remove();
+  const ov = document.createElement('div'); ov.id = 'cheat-colony-pick';
+  ov.style.cssText = 'position:fixed;inset:0;z-index:100000;background:rgba(0,0,0,.8);display:flex;align-items:center;justify-content:center;padding:16px';
+  const rows = cols.map(w => {
+    const here = w.id === G.activeWorld, away = ((G.fleet && G.fleet.prepared) || []).some(f => f && f.world === 'transit:' + w.id);
+    const why = here ? 'Repasse d\'abord sur une autre planète' : away ? 'Une flotte est en route vers elle' : (w.taxi ? 'Colonie TAXI : le TAXI sera rendu' : (w.coord || ''));
+    return `<button data-col="${_esc(w.id)}" ${here || away ? 'disabled' : ''} style="display:block;width:100%;min-height:52px;margin-bottom:8px;padding:8px 12px;text-align:left;border:1px solid rgba(255,255,255,.2);border-radius:8px;background:rgba(255,255,255,.04);color:${here || away ? 'var(--mut)' : '#e6f0ff'};font:inherit"><b>${_esc(w.name || 'Colonie')}</b><span style="display:block;font-size:11px;color:var(--mut)">${_esc(why)}</span></button>`;
+  }).join('');
+  ov.innerHTML = `<div style="background:var(--bg-1,#10151a);border:1px solid rgba(255,255,255,.15);border-radius:12px;padding:16px;width:100%;max-width:380px;max-height:80vh;overflow:auto"><div style="font-size:14px;font-weight:600;margin-bottom:10px;color:#e6f0ff">Retirer une colonie (test)</div>${rows}<button data-col-x style="width:100%;min-height:44px;border:0;background:none;color:var(--mut);font:inherit">Annuler</button></div>`;
+  ov.addEventListener('click', (e) => {
+    if (e.target === ov || e.target.closest('[data-col-x]')) { ov.remove(); return; }
+    const b = e.target.closest('[data-col]'); if (b && !b.disabled) { ov.remove(); cheatRemoveColonyGo(b.dataset.col); }
+  });
+  document.body.appendChild(ov);
+}
+async function cheatRemoveColonyGo(id) {
+  const w = (G.worlds || []).find(x => x && x.id === id); if (!w || id === G.activeWorld) return;
+  const ok = await sbConfirmDanger('Retirer ' + _esc(w.name || 'cette colonie'), 'Elle disparaît de ta partie et du registre.' + (w.taxi ? '<br><br>Ton TAXI redevient prêt à larguer.' : '') + '<br><br>Ta capitale et tes autres colonies ne bougent pas.', 'Retirer');
+  if (!ok) return;
+  if (!window._sbRpc) { toast('Connexion au registre indisponible : rien n\'a été retiré'); return; }
+  let res; try { res = await window._sbRpc('dev_colony_remove', { p_address: w.coord || '', p_taxi: !!w.taxi }); } catch (e) { res = { error: e }; }
+  if (res && res.error) { toast('Refusé par le serveur, rien n\'a été retiré : ' + (res.error.message || res.error)); return; }
+  const fallback = 'home';
+  for (const list of [G.fleet && G.fleet.prepared, G.tankerMissions, G.probeMissions, G.garrisons]) for (const x of (list || [])) if (x && x.world === id) x.world = fallback;
+  const loc = G.fleet && G.fleet.bmLoc; if (loc) for (const k of Object.keys(loc)) if (loc[k] === id) delete loc[k];
+  G.worlds = G.worlds.filter(x => x && x.id !== id);
+  if (w.taxi && G.fleet) delete G.fleet.bmTaxi;
+  try { saveGame(); } catch (e) {}
+  try { if (window.SBBlackmarket) SBBlackmarket.reload(); } catch (e) {}
+  try { if (typeof renderPlanetMap === 'function') renderPlanetMap(); } catch (e) {}
+  try { refreshCurrentScreen(); } catch (e) {}
+  toast('◈ ' + (w.name || 'Colonie') + ' retirée');
 }
 function cheatArcheArrive() {
   const ms = G.colonyMissions || [];
