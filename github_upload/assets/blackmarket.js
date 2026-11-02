@@ -57,6 +57,9 @@
   let units = (() => { try { return JSON.parse(localStorage.getItem('bm_units_cache') || '[]') || []; } catch (e) { return []; } })();
   // Atelier des logos (v35) : ma bibliothèque et la peinture de chaque modèle
   let logos = [], paint = {};
+  // Le vaisseau amiral (un seul) : c'est lui, et lui seul, qui peut faire l'ambassadeur. Gardé pour les écrans ouverts avant la relève.
+  let flagItem = (() => { try { return localStorage.getItem('bm_flagship_cache') || null; } catch (e) { return null; } })();
+  function setFlagItem(id) { flagItem = id || null; try { if (flagItem) localStorage.setItem('bm_flagship_cache', flagItem); else localStorage.removeItem('bm_flagship_cache'); } catch (e) {} }
   async function loadOwned() {
     try {
       const st = await call('/rest/v1/rpc/bm_state', {});
@@ -65,6 +68,7 @@
           ed: o.edition_no || null, used: o.taxi_used_at ? new Date(o.taxi_used_at).getTime() : 0, addr: o.taxi_address || null, showPseudo: !!o.show_pseudo }));
       if (st && typeof st.taxi_left === 'number') taxiLeft = st.taxi_left;
       logos = (st && st.logos) || []; paint = {}; ((st && st.paint) || []).forEach(p => { paint[p.item_id] = p; });
+      setFlagItem(((st && st.paint) || []).filter(p => p.flagship).map(p => p.item_id)[0] || null);
       owned = {}; units.forEach(u => { owned[u.item] = (owned[u.item] || 0) + 1; });
       try { localStorage.setItem('bm_owned_cache', JSON.stringify(owned)); localStorage.setItem('bm_units_cache', JSON.stringify(units)); } catch (e) {}
     } catch (e) { /* v31 pas encore lancé : rien à afficher */ }
@@ -404,24 +408,45 @@
   function envoyMission(pid) {
     try { return (G.tankerMissions || []).find(m => m.bmEnvoy && m.bmEnvoy.pid === pid && TANKER_BUSY_STATUSES.includes(m.status)) || null; } catch (e) { return null; }
   }
-  function envoyChoices() {
-    try { return freeHere(null).filter(u => ENVOY[u.cat] && shipOf(u)).map(u => {
-      const s = shipOf(u), e = ENVOY[u.cat];
-      return { pid: u.id, item: u.item, cat: u.cat, name: s.name, cargo: e.cargo, fuel: e.fuel, speed: e.speed };
-    }); } catch (e) { return []; }
+  // Un seul ambassadeur à la fois : le vaisseau amiral (décision d'Adrien, 02/11). Rend le vaisseau, ou la raison de son absence.
+  function envoyState() {
+    try {
+      const mine = units.filter(u => ENVOY[u.cat] && shipOf(u));
+      if (!mine.length) return { choice: null, reason: null };
+      const gone = (G.tankerMissions || []).find(m => m.bmEnvoy && TANKER_BUSY_STATUSES.includes(m.status));
+      if (gone) return { choice: null, reason: gone.bmEnvoy.name + ' est déjà en mission', item: gone.bmEnvoy.item };
+      if (!flagItem) return { choice: null, reason: 'Choisis ton vaisseau amiral à l\'Atelier pour l\'envoyer ici' };
+      const fl = mine.filter(u => u.item === flagItem), s = SHIPS.find(x => x.id === flagItem);
+      if (!fl.length) return { choice: null, reason: 'Choisis ton vaisseau amiral à l\'Atelier pour l\'envoyer ici' };
+      const free = freeHere(null).find(u => u.item === flagItem);
+      if (free) {
+        const e = ENVOY[free.cat];
+        return { choice: { pid: free.id, item: free.item, cat: free.cat, name: s.name, cargo: e.cargo, fuel: e.fuel, speed: e.speed } };
+      }
+      const down = fl.find(isDown), f = fl.map(u => fleetOfUnit(u.id)).find(Boolean);
+      return { choice: null, item: flagItem, reason: down ? s.name + ' est hors service · ' + hoursLeft(down)
+        : f ? s.name + ' est dans la flotte ' + f.name : s.name + ' est sur une autre planète' };
+    } catch (e) { return { choice: null, reason: null }; }
   }
+  function envoyChoices() { const c = envoyState().choice; return c ? [c] : []; }
   function envoyRows(selected, fn, o) {
     o = o || {};
-    const list = envoyChoices().filter(e => !o.needCargo || e.cargo > 0);
-    if (!list.length) return '';
-    return `<div style="margin:12px 0 8px;font-size:10px;color:#c9a45a;letter-spacing:.1em;text-transform:uppercase">Vaisseaux d'exception</div>` + list.map(e => {
-      const on = selected === e.pid;
-      return `<div onclick="${fn}('${e.pid}')" style="display:flex;align-items:center;gap:10px;margin-bottom:8px;padding:8px 12px 8px 8px;min-height:44px;background:${on ? 'rgba(201,164,90,.14)' : 'rgba(40,40,40,.3)'};border:1px solid ${on ? '#c9a45a' : 'var(--border)'};border-radius:6px;cursor:pointer">
+    const st = envoyState(), e = st.choice;
+    const head = `<div style="margin:12px 0 8px;font-size:10px;color:#c9a45a;letter-spacing:.1em;text-transform:uppercase">Ton vaisseau amiral</div>`;
+    const why = !e ? st.reason : (o.needCargo && !e.cargo ? e.name + ' n\'a pas de cale : rien à livrer' : null);
+    if (why) {
+      const it = (e && e.item) || st.item;
+      return head + `<div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;padding:8px 12px 8px 8px;min-height:44px;border:1px dashed var(--border);border-radius:6px;opacity:.75">
+        ${it ? `<img src="${thumb(it)}" alt="" style="flex:none;width:58px;height:38px;object-fit:cover;border-radius:4px;background:#000;filter:saturate(.4)">` : ''}
+        <div style="flex:1;min-width:0;font-size:11px;line-height:1.4;color:var(--mut)">${esc(why)}</div></div>`;
+    }
+    if (!e) return '';
+    const on = selected === e.pid;
+    return head + `<div onclick="${fn}('${e.pid}')" style="display:flex;align-items:center;gap:10px;margin-bottom:8px;padding:8px 12px 8px 8px;min-height:44px;background:${on ? 'rgba(201,164,90,.14)' : 'rgba(40,40,40,.3)'};border:1px solid ${on ? '#c9a45a' : 'var(--border)'};border-radius:6px;cursor:pointer">
         <img src="${thumb(e.item)}" alt="" style="flex:none;width:58px;height:38px;object-fit:cover;border-radius:4px;background:#000">
         <div style="flex:1;min-width:0"><div style="font-size:12px;color:${on ? '#f1d27a' : 'var(--text)'};font-weight:${on ? 600 : 400}">${esc(e.name)}</div>
           <div style="font-size:10px;color:var(--mut);margin-top:2px">${e.cargo ? 'Cale : ' + e.cargo.toLocaleString('fr-CH') : 'Sans cale · pure parade'}${o.fuel ? ' · -' + e.fuel + ' carburant' : ''}</div></div>
         ${on ? '<div style="color:#c9a45a;font-size:14px">✓</div>' : ''}</div>`;
-    }).join('');
   }
   // Perdu là où un tanker le serait : jamais détruit, hors service à son retour
   function envoyLost(m) {
@@ -894,7 +919,7 @@
       <div class="bm-at-row">${atelierSlots.map(s => `<button class="bm-chip ${(p.slots || []).includes(s.id) ? 'on' : ''}" data-lgslot="${esc(s.id)}">${esc(s.label)}</button>`).join('')}
         <button class="bm-chip ${p.outline !== false ? 'on' : ''}" data-lgout>Contour sombre</button></div>` : ''}
       <div class="bm-at-row"><button class="bm-chip ${p.flagship ? 'on' : ''}" data-lgflag>${p.flagship ? 'Vaisseau amiral' : 'En faire mon vaisseau amiral'}</button></div>
-      <div class="bm-at-msg ${err ? 'err' : ''}" aria-live="polite">${msg ? esc(msg) : (logos.length ? 'Ton logo est vu quand tu raides quelqu\'un et, pour ton vaisseau amiral, au bar des docks.' : 'PNG à fond transparent : le plus beau rendu.')}</div>`;
+      <div class="bm-at-msg ${err ? 'err' : ''}" aria-live="polite">${msg ? esc(msg) : (logos.length ? 'Ton logo est vu quand tu raides quelqu\'un. Ton vaisseau amiral peut remplacer un tanker : il va en ambassade et dans les ports francs, et tout le monde le voit.' : 'PNG à fond transparent : le plus beau rendu.')}</div>`;
     const inp = box.querySelector('#bm-lg-file'); if (inp) inp.addEventListener('change', () => { if (inp.files[0]) atelierImport(inp.files[0]); });
     setTimeout(fitView, 50);
   }
@@ -959,6 +984,7 @@
     const item = atelierShip, was = !!(paint[item] && paint[item].flagship);
     Object.values(paint).forEach(p => { p.flagship = false; });
     const p = paint[item] = paint[item] || { item_id: item }; p.flagship = !was;
+    setFlagItem(was ? null : item);
     renderAtelier();
     try { await call('/rest/v1/rpc/bm_flagship_set', { p_item: was ? null : item }); } catch (e) { renderAtelier(lgErr(e), true); }
   }
