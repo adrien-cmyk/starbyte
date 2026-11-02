@@ -12201,6 +12201,7 @@ function renderDefenseReportDetail(r) {
       <div style="font-size:10px;color:var(--mut);letter-spacing:.12em;text-transform:uppercase;margin-bottom:8px">Répondre à ${d.attacker || 'l\'assaillant'} · un pavillon</div>
       ${d.flagSent ? `<div style="font-size:12px;color:var(--mut);font-style:italic">Pavillon envoyé : « ${(MP_FLAG_BY_KEY[d.flagSent] || {}).label || d.flagSent} »</div>` : _mpFlagChips(`mpFlagAttacker.bind(null,'${r.id}')`)}
     </div>` : ''}`;
+  try { if (window.SBBlackmarket && r.mpRaidId) SBBlackmarket.fillRaidFaces(el, r.mpRaidId); } catch (e) {}   // Atelier des logos : le vaisseau d'exception de l'assaillant
 }
 // ═══ fin MP_RAIDS_V0 ═══
 
@@ -12635,6 +12636,7 @@ function _mpRerenderConvoySheet() {
       <button onclick="closeMpConvoySheet()" style="margin-top:18px;width:100%;padding:11px;background:transparent;border:1px solid var(--border);color:var(--mut);border-radius:6px;font-family:inherit;font-size:12px;letter-spacing:.08em;cursor:pointer">FERMER</button>
     </div>`;
   document.body.appendChild(modal);
+  try { if (window.SBBlackmarket) SBBlackmarket.fillFlagship(modal, c.presence_id); } catch (e) {}   // Atelier des logos : son vaisseau amiral
 }
 async function mpFlagConvoy(presenceId, key) {
   const mission = (G.tankerMissions || []).find(m => m.id === _activeDockMissionId);
@@ -49971,7 +49973,7 @@ if (G.knownTargets && Array.isArray(G.tankerMissions)) {
 <!-- PATCH_1610_SKILLS — skills des bâtiments : apprendre, découvrir, effets -->
 <script src="assets/skills.js?v=20261021-1130"></script>
 <script src="assets/maj.js?v=20261025-1800"></script>
-<script src="assets/blackmarket.js?v=20261102-1700"></script>   <!-- Blackmarket v0 : aperçu du catalogue, réservé au compte d'Adrien -->
+<script src="assets/blackmarket.js?v=20261102-logos"></script>   <!-- Blackmarket v0 : aperçu du catalogue, réservé au compte d'Adrien -->
 <!-- PATCH_1510_CROWN — The Drifting Crown en 3D (assets/station3d.js, sur le moteur partagé window.SB3D) -->
 <script type="module" src="assets/station3d.js?v=20261022-1047"></script>
 <!-- FORMATION3D — flotte déployée en orbite, vue de haut en formation (remplace la vue orbite) -->

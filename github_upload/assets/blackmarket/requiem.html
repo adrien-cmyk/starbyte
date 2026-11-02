@@ -239,6 +239,8 @@ ship.add(engineLight);
 
 /* ================================================================== lookdev : la planche donne la peinture,
    le shader ajoute micro-panneaux de près, variation de rugosité, patine, suie vers les moteurs, usure d'arête. */
+// Atelier des logos : peinture chargée seulement avec ?lg=1 (vaisseau possédé ou croisé), jamais au catalogue
+const LOGO = /[?&]lg=1/.test(location.search) ? (await import('./logo-paint.js?v=20261102d')).createLogoPaint(THREE, 'requiem') : null;
 const LOOK = {
   M_RQ_BLANC:        { cell: [9.0, 6.0], seam: .13, depth: .05, tint: .04, rough: .10, grime: .16, wear: .25 },
   M_RQ_BLANC_SALE:   { cell: [9.0, 6.0], seam: .13, depth: .05, tint: .05, rough: .10, grime: .20, wear: .25 },
@@ -252,6 +254,7 @@ function premium(mat, p) {
     sh.uniforms.uCell = { value: new THREE.Vector2(...p.cell) };
     sh.uniforms.uLook = { value: new THREE.Vector4(p.seam, p.depth, p.tint, p.rough) };
     sh.uniforms.uLook2 = { value: new THREE.Vector2(p.grime, p.wear) };
+    if (LOGO) Object.assign(sh.uniforms, LOGO.uni);
     sh.vertexShader = sh.vertexShader
       .replace('#include <common>', '#include <common>\nvarying vec3 vOP; varying vec3 vON;')
       .replace('#include <begin_vertex>', '#include <begin_vertex>\nvOP = position; vON = normal;');
@@ -259,6 +262,7 @@ function premium(mat, p) {
       .replace('#include <common>', `#include <common>
         varying vec3 vOP; varying vec3 vON;
         uniform vec2 uCell; uniform vec4 uLook; uniform vec2 uLook2;
+        ${LOGO ? LOGO.DECL : ''}
         float hh(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
         float vn(vec3 x){ vec3 i=floor(x), f=fract(x); f=f*f*(3.0-2.0*f);
           float a=hh(i.xy+i.z*17.0), b=hh(i.xy+vec2(1,0)+i.z*17.0), c=hh(i.xy+vec2(0,1)+i.z*17.0), d=hh(i.xy+vec2(1,1)+i.z*17.0);
@@ -279,6 +283,7 @@ function premium(mat, p) {
           return sX * w.x + sY * w.y + sZ * w.z;
         }`)
       .replace('#include <color_fragment>', `#include <color_fragment>
+        ${LOGO ? LOGO.APPLY : ''}
         float mpp = length(fwidth(vOP));
         float cmin = min(uCell.x, uCell.y);
         float near = 1.0 - smoothstep(cmin / 22.0, cmin / 9.0, mpp);
@@ -580,7 +585,8 @@ loadShip().then((gltf) => {
       if (GLOSS[mat.name]) { mat.roughness = GLOSS[mat.name][0]; mat.metalness = GLOSS[mat.name][1]; }
       if (mat.map) { mat.map.anisotropy = renderer.capabilities.getMaxAnisotropy(); }
       const look = LOOK[mat.name];
-      if (look && !mat.userData.rq) { mat.userData.rq = 1; premium(mat, look); }
+      if (look && !mat.userData.rq) { mat.userData.rq = 1; premium(mat, look); if (LOGO) LOGO.wrap(mat); }
+      else if (LOGO && !look && !mat.userData.rq && LOGO.paintable(mat)) { mat.userData.rq = 1; LOGO.only(mat); }
       if (mat.name === 'M_KV_GLOW_MOTEUR') { mat.emissive.copy(ENGINE_COLOR); mat.emissiveIntensity = 5.5; mat.color.copy(ENGINE_COLOR); }
       else if (mat.name.startsWith('M_RQ_AMBRE')) { mat.emissiveIntensity = 1.4; }
       else if (mat.name === 'M_RQ_BLEU') { mat.emissiveIntensity = 0.5; }
@@ -689,7 +695,7 @@ function frame() {
     if (Math.abs(fov - camera.fov) > 0.05) { camera.fov = fov; camera.updateProjectionMatrix(); }
     const wantZ = THREE.MathUtils.lerp(THREE.MathUtils.clamp(camera.position.z * 0.8, -4.8, 5.6), TARGET.z, k);
     const wantY = THREE.MathUtils.lerp(AXIS_Y + 0.05, TARGET.y, k);
-    const dz = wantZ - controls.target.z, dy = wantY - controls.target.y;
+    const dz = window.__logoHold ? 0 : wantZ - controls.target.z, dy = window.__logoHold ? 0 : wantY - controls.target.y;
     controls.target.z += dz * Math.min(1, dt * 2.5); controls.target.y += dy * Math.min(1, dt * 2.5);
     camera.position.z += dz * Math.min(1, dt * 2.5); camera.position.y += dy * Math.min(1, dt * 2.5);
   }
@@ -703,6 +709,7 @@ function frame() {
   composer.render();
   requestAnimationFrame(frame);
 }
+if (LOGO) LOGO.attach({ renderer, camera, controls, S });
 frame();
 </script>
 

@@ -38,7 +38,7 @@
     'Tu négocies ? Retourne compter tes cailloux au match-3.',
     "T'as vu l'acier ? Ça, ça se construit pas dans ton petit chantier.",
   ];
-  const VERSION = '20261031';
+  const VERSION = '20261102d';
   // Serveur (schema_mp_v31_blackmarket.sql + fonctions bm-checkout / bm-webhook)
   const SB = 'https://elupnpdcblztpfywnhjl.supabase.co';
   const KEY = 'sb_publishable_tXGrQIROzH2DwBrny1GcHQ_iKJKoBOQ';
@@ -55,6 +55,8 @@
   }
   // un vaisseau acheté = une « unité » (id de l'achat) : { id, item, cat, down (fin de mise hors service, ms) }
   let units = (() => { try { return JSON.parse(localStorage.getItem('bm_units_cache') || '[]') || []; } catch (e) { return []; } })();
+  // Atelier des logos (v35) : ma bibliothèque et la peinture de chaque modèle
+  let logos = [], paint = {};
   async function loadOwned() {
     try {
       const st = await call('/rest/v1/rpc/bm_state', {});
@@ -62,6 +64,7 @@
         .map(o => ({ id: o.id, item: o.item_id, cat: o.category, down: o.disabled_until ? new Date(o.disabled_until).getTime() : 0,
           ed: o.edition_no || null, used: o.taxi_used_at ? new Date(o.taxi_used_at).getTime() : 0, addr: o.taxi_address || null, showPseudo: !!o.show_pseudo }));
       if (st && typeof st.taxi_left === 'number') taxiLeft = st.taxi_left;
+      logos = (st && st.logos) || []; paint = {}; ((st && st.paint) || []).forEach(p => { paint[p.item_id] = p; });
       owned = {}; units.forEach(u => { owned[u.item] = (owned[u.item] || 0) + 1; });
       try { localStorage.setItem('bm_owned_cache', JSON.stringify(owned)); localStorage.setItem('bm_units_cache', JSON.stringify(units)); } catch (e) {}
     } catch (e) { /* v31 pas encore lancé : rien à afficher */ }
@@ -125,6 +128,21 @@
   font: 600 14px 'Space Grotesk', sans-serif; letter-spacing: .08em; text-transform: uppercase; }
 #bm-root .bm-buy:not([disabled]) { background: #c9a45a; color: #15110a; cursor: pointer; }
 #bm-root .bm-buy-sub.err { color: #d9845a; }
+#bm-root .bm-atelier { display: flex; flex-direction: column; gap: 8px; padding-bottom: calc(env(safe-area-inset-bottom) + 6px); }
+#bm-root .bm-at-head { display: flex; justify-content: space-between; align-items: center; font-size: 17px; }
+#bm-root .bm-at-link { min-height: 44px; padding: 0 4px; border: 0; background: none; color: #c9a45a; font: 500 13px 'Space Grotesk', sans-serif; cursor: pointer; }
+#bm-root .bm-at-lbl { font: 500 10px 'JetBrains Mono', monospace; letter-spacing: .14em; text-transform: uppercase; color: #8d98a3; }
+#bm-root .bm-at-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+#bm-root .bm-lg { position: relative; width: 76px; height: 52px; border-radius: 8px; border: 1px solid rgba(255,255,255,.2); background: #20262c; display: inline-flex; align-items: center; justify-content: center; color: #c9a45a; font-size: 24px; cursor: pointer; }
+#bm-root .bm-lg.on { border-color: #c9a45a; box-shadow: 0 0 0 1px #c9a45a; }
+#bm-root .bm-lg > button:first-child { width: 100%; height: 100%; padding: 4px; border: 0; background: none; cursor: pointer; }
+#bm-root .bm-lg img { width: 100%; height: 100%; object-fit: contain; display: block; }
+#bm-root .bm-lg .x { position: absolute; right: -8px; top: -8px; width: 26px; height: 26px; border-radius: 13px; border: 1px solid rgba(255,255,255,.3); background: #0b0f12; color: #e6edf2; font-size: 15px; line-height: 1; cursor: pointer; }
+#bm-root .bm-lg input { position: absolute; width: 1px; height: 1px; opacity: 0; }
+#bm-root .bm-chip { min-height: 44px; padding: 0 12px; border-radius: 8px; border: 1px solid rgba(255,255,255,.22); background: rgba(255,255,255,.04); color: #e6edf2; font: 500 13px 'Space Grotesk', sans-serif; cursor: pointer; }
+#bm-root .bm-chip.on { border-color: #c9a45a; color: #c9a45a; }
+#bm-root .bm-at-msg { min-height: 34px; font-size: 12px; line-height: 1.4; color: #a7b1ba; }
+#bm-root .bm-at-msg.err { color: #d9845a; }
 #bm-root .bm-own { font: 500 10px 'JetBrains Mono', monospace; color: #7fbf7a; letter-spacing: .08em; margin-top: 3px; }
 #bm-root .bm-buy-sub { text-align: center; font: 400 10px 'JetBrains Mono', monospace; color: #6f7a84; margin-top: 6px; }
 `;
@@ -200,13 +218,14 @@
     const pane = root.querySelector('.bm-ship');
     const stats = statsOf(s.cat).map(x => `<div><i>${x.k}</i><b>${x.v != null ? fmt(x.v) : x.txt}</b>${x.d ? `<em class="${x.neg ? 'neg' : /^(=|standard)$/.test(x.d) ? 'neu' : ''}">${x.d}</em>` : ''}</div>`).join('');
     pane.innerHTML = `
-      <iframe src="assets/blackmarket/${s.id}.html?embed${mine && tx && tx.used ? '&dead' : ''}&v=${VERSION}" title="${esc(s.name)} en 3D" allow="fullscreen"></iframe>
+      <iframe src="assets/blackmarket/${s.id}.html?embed${mine && tx && tx.used ? '&dead' : ''}${mine && s.cat !== 'arche' ? '&lg=1' : ''}&v=${VERSION}" title="${esc(s.name)} en 3D" allow="fullscreen"></iframe>
       <div class="bm-top"><button class="bm-back" ${mine ? 'data-close' : 'data-cat'}>‹ ${mine ? 'Flotte' : 'Catalogue'}</button></div>
       <div class="bm-sheet" style="--a:${s.accent}">
         <div class="bm-grip" data-grip></div>
         <div class="cat">${mine ? `${STAR(11)} Vaisseau d'exception · ` : ''}${s.cat === 'arche' ? 'Édition légendaire' : c.label}</div>
         <div class="nm"><b>${esc(s.name)}${tx && tx.ed ? ` <span style="font:500 13px 'JetBrains Mono',monospace;color:#d9c2ff">n° ${String(tx.ed).padStart(3, '0')} / 100</span>` : ''}</b><span class="bm-price">${mine ? (s.cat === 'arche' ? '' : `À toi ×${owned[s.id] || 1}`) : chf(c.price)}</span></div>
         <div class="bm-stats">${stats}</div>
+        ${mine && s.cat !== 'arche' ? `<button class="bm-buy" data-atelier="${s.id}" style="margin-bottom:12px">Atelier · Logo</button>` : ''}
         <div class="bm-note">${s.cat === 'arche'
           ? `Transport par Arche eXtra-Interstellaire. Tu choisis un secteur, même inconnu : le TAXI perce la trame et te crée un monde dans un système vide, tiré au sort. Tu ne sais où qu'en arrivant. Planète-jardin luxuriante, 72 h de protection, aucune ressource. Un seul largage ; ensuite, il reste dans ta flotte, coque morte. 100 exemplaires numérotés, un par joueur.`
           : `Comparé à un cuirassé T3 construit. Jamais détruit : vaincu, il est mis hors service et répare à quai 24 h minimum. Max ${c.cap} ${c.plural.toLowerCase()} par joueur, tous modèles confondus.`}</div>
@@ -215,6 +234,7 @@
       </div>`;
     pane.classList.add('on');
     fitView();
+    atelierShip = mine && s.cat !== 'arche' ? s.id : null; atelierSlots = [];
   }
   // La vitrine s'arrête au bord haut du tiroir : le vaisseau se centre dans la partie visible
   // (le tiroir arrondi chevauche de 16 px). Tiroir replié → la vitrine reprend presque tout l'écran.
@@ -244,6 +264,13 @@
     const t = e.target.closest ? e.target : null; if (!t) return;
     const card = t.closest('[data-ship]'); if (card) return openShip(card.dataset.ship);
     const buy = t.closest('[data-buy]'); if (buy) return startBuy(buy);
+    const at = t.closest('[data-atelier]'); if (at) return atelierOpen(at.dataset.atelier);
+    if (t.closest('[data-atback]')) return atelierClose();
+    const lgp = t.closest('[data-lgpick]'); if (lgp) return atelierPick(lgp.dataset.lgpick);
+    const lgd = t.closest('[data-lgdel]'); if (lgd) return atelierDelete(lgd.dataset.lgdel);
+    const lgs = t.closest('[data-lgslot]'); if (lgs) return atelierSlot(lgs.dataset.lgslot);
+    if (t.closest('[data-lgout]')) return atelierOutline();
+    if (t.closest('[data-lgflag]')) return atelierFlag();
     if (t.closest('[data-taxi]')) return taxiPicker();
     if (t.closest('[data-taxiview]')) { close(); return taxiCinema('voyage'); }
     const sec = t.closest('[data-sector]'); if (sec) return taxiConfirm(sec.dataset.sector);
@@ -765,5 +792,159 @@
   }
   setInterval(() => { try { taxiTick(); } catch (e) { console.warn('[TAXI]', e); } }, 5000);
   window.addEventListener('resize', () => { try { fitView(); } catch (e) {} });
-  window.SBBlackmarket = { open, close, openOwned, ships: SHIPS, cats: CATS, owned: () => owned, units: () => units, reload: loadOwned };
+  // ── Atelier des logos (GDD claude/starbyte_GDD_atelier_logos.md) ──
+  // Un logo par modèle, posé sur les emplacements choisis. La vitrine (?lg=1) reçoit tout par postMessage.
+  const LOGO_BASE = SB + '/storage/v1/object/public/ship-logos/';
+  const logoUrl = (p) => p ? LOGO_BASE + p.split('/').map(encodeURIComponent).join('/') : null;
+  let atelierShip = null, atelierSlots = [];
+  addEventListener('message', (ev) => {
+    if (ev.origin !== location.origin || !ev.data || !ev.data.bmReady) return;
+    const src = ev.source;
+    if (viewerFace && viewerFrame && src === viewerFrame.contentWindow) { src.postMessage({ bmLogo: { url: logoUrl(viewerFace.path), slots: viewerFace.slots || [], outline: viewerFace.outline !== false, focus: (viewerFace.slots || [])[0] } }, location.origin); return; }
+    if (!root || ev.data.bmReady !== atelierShip) return;
+    atelierSlots = ev.data.slots || [];
+    pushPaint();
+    if (root.querySelector('.bm-atelier')) renderAtelier();
+  });
+  function shipFrame() { return root && root.querySelector('.bm-ship iframe'); }
+  function pushPaint(focus) {
+    const f = shipFrame(), p = paint[atelierShip] || {}; if (!f || !f.contentWindow) return;
+    f.contentWindow.postMessage({ bmLogo: { url: logoUrl(p.path), slots: p.slots || [], outline: p.outline !== false, focus } }, location.origin);
+  }
+  function atelierOpen(id) {
+    atelierShip = id;
+    const sheet = root.querySelector('.bm-sheet'); if (!sheet) return;
+    sheet.classList.remove('min'); sheet.querySelectorAll(':scope > *:not(.bm-grip)').forEach(n => { n.style.display = 'none'; });
+    const box = document.createElement('div'); box.className = 'bm-atelier'; sheet.appendChild(box);
+    renderAtelier(); setTimeout(fitView, 270);
+    const first = (paint[id] && paint[id].slots || [])[0]; if (first) { const f = shipFrame(); if (f) f.contentWindow.postMessage({ bmFocus: first }, location.origin); }
+  }
+  function atelierClose() {
+    const sheet = root.querySelector('.bm-sheet'); if (!sheet) return;
+    const box = sheet.querySelector('.bm-atelier'); if (box) box.remove();
+    sheet.querySelectorAll(':scope > *:not(.bm-grip)').forEach(n => { n.style.display = ''; });
+    setTimeout(fitView, 270);
+  }
+  function renderAtelier(msg, err) {
+    const box = root.querySelector('.bm-atelier'); if (!box) return;
+    const p = paint[atelierShip] || {};
+    const lib = logos.map(l => `<span class="bm-lg ${p.logo_id === l.id ? 'on' : ''}"><button data-lgpick="${esc(l.id)}" aria-label="Poser ce logo"><img src="${esc(logoUrl(l.path))}" alt=""></button><button class="x" data-lgdel="${esc(l.id)}" aria-label="Supprimer ce logo">×</button></span>`).join('');
+    const canAdd = logos.length < 3;
+    box.innerHTML = `
+      <div class="bm-at-head"><b>Atelier</b><button class="bm-at-link" data-atback>Fermer</button></div>
+      <div class="bm-at-lbl">Tes logos</div>
+      <div class="bm-at-row">${lib}${canAdd ? `<label class="bm-lg add" aria-label="Importer un logo">+<input id="bm-lg-file" type="file" accept="image/png,image/jpeg,image/webp,image/heic"></label>` : ''}</div>
+      ${p.logo_id ? `<div class="bm-at-lbl">Emplacements</div>
+      <div class="bm-at-row">${atelierSlots.map(s => `<button class="bm-chip ${(p.slots || []).includes(s.id) ? 'on' : ''}" data-lgslot="${esc(s.id)}">${esc(s.label)}</button>`).join('')}
+        <button class="bm-chip ${p.outline !== false ? 'on' : ''}" data-lgout>Contour sombre</button></div>` : ''}
+      <div class="bm-at-row"><button class="bm-chip ${p.flagship ? 'on' : ''}" data-lgflag>${p.flagship ? 'Vaisseau amiral' : 'En faire mon vaisseau amiral'}</button></div>
+      <div class="bm-at-msg ${err ? 'err' : ''}" aria-live="polite">${msg ? esc(msg) : (logos.length ? 'Ton logo est vu quand tu raides quelqu\'un et, pour ton vaisseau amiral, au bar des docks.' : 'PNG à fond transparent : le plus beau rendu.')}</div>`;
+    const inp = box.querySelector('#bm-lg-file'); if (inp) inp.addEventListener('change', () => { if (inp.files[0]) atelierImport(inp.files[0]); });
+    setTimeout(fitView, 50);
+  }
+  async function savePaint(item, focus) {
+    const p = paint[item] || {};
+    await call('/rest/v1/rpc/bm_paint_set', { p_item: item, p_logo: p.logo_id || null, p_slots: p.slots || [], p_outline: p.outline !== false });
+    pushPaint(focus);
+  }
+  const lgErr = (e) => ({ refused: 'Pauline : « Pas ça sur ma coque. Trouve autre chose. »', quota: 'Pauline : « Assez pour aujourd\'hui. Reviens demain. »', library_full: 'Trois logos au plus. Supprimes-en un.',
+    filter_down: 'Réessaie dans un instant.', filter_not_configured: 'Filtre pas encore branché côté serveur.', blocked: 'Tu ne peux plus importer de logo.', not_owner: 'Il te faut un vaisseau du Blackmarket.', bad_image: 'Cette image ne passe pas : essaie un PNG ou un JPEG.', not_signed_in: 'Connecte ton compte (cloud).' }[e.message] || 'L\'Atelier ne répond pas pour le moment.');
+  async function toPngB64(file) {
+    const url = URL.createObjectURL(file);
+    try {
+      const i = new Image(); await new Promise((ok, ko) => { i.onload = ok; i.onerror = () => ko(new Error('bad_image')); i.src = url; });
+      const k = Math.min(1, 1024 / Math.max(i.naturalWidth, i.naturalHeight));
+      const c = document.createElement('canvas'); c.width = Math.max(1, Math.round(i.naturalWidth * k)); c.height = Math.max(1, Math.round(i.naturalHeight * k));
+      c.getContext('2d').drawImage(i, 0, 0, c.width, c.height);
+      return c.toDataURL('image/png').split(',')[1];
+    } finally { URL.revokeObjectURL(url); }
+  }
+  async function atelierImport(file) {
+    const item = atelierShip;
+    renderAtelier('Pauline regarde ça…');
+    try {
+      const image = await toPngB64(file);
+      const r = await call('/functions/v1/logo-upload', { image });
+      if (!logos.some(l => l.id === r.id)) logos.push({ id: r.id, path: r.path });
+      const first = atelierSlots[0] && atelierSlots[0].id;
+      const p = paint[item] = Object.assign(paint[item] || { item_id: item }, { logo_id: r.id, path: r.path });
+      if (!p.slots || !p.slots.length) p.slots = first ? [first] : [];
+      await savePaint(item, p.slots[0]);
+      if (atelierShip === item) renderAtelier('Pauline : « Ça passe. »');
+    } catch (e) { if (atelierShip === item) renderAtelier(lgErr(e), true); }
+  }
+  async function atelierPick(id) {
+    const item = atelierShip, l = logos.find(x => x.id === id); if (!l) return;
+    const p = paint[item] = paint[item] || { item_id: item };
+    if (p.logo_id === id) { p.logo_id = null; p.path = null; }   // retoucher le logo posé le retire
+    else { p.logo_id = id; p.path = l.path; if (!p.slots || !p.slots.length) p.slots = atelierSlots[0] ? [atelierSlots[0].id] : []; }
+    renderAtelier();
+    try { await savePaint(item, p.logo_id ? p.slots[0] : undefined); } catch (e) { renderAtelier(lgErr(e), true); }
+  }
+  async function atelierDelete(id) {
+    logos = logos.filter(l => l.id !== id);
+    Object.values(paint).forEach(p => { if (p.logo_id === id) { p.logo_id = null; p.path = null; } });
+    renderAtelier(); pushPaint();
+    try { await call('/rest/v1/rpc/bm_logo_delete', { p_logo: id }); } catch (e) { renderAtelier(lgErr(e), true); }
+  }
+  async function atelierSlot(id) {
+    const item = atelierShip, p = paint[item]; if (!p) return;
+    const has = (p.slots || []).includes(id);
+    p.slots = has ? p.slots.filter(x => x !== id) : [...(p.slots || []), id];
+    renderAtelier();
+    try { await savePaint(item, has ? undefined : id); } catch (e) { renderAtelier(lgErr(e), true); }
+  }
+  async function atelierOutline() {
+    const item = atelierShip, p = paint[item]; if (!p) return;
+    p.outline = p.outline === false; renderAtelier();
+    try { await savePaint(item); } catch (e) { renderAtelier(lgErr(e), true); }
+  }
+  async function atelierFlag() {
+    const item = atelierShip, was = !!(paint[item] && paint[item].flagship);
+    Object.values(paint).forEach(p => { p.flagship = false; });
+    const p = paint[item] = paint[item] || { item_id: item }; p.flagship = !was;
+    renderAtelier();
+    try { await call('/rest/v1/rpc/bm_flagship_set', { p_item: was ? null : item }); } catch (e) { renderAtelier(lgErr(e), true); }
+  }
+  // ── Ce que voient les autres : rapport de défense et bar des docks ──
+  let viewerFace = null, viewerFrame = null;
+  function faceViewer(face) {
+    const s = SHIPS.find(x => x.id === face.item_id); if (!s) return;
+    let v = document.getElementById('bm-viewer'); if (v) v.remove();
+    v = document.createElement('div'); v.id = 'bm-viewer';
+    v.style.cssText = 'position:fixed;inset:0;z-index:100000;background:#000';
+    v.innerHTML = `<iframe src="assets/blackmarket/${s.id}.html?embed&lg=1&v=${VERSION}" title="${esc(s.name)} en 3D" style="position:absolute;inset:0;width:100%;height:100%;border:0"></iframe>
+      <button style="position:absolute;left:12px;top:calc(env(safe-area-inset-top) + 10px);min-height:44px;padding:8px 14px;border:1px solid rgba(255,255,255,.18);background:rgba(7,9,11,.6);color:#e6edf2;border-radius:20px;font:500 13px 'Space Grotesk',sans-serif;cursor:pointer">‹ Retour</button>`;
+    viewerFace = face; viewerFrame = v.querySelector('iframe');
+    v.querySelector('button').addEventListener('click', () => { viewerFace = null; viewerFrame = null; v.remove(); });
+    document.body.appendChild(v);
+  }
+  function faceCard(face, title, sub) {
+    const s = SHIPS.find(x => x.id === face.item_id); if (!s) return null;
+    const c = document.createElement('button'); c.type = 'button';
+    c.style.cssText = 'display:flex;align-items:center;gap:12px;width:100%;min-height:64px;padding:10px 12px;background:rgba(201,164,90,.06);border:1px solid rgba(201,164,90,.35);border-radius:10px;color:#e6f0ff;text-align:left;cursor:pointer;font-family:inherit';
+    c.innerHTML = `<span style="position:relative;flex:none;width:76px;height:48px;border-radius:6px;overflow:hidden;background:#000"><img src="${thumb(s.id)}" alt="" style="width:100%;height:100%;object-fit:cover">${face.path ? `<img src="${esc(logoUrl(face.path))}" alt="" style="position:absolute;right:3px;bottom:3px;max-width:44px;max-height:26px;object-fit:contain">` : ''}</span>
+      <span style="min-width:0;flex:1"><span style="display:block;font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:#c9a45a">${esc(title)}</span><span style="display:block;font-size:13px;font-weight:600">${esc(s.name)}</span><span style="display:block;font-size:10px;color:#8d98a3">${esc(sub)}</span></span>`;
+    c.addEventListener('click', () => faceViewer(face));
+    return c;
+  }
+  async function fillRaidFaces(el, raidId) {
+    if (!el || !raidId) return;
+    let list = []; try { list = await call('/rest/v1/rpc/bm_raid_faces', { p_raid: raidId }); } catch (e) { return; }
+    if (!Array.isArray(list) || !list.length || !el.isConnected) return;
+    const wrap = document.createElement('div'); wrap.style.cssText = 'margin:0 16px 14px;display:flex;flex-direction:column;gap:8px';
+    list.forEach(f => { const c = faceCard(f, 'Vaisseau d\'exception', 'Touche pour le voir de près'); if (c) wrap.appendChild(c); });
+    el.insertBefore(wrap, el.children[1] || null);
+  }
+  async function fillFlagship(modal, presenceId, sel) {
+    if (!modal || !presenceId) return;
+    let f = null; try { f = await call('/rest/v1/rpc/bm_flagship_of', { p_presence: presenceId }); } catch (e) { return; }
+    if (!f || !f.item_id || !modal.isConnected) return;
+    const c = faceCard(f, 'Son vaisseau amiral', 'Touche pour le voir de près'); if (!c) return;
+    c.style.margin = '10px 0';
+    const host = (sel && modal.querySelector(sel)) || modal.firstElementChild || modal;
+    host.insertBefore(c, host.children[1] || null);
+  }
+
+  window.SBBlackmarket = { open, close, openOwned, ships: SHIPS, cats: CATS, owned: () => owned, units: () => units, reload: loadOwned, fillRaidFaces, fillFlagship };
 })();

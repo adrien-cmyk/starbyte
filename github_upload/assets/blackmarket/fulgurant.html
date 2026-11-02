@@ -266,6 +266,8 @@ ship.add(engineLight);
 /* ================================================================== lookdev procédural (sans UV)
    Panneaux triplanaires à deux échelles, joints en creux, teinte / rugosité par panneau, patine multi-échelle,
    coulures de sillage, suie croissante vers les réacteurs, ventre plus sale, micro-usure d'arête. Repère objet. */
+// Atelier des logos : peinture chargée seulement avec ?lg=1 (vaisseau possédé ou croisé), jamais au catalogue
+const LOGO = /[?&]lg=1/.test(location.search) ? (await import('./logo-paint.js?v=20261102d')).createLogoPaint(THREE, 'fulgurant') : null;
 const LOOK = {
   M_FG_JAUNE:        { cell: [18.0, 12.0], seam: .16, depth: .05, tint: .06, rough: .10, grime: .26, wear: .35 },
   M_FG_ANTHRACITE:   { cell: [15.0, 10.0], seam: .16, depth: .16, tint: .12, rough: .16, grime: .22, wear: .30 },
@@ -279,6 +281,7 @@ function premium(mat, p) {
     sh.uniforms.uCell = { value: new THREE.Vector2(...p.cell) };
     sh.uniforms.uLook = { value: new THREE.Vector4(p.seam, p.depth, p.tint, p.rough) };
     sh.uniforms.uLook2 = { value: new THREE.Vector2(p.grime, p.wear) };
+    if (LOGO) Object.assign(sh.uniforms, LOGO.uni);
     sh.vertexShader = sh.vertexShader
       .replace('#include <common>', '#include <common>\nvarying vec3 vOP; varying vec3 vON;')
       .replace('#include <begin_vertex>', '#include <begin_vertex>\nvOP = position; vON = normal;');
@@ -286,6 +289,7 @@ function premium(mat, p) {
       .replace('#include <common>', `#include <common>
         varying vec3 vOP; varying vec3 vON;
         uniform vec2 uCell; uniform vec4 uLook; uniform vec2 uLook2;
+        ${LOGO ? LOGO.DECL : ''}
         float hh(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
         float vn(vec3 x){ vec3 i=floor(x), f=fract(x); f=f*f*(3.0-2.0*f);
           float a=hh(i.xy+i.z*17.0), b=hh(i.xy+vec2(1,0)+i.z*17.0), c=hh(i.xy+vec2(0,1)+i.z*17.0), d=hh(i.xy+vec2(1,1)+i.z*17.0);
@@ -306,6 +310,7 @@ function premium(mat, p) {
           return sX * w.x + sY * w.y + sZ * w.z;
         }`)
       .replace('#include <color_fragment>', `#include <color_fragment>
+        ${LOGO ? LOGO.APPLY : ''}
         float mpp = length(fwidth(vOP));
         float cmin = min(uCell.x, uCell.y);
         float near = 1.0 - smoothstep(cmin / 22.0, cmin / 9.0, mpp);
@@ -618,7 +623,8 @@ loadShip().then((gltf) => {
       mat.envMapIntensity = GLOSS[mat.name] ? GLOSS_ENV : 0.45;
       if (GLOSS[mat.name]) { mat.roughness = GLOSS[mat.name][0]; mat.metalness = GLOSS[mat.name][1]; }
       const look = LOOK[mat.name];
-      if (look && !mat.userData.kv) { mat.userData.kv = 1; premium(mat, look); }
+      if (look && !mat.userData.kv) { mat.userData.kv = 1; premium(mat, look); if (LOGO) LOGO.wrap(mat); }
+      else if (LOGO && !look && !mat.userData.kv && LOGO.paintable(mat)) { mat.userData.kv = 1; LOGO.only(mat); }
       if (mat.name === 'M_KV_GLOW_MOTEUR') { mat.emissive.copy(ENGINE_COLOR); mat.emissiveIntensity = 5.5; mat.color.copy(ENGINE_COLOR); }
       else if (mat.name === 'M_FG_JAUNE') { mat.color.setRGB(0.80, 0.43, 0.0); }
       else if (mat.name === 'M_FG_BLEU') { mat.emissive.set(0x4a8cff); mat.emissiveIntensity = 2.6; }
@@ -746,6 +752,7 @@ function frame() {
   composer.render();
   requestAnimationFrame(frame);
 }
+if (LOGO) LOGO.attach({ renderer, camera, controls, S });
 frame();
 </script>
 
