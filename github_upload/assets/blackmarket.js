@@ -39,7 +39,7 @@
     'Tu négocies ? Retourne compter tes cailloux au match-3.',
     "T'as vu l'acier ? Ça, ça se construit pas dans ton petit chantier.",
   ];
-  const VERSION = '20261103b';
+  const VERSION = '20261103c';
   // Serveur (schema_mp_v31_blackmarket.sql + fonctions bm-checkout / bm-webhook)
   const SB = 'https://elupnpdcblztpfywnhjl.supabase.co';
   const KEY = 'sb_publishable_tXGrQIROzH2DwBrny1GcHQ_iKJKoBOQ';
@@ -881,18 +881,36 @@
   let atelierShip = null, atelierSlots = [];
   // Fiche de mission (missions.js) : le vaisseau amiral en route est montré dans sa vitrine, avec sa peinture (03/11, Adrien)
   const heroFrames = new Map();   // iframe → item_id
-  function missionHero(host, item) {
+  function missionHero(host, item, face) {
     if (!host || !SHIPS.some(x => x.id === item)) return null;
     const f = document.createElement('iframe');
     f.src = `assets/blackmarket/${item}.html?embed&lg=1&v=${VERSION}`; f.title = 'Vaisseau amiral en 3D'; f.allow = 'fullscreen';
     f.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;border:0;background:#000';
-    heroFrames.set(f, item); host.appendChild(f);
-    return { frame: f, dispose() { heroFrames.delete(f); f.remove(); } };
+    heroFrames.set(f, { item, face: face || null }); host.insertBefore(f, host.firstChild);   // sous l'indication et le voile de la vue héros
+    const post = (msg) => { try { f.contentWindow && f.contentWindow.postMessage(msg, location.origin); } catch (e) {} };
+    // même interface que Ship3D.mount : les gestes de la fiche (shipHeroGestures) sont relayés à la vitrine
+    return { frame: f, begin() { post({ bmGesture: 'begin' }); }, end() { post({ bmGesture: 'end' }); }, orbit(dx, dy) { post({ bmOrbit: [dx, dy] }); }, dolly(k) { post({ bmDolly: k }); }, dispose() { heroFrames.delete(f); f.remove(); } };
+  }
+  // Ambassade : le vaisseau amiral en orbite, en vue héros (le mien : ma peinture ; celui d'un visiteur : son visage via bm_envoy_face)
+  function envoyHero(host, ownItem, presenceId) {
+    if (!host) return null;
+    if (ownItem) return missionHero(host, ownItem);
+    if (!presenceId) return null;
+    let inner = null, dead = false;
+    const h = { begin() { inner && inner.begin(); }, end() { inner && inner.end(); }, orbit(dx, dy) { inner && inner.orbit(dx, dy); }, dolly(k) { inner && inner.dolly(k); }, dispose() { dead = true; inner && inner.dispose(); inner = null; } };
+    (async () => {
+      let f = envoyFaces[presenceId];
+      if (f === undefined) { try { f = await call('/rest/v1/rpc/bm_envoy_face', { p_kind: 'orbit', p_presence: presenceId }); } catch (e) { f = null; } envoyFaces[presenceId] = f || null; }
+      if (dead || !f || !f.item_id || !host.isConnected) return;
+      inner = missionHero(host, f.item_id, f);
+      if (h.onReady) h.onReady(f.item_id);
+    })();
+    return h;
   }
   addEventListener('message', (ev) => {
     if (ev.origin !== location.origin || !ev.data || !ev.data.bmReady) return;
     const src = ev.source;
-    for (const [f, item] of heroFrames) if (f.contentWindow === src) { const p = paint[item] || {}; src.postMessage({ bmLogo: { url: logoUrl(p.path), slots: p.slots || [], outline: p.outline !== false } }, location.origin); return; }
+    for (const [f, e] of heroFrames) if (f.contentWindow === src) { const p = e.face || paint[e.item] || {}; src.postMessage({ bmLogo: { url: logoUrl(p.path), slots: p.slots || [], outline: p.outline !== false } }, location.origin); return; }
     if (viewerFace && viewerFrame && src === viewerFrame.contentWindow) { src.postMessage({ bmLogo: { url: logoUrl(viewerFace.path), slots: viewerFace.slots || [], outline: viewerFace.outline !== false, focus: (viewerFace.slots || [])[0] } }, location.origin); return; }
     if (!root || ev.data.bmReady !== atelierShip) return;
     atelierSlots = ev.data.slots || [];
@@ -1055,5 +1073,5 @@
     c.dataset.bmEnvoy = '1'; c.style.marginBottom = '10px';
     host.insertBefore(c, host.firstChild);
   }
-  window.SBBlackmarket = { open, close, openOwned, ships: SHIPS, cats: CATS, owned: () => owned, units: () => units, reload: loadOwned, fillRaidFaces, fillFlagship, fillEnvoy, interceptShip, envoyChoices, envoyRows, envoyLost, shipThumbHtml, missionHero };
+  window.SBBlackmarket = { open, close, openOwned, ships: SHIPS, cats: CATS, owned: () => owned, units: () => units, reload: loadOwned, fillRaidFaces, fillFlagship, fillEnvoy, interceptShip, envoyChoices, envoyRows, envoyLost, shipThumbHtml, missionHero, envoyHero };
 })();

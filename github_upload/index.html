@@ -11229,14 +11229,8 @@ function mpEmbassyMountHero(m, inc, pseudo) {
   const model = typeof UNIT_SHIP3D_MODELS !== 'undefined' && UNIT_SHIP3D_MODELS.tanker;
   // PATCH_0211_AMBASSADEUR — pas de modèle de tanker au-dessus d'un vaisseau d'exception : c'est sa fiche qui le montre
   const _isEnvoy = (m && m.bmEnvoy) || (!m && inc && window.SBBlackmarket && SBBlackmarket.shipThumbHtml(inc.tanker));
-  if (_isEnvoy) {
-    if (_emb.hero) { try { _emb.hero.dispose(); } catch (e) {} _emb.hero = null; }
-    const _h = document.getElementById('emb-hero'), _s = document.getElementById('emb-space');
-    if (_h) _h.style.display = 'none'; if (_s) _s.style.display = 'none';
-    scr.classList.remove('ud-hero', 'ud-ship');
-    return;
-  }
-  if (!model || !window.WebGLRenderingContext) { scr.classList.remove('ud-hero', 'ud-ship'); return; }
+  if ((!model || !window.WebGLRenderingContext) && !_isEnvoy) { scr.classList.remove('ud-hero', 'ud-ship'); return; }
+  if (_emb.hero && (!!_isEnvoy !== !!_emb.heroEnvoy)) { try { _emb.hero.dispose(); } catch (e) {} _emb.hero = null; }   // tanker ↔ vaisseau amiral : on remonte
   let hero = document.getElementById('emb-hero');
   if (!hero) { hero = document.createElement('div'); hero.id = 'emb-hero'; hero.className = 'u3d u3d-hero'; scr.insertBefore(hero, scroll); }
   let space = document.getElementById('emb-space');
@@ -11244,13 +11238,24 @@ function mpEmbassyMountHero(m, inc, pseudo) {
   scr.classList.add('ud-hero', 'ud-ship');
   hero.style.display = ''; space.style.display = '';
   if (!hero.querySelector('.u3d-hint')) hero.insertAdjacentHTML('beforeend', '<div class="u3d-hint"></div>');
-  hero.querySelector('.u3d-hint').textContent = m ? `TK-07 ${m.tankerName} · en orbite chez ${pseudo}` : inc ? `TK-07 ${inc.tanker || ''} de ${pseudo} · en orbite chez toi` : `Ambassade de ${pseudo}`;
+  hero.querySelector('.u3d-hint').textContent = _isEnvoy ? (m ? `${m.tankerName} · vaisseau amiral · en orbite chez ${pseudo}` : `${inc.tanker || ''} · vaisseau amiral de ${pseudo} · en orbite chez toi`)
+    : m ? `TK-07 ${m.tankerName} · en orbite chez ${pseudo}` : inc ? `TK-07 ${inc.tanker || ''} de ${pseudo} · en orbite chez toi` : `Ambassade de ${pseudo}`;
   requestAnimationFrame(() => {
     const hb = hero.getBoundingClientRect(), sb = space.getBoundingClientRect();
     if (hb.height) hero.style.setProperty('--u3d-band', Math.max(0, hb.bottom - sb.bottom) + 'px');
   });
   if (typeof shipHeroGestures === 'function') shipHeroGestures('scr-embassy', () => _emb.hero);
   if (_emb.hero) return;
+  if (_isEnvoy) {   // PATCH_0311 : le vaisseau amiral (sa vitrine Blackmarket, avec son logo) remplace le tanker dans la même vue héros
+    if (typeof fleetShip3D !== 'undefined' && fleetShip3D) { try { fleetShip3D.handle.dispose(); } catch (e) {} fleetShip3D = null; }
+    if (typeof bdShip3D !== 'undefined' && bdShip3D) { try { bdShip3D.handle.dispose(); } catch (e) {} bdShip3D = null; }
+    hero.classList.remove('u3d-fail', 'u3d-loading');
+    _emb.heroEnvoy = true;
+    _emb.hero = SBBlackmarket.envoyHero(hero, m && m.bmEnvoy ? m.bmEnvoy.item : null, m ? m.mpPresenceId : inc && inc.presenceId) || null;
+    if (!_emb.hero) { hero.style.display = 'none'; space.style.display = 'none'; scr.classList.remove('ud-hero', 'ud-ship'); }
+    return;
+  }
+  _emb.heroEnvoy = false;
   // une seule grosse scène en mémoire (iPhone) : la station du chantier est remontée au retour
   if (typeof fleetShip3D !== 'undefined' && fleetShip3D) { try { fleetShip3D.handle.dispose(); } catch (e) {} fleetShip3D = null; }
   if (typeof bdShip3D !== 'undefined' && bdShip3D) { try { bdShip3D.handle.dispose(); } catch (e) {} bdShip3D = null; }
@@ -11268,7 +11273,7 @@ function mpEmbassyMountHero(m, inc, pseudo) {
   if (window.Ship3D) start(); else window.addEventListener('ship3d-ready', start, { once: true });
 }
 function mpEmbassyUnmount() {
-  if (_emb.hero) { try { _emb.hero.dispose(); } catch (e) {} _emb.hero = null; }
+  if (_emb.hero) { try { _emb.hero.dispose(); } catch (e) {} _emb.hero = null; } _emb.heroEnvoy = false;
   _mpChatBubble();
 }
 
@@ -50109,7 +50114,7 @@ if (G.knownTargets && Array.isArray(G.tankerMissions)) {
 <!-- PATCH_1610_SKILLS — skills des bâtiments : apprendre, découvrir, effets -->
 <script src="assets/skills.js?v=20261021-1130"></script>
 <script src="assets/maj.js?v=20261025-1800"></script>
-<script src="assets/blackmarket.js?v=20261103-amiral"></script>   <!-- Blackmarket v0 : aperçu du catalogue, réservé au compte d'Adrien -->
+<script src="assets/blackmarket.js?v=20261103-amiral2"></script>   <!-- Blackmarket v0 : aperçu du catalogue, réservé au compte d'Adrien -->
 <!-- PATCH_1510_CROWN — The Drifting Crown en 3D (assets/station3d.js, sur le moteur partagé window.SB3D) -->
 <script type="module" src="assets/station3d.js?v=20261022-1047"></script>
 <!-- FORMATION3D — flotte déployée en orbite, vue de haut en formation (remplace la vue orbite) -->

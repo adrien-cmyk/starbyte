@@ -979,6 +979,24 @@ controls.touches = { ONE: THREE.TOUCH.ROTATE, TWO: THREE.TOUCH.DOLLY_ROTATE };
 controls.autoRotate = !REDUCED; controls.autoRotateSpeed = 0.3;
 controls.update();
 if (LOGO) LOGO.attach({ renderer, camera, controls, S });
+// Vue héros du jeu (ambassade, fiche de mission) : les gestes faits sur la fiche sont relayés ici par postMessage
+addEventListener('message', (ev) => {
+  if (ev.origin !== location.origin || !ev.data) return;
+  const d = ev.data;
+  if (d.bmGesture === 'begin') { controls.autoRotate = false; hint.classList.add('gone'); clearTimeout(idleTimer); }
+  if (d.bmGesture === 'end') { clearTimeout(idleTimer); if (!REDUCED) idleTimer = setTimeout(() => { controls.autoRotate = true; }, 6000); }
+  if (d.bmOrbit || d.bmDolly) {
+    const off = camera.position.clone().sub(controls.target);
+    if (d.bmOrbit) {
+      const sph = new THREE.Spherical().setFromVector3(off), k = 2 * Math.PI * controls.rotateSpeed / Math.max(1, renderer.domElement.clientHeight);
+      sph.theta -= d.bmOrbit[0] * k; sph.phi -= d.bmOrbit[1] * k;
+      sph.phi = Math.max(controls.minPolarAngle, Math.min(controls.maxPolarAngle, sph.phi)); sph.makeSafe();
+      off.setFromSpherical(sph);
+    }
+    if (d.bmDolly) off.setLength(Math.max(controls.minDistance, Math.min(controls.maxDistance, off.length() * d.bmDolly)));
+    camera.position.copy(controls.target).add(off); camera.lookAt(controls.target);
+  }
+});
 let idleTimer = null;
 const hint = document.getElementById('hint');
 controls.addEventListener('start', () => { controls.autoRotate = false; hint.classList.add('gone'); clearTimeout(idleTimer); });
