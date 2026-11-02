@@ -1,0 +1,1108 @@
+<!doctype html>
+<html lang="fr"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>TAXI · Traversée</title>
+<style>
+html, body { margin: 0; height: 100%; background: #000; overflow: hidden; color: #e8e2f6;
+  font-family: "Space Grotesk", "Helvetica Neue", Arial, sans-serif; -webkit-user-select: none; user-select: none; }
+#stage { position: fixed; inset: 0; }
+#stage canvas { display: block; width: 100%; height: 100%; }
+.load { position: fixed; inset: 0; display: grid; place-items: center; pointer-events: none; transition: opacity .8s;
+  font: 500 11px "JetBrains Mono", ui-monospace, Menlo, monospace; letter-spacing: .18em; color: #8f83b3; text-align: center; }
+.load.done { opacity: 0; }
+.bar { width: 160px; height: 2px; margin: 12px auto 0; background: rgba(255,255,255,.08); overflow: hidden; }
+.bar i { display: block; width: 0; height: 100%; background: #b98cff; transition: width .2s; }
+.ctl { position: fixed; left: 0; right: 0; bottom: 0; display: flex; gap: 8px; flex-wrap: wrap; align-items: center; justify-content: center;
+  padding: 12px 16px calc(env(safe-area-inset-bottom, 0px) + 14px); background: linear-gradient(to top, rgba(0,0,0,.7), transparent); }
+.ctl button { border: 1px solid rgba(185,140,255,.45); background: rgba(20,12,36,.7); color: #efe6ff; border-radius: 16px; padding: 7px 13px;
+  font: 500 12px "Space Grotesk", sans-serif; cursor: pointer; }
+.ctl button.on { background: #5b3fa0; }
+.ctl span { font: 500 11px "JetBrains Mono", monospace; color: #9b8fc0; min-width: 120px; text-align: center; }
+html.embed .ctl { display: none; }
+</style>
+<script>if (/[?&]embed/.test(location.search)) document.documentElement.classList.add('embed');</script>
+</head><body>
+<div id="stage" aria-label="Cinématique du TAXI : départ, traversée de l'anomalie, livraison d'un monde."></div>
+<div class="load" id="load"><div><div>OUVERTURE DE LA TRAME</div><div class="bar"><i id="bar"></i></div></div></div>
+<div class="ctl">
+  <button data-p="depart">1 · Départ</button><button data-p="voyage">2 · Voyage</button><button data-p="exit">→ Sortie</button><button data-p="arrivee">3 · Arrivée</button>
+  <span id="clock"></span>
+</div>
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+} }
+</script>
+<script type="module">
+import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
+import { FullScreenQuad } from 'three/addons/postprocessing/Pass.js';
+
+/* ════════════════════════════════════════════════════════════════════════════════════════
+   TAXI — trois séquences pilotables : départ · voyage (boucle) · arrivée.
+   Pilotage : ?phase=depart|voyage|arrivee  (départ enchaîne sur le voyage sauf &only)
+              postMessage({ taxiCmd: 'play', phase }) · { taxiCmd: 'arrive' } (sortie du voyage → arrivée)
+              { taxiCmd: 'cfg', cfg: {...} }  ·  ?cfg=<json>  ·  window.TAXI_CINE
+   Événements envoyés au parent : { taxiCine: 1, type: 'ready' | 'phase' | 'beat' | 'done', ... }
+   ════════════════════════════════════════════════════════════════════════════════════════ */
+
+/* ═══════════════ RÉGLAGES ESSENTIELS ═══════════════ */
+const CFG = {
+  rate: 1,                          // vitesse de lecture globale
+  distortion: 1,                    // intensité des distorsions (lentille, coque, image)
+  portalRadius: 6.2,                // rayon du passage ouvert (le TAXI : 11,5 u de long, 3,9 u de rayon)
+  ship: { cruise: 0.7, plunge: 6.0, emerge: 15.0, recall: 18.0 },   // u/s : dérive, plongée, sortie, rappel
+  jaw: { base: 32, tip: 22, teeth: 170, delay: 0.55 },             // ouverture des pinces (°), dégagement des crocs, décalage
+  release: { to: [-1.0, 3.5, 10.0], dur: 6.5, start: 11.8 },        // trajectoire de libération (repère du vaisseau), durée, début
+  T: { loop: 8, exit: 2.4, arriveeOpen: 1.6, emergeAt: 3.0, emergeDur: 6.0, jawsAt: 8.8, jawsDur: 3.8, recallAfter: 0.4, hold: 3.8 },
+};
+const Q = new URLSearchParams(location.search);
+function deepMerge(a, b) { for (const k in b) { if (b[k] && typeof b[k] === 'object' && !Array.isArray(b[k]) && a[k] && typeof a[k] === 'object') deepMerge(a[k], b[k]); else a[k] = b[k]; } return a; }
+try { if (Q.get('cfg')) deepMerge(CFG, JSON.parse(Q.get('cfg'))); } catch (e) { console.warn('cfg', e); }
+const REDUCED = matchMedia('(prefers-reduced-motion: reduce)').matches;
+const EMBED = Q.has('embed');
+
+/* ═══════════════ outils ═══════════════ */
+const clamp01 = (x) => Math.min(1, Math.max(0, x));
+const lin = (a, b, x) => clamp01((x - a) / (b - a));
+const sm = (a, b, x) => { const t = lin(a, b, x); return t * t * (3 - 2 * t); };
+const eio = (u) => u < .5 ? 4 * u * u * u : 1 - Math.pow(-2 * u + 2, 3) / 2;
+const eoS = (u) => Math.sin(u * Math.PI / 2);
+const eiC = (u) => u * u * u;
+const hash = (i) => { const s = Math.sin(i * 127.1 + 311.7) * 43758.5453; return s - Math.floor(s); };
+const smInt = (t, a, b) => t <= a ? 0 : t >= b ? (b - a) * .5 + (t - b) : (b - a) * (Math.pow((t - a) / (b - a), 3) - Math.pow((t - a) / (b - a), 4) / 2);
+const V3 = (x = 0, y = 0, z = 0) => new THREE.Vector3(x, y, z);
+function post(m) { try { if (parent !== window) parent.postMessage(Object.assign({ taxiCine: 1 }, m), '*'); } catch (e) {} }
+
+/* ═══════════════ moteur ═══════════════ */
+const stage = document.getElementById('stage');
+const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
+let PR = Math.min(devicePixelRatio, 1.6);
+renderer.setPixelRatio(PR);
+renderer.setSize(innerWidth, innerHeight);
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.25;
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+stage.appendChild(renderer.domElement);
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x010207);
+const camera = new THREE.PerspectiveCamera(40, innerWidth / innerHeight, 0.05, 900);
+const pmrem = new THREE.PMREMGenerator(renderer);
+scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+const PLASMA_T = { value: 0 };
+const SUN_DIR = V3(-0.75, 0.55, 0.35).normalize();
+const NOISE_GLSL = `
+  float h2(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+  float n2(vec2 x){ vec2 i = floor(x), f = fract(x); f = f*f*(3.0-2.0*f);
+    return mix(mix(h2(i), h2(i+vec2(1,0)), f.x), mix(h2(i+vec2(0,1)), h2(i+vec2(1,1)), f.x), f.y); }
+  float f2(vec2 p){ float a = .5, s = 0.; for (int i = 0; i < 5; i++){ s += a * n2(p); p = p * 2.03 + 3.7; a *= .5; } return s; }
+  float h3(vec3 p){ p = fract(p*0.3183099+.1); p *= 17.0; return fract(p.x*p.y*p.z*(p.x+p.y+p.z)); }
+  float n3(vec3 x){ vec3 i=floor(x), f=fract(x); f=f*f*(3.0-2.0*f);
+    return mix(mix(mix(h3(i),h3(i+vec3(1,0,0)),f.x),mix(h3(i+vec3(0,1,0)),h3(i+vec3(1,1,0)),f.x),f.y),
+               mix(mix(h3(i+vec3(0,0,1)),h3(i+vec3(1,0,1)),f.x),mix(h3(i+vec3(0,1,1)),h3(i+vec3(1,1,1)),f.x),f.y),f.z); }
+  float f3(vec3 p){ float a=.5,s=0.; for(int i=0;i<5;i++){ s+=a*n3(p); p=p*2.02+3.1; a*=.5; } return s; }`;
+
+/* ═══════════════ déformation réversible du vaisseau (et de sa planète tant qu'elle est à bord) ═══════════════
+   Calculée dans le repère du vaisseau, appliquée au rendu, au masque de la lentille et aux ombres.
+   La géométrie n'est jamais modifiée : à amplitude nulle, le TAXI est rigoureusement intact. */
+const DEF = {
+  uShip: { value: new THREE.Matrix4() }, uShipInv: { value: new THREE.Matrix4() },
+  uDT: { value: 0 }, uDW: { value: Math.PI * 2 / CFG.T.loop },
+  uSpag: { value: 0 }, uSpagL: { value: 3.2 }, uPlaneZs: { value: 0 }, uPlaneDir: { value: 1 },
+  uWave: { value: 0 }, uStretch: { value: 0 }, uLag: { value: 0 }, uTwist: { value: 0 },
+  uPlane: { value: new THREE.Vector4(0, 0, 1, -1e6) }, uClip: { value: 0 },
+};
+const DEFORM_GLSL = `
+  uniform mat4 uShip, uShipInv;
+  uniform float uDT, uDW, uSpag, uSpagL, uPlaneZs, uPlaneDir, uWave, uStretch, uLag, uTwist;
+  vec3 sbDeform(vec3 w){
+    vec3 s = (uShipInv * vec4(w, 1.0)).xyz;
+    float ph = uDT * uDW;
+    if (uWave + uStretch + uLag + uTwist > 0.001) {
+      s.z *= 1.0 + uStretch * 0.16 * sin(ph);                                       // étirement longitudinal
+      float band = pow(0.5 + 0.5 * sin(s.z * 0.85 - ph * 4.0), 8.0);                 // vague de compression qui court sur le blindage
+      float band2 = pow(0.5 + 0.5 * sin(s.z * 1.7 + ph * 3.0 + 1.3), 10.0);
+      s.xy *= 1.0 - uWave * (0.13 * band + 0.06 * band2);
+      s.z += uWave * 0.22 * sin(s.z * 0.55 - ph * 2.0);
+      float seg = floor(s.z * 0.6 + 0.5);                                            // tronçons momentanément en retard
+      s.z -= uLag * 0.30 * (0.5 + 0.5 * sin(ph * 3.0 + seg * 2.1)) * step(0.3, fract(seg * 0.618 + 0.11));
+      float tw = uTwist * 0.045 * s.z * sin(ph * 2.0);
+      float c = cos(tw), sn = sin(tw); s.xy = mat2(c, -sn, sn, c) * s.xy;
+    }
+    if (uSpag > 0.001) {                                                             // étirement vers le seuil du passage
+      float D = (uPlaneZs - s.z) * uPlaneDir;
+      float f = exp(-max(D, 0.0) / uSpagL);
+      s.z += uPlaneDir * uSpag * uSpagL * f;
+      s.xy *= 1.0 - 0.28 * uSpag * f;
+    }
+    return (uShip * vec4(s, 1.0)).xyz;
+  }`;
+const CLIP_GLSL = `uniform vec4 uPlane; uniform float uClip; varying vec3 vSbW;`;
+const CLIP_TEST = `if (uClip > 0.5 && dot(uPlane.xyz, vSbW) + uPlane.w > 0.0) discard;`;
+function patchDeform(mat, extra) {
+  const prev = mat.onBeforeCompile;
+  mat.onBeforeCompile = (sh, r) => {
+    if (extra) extra(sh, r);
+    Object.assign(sh.uniforms, DEF);
+    sh.vertexShader = sh.vertexShader
+      .replace('#include <common>', '#include <common>\n' + DEFORM_GLSL + '\nvarying vec3 vSbW;')
+      .replace('#include <project_vertex>', `
+        vec4 sbW = modelMatrix * vec4(transformed, 1.0);
+        sbW.xyz = sbDeform(sbW.xyz); vSbW = sbW.xyz;
+        vec4 mvPosition = viewMatrix * sbW;
+        gl_Position = projectionMatrix * mvPosition;`)
+      .replace('#include <worldpos_vertex>', `
+        #if defined( USE_ENVMAP ) || defined( DISTANCE ) || defined ( USE_SHADOWMAP ) || defined ( USE_TRANSMISSION ) || NUM_SPOT_LIGHT_COORDS > 0
+          vec4 worldPosition = sbW;
+        #endif`);
+    sh.fragmentShader = sh.fragmentShader
+      .replace('#include <common>', '#include <common>\n' + CLIP_GLSL)
+      .replace('#include <clipping_planes_fragment>', CLIP_TEST + '\n#include <clipping_planes_fragment>');
+  };
+  const tag = (extra ? 'x-' + mat.name : '') + '-' + mat.type;
+  mat.customProgramCacheKey = () => 'sbdef' + tag;
+}
+const depthMat = new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking });
+patchDeform(depthMat);
+const maskMat = new THREE.MeshBasicMaterial({ color: 0xffffff, fog: false });
+patchDeform(maskMat);
+
+/* ═══════════════ fond : ciel, étoiles, soleil, poussière ═══════════════ */
+const world = new THREE.Group(); scene.add(world);          // éléments de l'espace « normal »
+const sky = new THREE.Mesh(new THREE.SphereGeometry(400, 48, 32), new THREE.ShaderMaterial({
+  side: THREE.BackSide, depthWrite: false,
+  vertexShader: `varying vec3 vDir; void main(){ vDir = normalize(position); gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }`,
+  fragmentShader: NOISE_GLSL + `
+    varying vec3 vDir;
+    float fbm6(vec3 p){ float a=.5, s=0.; for(int i=0;i<6;i++){ s+=a*n3(p); p=p*2.03+vec3(1.7,9.2,3.1); a*=.5; } return s; }
+    void main(){
+      vec3 d = normalize(vDir);
+      vec3 axis = normalize(vec3(0.55, 0.75, -0.35));
+      float band = exp(-pow(dot(d, axis) * 1.8, 2.0));
+      float neb = band * smoothstep(.32, .82, fbm6(d * 3.2));
+      float dust = fbm6(d * 6.5 + 4.0);
+      vec3 col = vec3(.004,.006,.014);
+      float hue = fbm6(d * 2.1 + 7.0);
+      vec3 pc = mix(vec3(.08,.12,.48), vec3(.30,.08,.50), smoothstep(.35,.7,hue));
+      col += pc * neb * .45;
+      col += mix(vec3(.25,.40,.9), vec3(.60,.28,.95), smoothstep(.4,.7,hue)) * pow(neb, 2.4) * .45;
+      col *= 1.0 - .7 * smoothstep(.45, .75, dust) * band;
+      gl_FragColor = vec4(col, 1.0);
+    }`
+}));
+world.add(sky);
+function starField(count, radius, size) {
+  const g = new THREE.BufferGeometry();
+  const pos = new Float32Array(count * 3), col = new Float32Array(count * 3);
+  const c = new THREE.Color();
+  for (let i = 0; i < count; i++) {
+    const u = Math.random() * 2 - 1, t = Math.random() * Math.PI * 2, s = Math.sqrt(1 - u * u);
+    pos.set([radius * s * Math.cos(t), radius * u, radius * s * Math.sin(t)], i * 3);
+    const k = Math.random();
+    c.setRGB(...(k > .92 ? [1, .8, .6] : k > .7 ? [.78, .86, 1] : [1, 1, 1])).multiplyScalar(.25 + Math.random() * .6);
+    col.set([c.r, c.g, c.b], i * 3);
+  }
+  g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  g.setAttribute('color', new THREE.BufferAttribute(col, 3));
+  return new THREE.Points(g, new THREE.PointsMaterial({ size, sizeAttenuation: false, vertexColors: true, depthWrite: false, fog: false }));
+}
+world.add(starField(3200, 380, 1.2), starField(240, 380, 2.2));
+{
+  const N = 1400, B = 70, g = new THREE.BufferGeometry(), p = new Float32Array(N * 3);
+  for (let i = 0; i < N; i++) p.set([(Math.random() - .5) * B, (Math.random() - .5) * B * .6, (Math.random() - .5) * B + 5], i * 3);
+  g.setAttribute('position', new THREE.BufferAttribute(p, 3));
+  world.add(new THREE.Points(g, new THREE.PointsMaterial({ size: 0.03, color: 0x8ea4c8, transparent: true, opacity: .4, depthWrite: false, sizeAttenuation: true })));
+}
+function radialTex(stops, n = 256) {
+  const c = document.createElement('canvas'); c.width = c.height = n;
+  const g = c.getContext('2d'), r = g.createRadialGradient(n / 2, n / 2, 0, n / 2, n / 2, n / 2);
+  for (const [o, col] of stops) r.addColorStop(o, col);
+  g.fillStyle = r; g.fillRect(0, 0, n, n);
+  return new THREE.CanvasTexture(c);
+}
+{
+  const sunPos = SUN_DIR.clone().multiplyScalar(330);
+  for (const [size, stops, opacity] of [
+    [18,  [[0, 'rgba(255,255,255,1)'], [.35, 'rgba(255,250,235,1)'], [.5, 'rgba(255,235,200,.6)'], [1, 'rgba(255,220,180,0)']], 1.0],
+    [110, [[0, 'rgba(255,240,215,.9)'], [.12, 'rgba(255,215,170,.4)'], [.4, 'rgba(200,170,255,.1)'], [1, 'rgba(120,120,255,0)']], .85],
+  ]) {
+    const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: radialTex(stops), blending: THREE.AdditiveBlending, depthWrite: false, transparent: true, opacity, fog: false }));
+    sp.scale.set(size, size, 1); sp.position.copy(sunPos); world.add(sp);
+  }
+}
+
+/* ═══════════════ lumière ═══════════════ */
+const key = new THREE.DirectionalLight(0xffd6b0, 2.1);
+key.castShadow = true; key.shadow.mapSize.set(2048, 2048);
+Object.assign(key.shadow.camera, { left: -10, right: 10, top: 10, bottom: -10, near: 1, far: 60 });
+key.shadow.bias = -0.0004; key.shadow.normalBias = 0.015;
+scene.add(key, key.target);
+const rim = new THREE.DirectionalLight(0x7a5cff, 0.9); rim.position.set(9, 4, 10); scene.add(rim);
+const fill = new THREE.DirectionalLight(0x6a6080, 0.8); fill.position.set(3, 10, -4); scene.add(fill);
+const hemi = new THREE.HemisphereLight(0x4a4560, 0x0a0806, 1.1); scene.add(hemi);
+const portalL1 = new THREE.PointLight(0x9a6cff, 0, 70, 1.2), portalL2 = new THREE.PointLight(0xff9a50, 0, 50, 1.3);
+scene.add(portalL1, portalL2);
+const voyL = [0xd8c8ff, 0x8a5cff, 0xffb070].map(c => { const l = new THREE.PointLight(c, 0, 40, 1.2); scene.add(l); return l; });
+
+/* ═══════════════ le TAXI ═══════════════ */
+const SC = 0.0016, OFFZ = 0.184;                   // glTF (m) → scène : 7 170 m = 11,5 u ; gueule en +z
+const TIP = 3347 * SC + OFFZ, STERN = -3620 * SC + OFFZ, HULL_R = 2450 * SC;
+const Z_SPLIT = 20, Z_TIP = 1900, R_H1 = 2440, R_H2 = 2300;   // pinces : au-delà de z = 20 m, articulées à leur embase
+const GLOSS = {
+  M_EM_PLAQUE_A: [0.80, 0.38], M_EM_PLAQUE_B: [0.76, 0.40], M_EM_PLAQUE_C: [0.86, 0.32], M_EM_SOUS: [0.92, 0.25],
+  M_EM_CUIVRE: [0.55, 0.75], M_EM_PL1: [1.0, 0.42], M_EM_PL2: [1.0, 0.42], M_EM_PL3: [1.0, 0.40], M_EM_PLI: [1.0, 0.35], M_EM_PL4: [1.0, 0.42],
+  M_EM_CROC: [0.50, 0.75], M_EM_CROC_ACIER: [0.46, 0.75], M_EM_TRANCHEE: [0.85, 0.3],
+};
+const ship = new THREE.Group(); scene.add(ship);
+const model = new THREE.Group(); model.scale.setScalar(SC); model.position.z = OFFZ; ship.add(model);
+const pinces = [];
+for (let k = 0; k < 4; k++) {
+  const th = k * Math.PI / 2, er = V3(Math.cos(th), Math.sin(th), 0), et = V3(-Math.sin(th), Math.cos(th), 0);
+  const pB = new THREE.Group(); pB.position.copy(er).multiplyScalar(R_H1);
+  const oB = new THREE.Group(); oB.position.copy(pB.position).negate(); pB.add(oB); model.add(pB);
+  const pT = new THREE.Group(); pT.position.copy(er).multiplyScalar(R_H2).setZ(Z_TIP);
+  const oT = new THREE.Group(); oT.position.copy(pT.position).negate(); pT.add(oT); oB.add(pT);
+  const tB = new THREE.Group(), tT = new THREE.Group(); oB.add(tB); oT.add(tT);
+  pinces.push({ th, er, et, pB, pT, tB, tT, d: [0, .32, .14, .46][k] });
+}
+const shipMats = [], navMats = [], feuMats = [];
+const hullSamples = [];                           // points de coque (repère du vaisseau) pour les nappes de lumière
+let shipReady = false;
+function premiumLook(mat) {   // micro-panneaux sur la tranchée (repris de la vitrine)
+  return (sh) => {
+    sh.uniforms.uCell = { value: new THREE.Vector2(15.0, 8.5) };
+    sh.uniforms.uLook = { value: new THREE.Vector4(.18, .10, .10, .18) };
+    sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nvarying vec3 vOP;').replace('#include <begin_vertex>', '#include <begin_vertex>\nvOP = position;');
+    sh.fragmentShader = sh.fragmentShader.replace('#include <common>', `#include <common>
+        varying vec3 vOP; uniform vec2 uCell; uniform vec4 uLook;
+        float hh(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }`)
+      .replace('#include <color_fragment>', `#include <color_fragment>
+        { vec2 c = vOP.xy / uCell; vec2 f = fract(c); vec2 e = min(f, 1.0 - f) * uCell; float seam = 1.0 - smoothstep(uLook.x * .5, uLook.x * 1.6, min(e.x, e.y));
+          diffuseColor.rgb *= (1.0 - uLook.z * .5) + uLook.z * hh(floor(c)); diffuseColor.rgb *= 1.0 - .22 * seam; }`);
+  };
+}
+function setupMaterial(mat) {
+  if (mat.userData.sb) return; mat.userData.sb = 1; shipMats.push(mat);
+  mat.envMapIntensity = GLOSS[mat.name] ? 0.24 : 0.3;
+  if (GLOSS[mat.name]) { mat.roughness = GLOSS[mat.name][0]; mat.metalness = GLOSS[mat.name][1]; }
+  if (mat.map) mat.map.anisotropy = renderer.capabilities.getMaxAnisotropy();
+  if (mat.normalMap) mat.normalScale.set(0.85, 0.85);
+  if (mat.name === 'M_KV_GLOW_MOTEUR') { mat.emissive.setRGB(1.0, .55, .25); mat.emissiveIntensity = 5.5; }
+  else if (mat.name.startsWith('M_EM_AMBRE')) { mat.emissive.setRGB(1.0, 0.42, 0.1); mat.emissiveIntensity = 2.6; }
+  else if (mat.name === 'M_EM_FEU') { mat.emissiveIntensity = Math.min(mat.emissiveIntensity, 3.0); feuMats.push(mat); }
+  else if (mat.name.startsWith('M_KV_NAV_') || mat.name === 'M_KV_STROBE') navMats.push(mat);
+  patchDeform(mat, mat.name === 'M_EM_TRANCHEE' ? premiumLook(mat) : null);
+}
+function buildShip(gltf) {
+  gltf.scene.updateMatrixWorld(true);
+  const meshes = []; gltf.scene.traverse(o => { if (o.isMesh) meshes.push(o); });
+  for (const o of meshes) {
+    let p = o; while (p && !/^EM_/.test(p.name)) p = p.parent;
+    const nm = (p ? p.name : o.name).replace(/_\d+$/, ''), isTeeth = nm === 'EM_teeth';
+    const g = o.geometry; g.applyMatrix4(o.matrixWorld);
+    const mats = Array.isArray(o.material) ? o.material : [o.material]; mats.forEach(setupMaterial);
+    const pos = g.attributes.position, idx = g.index ? g.index.array : null;
+    const nTri = (idx ? idx.length : pos.count) / 3, buckets = new Map();
+    for (let i = 0; i < nTri; i++) {
+      const a = idx ? idx[i * 3] : i * 3, b = idx ? idx[i * 3 + 1] : i * 3 + 1, c = idx ? idx[i * 3 + 2] : i * 3 + 2;
+      const cz = (pos.getZ(a) + pos.getZ(b) + pos.getZ(c)) / 3;
+      let key = -1;
+      if (cz > Z_SPLIT) {
+        const cx = (pos.getX(a) + pos.getX(b) + pos.getX(c)) / 3, cy = (pos.getY(a) + pos.getY(b) + pos.getY(c)) / 3;
+        const kk = ((Math.round(Math.atan2(cy, cx) / (Math.PI / 2)) % 4) + 4) % 4;
+        key = kk * 2 + (cz > Z_TIP ? 1 : 0);
+      }
+      let arr = buckets.get(key); if (!arr) buckets.set(key, arr = []);
+      arr.push(a, b, c);
+    }
+    for (const [key, arr] of buckets) {
+      const ng = new THREE.BufferGeometry();
+      for (const n in g.attributes) ng.setAttribute(n, g.attributes[n]);
+      ng.setIndex(new THREE.BufferAttribute(pos.count > 65535 ? new Uint32Array(arr) : new Uint16Array(arr), 1));
+      for (const gr of g.groups) ng.addGroup(gr.start, gr.count, gr.materialIndex);
+      const m = new THREE.Mesh(ng, o.material);
+      m.frustumCulled = false; m.castShadow = m.receiveShadow = true; m.customDepthMaterial = depthMat;
+      m.layers.enable(1);
+      if (key < 0) model.add(m);
+      else { const P = pinces[key >> 1], seg = key & 1; (seg ? (isTeeth ? P.tT : P.pT.children[0]) : (isTeeth ? P.tB : P.pB.children[0])).add(m); }
+    }
+    if (nm === 'EM_hull' || nm === 'EM_armor') {
+      for (let i = 0; i < 260; i++) { const j = Math.floor(Math.random() * pos.count); hullSamples.push(V3(pos.getX(j) * SC, pos.getY(j) * SC, pos.getZ(j) * SC + OFFZ)); }
+    }
+  }
+  hullSamples.sort((a, b) => a.z - b.z);
+  shipReady = true;
+}
+function setJaws(base, tip, teeth) {
+  for (const P of pinces) {
+    P.pB.quaternion.setFromAxisAngle(P.et, THREE.MathUtils.degToRad(base[P.k] ?? base));
+    P.pT.quaternion.setFromAxisAngle(P.et, THREE.MathUtils.degToRad(tip[P.k] ?? tip));
+    const tt = teeth[P.k] ?? teeth;
+    P.tB.position.copy(P.er).multiplyScalar(tt).setZ(tt * .35); P.tT.position.copy(P.tB.position);
+  }
+}
+pinces.forEach((P, k) => P.k = k);
+
+/* ═══════════════ la planète (une seule, du départ à la livraison) ═══════════════ */
+const PR_ = 1.72;
+const PLANET_U = { uSun: { value: SUN_DIR.clone() }, uT: PLASMA_T, uRim: { value: 0 }, uGlow: { value: 0 }, uDefOn: { value: 1 } };
+const planetVS = `
+  ${DEFORM_GLSL}
+  uniform float uDefOn; varying vec3 vN; varying vec3 vP; varying vec3 vW; varying vec3 vSbW;
+  void main(){
+    vN = normalize(mat3(modelMatrix) * normal); vP = position;
+    vec4 w = modelMatrix * vec4(position, 1.0);
+    if (uDefOn > 0.5) w.xyz = sbDeform(w.xyz);
+    vW = w.xyz; vSbW = w.xyz;
+    gl_Position = projectionMatrix * viewMatrix * w;
+  }`;
+const planetUniforms = () => Object.assign({}, DEF, PLANET_U);
+const planet = new THREE.Group();
+{
+  const ball = new THREE.Mesh(new THREE.SphereGeometry(PR_, 112, 80), new THREE.ShaderMaterial({
+    uniforms: planetUniforms(), vertexShader: planetVS,
+    fragmentShader: NOISE_GLSL + CLIP_GLSL + `
+      uniform vec3 uSun; uniform float uT, uRim, uGlow; varying vec3 vN; varying vec3 vP; varying vec3 vW;
+      float fb(vec3 p){ float a=.5,s=0.; for(int i=0;i<6;i++){ s+=a*n3(p); p=p*2.02+3.1; a*=.5; } return s; }
+      void main(){
+        ${CLIP_TEST}
+        vec3 d = normalize(vP);
+        float e = fb(d * 2.1 + 3.0);
+        float land = smoothstep(.505, .53, e);
+        float lat = abs(d.y);
+        vec3 ocean = mix(vec3(.008,.045,.13), vec3(.02,.15,.27), smoothstep(.43, .505, e));
+        vec3 green = mix(vec3(.05,.19,.05), vec3(.15,.29,.07), fb(d * 9.0));
+        vec3 ground = mix(green, vec3(.025,.11,.035), smoothstep(.56, .70, e));
+        ground = mix(ground, vec3(.40,.34,.22), smoothstep(.64, .74, fb(d * 5.0 + 11.0)) * .45);
+        vec3 col = mix(ocean, ground, land);
+        col = mix(col, vec3(.82,.88,.94), smoothstep(.80, .88, lat + .07 * fb(d * 6.0)));
+        vec3 N = normalize(vN), L = normalize(uSun), V = normalize(cameraPosition - vW);
+        float ndl = dot(N, L), day = smoothstep(-.06, .28, ndl);
+        vec3 lit = col * (day * 1.15 + .012);
+        vec3 H = normalize(L + V); lit += vec3(1., .9, .75) * pow(max(dot(N, H), 0.), 70.) * (1. - land) * day * .7;
+        float fres = pow(1. - max(dot(N, V), 0.), 2.4);
+        lit += vec3(.22,.48,1.) * fres * (.06 + .6 * smoothstep(-.25, .6, ndl)) * (.6 + .7 * uRim);
+        lit += vec3(.45,.65,1.) * uGlow * (.10 + .5 * fres);
+        gl_FragColor = vec4(lit, 1.0);
+      }` }));
+  const clouds = new THREE.Mesh(new THREE.SphereGeometry(PR_ * 1.014, 96, 64), new THREE.ShaderMaterial({
+    transparent: true, depthWrite: false, uniforms: planetUniforms(), vertexShader: planetVS,
+    fragmentShader: NOISE_GLSL + CLIP_GLSL + `
+      uniform vec3 uSun; uniform float uT, uGlow; varying vec3 vN; varying vec3 vP; varying vec3 vW;
+      void main(){
+        ${CLIP_TEST}
+        vec3 d = normalize(vP);
+        vec3 q = d * 3.4 + vec3(0.0, 0.0, uT * .01);
+        q.xy += .4 * vec2(f3(q * 1.2), f3(q * 1.2 + 5.2));
+        float c = smoothstep(.52, .72, f3(q));
+        vec3 N = normalize(vN), L = normalize(uSun), V = normalize(cameraPosition - vW);
+        float day = smoothstep(-.1, .3, dot(N, L));
+        vec3 col = vec3(.95, .96, 1.0) * (day * .95 + .02) + vec3(.4,.55,1.) * uGlow * .25;
+        float rim = pow(1. - abs(dot(N, V)), 2.0);
+        gl_FragColor = vec4(col, c * .82 * (1.0 - rim * .6));
+      }` }));
+  const atm = new THREE.Mesh(new THREE.SphereGeometry(PR_ * 1.032, 72, 48), new THREE.ShaderMaterial({
+    transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.BackSide, uniforms: planetUniforms(), vertexShader: planetVS,
+    fragmentShader: CLIP_GLSL + `
+      uniform vec3 uSun; uniform float uRim, uGlow; varying vec3 vN; varying vec3 vW;
+      void main(){
+        ${CLIP_TEST}
+        vec3 N = normalize(vN), V = normalize(cameraPosition - vW), L = normalize(uSun);
+        float f = pow(1.0 - abs(dot(N, V)), 2.6);
+        float sun = smoothstep(-.35, .55, dot(N, L));
+        vec3 c = mix(vec3(.9, .6, .45), vec3(.32, .58, 1.), smoothstep(-.25, .2, dot(N, L)));
+        float a = f * (sun * (.55 + .9 * uRim) + uGlow * .6);
+        gl_FragColor = vec4(c * a, a);
+      }` }));
+  clouds.renderOrder = 2; atm.renderOrder = 3;
+  planet.add(ball, clouds, atm);
+  planet.userData.clouds = clouds;
+  planet.traverse(o => { if (o.isMesh) { o.frustumCulled = false; o.layers.enable(1); } });
+}
+const PLANET_HOME = V3(0, 0.05, 2.05);            // dans la cavité, à l'abri de la gueule
+planet.position.copy(PLANET_HOME); ship.add(planet);
+const _planetAttached = { v: true };
+function planetToShip() { if (planet.parent !== ship) { ship.add(planet); } planet.position.copy(PLANET_HOME); planet.quaternion.identity(); planet.scale.setScalar(1); _planetAttached.v = true; PLANET_U.uDefOn.value = 1; }
+function planetToWorld() { if (planet.parent !== scene) scene.attach(planet); _planetAttached.v = false; PLANET_U.uDefOn.value = 0; }
+
+/* ═══════════════ l'anomalie : passage traversable ═══════════════
+   Disque d'horizon dans le plan du seuil (centre véritablement noir), anneau de photons, couronne de matière
+   tourmentée, filaments aux trajectoires impossibles, lentille gravitationnelle en post-traitement. */
+const portal = new THREE.Group(); scene.add(portal);
+const PORTAL_U = { uT: PLASMA_T, uLiquid: { value: 0 }, uHeat: { value: 1 } };
+const horizon = new THREE.Mesh(new THREE.CircleGeometry(1, 128), new THREE.ShaderMaterial({
+  uniforms: PORTAL_U,
+  vertexShader: `varying vec2 vP; void main(){ vP = position.xy; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+  fragmentShader: NOISE_GLSL + `
+    uniform float uT, uLiquid; varying vec2 vP;
+    void main(){
+      float r = length(vP), a = atan(vP.y, vP.x);
+      float edge = smoothstep(.45, 1.0, r);
+      // océan galactique comprimé : houle lente vers le centre, reflets violets en profondeur ; le cœur reste noir
+      float swell = f2(vec2(a * 3.0 + uT * .12 + 4.0 / (r + .25), r * 7.0 - uT * .9));
+      float caust = pow(1.0 - abs(sin((r * 18.0 - uT * 1.4) + swell * 4.0)), 8.0);
+      vec3 col = vec3(.16, .06, .30) * pow(edge, 2.4) * (.35 + .9 * swell) * (.25 + uLiquid)
+               + vec3(.75, .70, 1.0) * caust * pow(edge, 5.0) * .22 * uLiquid
+               + vec3(.95, .9, 1.0) * pow(smoothstep(.93, 1.0, r), 8.0) * .5;
+      gl_FragColor = vec4(col, 1.0);
+    }` }));
+horizon.renderOrder = 1; portal.add(horizon);
+const photon = new THREE.Mesh(new THREE.RingGeometry(0.985, 1.14, 192, 1), new THREE.ShaderMaterial({
+  transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide, uniforms: PORTAL_U,
+  vertexShader: `varying vec2 vP; void main(){ vP = position.xy; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+  fragmentShader: NOISE_GLSL + `uniform float uT, uHeat; varying vec2 vP;
+    void main(){ float r = length(vP), a = atan(vP.y, vP.x);
+      float ring = exp(-pow((r - 1.005) / .012, 2.0)) * 1.4 + exp(-pow((r - 1.03) / .05, 2.0)) * .35 * (.6 + .4 * f2(vec2(a * 8.0 - uT, 3.0)));
+      vec3 c = mix(vec3(.80,.70,1.0), vec3(1.0,.92,.82), .5 + .5 * sin(a * 3.0 + uT * .7));
+      gl_FragColor = vec4(c * ring * uHeat, 1.0); }` }));
+photon.renderOrder = 3; portal.add(photon);
+const corona = new THREE.Mesh(new THREE.RingGeometry(1.0, 2.5, 256, 24), new THREE.ShaderMaterial({
+  transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide, uniforms: PORTAL_U,
+  vertexShader: NOISE_GLSL + `uniform float uT; varying vec2 vP;
+    void main(){ vP = position.xy; vec3 p = position; float r = length(p.xy), a = atan(p.y, p.x);
+      p.z += (f2(vec2(a * 3.0 + uT * .3, r * 2.0 - uT * .2)) - .5) * .55 * (r - 1.0);      // matière tourmentée : la couronne se tord hors du plan
+      gl_Position = projectionMatrix * modelViewMatrix * vec4(p, 1.0); }`,
+  fragmentShader: NOISE_GLSL + `uniform float uT, uHeat; varying vec2 vP;
+    void main(){
+      float r = length(vP), a = atan(vP.y, vP.x);
+      float sw = a + 2.4 / r - uT * (.7 / (r * r) + .04);
+      float b = f2(vec2(sw * 2.2, r * 2.4)) * .6 + f2(vec2(sw * 7.0, r * 8.0)) * .4;
+      float t = clamp((r - 1.0) / 1.5, 0., 1.);
+      vec3 col = mix(vec3(.85,.80,1.0), vec3(.36,.14,.62), smoothstep(.0, .22, t));
+      col = mix(col, vec3(.10,.04,.22), smoothstep(.4, 1., t));
+      float ember = pow(f2(vec2(sw * 11.0, r * 15.0 + uT * .4)), 6.0) * 3.5;                  // quelques braises ambrées
+      col += vec3(1.0,.52,.18) * ember * (1.0 - t);
+      float alpha = smoothstep(0., .03, t) * (1. - smoothstep(.35, 1., t)) * (.06 + 1.1 * pow(b, 3.0));
+      gl_FragColor = vec4(col * alpha * .75 * uHeat, 1.0);
+    }` }));
+corona.renderOrder = 2; portal.add(corona);
+// filaments : 90 traits lumineux aux trajectoires impossibles (orbites qui changent de plan, s'inversent, se nouent)
+const FIL = REDUCED ? 40 : 90, TRAIL = 22;
+const filGeo = new THREE.BufferGeometry();
+const filPos = new Float32Array(FIL * TRAIL * 3), filCol = new Float32Array(FIL * TRAIL * 3), filSz = new Float32Array(FIL * TRAIL);
+filGeo.setAttribute('position', new THREE.BufferAttribute(filPos, 3));
+filGeo.setAttribute('color', new THREE.BufferAttribute(filCol, 3));
+filGeo.setAttribute('aSize', new THREE.BufferAttribute(filSz, 1));
+const glowPointMat = (scale) => new THREE.ShaderMaterial({
+  transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, uniforms: { uScale: { value: scale } },
+  vertexShader: `attribute float aSize; varying vec3 vC; uniform float uScale;
+    void main(){ vC = color; vec4 mv = modelViewMatrix * vec4(position, 1.0); gl_PointSize = aSize * uScale / max(-mv.z, .1); gl_Position = projectionMatrix * mv; }`,
+  fragmentShader: `varying vec3 vC; void main(){ vec2 d = gl_PointCoord - .5; float a = exp(-dot(d, d) * 14.0); gl_FragColor = vec4(vC * a, a); }`,
+  vertexColors: true,
+});
+const filMat = glowPointMat(1);
+const filaments = new THREE.Points(filGeo, filMat); filaments.frustumCulled = false; filaments.renderOrder = 4; scene.add(filaments);
+const FILP = Array.from({ length: FIL }, (_, i) => ({ r: 1.15 + hash(i) * 1.9, w: (hash(i + 7) < .78 ? 1 : -1) * (.5 + hash(i + 3) * 1.4), a0: hash(i + 11) * 6.283,
+  h: (hash(i + 13) - .5) * .9, p: hash(i + 17) * 6.283, pr: .3 + hash(i + 19) * .9, warm: hash(i + 23) < .14 }));
+// nappes de lumière arrachées à la coque (arrivée) / étincelles aspirées (départ)
+const TRL = REDUCED ? 300 : 900;
+const trlGeo = new THREE.BufferGeometry();
+const trlPos = new Float32Array(TRL * 3), trlCol = new Float32Array(TRL * 3), trlSz = new Float32Array(TRL);
+trlGeo.setAttribute('position', new THREE.BufferAttribute(trlPos, 3));
+trlGeo.setAttribute('color', new THREE.BufferAttribute(trlCol, 3));
+trlGeo.setAttribute('aSize', new THREE.BufferAttribute(trlSz, 1));
+const trails = new THREE.Points(trlGeo, glowPointMat(1)); trails.frustumCulled = false; trails.renderOrder = 4; scene.add(trails);
+
+/* ═══════════════ l'intérieur de l'anomalie (voyage) ═══════════════ */
+const inside = new THREE.Group(); inside.visible = false; scene.add(inside);
+const VOY_U = { uT: { value: 0 }, uW: { value: Math.PI * 2 / CFG.T.loop }, uAmt: { value: 1 } };
+const abyss = new THREE.Mesh(new THREE.SphereGeometry(300, 64, 48), new THREE.ShaderMaterial({
+  side: THREE.BackSide, depthWrite: false, uniforms: VOY_U,
+  vertexShader: `varying vec3 vDir; void main(){ vDir = position; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+  fragmentShader: NOISE_GLSL + `uniform float uT, uW, uAmt; varying vec3 vDir;
+    void main(){
+      vec3 d = normalize(vDir); float ph = uT * uW;
+      float ang = atan(d.y, d.x), rad = length(d.xy);
+      float depth = d.z / max(rad, .06);
+      vec3 q = d * 2.3 + vec3(cos(ph), sin(ph), cos(ph * 2.0) * .5) * .55;
+      q += .7 * vec3(f3(q * 1.3), f3(q * 1.3 + 4.0), f3(q * 1.3 + 8.0));
+      float fold = f3(q);
+      float crease = exp(-pow((fold - .5) / .022, 2.0));
+      float flow = .5 + .5 * sin(depth * 2.2 - ph * 3.0 + fold * 6.0);              // les plis défilent : on avance
+      float ripple = pow(.5 + .5 * sin(ang * 5.0 + depth * 1.3 + ph * 2.0 + fold * 5.0), 12.0);
+      vec3 col = vec3(.012, .004, .03) + vec3(.16, .06, .30) * pow(fold, 3.0) * 1.6;
+      col += vec3(.85, .82, 1.0) * crease * (.25 + .75 * flow) * .28;
+      col += vec3(.45, .2, .85) * ripple * .25;
+      col += vec3(1.0, .55, .2) * pow(f3(q * 3.0 + 9.0), 7.0) * 2.2 * flow;             // braises
+      gl_FragColor = vec4(col * uAmt, 1.0);
+    }` }));
+inside.add(abyss);
+const SHEETS = [];
+{
+  const g = new THREE.PlaneGeometry(90, 90, 72, 72);
+  for (let i = 0; i < 8; i++) {
+    const m = new THREE.Mesh(g, new THREE.ShaderMaterial({
+      transparent: true, depthWrite: false, side: THREE.DoubleSide,
+      blending: THREE.CustomBlending, blendSrc: THREE.OneFactor, blendDst: THREE.OneMinusSrcAlphaFactor,
+      uniforms: Object.assign({ uSeed: { value: i * 3.7 + 1.0 } }, VOY_U),
+      vertexShader: `uniform float uT, uW, uSeed; varying vec2 vUv; varying float vD;
+        void main(){ vUv = uv; vec3 p = position; float ph = uT * uW;
+          p.z += 3.0 * sin(p.x * .11 + ph * 2.0 + uSeed) * cos(p.y * .08 - ph + uSeed * 1.7) + 1.4 * sin(p.y * .23 + ph * 3.0 + uSeed * 2.3);
+          vec4 mv = modelViewMatrix * vec4(p, 1.0); vD = -mv.z; gl_Position = projectionMatrix * mv; }`,
+      fragmentShader: NOISE_GLSL + `uniform float uT, uW, uSeed, uAmt; varying vec2 vUv; varying float vD;
+        void main(){
+          float ph = uT * uW;
+          vec2 q = vUv * 5.0 + vec2(uSeed);
+          q += .7 * vec2(f2(q * .7 + vec2(cos(ph), sin(ph)) * .9), f2(q * .7 + 4.1 + vec2(sin(ph * 2.0), cos(ph)) * .9));
+          float f = f2(q);
+          float crease = exp(-pow((f - .5) / .016, 2.0));
+          float f2b = f2(q * 2.3 + 7.0); float crease2 = exp(-pow((f2b - .5) / .011, 2.0)) * .55;
+          float veil = smoothstep(.32, .72, f) * .62;
+          float edge = smoothstep(0., .2, vUv.x) * smoothstep(1., .8, vUv.x) * smoothstep(0., .2, vUv.y) * smoothstep(1., .8, vUv.y);
+          float near = smoothstep(2.0, 9.0, vD) * smoothstep(150., 70., vD);
+          float k = edge * near * uAmt;
+          vec3 c = (vec3(.92, .88, 1.0) * crease * .45 + vec3(.55, .3, .95) * crease2 * .8 + vec3(1., .55, .2) * pow(crease2 * 1.8, 3.0) * .5) * k;
+          gl_FragColor = vec4(c, veil * k);
+        }` }));
+    m.renderOrder = 5; m.frustumCulled = false;
+    const contra = i === 2 || i === 6;          // deux nappes à contre-sens : profondeurs contradictoires
+    m.userData = { n: contra ? 1 : (i % 3 === 0 ? 2 : 1), dir: contra ? V3(.15, -.1, 1).normalize() : V3((hash(i) - .5) * .5, (hash(i + 1) - .5) * .5, -1).normalize(),
+      off: V3((hash(i + 2) - .5) * 14, (hash(i + 3) - .5) * 14, 0), ph: hash(i + 4), rot: new THREE.Euler(hash(i + 5) * 2.4 - 1.2, hash(i + 6) * 2.4 - 1.2, hash(i + 7) * 3.1), spin: (hash(i + 8) - .5) * .6 };
+    inside.add(m); SHEETS.push(m);
+  }
+}
+const STREAK = REDUCED ? 500 : 1400;
+const stkGeo = new THREE.BufferGeometry();
+const stkPos = new Float32Array(STREAK * 6), stkCol = new Float32Array(STREAK * 6);
+stkGeo.setAttribute('position', new THREE.BufferAttribute(stkPos, 3));
+stkGeo.setAttribute('color', new THREE.BufferAttribute(stkCol, 3));
+const streaks = new THREE.LineSegments(stkGeo, new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false }));
+streaks.frustumCulled = false; inside.add(streaks);
+const STKP = Array.from({ length: STREAK }, (_, i) => ({ r: 4 + Math.pow(hash(i), .6) * 40, a: hash(i + 1) * 6.283, z0: hash(i + 2) * 160, n: 2 + Math.floor(hash(i + 3) * 4),
+  warm: hash(i + 4) < .1, hel: (hash(i + 5) - .5) * .05 }));
+
+/* ═══════════════ post-traitement ═══════════════ */
+const composer = new EffectComposer(renderer);
+composer.renderToScreen = false;
+composer.addPass(new RenderPass(scene, camera));
+const bloom = new UnrealBloomPass(new THREE.Vector2(innerWidth / 2, innerHeight / 2), 0.62, 0.45, 1.0);
+composer.addPass(bloom);
+composer.addPass(new OutputPass());
+// lentille gravitationnelle elliptique (le passage est vu de biais) ; le TAXI et sa planète sont épargnés hors traversée
+const lensPass = new ShaderPass({
+  uniforms: { tDiffuse: { value: null }, tMask: { value: null }, uC: { value: new THREE.Vector2(.5, .5) }, uM: { value: new THREE.Matrix3() }, uMi: { value: new THREE.Matrix3() },
+    uAsp: { value: 1 }, uK: { value: 0 }, uVis: { value: 0 }, uT: PLASMA_T, uMaskOn: { value: 1 } },
+  vertexShader: `varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+  fragmentShader: `uniform sampler2D tDiffuse, tMask; uniform vec2 uC; uniform mat3 uM, uMi; uniform float uAsp, uK, uVis, uT, uMaskOn; varying vec2 vUv;
+    void main(){
+      if (uVis < 0.001) { gl_FragColor = texture2D(tDiffuse, vUv); return; }
+      vec2 d = vUv - uC; d.x *= uAsp;
+      vec2 q = (uMi * vec3(d, 0.0)).xy; float r = max(length(q), 1e-4); vec2 dq = q / r;
+      float defl = min(uVis * uK * uK / r, r * 0.94) / (1.0 + pow(max(r - 1.3, 0.0), 2.0) * 0.8);   // la lentille s'éteint vite au large
+      float wave = sin(r * 9.0 - uT * 4.0) * exp(-r * 1.1) * .035 * uVis * uK;
+      vec2 off = (uM * vec3(dq * (defl + wave), 0.0)).xy; off.x /= uAsp;
+      vec2 ca = (uM * vec3(dq, 0.0)).xy * .005 * exp(-r * 1.4) * uVis; ca.x /= uAsp;
+      float ship = uMaskOn * smoothstep(.35, .65, texture2D(tMask, vUv).r);
+      float near = 0.0;
+      if (uMaskOn > .5) {
+        for (int i = 0; i < 12; i++) { float an = float(i) * .5235988 + .26; vec2 o = vec2(cos(an) / uAsp, sin(an));
+          near += texture2D(tMask, vUv + o * .03).r + texture2D(tMask, vUv + o * .08).r * .85 + texture2D(tMask, vUv + o * .15).r * .6 + texture2D(tMask, vUv + o * .24).r * .35; }
+        near = smoothstep(0.0, 0.7, near / 33.6); near = near * near * (3.0 - 2.0 * near);
+      }
+      float keep = max(ship, near * .9);
+      off *= 1.0 - keep; ca *= 1.0 - keep;
+      vec2 uv = vUv - off;
+      float ghost = uMaskOn * smoothstep(.35, .65, texture2D(tMask, uv).r) * (1.0 - ship);
+      float bl = (0.0015 + 0.010 * clamp(length(off) * 6.0, 0.0, 1.0)) * (1.0 - ship);
+      vec3 col = vec3(0.0);
+      for (int i = 0; i < 8; i++) { float an = float(i) * .7853982 + .39; vec2 o = vec2(cos(an) / uAsp, sin(an)) * bl * (i < 4 ? .5 : 1.0);
+        col.r += texture2D(tDiffuse, uv + o - ca).r; col.g += texture2D(tDiffuse, uv + o).g; col.b += texture2D(tDiffuse, uv + o + ca).b; }
+      col /= 8.0;
+      col = mix(col, texture2D(tDiffuse, vUv).rgb, max(ship, ghost));   // jamais d'image fantôme du vaisseau ni de la planète
+      gl_FragColor = vec4(col, 1.0);
+    }` });
+composer.addPass(lensPass);
+// image finale : respiration de la perspective, dédoublement, décalages temporels, pincement, flash, iris
+const histRT = [0, 1].map(() => new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType }));
+let histI = 0;
+const FIN = {
+  tDiffuse: { value: null }, tHist: { value: null }, uT: { value: 0 }, uAsp: { value: 1 },
+  uBreath: { value: 0 }, uGhost: { value: 0 }, uGhostOff: { value: new THREE.Vector2() }, uSmear: { value: 0 }, uSlit: { value: 0 }, uTrail: { value: 0 },
+  uPinch: { value: 0 }, uPinchC: { value: new THREE.Vector2(.5, .5) }, uFlash: { value: 0 }, uFade: { value: 0 }, uIris: { value: 4 }, uIrisC: { value: new THREE.Vector2(.5, .5) },
+  uTear: { value: 0 }, uVig: { value: .55 }, uGrain: { value: .018 },
+};
+const finQuad = new FullScreenQuad(new THREE.ShaderMaterial({
+  uniforms: FIN, depthTest: false, depthWrite: false,
+  vertexShader: `varying vec2 vUv; void main(){ vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }`,
+  fragmentShader: NOISE_GLSL + `uniform sampler2D tDiffuse, tHist; uniform float uT, uAsp, uBreath, uGhost, uSmear, uSlit, uTrail, uPinch, uFlash, uFade, uIris, uTear, uVig, uGrain;
+    uniform vec2 uGhostOff, uPinchC, uIrisC; varying vec2 vUv;
+    void main(){
+      vec2 A = vec2(uAsp, 1.0);
+      vec2 p = (vUv - .5) * A; float r2 = dot(p, p);
+      p *= 1.0 + uBreath * (r2 - .3);                                            // la perspective respire
+      vec2 c = (uPinchC - .5) * A; vec2 d = p - c; float rr = length(d);
+      p = c + d * (1.0 + uPinch * 1.6 / (rr * 3.0 + .25));                       // l'image est aspirée vers le point d'effondrement
+      vec2 uv = p / A + .5;
+      float yb = .5 + .32 * sin(uT * 5.3) + .1 * sin(uT * 17.0);                // déchirure
+      float tear = uTear * smoothstep(.035, .0, abs(vUv.y - yb));
+      uv.x += tear * .06 * sin(uT * 61.0);
+      vec2 sd = vec2(cos(uT * .7), sin(uT * .9)) * uSmear * .014;
+      vec3 col = vec3(0.0);
+      for (int i = 0; i < 6; i++) { float f = float(i) / 5.0 - .5;
+        col.r += texture2D(tDiffuse, uv + sd * f * 1.35).r; col.g += texture2D(tDiffuse, uv + sd * f).g; col.b += texture2D(tDiffuse, uv + sd * f * .65).b; }
+      col /= 6.0;
+      if (uGhost > .001) { vec3 g = texture2D(tDiffuse, uv + uGhostOff).rgb; col = mix(col, max(col, g) * .55 + (col + g) * .3, uGhost); }
+      vec3 hist = texture2D(tHist, vUv).rgb;
+      float band = smoothstep(.66, .70, n2(vec2(vUv.y * 11.0 + floor(uT * 2.5) * 3.1, floor(uT * 2.5))));   // tranches d'image en retard
+      col = mix(col, hist, uSlit * band * .55);
+      col = max(col, hist * uTrail);                                             // lumières étalées dans le temps
+      col += uFlash * vec3(1.0, .96, 1.0);
+      float ir = length((vUv - uIrisC) * A);
+      col *= smoothstep(uIris, uIris - .04, ir) * step(.0001, uIris);
+      col *= 1.0 - uFade;
+      col *= mix(1.0, smoothstep(1.3, .35, length((vUv - .5) * A) * 1.05), uVig);
+      col += (h2(vUv * vec2(1973., 1531.) + fract(uT * 7.31)) - .5) * uGrain;
+      gl_FragColor = vec4(max(col, 0.0), 1.0);
+    }` }));
+const blitQuad = new FullScreenQuad(new THREE.ShaderMaterial({
+  uniforms: { t: { value: null } }, depthTest: false, depthWrite: false,
+  vertexShader: `varying vec2 vUv; void main(){ vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }`,
+  fragmentShader: `uniform sampler2D t; varying vec2 vUv; void main(){ gl_FragColor = texture2D(t, vUv); }` }));
+const maskRT = new THREE.WebGLRenderTarget(1, 1, { depthBuffer: true });
+function resize() {
+  camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight); composer.setSize(innerWidth, innerHeight);
+  bloom.resolution.set(innerWidth / 2, innerHeight / 2);
+  const w = Math.round(innerWidth * renderer.getPixelRatio()), h = Math.round(innerHeight * renderer.getPixelRatio());
+  histRT.forEach(rt => rt.setSize(w, h));
+  maskRT.setSize(Math.max(1, Math.round(w * .5)), Math.max(1, Math.round(h * .5)));
+}
+addEventListener('resize', resize); resize();
+function renderMask() {
+  const bg = scene.background; scene.background = null; scene.overrideMaterial = maskMat;
+  const sm0 = renderer.shadowMap.autoUpdate; renderer.shadowMap.autoUpdate = false;
+  camera.layers.set(1);
+  const cc = renderer.getClearColor(new THREE.Color()), ca = renderer.getClearAlpha();
+  renderer.setRenderTarget(maskRT); renderer.setClearColor(0x000000, 1); renderer.clear(); renderer.render(scene, camera);
+  renderer.setRenderTarget(null); renderer.setClearColor(cc, ca);
+  camera.layers.set(0); scene.overrideMaterial = null; scene.background = bg; renderer.shadowMap.autoUpdate = sm0;
+  lensPass.uniforms.tMask.value = maskRT.texture;
+}
+
+/* ═══════════════ caméra ═══════════════ */
+const _look = V3(), _dir = V3(), _up = V3();
+function placeCam(pos, look, roll, hfov) {
+  const asp = camera.aspect, th = Math.tan(THREE.MathUtils.degToRad(hfov * (asp < 1 ? 0.62 + 0.38 * asp : 1)) / 2);   // portrait : on accepte de rogner les côtés
+  let vf = 2 * Math.atan(th / asp), mult = 1;
+  const VMAX = THREE.MathUtils.degToRad(70);
+  if (vf > VMAX) { mult = th / (Math.tan(VMAX / 2) * asp); vf = VMAX; }       // portrait : on recule plutôt que d'élargir à l'excès
+  camera.fov = THREE.MathUtils.radToDeg(vf);
+  _dir.subVectors(pos, look);
+  camera.position.copy(look).addScaledVector(_dir, mult);
+  _dir.normalize().negate();
+  _up.set(0, 1, 0).applyAxisAngle(_dir, roll || 0);
+  camera.up.copy(_up); camera.lookAt(look);
+  camera.updateProjectionMatrix();
+}
+
+/* ═══════════════ mise en scène ═══════════════ */
+// DÉPART : vitesse = dérive puis plongée (rampe douce), position en forme fermée
+const DEP = { z0: -7.0, P: 9.5, a: 3.0, b: 6.2 };
+const depX = (t) => CFG.ship.cruise * t + (CFG.ship.plunge - CFG.ship.cruise) * smInt(t, DEP.a, DEP.b);
+function depTimes() {
+  const need = DEP.P - STERN - DEP.z0 + 0.15, needTip = DEP.P - (DEP.z0 + TIP);
+  let tS = 0, tTip = 0; for (let t = 0; t < 40; t += 0.01) { if (!tTip && depX(t) >= needTip) tTip = t; if (depX(t) >= need) { tS = t; break; } }
+  const close = tS + 0.8;
+  return { tTip, tS, close, end: close + 1.9 };
+}
+// ARRIVÉE
+function arrTimes() {
+  const T = CFG.T, rel0 = CFG.release.start, rel1 = rel0 + CFG.release.dur;
+  const rec0 = rel1 + T.recallAfter, recMove = rec0 + 0.9, recEnd = recMove + Math.max(1.6, 18 / CFG.ship.recall * 2.2);
+  const col0 = recEnd, col1 = col0 + 0.75;
+  return { rel0, rel1, rec0, recMove, recEnd, col0, col1, end: col1 + T.hold };
+}
+const ARR_SHIP_FINAL = 9.0, ARR_SHIP_START = -(TIP + 0.7), ARR_SHIP_GONE = -(TIP + 1.5);   // tout le vaisseau derrière le seuil au début et à la fin
+let phase = 'none', pt = 0, loopT = 0, exitFrom = 0, freeze = false;
+let D = depTimes(), A = arrTimes();
+const beatsSent = new Set();
+function beat(name) { const k = phase + ':' + name; if (beatsSent.has(k)) return; beatsSent.add(k); post({ type: 'beat', phase, name }); }
+function play(p) {
+  phase = p; pt = 0; beatsSent.clear();
+  D = depTimes(); A = arrTimes(); DEF.uDW.value = VOY_U.uW.value = Math.PI * 2 / CFG.T.loop;
+  if (p === 'exit') exitFrom = loopT;
+  if (p === 'depart' || p === 'voyage' || p === 'exit') { planetToShip(); }
+  if (p === 'arrivee') { planetToShip(); }
+  post({ type: 'phase', phase: p, duration: p === 'depart' ? D.end : p === 'arrivee' ? A.end : p === 'exit' ? CFG.T.exit : CFG.T.loop });
+  document.querySelectorAll('.ctl button').forEach(b => b.classList.toggle('on', b.dataset.p === p));
+}
+
+// état calculé à chaque image (aucune intégration : toute séquence est rejouable et positionnable)
+const st = {};
+const _camP = V3(), _camL = V3(), _tmp = V3(), _tmp2 = V3(), _sp = V3();
+function resetState() {
+  Object.assign(st, {
+    shipZ: 0, shipBob: 1, shipVis: true, inside: false, portalOn: false, pz: 0, pDir: 1, R: 0, Rlens: 0, lensK: 0, liquid: 0, heat: 1,
+    clip: 0, spag: 0, spagL: 3.2, wave: 0, stretch: 0, lag: 0, twist: 0,
+    jawB: 0, jawT: 0, teeth: 0, jawPh: null, rim: 0, glow: 0.15, filTen: 0, filCollapse: 0, trailMode: 0,
+    fov: 48, roll: 0, fade: 0, iris: 4, irisC: null, pinch: 0, flash: 0, ghost: 0, ghostOff: [0, 0], breath: 0, slit: 0, trail: 0, smear: 0, tear: 0, maskOn: 1,
+    sunK: 1, voyLights: 0,
+  });
+}
+function stateDepart(t) {
+  const T = D;
+  st.shipZ = DEP.z0 + depX(t);
+  st.shipVis = t < T.tS + 0.05;
+  st.portalOn = t < T.close + 0.4; st.pz = DEP.P; st.pDir = 1;
+  const open = sm(2.4, 5.0, t), shut = eiC(lin(T.close - 0.8, T.close, t));
+  st.R = CFG.portalRadius * (open * (1 + .04 * Math.sin(t * 2.3))) * (1 - shut);
+  st.Rlens = Math.max(st.R, CFG.portalRadius * 0.55 * sm(1.0, 3.0, t) * (1 - shut));
+  st.lensK = (sm(1.0, 3.2, t) * 0.68 + 0.5 * Math.exp(-Math.pow((t - T.close) / 0.18, 2))) * (1 - lin(T.close + 0.1, T.close + 0.9, t)) * CFG.distortion;
+  st.heat = sm(2.6, 4.6, t) * (1 + 1.2 * Math.exp(-Math.pow((t - T.close + 0.1) / 0.25, 2)));
+  st.filCollapse = lin(T.close - 0.9, T.close, t);
+  st.clip = 1;
+  st.spag = (sm(T.tTip - 0.6, T.tTip + 0.4, t) * 0.25 + sm(T.tS - 1.1, T.tS - 0.15, t) * 0.75) * CFG.distortion;
+  st.spagL = 2.6;
+  st.trailMode = 1;
+  // caméra : trois quarts arrière, lente avancée ; le regard glisse de la coque vers le seuil
+  const k = sm(0, T.end, t);
+  _camP.set(-23.5 + 2.5 * k, 6.8 - 0.8 * k, -15.5 + 5.0 * k);
+  const lookZ = THREE.MathUtils.lerp(-0.5, DEP.P - 0.5, sm(1.0, 7.0, t));
+  _camL.set(1.2, 0.0, lookZ);
+  st.fov = 56 - 4 * k; st.roll = -0.03 + 0.02 * Math.sin(t * .3);
+  st.pinch = 0.18 * Math.exp(-Math.pow((t - T.close) / 0.12, 2)) * CFG.distortion;
+  st.flash = 0.10 * Math.exp(-Math.pow((t - T.close) / 0.1, 2));
+  st.fade = lin(0, 0.6, t) < 1 ? 1 - lin(0, 0.6, t) : 0;
+  if (!Q.has('only')) st.iris = 4 - 4 * eiC(lin(T.end - 0.7, T.end, t));   // le vide se referme sur un point : on entre dans l'anomalie
+  if (t > 0.2) beat('calme'); if (t > 2.4) beat('ouverture'); if (t > T.tTip) beat('franchissement'); if (t > T.close - 0.8) beat('fermeture');
+}
+function voyageEnv(t) {      // la boucle : t périodique (période CFG.T.loop)
+  const P = CFG.T.loop, ph = t / P * Math.PI * 2;
+  st.inside = true; st.shipZ = 0; st.shipBob = 0; st.maskOn = 0; st.clip = 0;
+  const env = Math.pow(.5 - .5 * Math.cos(ph), 1.3), env2 = Math.pow(.5 - .5 * Math.cos(ph * 2 + 1.1), 2) * .45;
+  const k = CFG.distortion * (env * .85 + env2);
+  st.wave = k; st.stretch = k * .9; st.lag = k * .7; st.twist = k * .8;
+  st.glow = .26 + .12 * Math.sin(ph * 3);
+  // caméra : orbite lente, roulis, distances contradictoires (dolly zoom)
+  const a = 2.35 + 0.55 * Math.sin(ph) + 0.15 * Math.sin(ph * 3), e = 0.32 + 0.22 * Math.sin(ph * 2 + 1.0);
+  const hf = 58 + 20 * Math.sin(ph * 2 + .4) * (0.4 + 0.6 * env + .2);
+  const dist = 15.5 * Math.tan(THREE.MathUtils.degToRad(58) / 2) / Math.tan(THREE.MathUtils.degToRad(hf) / 2);
+  _camP.set(Math.cos(a) * Math.cos(e) * dist, Math.sin(e) * dist, Math.sin(a) * Math.cos(e) * dist - 1.0);
+  _camL.set(0.4 * Math.sin(ph * 2), 0.3 * Math.cos(ph * 3), 0.6 * Math.sin(ph));
+  st.fov = hf; st.roll = 0.55 * Math.sin(ph) + 0.22 * Math.sin(ph * 3 + .5);
+  st.breath = (0.12 + 0.35 * env) * Math.sin(ph * 4) * CFG.distortion;
+  st.ghost = clamp01((env - .35) * 1.6) * .8 * CFG.distortion * (0.5 + 0.5 * Math.sin(ph * 5));
+  st.ghostOff = [0.012 * Math.cos(ph * 3) * (1 + env), 0.008 * Math.sin(ph * 2) * (1 + env)];
+  st.slit = clamp01(env * 1.2 - .25) * CFG.distortion; st.trail = 0.55 + 0.25 * env; st.smear = 0.25 + 0.75 * env * CFG.distortion;
+  st.vig = .75; st.voyLights = 1;
+}
+function stateVoyage(t) { voyageEnv(t); st.iris = Math.min(4, 4 * eoS(lin(0, 1.1, pt))); if (pt < 1.1 && phase === 'voyage') st.irisC = [.5, .5]; }
+function stateExit(t) {
+  voyageEnv(exitFrom + t);
+  const u = lin(0, CFG.T.exit, t);
+  st.wave += 1.2 * u * u; st.twist += u; st.breath += 0.5 * u * Math.sin(t * 9);
+  st.pinch = 0.9 * eiC(lin(0.6, CFG.T.exit - 0.1, t)) * CFG.distortion;
+  st.flash = Math.pow(lin(CFG.T.exit - 0.5, CFG.T.exit, t), 2) * 1.4;
+  st.tear = 0.8 * sm(0.4, 1.4, t);
+}
+function stateArrivee(t) {
+  const T = CFG.T, AT = A;
+  // le vaisseau s'extirpe, ralentit, s'arrête ; plus tard il est réaspiré, poupe en premier
+  const eu = lin(T.emergeAt, T.emergeAt + T.emergeDur, t);
+  let z = THREE.MathUtils.lerp(ARR_SHIP_START, ARR_SHIP_FINAL, eoS(eu));
+  const ru = lin(AT.recMove, AT.recEnd, t);
+  z -= (ARR_SHIP_FINAL - ARR_SHIP_GONE) * eiC(ru) + 0.25 * sm(AT.rec0, AT.recMove, t);
+  st.shipZ = z;
+  st.shipVis = t < AT.recEnd;
+  st.portalOn = t < AT.col1 + 0.2; st.pz = 0; st.pDir = -1;
+  const open = sm(0.8, 0.8 + T.arriveeOpen + 0.8, t), shut = eiC(lin(AT.col0, AT.col1, t));
+  st.R = CFG.portalRadius * open * (1 + .03 * Math.sin(t * 1.9)) * (1 - shut);
+  st.Rlens = Math.max(st.R, CFG.portalRadius * .5 * sm(0.3, 1.6, t) * (1 - shut));
+  st.lensK = (sm(0.3, 1.8, t) * 0.68 + 0.6 * Math.exp(-Math.pow((t - AT.col1 + 0.1) / 0.16, 2))) * (1 - lin(AT.col1, AT.col1 + 0.6, t)) * CFG.distortion;
+  st.liquid = sm(0.8, 2.8, t) * (1 - shut);
+  st.heat = sm(1.0, 2.6, t) * (1 + 1.4 * Math.exp(-Math.pow((t - AT.col1 + .1) / 0.25, 2)));
+  st.clip = 1;
+  // encore déformé à la sortie, puis géométrie rendue ; de nouveau tiré au rappel
+  st.spag = (0.85 * (1 - sm(T.emergeAt + 0.5, T.emergeAt + T.emergeDur - 0.3, t)) * sm(T.emergeAt - 0.1, T.emergeAt + 0.3, t) + 0.8 * sm(AT.rec0, AT.recMove + 0.6, t)) * CFG.distortion;
+  st.spagL = 3.0;
+  st.wave = 0.25 * (1 - sm(T.emergeAt + 1.5, T.emergeAt + T.emergeDur, t)) * sm(T.emergeAt, T.emergeAt + .6, t) * CFG.distortion;
+  st.trailMode = 2;
+  st.filTen = sm(AT.rec0, AT.recMove, t) * (1 - lin(AT.col0, AT.col1, t));
+  st.filCollapse = lin(AT.col0 - 0.3, AT.col1, t);
+  // la gueule s'ouvre : embase, puis segments, puis crocs ; chaque pince avec son retard et sa résistance
+  st.jawPh = (k) => {
+    const d = pinces[k].d * CFG.jaw.delay;
+    const ub = lin(T.jawsAt + d, T.jawsAt + d + T.jawsDur * .8, t), ut = lin(T.jawsAt + d + T.jawsDur * .3, T.jawsAt + d + T.jawsDur, t);
+    const res = (u) => { const e = eio(u); return e + 0.02 * Math.sin(u * 31) * u * (1 - u) * 4; };   // à-coups de la mécanique
+    return [CFG.jaw.base * res(ub), CFG.jaw.tip * res(ut), CFG.jaw.teeth * sm(T.jawsAt + d + T.jawsDur * .5, T.jawsAt + d + T.jawsDur * 1.1, t)];
+  };
+  st.rim = sm(AT.rel0 + 1.0, AT.rel0 + 5.0, t);
+  st.glow = 0.2 * (1 - sm(AT.rel0, AT.rel0 + 3, t));
+  // caméra : de côté et en avant ; l'anomalie au fond derrière la poupe, la zone de libération devant la gueule
+  const endK = eio(lin(AT.col0 - 0.6, AT.end - 0.4, t));
+  const relK = sm(AT.rel0 - 1.5, AT.rel1, t);
+  _camP.set(22 - 1.0 * relK, 7.0 + 0.5 * relK, 22 - 1.0 * relK);
+  _camL.set(0.0 - 0.5 * relK, 1.0 + 1.0 * relK, 7.0 + 4.0 * relK);
+  const F = _tmp.set(...CFG.release.to).add(_tmp2.set(0, 0, ARR_SHIP_FINAL));
+  const camEnd = _tmp2.copy(F).add(V3(9.5, 2.2, 10.5));
+  _camP.lerp(camEnd, endK); _camL.lerp(F, endK);
+  st.fov = 54 - 10 * endK; st.roll = 0.02 * Math.sin(t * .25);
+  st.pinch = 0.55 * Math.exp(-Math.pow((t - AT.col1 + 0.12) / 0.12, 2)) * CFG.distortion;
+  st.flash = Math.max(1 - lin(0, 0.9, t), 0.0) * 1.2 + 0.25 * Math.exp(-Math.pow((t - AT.col1) / 0.1, 2));
+  st.tear = 0.9 * Math.exp(-Math.pow((t - AT.col1 + 0.05) / 0.12, 2)) * CFG.distortion;
+  st.fade = 0;
+  if (t > T.emergeAt) beat('emergence'); if (t > 0.8) beat('ouverture'); if (t > T.jawsAt) beat('gueule'); if (t > AT.rel0) beat('naissance');
+  if (t > AT.rec0) beat('rappel'); if (t > AT.col0) beat('effondrement'); if (t > AT.end) { beat('fin'); if (!beatsSent.has('done')) { beatsSent.add('done'); post({ type: 'done' }); } }
+}
+
+/* ═══════════════ application de l'état ═══════════════ */
+const _m = new THREE.Matrix4(), _q = new THREE.Quaternion(), _e = new THREE.Euler();
+const _pc = V3(), _pu = V3(1, 0, 0), _pv = V3(0, 1, 0), _pn = V3(0, 0, 1);
+function applyFilaments(t) {
+  const R = Math.max(st.R, 0.0001), on = st.portalOn && st.R > 0.05;
+  filaments.visible = on;
+  if (!on) return;
+  const sternW = _sp.set(0, 0, st.shipZ + STERN);
+  let n = 0;
+  for (let i = 0; i < FIL; i++) {
+    const f = FILP[i];
+    for (let j = 0; j < TRAIL; j++, n++) {
+      const tau = t - j * .028;
+      const col = 1 - st.filCollapse;
+      const rr = R * f.r * (1 + .18 * Math.sin(tau * .9 + f.p)) * (col * col);
+      const a = f.a0 + f.w * tau * (1 + 3 * st.filCollapse) + .8 * Math.sin(tau * .37 + f.p);
+      const tilt = f.h * Math.sin(tau * f.pr + f.p) + .35 * Math.sin(tau * .21 + f.a0);   // l'orbite change de plan
+      const x = Math.cos(a) * rr, y = Math.sin(a) * rr * Math.cos(tilt), zz = Math.sin(a) * rr * Math.sin(tilt) * 1.1 + Math.sin(a * 2 + f.p) * R * .12;
+      let px = x, py = y, pz = st.pz + zz * st.pDir * -1;
+      if (st.filTen > 0) {                          // les filaments se tendent vers la poupe
+        const s = clamp01(st.filTen * (0.4 + 0.6 * hash(i + 31))) * (0.5 + 0.5 * (1 - j / TRAIL));
+        const tt = (j / TRAIL + hash(i)) % 1;
+        px += (sternW.x * tt - px) * s; py += (sternW.y * tt - py) * s; pz += (st.pz + (sternW.z - st.pz) * tt - pz) * s;
+      }
+      filPos[n * 3] = px; filPos[n * 3 + 1] = py; filPos[n * 3 + 2] = pz;
+      const fade = (1 - j / TRAIL), b = fade * fade * (0.6 + 0.4 * Math.sin(tau * 3 + f.p)) * Math.min(1, st.heat);
+      if (f.warm) { filCol[n * 3] = 1.0 * b; filCol[n * 3 + 1] = .55 * b; filCol[n * 3 + 2] = .2 * b; }
+      else { filCol[n * 3] = .82 * b; filCol[n * 3 + 1] = .72 * b; filCol[n * 3 + 2] = 1.0 * b; }
+      filSz[n] = (j === 0 ? 34 : 22) * fade * renderer.getPixelRatio();
+    }
+  }
+  filGeo.attributes.position.needsUpdate = filGeo.attributes.color.needsUpdate = filGeo.attributes.aSize.needsUpdate = true;
+}
+function applyTrails(t) {
+  trails.visible = (st.trailMode > 0) && hullSamples.length > 0 && st.portalOn;
+  if (!trails.visible) return;
+  const pr = renderer.getPixelRatio();
+  for (let i = 0; i < TRL; i++) {
+    let te, life = 1.4 + hash(i + 5) * 1.2;
+    if (st.trailMode === 1) te = D.tTip - 0.3 + hash(i) * (D.tS - D.tTip + 0.2);
+    else te = (hash(i + 9) < .75) ? CFG.T.emergeAt + hash(i) * CFG.T.emergeDur * .7 : A.rec0 + hash(i) * (A.recEnd - A.rec0);
+    const tau = t - te;
+    if (tau < 0 || tau > life) { trlSz[i] = 0; continue; }
+    const shipZe = st.trailMode === 1 ? DEP.z0 + depX(te) : shipZAt(te);
+    const planeS = st.pz - shipZe;                   // le seuil dans le repère du vaisseau au moment de l'émission
+    let best = hullSamples[Math.floor(hash(i + 2) * hullSamples.length)];
+    { let lo = 0, hi = hullSamples.length - 1; while (lo < hi) { const mid = (lo + hi) >> 1; if (hullSamples[mid].z < planeS) lo = mid + 1; else hi = mid; }
+      const spread = 40; const j = Math.min(hullSamples.length - 1, Math.max(0, lo + Math.floor((hash(i + 3) - .5) * spread))); best = hullSamples[j]; }
+    const u = tau / life;
+    const curShipZ = st.trailMode === 1 ? st.shipZ : st.shipZ;
+    // d'abord accrochée à la coque, puis elle retombe vers le passage
+    const att = 1 - sm(0.0, 0.45, u);
+    const hx = best.x * 1.04, hy = best.y * 1.04, hz = best.z + (att > 0 ? curShipZ : shipZe);
+    const fall = sm(0.15, 1.0, u);
+    const tx = best.x * 0.25, ty = best.y * 0.25, tz = st.pz + (st.trailMode === 1 ? 0.3 : -0.3);
+    trlPos[i * 3] = THREE.MathUtils.lerp(hx, tx, fall) + Math.sin(u * 6 + i) * .15;
+    trlPos[i * 3 + 1] = THREE.MathUtils.lerp(hy, ty, fall) + Math.cos(u * 5 + i) * .15;
+    trlPos[i * 3 + 2] = THREE.MathUtils.lerp(best.z + (att > 0.5 ? curShipZ : shipZe), tz, fall);
+    const b = Math.sin(Math.PI * Math.min(1, u * 1.2)) * .9;
+    const w = hash(i + 7) < .2;
+    trlCol[i * 3] = (w ? 1 : .85) * b; trlCol[i * 3 + 1] = (w ? .6 : .75) * b; trlCol[i * 3 + 2] = (w ? .25 : 1) * b;
+    trlSz[i] = (14 + 18 * hash(i + 4)) * pr * (1 - u * .5);
+  }
+  trlGeo.attributes.position.needsUpdate = trlGeo.attributes.color.needsUpdate = trlGeo.attributes.aSize.needsUpdate = true;
+}
+function shipZAt(t) {   // arrivée : position du vaisseau à l'instant t (pour les émissions passées)
+  const T = CFG.T, eu = lin(T.emergeAt, T.emergeAt + T.emergeDur, t);
+  let z = THREE.MathUtils.lerp(ARR_SHIP_START, ARR_SHIP_FINAL, eoS(eu));
+  z -= (ARR_SHIP_FINAL - ARR_SHIP_GONE) * eiC(lin(A.recMove, A.recEnd, t)) + 0.25 * sm(A.rec0, A.recMove, t);
+  return z;
+}
+function applyInside(t) {
+  inside.visible = st.inside; world.visible = !st.inside;
+  if (!st.inside) return;
+  const P = CFG.T.loop, ph = t / P * Math.PI * 2;
+  VOY_U.uT.value = t;
+  abyss.position.copy(camera.position);
+  for (const m of SHEETS) {
+    const u = m.userData, L = 140, sp = u.n * L / P;
+    const s = ((t * sp / L + u.ph) % 1) * L - L / 2;
+    m.position.copy(u.off).addScaledVector(u.dir, s);
+    _e.set(u.rot.x + .25 * Math.sin(ph + u.ph * 6), u.rot.y + .2 * Math.cos(ph * 2 + u.ph * 6), u.rot.z + u.spin * Math.sin(ph));
+    m.quaternion.setFromEuler(_e);
+  }
+  for (let i = 0; i < STREAK; i++) {
+    const s = STKP[i], L = 160, sp = s.n * L / P;
+    const z = ((s.z0 - t * sp) % L + L) % L - L / 2, len = sp * .05;
+    const a1 = s.a + s.hel * z, a2 = s.a + s.hel * (z + len);
+    stkPos.set([Math.cos(a1) * s.r, Math.sin(a1) * s.r, z, Math.cos(a2) * s.r, Math.sin(a2) * s.r, z + len], i * 6);
+    const f = Math.min(1, (L / 2 - Math.abs(z)) / 25) * .7;
+    const c = s.warm ? [1 * f, .55 * f, .2 * f] : [.75 * f, .68 * f, 1 * f];
+    stkCol.set([c[0], c[1], c[2], 0, 0, 0], i * 6);
+  }
+  stkGeo.attributes.position.needsUpdate = stkGeo.attributes.color.needsUpdate = true;
+  voyL.forEach((l, i) => {
+    const a = ph * (i + 1) + i * 2.1;
+    l.position.set(Math.cos(a) * 9, Math.sin(a * 1.3) * 7, Math.sin(a) * 9 + 4 * Math.sin(ph * 2 + i));
+    l.intensity = 22 * (0.55 + 0.45 * Math.sin(ph * (3 + i) + i)) * (0.7 + 0.3 * Math.sin(t * 13 + i * 4));
+  });
+}
+function applyState(t) {
+  const amp = REDUCED ? .25 : 1;
+  ship.position.set(0, st.shipBob * Math.sin(t * .45) * .05 * amp, st.shipZ);
+  ship.rotation.set(st.shipBob * Math.sin(t * .27 + 1) * .006 * amp, 0, st.shipBob * Math.sin(t * .32) * .012 * amp);
+  ship.visible = st.shipVis;
+  ship.updateMatrixWorld(true);
+  DEF.uShip.value.copy(ship.matrixWorld); DEF.uShipInv.value.copy(ship.matrixWorld).invert();
+  DEF.uDT.value = st.inside ? (phase === 'exit' ? exitFrom + pt : loopT) : t;
+  DEF.uWave.value = st.wave; DEF.uStretch.value = st.stretch; DEF.uLag.value = st.lag; DEF.uTwist.value = st.twist;
+  DEF.uSpag.value = st.spag; DEF.uSpagL.value = st.spagL;
+  DEF.uPlaneZs.value = st.pz - st.shipZ; DEF.uPlaneDir.value = st.pDir;
+  DEF.uPlane.value.set(0, 0, st.pDir, -st.pz * st.pDir); DEF.uClip.value = st.clip && st.portalOn ? 1 : 0;
+  // gueule
+  if (st.jawPh) { for (const P of pinces) { const [b, tp, te] = st.jawPh(P.k); P.pB.quaternion.setFromAxisAngle(P.et, THREE.MathUtils.degToRad(b)); P.pT.quaternion.setFromAxisAngle(P.et, THREE.MathUtils.degToRad(tp)); P.tB.position.copy(P.er).multiplyScalar(te).setZ(te * .35); P.tT.position.copy(P.tB.position); } }
+  else setJaws(0, 0, 0);
+  // planète
+  PLANET_U.uRim.value = st.rim; PLANET_U.uGlow.value = st.glow;
+  planet.userData.clouds.rotation.y = t * .012;
+  planet.children[0].rotation.y = planet.children[1].rotation.y * 0 + t * .006;
+  if (phase === 'arrivee') {
+    if (pt >= A.rel0) {
+      if (planet.parent === ship) planetToWorld();
+      const u = lin(A.rel0, A.rel1, pt), e = eio(u);
+      const to = _tmp.set(...CFG.release.to);
+      const p0 = PLANET_HOME, p1 = V3(0, .15, TIP + 0.8), p2 = V3(to.x * .25, to.y * .55, to.z * .7), p3 = to;
+      const b = (a0, a1, a2, a3) => (1 - e) ** 3 * a0 + 3 * (1 - e) ** 2 * e * a1 + 3 * (1 - e) * e * e * a2 + e ** 3 * a3;
+      planet.position.set(b(p0.x, p1.x, p2.x, p3.x), b(p0.y, p1.y, p2.y, p3.y), b(p0.z, p1.z, p2.z, p3.z) + ARR_SHIP_FINAL);   // repère monde (vaisseau à l'arrêt)
+    } else if (planet.parent !== ship) planetToShip();
+  }
+  // passage
+  portal.visible = st.portalOn && st.R > 0.01;
+  portal.position.set(0, 0, st.pz);
+  portal.quaternion.setFromAxisAngle(V3(0, 1, 0), st.pDir > 0 ? Math.PI : 0);   // face au vaisseau
+  portal.scale.setScalar(Math.max(st.R, 0.0001));
+  PORTAL_U.uLiquid.value = st.liquid; PORTAL_U.uHeat.value = st.heat;
+  const pk = clamp01(st.R / CFG.portalRadius);
+  portalL1.position.set(0, 2, st.pz + 2 * -st.pDir); portalL2.position.set(0, -1, st.pz + 3 * -st.pDir);
+  portalL1.intensity = 40 * pk * st.heat; portalL2.intensity = 14 * pk * st.heat;
+  // lumières
+  key.position.copy(ship.position).addScaledVector(SUN_DIR, 22); key.target.position.copy(ship.position); key.target.updateMatrixWorld();
+  key.intensity = st.inside ? 0.25 : 2.1; rim.intensity = st.inside ? 0.6 : 0.9; hemi.intensity = st.inside ? 0.25 : 1.1; fill.intensity = st.inside ? 0.2 : 0.8;
+  if (!st.inside) voyL.forEach(l => l.intensity = 0);
+  for (const m of navMats) m.emissiveIntensity = m.name === 'M_KV_STROBE' ? ((t % 2.2) < .08 ? 12 : .2) : 2.5 + 2 * (.5 + .5 * Math.sin(t * 2.4));
+  for (const m of feuMats) m.emissiveIntensity = st.inside ? 2.2 + 1.5 * Math.sin(t * 9) * Math.sin(t * 3.3) : 1.6;
+}
+function applyCamera() {
+  placeCam(_camP, _camL, st.roll, st.fov);
+}
+function applyPost(t) {
+  // lentille
+  const on = st.portalOn && st.Rlens > 0.02 && st.lensK > 0.001;
+  lensPass.uniforms.uVis.value = 0;
+  if (on) {
+    _pc.set(0, 0, st.pz);
+    const c = _pc.clone().project(camera);
+    if (c.z < 1) {
+      const asp = camera.aspect;
+      const a = _tmp.set(st.Rlens, 0, 0).add(_pc).project(camera), b = _tmp2.set(0, st.Rlens, 0).add(_pc).project(camera);
+      const ax = (a.x - c.x) * .5 * asp, ay = (a.y - c.y) * .5, bx = (b.x - c.x) * .5 * asp, by = (b.y - c.y) * .5;
+      const det = ax * by - bx * ay;
+      if (Math.abs(det) > 1e-6) {
+        lensPass.uniforms.uC.value.set(c.x * .5 + .5, c.y * .5 + .5);
+        lensPass.uniforms.uM.value.set(ax, bx, 0, ay, by, 0, 0, 0, 1);
+        lensPass.uniforms.uMi.value.set(by / det, -bx / det, 0, -ay / det, ax / det, 0, 0, 0, 1);
+        lensPass.uniforms.uK.value = st.lensK; lensPass.uniforms.uAsp.value = asp; lensPass.uniforms.uVis.value = 1;
+        lensPass.uniforms.uMaskOn.value = st.maskOn;
+        FIN.uPinchC.value.set(c.x * .5 + .5, c.y * .5 + .5);
+        if (!st.irisC) FIN.uIrisC.value.set(c.x * .5 + .5, c.y * .5 + .5);
+      }
+    }
+  } else if (!st.inside) FIN.uPinchC.value.set(.5, .5);
+  if (st.inside) FIN.uPinchC.value.set(.5, .5);
+  if (st.irisC) FIN.uIrisC.value.set(st.irisC[0], st.irisC[1]);
+  FIN.uT.value = t; FIN.uAsp.value = camera.aspect;
+  FIN.uBreath.value = st.breath; FIN.uGhost.value = st.ghost; FIN.uGhostOff.value.set(st.ghostOff[0], st.ghostOff[1]);
+  FIN.uSlit.value = st.slit; FIN.uTrail.value = st.trail; FIN.uSmear.value = st.smear;
+  FIN.uPinch.value = st.pinch; FIN.uFlash.value = st.flash; FIN.uFade.value = st.fade; FIN.uIris.value = st.iris; FIN.uTear.value = st.tear;
+  FIN.uVig.value = st.vig ?? .55;
+}
+
+/* ═══════════════ boucle ═══════════════ */
+const clock = new THREE.Clock();
+let frames = 0, perfT = 0, perfDone = false, lastPhaseEnd = 0;
+const clockEl = document.getElementById('clock');
+function frame() {
+  const dt = Math.min(clock.getDelta(), .05) * CFG.rate;
+  if (!freeze && shipReady) { pt += dt; if (phase === 'voyage' || phase === 'exit') loopT += dt; }
+  PLASMA_T.value += dt;
+  const t = pt;
+  resetState();
+  if (phase === 'depart') { stateDepart(t); if (t > D.end) { beat('fin'); if (!Q.has('only')) play('voyage'); } }
+  else if (phase === 'voyage') stateVoyage(loopT % CFG.T.loop);
+  else if (phase === 'exit') { stateExit(t); if (t > CFG.T.exit) play('arrivee'); }
+  else if (phase === 'arrivee') stateArrivee(Math.min(t, A.end + 600));
+  else { st.portalOn = false; _camP.set(-12, 5, -16); _camL.set(0, 0, 0); }
+  applyState(PLASMA_T.value);
+  applyCamera();
+  applyInside(phase === 'exit' ? exitFrom + pt : loopT);
+  applyFilaments(PLASMA_T.value);
+  applyTrails(t);
+  applyPost(PLASMA_T.value);
+  if (clockEl) clockEl.textContent = phase + ' · ' + (phase === 'voyage' ? (loopT % CFG.T.loop).toFixed(1) + ' / ' + CFG.T.loop : t.toFixed(1) + ' s');
+  if (st.portalOn && st.maskOn && lensPass.uniforms.uVis.value > 0) renderMask();
+  composer.render(dt);
+  const dst = histRT[histI], src = histRT[1 - histI];
+  FIN.tDiffuse.value = composer.readBuffer.texture; FIN.tHist.value = src.texture;
+  renderer.setRenderTarget(dst); finQuad.render(renderer);
+  renderer.setRenderTarget(null); blitQuad.material.uniforms.t.value = dst.texture; blitQuad.render(renderer);
+  histI = 1 - histI;
+  if (!perfDone && shipReady && !freeze) {
+    frames++; perfT += dt;
+    if (perfT > 3) { perfDone = true; const fps = frames / perfT; if (fps < 30) { PR = 1; renderer.setPixelRatio(1); resize(); } if (fps < 22) { key.castShadow = false; } }
+  }
+  requestAnimationFrame(frame);
+}
+
+/* ═══════════════ chargement ═══════════════ */
+const loadEl = document.getElementById('load'), barEl = document.getElementById('bar');
+async function loadGLB() {
+  const res = await fetch('../3d/bm/taxi.glb.gz?v=20261102');
+  if (!res.ok) throw new Error(res.status);
+  const total = +res.headers.get('content-length') || 0, reader = res.body.getReader(), chunks = []; let got = 0;
+  for (;;) { const { done, value } = await reader.read(); if (done) break; chunks.push(value); got += value.length; if (total) barEl.style.width = Math.round(85 * got / total) + '%'; }
+  const raw = new Uint8Array(await new Blob(chunks).arrayBuffer());
+  const buf = (raw[0] === 0x1f && raw[1] === 0x8b) ? await new Response(new Blob([raw]).stream().pipeThrough(new DecompressionStream('gzip'))).arrayBuffer() : raw.buffer;
+  barEl.style.width = '100%';
+  return new Promise((ok, ko) => new GLTFLoader().parse(buf, '', ok, ko));
+}
+resetState(); play(Q.get('phase') || 'depart');
+const at = Q.get('at');                 // capture : ?at=<secondes>&freeze
+if (at) { pt = +at; loopT = +at; PLASMA_T.value = +at; }
+freeze = Q.has('freeze');
+frame();
+loadGLB().then((g) => {
+  buildShip(g);
+  renderer.compile(scene, camera);
+  loadEl.classList.add('done');
+  if (!at) { pt = 0; loopT = 0; }
+  post({ type: 'ready' });
+  window.__ready = true;
+}).catch((e) => { console.error(e); loadEl.firstElementChild.innerHTML = '<div style="color:#f0a040">Le TAXI n’a pas pu être chargé.</div>'; post({ type: 'error' }); });
+
+addEventListener('message', (e) => {
+  const d = e.data || {};
+  if (d.taxiCmd === 'play' && d.phase) play(d.phase);
+  else if (d.taxiCmd === 'arrive') { if (phase === 'voyage') play('exit'); else if (phase !== 'exit' && phase !== 'arrivee') play('arrivee'); }
+  else if (d.taxiCmd === 'cfg' && d.cfg) { deepMerge(CFG, d.cfg); D = depTimes(); A = arrTimes(); }
+});
+document.querySelectorAll('.ctl button').forEach(b => b.onclick = () => play(b.dataset.p === 'exit' ? (phase === 'voyage' ? 'exit' : 'voyage') : b.dataset.p));
+window.TAXI_CINE = { play, CFG, seek: (s) => { pt = s; loopT = s; }, get phase() { return phase; }, get t() { return pt; }, freeze: (v) => { freeze = v; } };
+</script>
+</body></html>

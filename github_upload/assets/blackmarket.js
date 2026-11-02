@@ -210,7 +210,7 @@
         <div class="bm-note">${s.cat === 'arche'
           ? `Transport par Arche eXtra-Interstellaire. Tu choisis un secteur, même inconnu : le TAXI perce la trame et te crée un monde dans un système vide, tiré au sort. Tu ne sais où qu'en arrivant. Planète-jardin luxuriante, 72 h de protection, aucune ressource. Un seul largage ; ensuite, il reste dans ta flotte, coque morte. 100 exemplaires numérotés, un par joueur.`
           : `Comparé à un cuirassé T3 construit. Jamais détruit : vaincu, il est mis hors service et répare à quai 24 h minimum. Max ${c.cap} ${c.plural.toLowerCase()} par joueur, tous modèles confondus.`}</div>
-        ${mine ? (tx && !tx.used && !taxiFlight() ? `<button class="bm-buy" data-taxi style="background:#5b3fa0;color:#f1e8ff">Larguer le TAXI</button><div class="bm-buy-sub">Une seule fois · à l'aveugle</div>` : `<div class="bm-buy-sub" style="text-align:left;color:#a7b1ba">${esc(mineStatus(s.id))}</div>`) : (s.cat === 'arche' && taxiLeft === 0 ? `<div class="bm-buy-sub">Édition épuisée. Les 100 TAXI ont trouvé preneur.</div>` : `<button class="bm-buy" data-buy="${s.id}">Acheter · ${chf(c.price)}</button>
+        ${mine && s.cat === 'arche' && taxiFlight() ? `<button class="bm-buy" data-taxiview style="background:#5b3fa0;color:#f1e8ff">Voir la traversée</button><div class="bm-buy-sub">${esc(mineStatus(s.id))}</div>` : mine ? (tx && !tx.used && !taxiFlight() ? `<button class="bm-buy" data-taxi style="background:#5b3fa0;color:#f1e8ff">Larguer le TAXI</button><div class="bm-buy-sub">Une seule fois · à l'aveugle</div>` : `<div class="bm-buy-sub" style="text-align:left;color:#a7b1ba">${esc(mineStatus(s.id))}</div>`) : (s.cat === 'arche' && taxiLeft === 0 ? `<div class="bm-buy-sub">Édition épuisée. Les 100 TAXI ont trouvé preneur.</div>` : `<button class="bm-buy" data-buy="${s.id}">Acheter · ${chf(c.price)}</button>
         <div class="bm-buy-sub">${owned[s.id] ? `Tu en as déjà ${owned[s.id]} · ` : ''}Paiement par Stripe · mode test</div>`)}
       </div>`;
     pane.classList.add('on');
@@ -245,6 +245,7 @@
     const card = t.closest('[data-ship]'); if (card) return openShip(card.dataset.ship);
     const buy = t.closest('[data-buy]'); if (buy) return startBuy(buy);
     if (t.closest('[data-taxi]')) return taxiPicker();
+    if (t.closest('[data-taxiview]')) { close(); return taxiCinema('voyage'); }
     const sec = t.closest('[data-sector]'); if (sec) return taxiConfirm(sec.dataset.sector);
     if (t.closest('[data-taxigo]')) return taxiDrop(t.closest('[data-taxigo]').dataset.taxigo);
     if (t.closest('[data-taxiback]')) return taxiPicker();
@@ -690,23 +691,58 @@
       if (go) { go.disabled = false; go.textContent = 'Percer la trame'; }
     }
   }
-  // cinématique provisoire : la vitrine du TAXI (trou noir) en plein écran, avec le récit ; la vraie viendra avec le modèle final
+  // ── cinématique du TAXI (taxi-cine.html) : 1. départ → 2. traversée (boucle pendant l'heure) → 3. livraison, puis le rapport ──
+  const CINE_V = '20261102-1';
+  let cine = null;                                   // { ov, fr, kind, done, timers }
+  const CAPS = {
+    depart: { calme: 'Le TAXI emporte ton monde, à l\'abri dans sa gueule.', ouverture: 'Devant lui, la trame de l\'univers cède.', franchissement: 'Il force le passage.', fermeture: 'L\'anomalie se referme sur lui.' },
+    arrivee: { ouverture: 'Quelque part, la trame se déchire.', emergence: 'Le TAXI s\'extirpe de l\'anomalie.', gueule: 'Il ouvre sa gueule…', naissance: '…et rend un monde à l\'univers.', rappel: 'L\'anomalie le rappelle.', effondrement: '', fin: 'Un monde neuf. Le tien.' },
+  };
+  function cineCountdown() {
+    const fl = taxiFlight(); if (!fl) return '';
+    const s = Math.max(0, Math.round((fl.arriveAt - Date.now()) / 1000));
+    return `Secteur ${esc(fl.sector || '?')} · arrivée dans ${Math.floor(s / 60)} min ${String(s % 60).padStart(2, '0')} s`;
+  }
   function taxiCinema(kind, done) {
+    if (cine) {                                       // déjà ouverte (la traversée) : la livraison s'enchaîne sans coupure
+      if (kind === 'arrive') { cine.kind = 'arrive'; cine.done = done; cine.post({ taxiCmd: 'arrive' }); cine.btn.textContent = 'Passer'; cine.hud.style.opacity = '0'; cine.arm(); }
+      return;
+    }
+    const phase = kind === 'arrive' ? 'arrivee' : kind;
     const ov = document.createElement('div');
     ov.style.cssText = 'position:fixed;inset:0;z-index:10050;background:#000;opacity:0;transition:opacity .6s ease';
-    ov.innerHTML = `<iframe src="assets/blackmarket/taxi.html?embed&v=${VERSION}" style="position:absolute;inset:0;width:100%;height:100%;border:0;transition:filter 2.4s ease, transform 2.4s ease"></iframe>
-      <div class="cap" style="position:absolute;left:0;right:0;bottom:calc(env(safe-area-inset-bottom) + 70px);text-align:center;color:#f1e8ff;font:600 20px 'Space Grotesk',sans-serif;letter-spacing:.04em;text-shadow:0 2px 18px #000;padding:0 24px;transition:opacity .5s"></div>
-      <button style="position:absolute;right:16px;top:calc(env(safe-area-inset-top) + 12px);border:1px solid rgba(255,255,255,.25);background:rgba(0,0,0,.4);color:#fff;border-radius:18px;padding:7px 14px;font:500 12px 'Space Grotesk',sans-serif">Passer</button>`;
+    ov.innerHTML = `<iframe src="assets/blackmarket/taxi-cine.html?embed&phase=${phase}&v=${CINE_V}" allow="autoplay" style="position:absolute;inset:0;width:100%;height:100%;border:0"></iframe>
+      <div class="cap" style="position:absolute;left:0;right:0;bottom:calc(env(safe-area-inset-bottom) + 64px);text-align:center;color:#f1e8ff;font:600 19px 'Space Grotesk',sans-serif;letter-spacing:.03em;text-shadow:0 2px 18px #000,0 0 4px #000;padding:0 24px;opacity:0;transition:opacity .7s;pointer-events:none"></div>
+      <div class="hud" style="position:absolute;left:0;right:0;top:calc(env(safe-area-inset-top) + 16px);text-align:center;color:#d9c2ff;font:500 11px 'JetBrains Mono',monospace;letter-spacing:.12em;text-transform:uppercase;text-shadow:0 1px 10px #000;opacity:0;transition:opacity .8s;pointer-events:none;padding:0 90px"></div>
+      <button style="position:absolute;right:16px;top:calc(env(safe-area-inset-top) + 10px);border:1px solid rgba(255,255,255,.25);background:rgba(0,0,0,.45);color:#fff;border-radius:18px;padding:7px 14px;font:500 12px 'Space Grotesk',sans-serif">${kind === 'arrive' ? 'Passer' : 'Fermer'}</button>`;
     document.body.appendChild(ov); requestAnimationFrame(() => { ov.style.opacity = '1'; });
-    const cap = ov.querySelector('.cap'), fr = ov.querySelector('iframe');
-    const lines = kind === 'depart'
-      ? [[1500, 'Le TAXI émerge du trou noir.'], [5000, 'Il force la trame de l\'univers.'], [8500, 'Destination inconnue. Arrivée dans 1 h.']]
-      : [[1200, 'La trame se déchire. Le TAXI surgit.'], [4800, 'Il ouvre sa gueule et dépose le monde.'], [8400, 'Le trou noir le reprend, sans ménagement.']];
-    const timers = lines.map(([t, txt]) => setTimeout(() => { cap.style.opacity = '0'; setTimeout(() => { cap.textContent = txt; cap.style.opacity = '1'; }, 300); }, t));
-    if (kind !== 'depart') timers.push(setTimeout(() => { fr.style.filter = 'brightness(.25) blur(2px)'; fr.style.transform = 'scaleY(1.6) translateY(30%)'; }, 8600));
-    const end = () => { timers.forEach(clearTimeout); ov.style.opacity = '0'; setTimeout(() => { ov.remove(); if (done) done(); }, 650); };
-    timers.push(setTimeout(end, 12500));
-    ov.querySelector('button').onclick = end;
+    const fr = ov.querySelector('iframe'), cap = ov.querySelector('.cap'), hud = ov.querySelector('.hud'), btn = ov.querySelector('button');
+    const say = (txt) => { cap.style.opacity = '0'; setTimeout(() => { cap.textContent = txt || ''; cap.style.opacity = txt ? '1' : '0'; }, 380); };
+    const c = cine = { ov, fr, kind, done, btn, hud, timers: [], post: (m) => { try { fr.contentWindow.postMessage(m, '*'); } catch (e) {} } };
+    c.arm = () => { c.timers.push(setTimeout(end, 50000)); };   // filet de sécurité : la livraison ne bloque jamais le rapport
+    const end = () => {
+      if (cine !== c) return; cine = null;
+      c.timers.forEach(clearTimeout); clearInterval(c.tick); window.removeEventListener('message', onMsg);
+      ov.style.opacity = '0'; setTimeout(() => { ov.remove(); if (c.done) c.done(); }, 650);
+    };
+    const onMsg = (e) => {
+      if (e.source !== fr.contentWindow || !e.data || !e.data.taxiCine) return;
+      const d = e.data;
+      if (d.type === 'beat') { const tx = (CAPS[d.phase] || {})[d.name]; if (tx !== undefined) say(tx); }
+      else if (d.type === 'phase' && d.phase === 'voyage') { say(''); hud.style.opacity = '1'; }
+      else if (d.type === 'phase' && d.phase === 'exit') { hud.style.opacity = '0'; }
+      else if (d.type === 'done') c.timers.push(setTimeout(end, 1800));
+      else if (d.type === 'error') c.timers.push(setTimeout(end, 2500));
+    };
+    window.addEventListener('message', onMsg);
+    c.tick = setInterval(() => {
+      hud.textContent = cineCountdown();
+      const fl = taxiFlight();
+      if (c.kind !== 'arrive' && fl && Date.now() >= fl.arriveAt) taxiTick();   // l'heure est passée pendant qu'on regarde : livraison
+    }, 1000);
+    hud.textContent = cineCountdown();
+    btn.onclick = end;
+    if (kind === 'arrive') c.arm();
   }
   // arrivée : la colonie (planète-jardin) est fondée chez le joueur ; elle est déjà inscrite sur le serveur
   let taxiLanding = false;
