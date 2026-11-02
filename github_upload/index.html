@@ -16424,8 +16424,10 @@ function resolveCombat(fleet, target) {
   const survivingTankers = composition.tanker;
   const totalSurvivingTankers = countShipsByType(composition, 'tanker');
 
-  if (totalSurvivingTankers > 0) {
-    const cargoCapacity = computeSurvivingCargo(survivingTankers);
+  // BLACKMARKET (v33) : le Cuirassé de Héro a une petite cale (5 000) — raid éclair léger, jamais de soldats
+  const premiumCargo = (Array.isArray(fleet.premium) ? fleet.premium : []).reduce((n, p) => n + (p && p.cat === 'sport' ? 5000 : 0), 0);
+  if (totalSurvivingTankers > 0 || premiumCargo > 0) {
+    const cargoCapacity = computeSurvivingCargo(survivingTankers) + premiumCargo;
     const pillagePct = Math.min(1, combatRand(COMBAT_CONSTS.PHASE3_LOOT_MIN, COMBAT_CONSTS.PHASE3_LOOT_MAX) * groundLootFactor);
 
     // Calculer le butin brut par ressource
@@ -49964,7 +49966,7 @@ if (G.knownTargets && Array.isArray(G.tankerMissions)) {
 <!-- PATCH_1610_SKILLS — skills des bâtiments : apprendre, découvrir, effets -->
 <script src="assets/skills.js?v=20261021-1130"></script>
 <script src="assets/maj.js?v=20261025-1800"></script>
-<script src="assets/blackmarket.js?v=20261102-1400"></script>   <!-- Blackmarket v0 : aperçu du catalogue, réservé au compte d'Adrien -->
+<script src="assets/blackmarket.js?v=20261102-1500"></script>   <!-- Blackmarket v0 : aperçu du catalogue, réservé au compte d'Adrien -->
 <!-- PATCH_1510_CROWN — The Drifting Crown en 3D (assets/station3d.js, sur le moteur partagé window.SB3D) -->
 <script type="module" src="assets/station3d.js?v=20261022-1047"></script>
 <!-- FORMATION3D — flotte déployée en orbite, vue de haut en formation (remplace la vue orbite) -->

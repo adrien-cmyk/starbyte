@@ -434,13 +434,64 @@
   });
   wrap('renderFleetCompose', () => composeSection());
   wrap('renderFleetComposeRecap', () => recapLine());
-  wrap('confirmFleetComposition', (r, ctx) => {
-    if (!ctx || G.fleetComposing) return;                       // refusée (pas de nom, pas de vaisseau…)
-    const f = ctx.editing ? G.fleet.prepared.find(x => x.id === ctx.editing) : G.fleet.prepared.find(x => !ctx.ids.has(x.id));
-    if (!f) return;
-    f.premium = ctx.premium; trackLoc();
-    if (typeof saveGame === 'function') saveGame();
-  }, () => G.fleetComposing ? { editing: G.fleetComposing.editingId, premium: JSON.parse(JSON.stringify(G.fleetComposing.premium || [])), ids: new Set(G.fleet.prepared.map(f => f.id)) } : null);
+  const compShips = (c) => { let n = 0; for (const k of ['tanker', 'fregate', 'cuirasse']) for (const t of ['t1', 't2', 't3']) n += (c && c[k] && c[k][t]) || 0; return n; };
+  // flotte d'exception seule (choix d'Adrien, 02/11) : une escadre sans vaisseau construit est permise
+  if (typeof window.confirmFleetComposition === 'function') {
+    const origCF = window.confirmFleetComposition;
+    window.confirmFleetComposition = function () {
+      const fc = G.fleetComposing;
+      const ctx = fc ? { editing: fc.editingId, premium: JSON.parse(JSON.stringify(fc.premium || [])), ids: new Set(G.fleet.prepared.map(f => f.id)) } : null;
+      if (fc && ctx.premium.length && compShips(fc.composition) === 0) {
+        const name = (fc.name || '').trim();
+        if (!name) { if (typeof toast === 'function') toast('Donne un nom à ta flotte'); return; }
+        if (fc.editingId) {
+          const ex = G.fleet.prepared.find(f => f.id === fc.editingId); if (!ex) return;
+          ex.name = name; ex.composition = JSON.parse(JSON.stringify(fc.composition)); ex.soldiers = { garde: 0, lourd: 0 }; ex.premium = ctx.premium; ex.modifiedAt = Date.now();
+          G.fleetComposing = null; trackLoc(); if (typeof saveGame === 'function') saveGame();
+          toast(`${ex.name} mise à jour`); selectedFleetId = ex.id; goto('fleet-detail', { replace: true }); return;
+        }
+        if (G.fleet.prepared.length >= 5) { toast('Maximum 5 flottes préparées simultanément'); return; }
+        const fleet = { id: 'fleet_' + Date.now(), name, composition: JSON.parse(JSON.stringify(fc.composition)), soldiers: { garde: 0, lourd: 0 },
+          status: 'prepared', heroes: { tanker: null, fregate: null, cuirasse: null }, createdAt: Date.now(), premium: ctx.premium };
+        G.fleet.prepared.push(typeof sbTagWorld === 'function' ? sbTagWorld(fleet) : fleet);
+        G.fleetComposing = null; trackLoc(); if (typeof saveGame === 'function') saveGame();
+        toast(`${fleet.name} prête au départ`); goto('fleet', { replace: true }); return;
+      }
+      const r = origCF.apply(this, arguments);
+      try {
+        if (ctx && !G.fleetComposing) {
+          const f = ctx.editing ? G.fleet.prepared.find(x => x.id === ctx.editing) : G.fleet.prepared.find(x => !ctx.ids.has(x.id));
+          if (f) { f.premium = ctx.premium; trackLoc(); if (typeof saveGame === 'function') saveGame(); }
+        }
+      } catch (e) { console.warn('[Blackmarket] flotte', e); }
+      return r;
+    };
+  }
+  wrap('updateComposeConfirmBtn', () => {
+    const btn = document.getElementById('fleet-compose-confirm-btn'), fc = G.fleetComposing;
+    if (btn && fc && (fc.premium || []).length && fc.name && fc.name.trim()) btn.disabled = false;
+  });
+  // ── Vitesse : une escadre composée UNIQUEMENT de Cuirassés de Héro va 20 % plus vite (une flotte avance au rythme du plus lent) ──
+  const isHeroSquad = (f) => !!(f && Array.isArray(f.premium) && f.premium.length && compShips(f.composition) === 0 && f.premium.every(p => p.cat === 'sport'));
+  wrap('confirmSendMission', (r, ctx) => {
+    if (!ctx) return;
+    const f = G.fleet.prepared.find(x => x.id === ctx.id);
+    if (f && f.status === 'in_mission' && !f.mpRaidId && f.missionEndsAt && f.missionStartedAt >= ctx.t && isHeroSquad(f)) {
+      f.missionEndsAt = f.missionStartedAt + Math.round((f.missionEndsAt - f.missionStartedAt) / 1.2);
+      if (typeof saveGame === 'function') saveGame();
+    }
+  }, () => ({ id: typeof selectedFleetId !== 'undefined' ? selectedFleetId : null, t: Date.now() }));
+  // transferts : une escadre d'exception se transfère aussi (et plus vite si ce ne sont que des Héros)
+  wrap('_sbXferFleets', (r) => {
+    if (!Array.isArray(r)) return;
+    for (const f of fleetsWithPremium()) if (!r.includes(f) && (typeof _sbMine !== 'function' || _sbMine(f)) && ['prepared', 'deployed'].includes(f.status || 'prepared')) r.push(f);
+  });
+  wrap('sbLaunchTransfer', (r, ctx) => {
+    if (!ctx || !Array.isArray(G.fleetTransfers)) return;
+    const x = G.fleetTransfers.find(y => y.fleetId === ctx && y.departAt >= Date.now() - 5000);
+    const f = G.fleet.prepared.find(y => y.id === ctx);
+    if (x && f && isHeroSquad(f) && !x.bmFast) { x.arriveAt = x.departAt + Math.round((x.arriveAt - x.departAt) / 1.2); x.bmFast = true; if (typeof saveGame === 'function') saveGame(); }
+  }, () => (typeof _sbXfer !== 'undefined' && _sbXfer) ? _sbXfer.fleetId : null);
   // fiche d'une flotte : ses vaisseaux d'exception
   wrap('renderFleetDetail', () => {
     const scr = document.getElementById('scr-fleet-detail'), sc = scr && scr.querySelector('.screen-scroll'); if (!sc) return;

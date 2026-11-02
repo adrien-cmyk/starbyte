@@ -441,8 +441,10 @@ function resolveCombat(fleet, target) {
   const survivingTankers = composition.tanker;
   const totalSurvivingTankers = countShipsByType(composition, 'tanker');
 
-  if (totalSurvivingTankers > 0) {
-    const cargoCapacity = computeSurvivingCargo(survivingTankers);
+  // BLACKMARKET (v33) : le Cuirassé de Héro a une petite cale (5 000) — raid éclair léger, jamais de soldats
+  const premiumCargo = (Array.isArray(fleet.premium) ? fleet.premium : []).reduce((n, p) => n + (p && p.cat === 'sport' ? 5000 : 0), 0);
+  if (totalSurvivingTankers > 0 || premiumCargo > 0) {
+    const cargoCapacity = computeSurvivingCargo(survivingTankers) + premiumCargo;
     const pillagePct = Math.min(1, combatRand(COMBAT_CONSTS.PHASE3_LOOT_MIN, COMBAT_CONSTS.PHASE3_LOOT_MAX) * groundLootFactor);
 
     // Calculer le butin brut par ressource
