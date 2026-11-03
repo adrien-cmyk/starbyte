@@ -152,6 +152,15 @@
   const note = (i) => 523.25 * Math.pow(2, SCALE[Math.max(0, Math.min(SCALE.length - 1, i))] / 12);
 
   const SOUNDS = {
+    // EXPLORE_0311 — clairière aux lapins : discret, de la matière plutôt que des notes
+    exThrow(t) { noise({ t, filter: 'bandpass', f: 1100, f2: 380, q: 1.1, a: 0.01, d: 0.2, g: 0.05 }); MX.tap(t, 0.05, 520); },
+    exLand(t) { noise({ t, filter: 'lowpass', f: 620, f2: 220, a: 0.002, d: 0.09, g: 0.09 }); },
+    exNibble(t) { noise({ t, filter: 'bandpass', f: 3200, q: 2.4, a: 0.001, d: 0.022, g: 0.018 }); },
+    exReady(t) { tone({ f: 1320, t, a: 0.002, d: 0.07, g: 0.035, rev: 0.12 }); },
+    exDoor(t) { noise({ t, filter: 'bandpass', f: 500, f2: 900, q: 0.9, a: 0.02, d: 0.17, g: 0.05 }); },
+    exEmpty(t) { MX.thud(t, 0.13); noise({ t, filter: 'bandpass', f: 1900, q: 4, a: 0.001, d: 0.05, g: 0.04 }); },
+    exLock(t) { MX.thud(t, 0.2); noise({ t, filter: 'bandpass', f: 2400, q: 5, a: 0.001, d: 0.05, g: 0.08, rev: 0.08 }); noise({ t: t + 0.07, filter: 'bandpass', f: 3100, q: 6, a: 0.001, d: 0.04, g: 0.06, rev: 0.08 }); },
+    exOk(t) { bell(880, t, 0.05, 0.42, 0.28); bell(1174.7, t + 0.09, 0.045, 0.6, 0.3); },
     tap(t) { tone({ f: 1500, f2: 950, t, a: 0.002, d: 0.04, g: 0.09 }); },
     // match-3 : sobre — pierre, gravats, coups sourds (aucune hauteur qui monte)
     swap(t) { MX.tap(t, 0.16); },
@@ -182,7 +191,7 @@
   };
 
   const last = {};
-  const GAP = { tap: 0.05, swap: 0.05, crack: 0.04, tick: 0.04, build: 0.6, dock: 0.8, fleet: 0.8 };
+  const GAP = { exNibble: 0.12, exLand: 0.06, tap: 0.05, swap: 0.05, crack: 0.04, tick: 0.04, build: 0.6, dock: 0.8, fleet: 0.8 };
   function play(name, delay) {
     if (!ready() || !SOUNDS[name]) return;
     const t = ctx.currentTime + (delay || 0);
