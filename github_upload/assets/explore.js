@@ -57,6 +57,9 @@
   // distance normalisée au centre de la clairière (1 = bord de l'ellipse)
   const q = (x, z, E) => { const dx = (x - SITE.x) / E.x, dz = z - SITE.z; const e = dz > 0 ? dz / (E.zs) : dz / (E.zn); return Math.hypot(dx, e); };
 
+  // points d'accroche pour les autres activités de la carte (stand de tir) : la mécanique des lapins n'en dépend pas
+  const EXTRA = { enter: [], exit: [], rebuild: [], tap: [], tick: [], obstacles: [] };
+  const callAll = (list, ...a) => list.forEach(f => { try { f(...a); } catch (e) { console.warn('[explore] extra', e); } });
   let P = null, T = null, installed = false;
   let Y0 = 0;                        // altitude du sol aplani
   let root = null, wild = null, wildKey = '';
@@ -444,6 +447,7 @@
     // rochers de la clairière, catapulte
     for (const [dx, dz, r] of ROCKS) mark(SITE.x + dx, SITE.z + dz, r + 1.0);
     mark(CATA.x, CATA.z, CATA.r);
+    for (const [x, z, r] of EXTRA.obstacles) mark(x, z, r);
     // la caisse : on y entre par la rampe, sur un parcours écrit (voir routeTo et l'état « hesitate »)
     for (let z = CRATE.z - CRATE.hd - 1.4; z <= CRATE.z + CRATE.hd + 1.4; z += 1) for (let x = CRATE.x - CRATE.hw - 1.4; x <= CRATE.x + CRATE.hw + 1.4; x += 1) {
       const [i, j] = cellOf(x, z); if (i >= 0 && j >= 0 && i < NAV.nx && j < NAV.nz) B[idx(i, j)] = 1;
@@ -1102,7 +1106,8 @@
   }
   function onTap(cx, cy) {
     if (!active || moving) return;
-    if (crateHit(cx, cy)) closeDoor();
+    if (crateHit(cx, cy)) { closeDoor(); return; }
+    EXTRA.tap.some(f => { try { return f(cx, cy); } catch (e) { console.warn('[explore] extra', e); return false; } });
   }
   // la catapulte se saisit au doigt : zone large, elle est petite de loin
   function grabHit(cx, cy) {
@@ -1335,6 +1340,7 @@
       try {
         if (!root) buildScene();
         buildWild();
+        callAll(EXTRA.enter);
         natureOn();
         buildNav();   // chemins refaits à chaque entrée : la forêt dépend des bâtiments
         const c = P.controls;
@@ -1364,6 +1370,7 @@
   function exit(immediate) {
     if (!active || (moving && !immediate)) return;
     const finish = () => {
+      callAll(EXTRA.exit);
       active = false;
       document.getElementById('scr-planet').classList.remove('sbx-on'); document.body.classList.remove('sbx-on');
       showPrompt(false);
@@ -1401,14 +1408,14 @@
     buildUI();
     bindInput();
     const orig = P._rebuild;
-    P._rebuild = function () { const r = orig.apply(this, arguments); try { carve(); if (active) natureOn(); } catch (e) { console.warn('[explore] rebuild', e); } return r; };
+    P._rebuild = function () { const r = orig.apply(this, arguments); try { carve(); if (active) { natureOn(); callAll(EXTRA.rebuild); } } catch (e) { console.warn('[explore] rebuild', e); } return r; };
     const of = P._frame;
     let last = performance.now();
     P._frame = function () {
       const now = performance.now(), dt = Math.min(0.1, (now - last) / 1000); last = now;
       try {
         pinTick(now);
-        if (active && P.host && P.host.offsetParent !== null) tick(dt);
+        if (active && P.host && P.host.offsetParent !== null) { tick(dt); callAll(EXTRA.tick, dt); }
       } catch (e) { console.warn('[explore]', e); }
       return of.apply(this, arguments);
     };
@@ -1445,6 +1452,7 @@
   window.SBExplore = {
     enter, exit,
     get active() { return active; },
+    api: { extra: EXTRA, get root() { return root; }, get active() { return active; }, heightAt: (x, z) => heightAt(x, z), screenOf: (x, y, z) => screenOf(x, y, z) },
     // mesure du rythme, pour équilibrer ensuite (brief §4)
     stats() {
       const s = S(), min = (s.secs || 0) / 60;

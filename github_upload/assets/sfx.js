@@ -155,6 +155,25 @@
     // EXPLORE_0311 — clairière aux lapins : discret, de la matière plutôt que des notes
     exThrow(t) { noise({ t, filter: 'bandpass', f: 1100, f2: 380, q: 1.1, a: 0.01, d: 0.2, g: 0.05 }); MX.tap(t, 0.05, 520); },
     exLand(t) { noise({ t, filter: 'lowpass', f: 620, f2: 220, a: 0.002, d: 0.09, g: 0.09 }); },
+    // STAND_0311 — le stand de tir : de la masse et de la matière, un écho de forêt ; rien de strident
+    stCharge(t) { tone({ type: 'sawtooth', f: 150, f2: 520, t, a: 0.02, d: 0.1, g: 0.05, lp: 1300 }); noise({ t, filter: 'bandpass', f: 900, f2: 2600, q: 2, a: 0.02, d: 0.1, g: 0.035 }); },
+    stShot(t) {
+      tone({ f: 92, f2: 34, t, a: 0.002, d: 0.42, g: 0.62, lp: 420 });
+      tone({ type: 'sawtooth', f: 1500, f2: 110, t, a: 0.001, d: 0.2, g: 0.14, lp: 3000, rev: 0.25 });
+      noise({ t, filter: 'lowpass', f: 6000, f2: 380, a: 0.001, d: 0.3, g: 0.34, rev: 0.45 });
+      // écho dans la forêt : trois retours de plus en plus sourds
+      [[0.32, 0.075, 900], [0.68, 0.045, 620], [1.12, 0.024, 420]].forEach(([dt, g, f]) => noise({ t: t + dt, filter: 'lowpass', f, f2: f * 0.45, a: 0.012, d: 0.34, g, rev: 0.6 }));
+    },
+    stWood(t) { noise({ t, filter: 'bandpass', f: 1500, f2: 620, q: 1.1, a: 0.001, d: 0.13, g: 0.17 }); MX.gravel(t + 0.02, 4, 0.05, 0.03); },
+    stDirt(t) { noise({ t, filter: 'lowpass', f: 1100, f2: 180, a: 0.002, d: 0.28, g: 0.15 }); MX.gravel(t + 0.05, 3, 0.05, 0.02); },
+    stVent(t) { noise({ t, filter: 'highpass', f: 2800, a: 0.05, d: 0.62, g: 0.028, rev: 0.12 }); },
+    stCrack(t) {
+      for (let k = 0; k < 7; k++) noise({ t: t + k * 0.055 + Math.random() * 0.03, filter: 'bandpass', f: 900 + Math.random() * 1600, q: 3, a: 0.001, d: 0.035, g: 0.11 - k * 0.008 });
+      noise({ t: t + 0.32, filter: 'lowpass', f: 500, f2: 160, a: 0.01, d: 0.3, g: 0.08 });
+    },
+    stCrane(t) { tone({ type: 'sawtooth', f: 70, f2: 96, t, a: 0.04, d: 0.4, g: 0.05, lp: 420 }); noise({ t, filter: 'bandpass', f: 520, q: 2, a: 0.05, d: 0.36, g: 0.022 }); },
+    stThud(t) { MX.thud(t, 0.26); noise({ t: t + 0.01, filter: 'lowpass', f: 420, f2: 120, a: 0.004, d: 0.24, g: 0.1 }); },
+    stLock(t) { noise({ t, filter: 'bandpass', f: 2200, q: 5, a: 0.001, d: 0.045, g: 0.075, rev: 0.05 }); noise({ t: t + 0.06, filter: 'bandpass', f: 3000, q: 6, a: 0.001, d: 0.035, g: 0.05 }); },
     exPull(t) { noise({ t, filter: 'bandpass', f: 1500, q: 7, a: 0.001, d: 0.018, g: 0.03 }); },
     exBox(t) { noise({ t, filter: 'bandpass', f: 2100, q: 6, a: 0.001, d: 0.04, g: 0.06, rev: 0.08 }); MX.thud(t, 0.06); },
     exSplash(t) { noise({ t, filter: 'lowpass', f: 2400, f2: 500, a: 0.004, d: 0.26, g: 0.07, rev: 0.12 }); },
