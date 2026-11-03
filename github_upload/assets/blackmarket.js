@@ -39,7 +39,7 @@
     'Tu négocies ? Retourne compter tes cailloux au match-3.',
     "T'as vu l'acier ? Ça, ça se construit pas dans ton petit chantier.",
   ];
-  const VERSION = '20261103m';
+  const VERSION = '20261103n';
   // Serveur (schema_mp_v31_blackmarket.sql + fonctions bm-checkout / bm-webhook)
   const SB = 'https://elupnpdcblztpfywnhjl.supabase.co';
   const KEY = 'sb_publishable_tXGrQIROzH2DwBrny1GcHQ_iKJKoBOQ';
@@ -312,9 +312,11 @@
     const say = (txt, err) => { if (sub) { sub.textContent = txt; sub.classList.toggle('err', !!err); } };
     btn.disabled = true; say('Pauline prépare la facture…');
     try {
-      const r = await call('/functions/v1/bm-checkout', { item_id: btn.dataset.buy });
+      const [r] = await Promise.all([call('/functions/v1/bm-checkout', { item_id: btn.dataset.buy }), loadOwned()]);
       if (r && r.url) {
-        try { localStorage.setItem('bm_pending', JSON.stringify({ item: btn.dataset.buy, n: owned[btn.dataset.buy] || 0, at: Date.now() })); } catch (e) {}
+        const ids = units.filter(u => u.item === btn.dataset.buy).map(u => u.id);
+        try { localStorage.setItem('bm_pending', JSON.stringify({ item: btn.dataset.buy, n: ids.length, ids, at: Date.now() })); } catch (e) {}
+        watchPending();   // app installée : Stripe s'ouvre par-dessus le jeu, sans événement au retour → on guette l'inscription
         location.href = r.url; return;
       }
       throw new Error('no_url');
@@ -362,24 +364,46 @@
     if (!p || Date.now() - p.at > 3600e3) { if (p) try { localStorage.removeItem('bm_pending'); } catch (e) {} return; }
     if (confirming) return;   // la popup d'attente s'en occupe déjà
     await loadOwned();
-    if ((owned[p.item] || 0) > p.n) {
+    if (confirming) return;
+    if (isNewPurchase(p, p.item)) {
       try { localStorage.removeItem('bm_pending'); } catch (e) {}
       purchaseDone(p.item);
     }
   }
+  function isNewPurchase(p, id) {
+    if (!p || p.item !== id) return (owned[id] || 0) > 0;
+    if (Array.isArray(p.ids)) return units.some(u => u.item === id && !p.ids.includes(u.id));
+    return (owned[id] || 0) > (p.n || 0);
+  }
+  // Tant qu'un achat est en attente (au plus 1 h), on vérifie régulièrement, sans dépendre d'un retour au premier plan :
+  // sur iPhone, la fenêtre Stripe se referme par-dessus le jeu sans qu'il le sache. Lecture seule (bm_state), rien n'est sauvegardé.
+  let pendTimer = null;
+  function watchPending() {
+    clearTimeout(pendTimer); pendTimer = null;
+    let p = null; try { p = JSON.parse(localStorage.getItem('bm_pending') || 'null'); } catch (e) {}
+    if (!p) return;
+    const age = Date.now() - (p.at || 0);
+    if (age > 3600e3) { try { localStorage.removeItem('bm_pending'); } catch (e) {} return; }
+    if (age > 900e3) return;   // au-delà de 15 min : seulement au retour dans le jeu (visibilitychange / focus)
+    pendTimer = setTimeout(async () => {
+      try { if (document.visibilityState !== 'hidden') await checkPending(); } catch (e) {}
+      watchPending();
+    }, age < 180e3 ? 4000 : 15000);
+  }
+  setTimeout(watchPending, 3000);
   // ── Popup de fin d'achat (03/11, Adrien) : « Achat confirmé » une fois le paiement inscrit par le serveur ──
   // Stripe renvoie le joueur avant que le webhook ait inscrit l'achat : on attend la confirmation (jusqu'à ~45 s).
   let confirming = false;
   async function confirmPurchase(itemId) {
     if (confirming) return; confirming = true;
     let p = null; try { p = JSON.parse(localStorage.getItem('bm_pending') || 'null'); } catch (e) {}
-    const id = itemId || (p && p.item), before = p && p.item === id ? p.n : null;
+    const id = itemId || (p && p.item);
     const it = SHIPS.find(x => x.id === id);
     const pop = buyPopup('wait', it);
     try {
       for (let i = 0; i < 15; i++) {
         await loadOwned();
-        if (before == null ? (owned[id] || 0) > 0 : (owned[id] || 0) > before) {
+        if (isNewPurchase(p, id)) {
           try { localStorage.removeItem('bm_pending'); } catch (e) {}
           pop.remove(); purchaseDone(id); return;
         }
