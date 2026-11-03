@@ -136,10 +136,13 @@ const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x010207);
 const camera = new THREE.PerspectiveCamera(40, innerWidth / innerHeight, 0.05, 600);
 const BASE_FOV = () => camera.aspect < 0.8 ? 54 : 40;
+// ambassade (vue héros du jeu) : les cartes occupent le bas de l'écran, on décale la vue pour que le vaisseau remonte (comme shiftY des fiches Ship3D)
+const SHIFT_Y = ORBIT ? 0.22 : 0;
+const applyShift = () => { if (SHIFT_Y) camera.setViewOffset(innerWidth, innerHeight, 0, innerHeight * SHIFT_Y, innerWidth, innerHeight); };
 const WIDE_FOV = () => camera.aspect < 0.8 ? 92 : 78;
 function fitDistance() {
   if (fitDistance.cached) return fitDistance.cached;
-  camera.fov = BASE_FOV(); camera.updateProjectionMatrix();
+  camera.fov = BASE_FOV(); applyShift(); camera.updateProjectionMatrix();
   const v = THREE.MathUtils.degToRad(camera.fov) / 2;
   const h = Math.atan(Math.tan(v) * camera.aspect);
   const half = camera.aspect < 0.8 ? 4.9 : 5.2;
@@ -1007,7 +1010,7 @@ const bloom = new UnrealBloomPass(new THREE.Vector2(innerWidth / 2, innerHeight 
 composer.addPass(bloom);
 composer.addPass(new OutputPass());
 addEventListener('resize', () => {
-  camera.aspect = innerWidth / innerHeight; ORBIT_SKY.fit(camera.aspect); fitDistance.cached = 0; controls.maxDistance = fitDistance() * (typeof ORBIT !== 'undefined' && ORBIT ? 2.6 : 1.6);   // ambassade (orbit) : on peut reculer bien plus loin
+  camera.aspect = innerWidth / innerHeight; applyShift(); ORBIT_SKY.fit(camera.aspect); fitDistance.cached = 0; controls.maxDistance = fitDistance() * (typeof ORBIT !== 'undefined' && ORBIT ? 2.6 : 1.6);   // ambassade (orbit) : on peut reculer bien plus loin
   renderer.setSize(innerWidth, innerHeight); composer.setSize(innerWidth, innerHeight);
   bloom.resolution.set(innerWidth / 2, innerHeight / 2);
  
