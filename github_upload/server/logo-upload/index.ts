@@ -12,7 +12,7 @@ const CORS = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
 const BUCKET = 'ship-logos';
-const MAX_BYTES = 2 * 1024 * 1024, MAX_SIDE = 1024, MAX_LIBRARY = 3, MAX_TRIES_PER_DAY = 5;
+const MAX_BYTES = 2 * 1024 * 1024, MAX_SIDE = 1024, MAX_LIBRARY = 3, MAX_TRIES_PER_DAY = 20;
 const SYSTEM = `Tu contrôles les images que des joueurs veulent peindre comme logo sur leur vaisseau, dans un jeu en ligne vu par d'autres joueurs.
 Refuse (ok = false) : nudité ou contenu sexuel ; toute image sexualisée d'une personne pouvant être mineure ; symboles ou messages haineux, dont nazis et racistes ; violence crue ; photo d'une personne réelle identifiable.
 Accepte (ok = true) : logos, emblèmes, blasons, dessins, armes stylisées, personnages dessinés, animaux, texte non haineux, y compris le logo d'une entreprise ou d'un club.
@@ -84,15 +84,22 @@ Deno.serve(async (req) => {
   if ((same || []).some((l) => l.status === 'banned')) return json({ error: 'refused' }, 422);
   const mineSame = (same || []).find((l) => l.user_id === uid && l.status === 'ok');
   if (mineSame) return json({ id: mineSame.id, path: mineSame.path });
+  // un logo que ce joueur a déjà fait valider puis supprimé revient sans repasser au filtre, donc sans compter d'essai
+  const mineDeleted = (same || []).find((l) => l.user_id === uid && l.status === 'deleted');
+  if (mineDeleted) {
+    const { error: backErr } = await admin.from('bm_logos').update({ status: 'ok' }).eq('id', mineDeleted.id);
+    if (backErr) return json({ error: backErr.message }, 500);
+    return json({ id: mineDeleted.id, path: mineDeleted.path });
+  }
 
-  // quota d'essais : compté avant le filtre, pour que chaque appel payant soit borné
+  // quota d'essais : seul un verdict du filtre compte, une panne ne coûte rien au joueur
   const since = new Date(Date.now() - 864e5).toISOString();
   const { count: tries } = await admin.from('bm_logo_attempts').select('user_id', { count: 'exact', head: true }).eq('user_id', uid).gt('at', since);
   if ((tries || 0) >= MAX_TRIES_PER_DAY) return json({ error: 'quota', max: MAX_TRIES_PER_DAY }, 429);
-  await admin.from('bm_logo_attempts').insert({ user_id: uid });
 
   let ok = false;
   try { ok = await verdict(key, base64); } catch (e) { console.error('filtre', e); return json({ error: 'filter_down' }, 503); }
+  await admin.from('bm_logo_attempts').insert({ user_id: uid });
   if (!ok) return json({ error: 'refused' }, 422);
 
   const path = `${uid}/${sha}.png`;
