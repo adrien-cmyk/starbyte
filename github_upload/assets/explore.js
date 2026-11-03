@@ -37,7 +37,7 @@
   const R = { x: 19, zn: 20, zs: 20 };          // zone où vivent les lapins
   const CUT = { x: 25, zn: 26, zs: 42 };        // zone sans arbres (plus longue au sud : les arbres du premier plan masqueraient le sol)
   const FLAT = { x: 30, zn: 30, zs: 44 };       // zone de sol aplani
-  const FLAG = { x: SITE.x - 16, z: SITE.z + 28, h: 30 };   // le mât-drapeau : l'entrée du jeu, visible depuis la colonie
+  const FLAG = { x: SITE.x - 18, z: SITE.z - 6, h: 36 };   // plus au nord, dans la clairière : les bâtiments de tier 3 ne le cachent pas   // le mât-drapeau : l'entrée du jeu, visible depuis la colonie
   const CRATE = { x: SITE.x + 2, z: SITE.z - 8, hw: 5, hd: 4, door: 3.2, ramp: 3.4 };   // door = demi-largeur de l'ouverture
   const CATA = { x: -78, z: 60, r: 5.5, scale: 2.1 };   // au sud de la forêt, à l'endroit désigné par Adrien (capture du 03/11)
   const HOME = { x: -70, z: 32, r: 15 };                // là où vivent les lapins au départ, juste au nord de la catapulte
@@ -1354,8 +1354,10 @@
     if (!P.host || P.host.offsetParent === null) return;
     windT += dt;
     const k = window.SBSky && SBSky.k != null ? SBSky.k : 1, night = 1 - k, W = 12;
+    const want = active ? 0.3 : 1;
     for (const f of FLAGS) {
       if (!f.g) continue;
+      if (Math.abs(f.g.scale.x - want) > 0.001) { const k = f.g.scale.x + (want - f.g.scale.x) * Math.min(1, dt * 6); f.g.scale.setScalar(Math.abs(k - want) < 0.005 ? want : k); }
       const pa = f.cloth.geometry.attributes.position;
       for (let i = 0; i < pa.count; i++) {
         const x0 = f.cloth0[i * 3], u = Math.max(0, (x0 - 0.3) / W);

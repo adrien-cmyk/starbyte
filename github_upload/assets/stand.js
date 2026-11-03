@@ -60,12 +60,23 @@
   const AIM0 = Math.atan2(TGT.x - POST.x, -(TGT.z - POST.z));   // direction de la plateforme (yaw 0 = nord)
   const DIST = Math.hypot(TGT.x - POST.x, TGT.z - POST.z);
   // chemin des lapins : le long de la berge, dans le couloir de tir, de 16 à 72 unités du poste
-  const SHORE = (() => {
+  let SHORE = [];
+  function buildShorePath() {   // au sec, le plus près possible du bord de l'eau, côté lac
     const ux = (TGT.x - POST.x) / DIST, uz = (TGT.z - POST.z) / DIST, rx = -uz, rz = ux, out = [];
-    for (let a = 16; a <= 72; a += 8) out.push([POST.x + ux * a + rx * 5.5, POST.z + uz * a + rz * 5.5]);
-    return out;
-  })();
+    for (let a = 16; a <= 72; a += 8) {
+      let pick = null;
+      for (const off of [5.5, 4, 2.5, 1, -1, -2.5, -4, -6, -8]) {
+        const x = POST.x + ux * a + rx * off, z = POST.z + uz * a + rz * off;
+        if (API.heightAt(x, z) > WATER + 0.25) { pick = [x, z]; break; }
+      }
+      if (pick) out.push(pick);
+    }
+    SHORE = out;
+  }
   const FLAG2 = { x: POST.x - 8, z: POST.z + 7 };        // le mât du stand, visible depuis la colonie
+  // l'autre rive : le banc de sable derrière la plateforme ; deux ou trois lapins y passent de temps en temps
+  const FAR = (() => { const out = []; for (let x = 232; x <= 266; x += 6) out.push([x, -131]); return out; })();
+  const FAR_N = 3;
 
   let T = null, P = null, API = null, built = false, WATER = -1.75;
   const allowed = () => {
@@ -438,29 +449,43 @@
   function buildRabbits() {
     const GEO = API.GEO, FUR = API.MAT && API.MAT.fur;
     if (!GEO || !GEO.rabbits || !FUR) return;
-    for (let i = 0; i < CFG.rabbits; i++) {
+    buildShorePath();
+    // les points de l'autre rive qui seraient sous l'eau sont écartés : aucun lapin ne nage
+    const far = [];
+    for (const [x] of FAR) {   // pour chaque x, le point le plus haut du banc ; écarté s'il est sous l'eau
+      let best = null;
+      for (let z = -135; z <= -127; z += 1) { const y = API.heightAt(x, z); if (y > WATER + 0.08 && (!best || y > best[2])) best = [x, z, y]; }
+      if (best) far.push([best[0], best[1]]);
+    }
+    RB.far = far.length >= 2 ? far : null;
+    for (let i = 0; i < CFG.rabbits + (RB.far ? FAR_N : 0); i++) {
       const g = GEO.rabbits[i % GEO.rabbits.length], grp = new T.Group(), bodyP = new T.Group(); grp.add(bodyP);
       bodyP.add(new T.Mesh(g.body, FUR));
       const head = new T.Group(); head.position.set(0, 1.94, 1.02); bodyP.add(head); head.add(new T.Mesh(g.head, FUR));
       for (const s of [-1, 1]) { const e = new T.Group(); e.position.set(s * 0.36, 0.5, -0.14); e.rotation.z = -s * 0.14; e.add(new T.Mesh(g.ear, FUR)); head.add(e); }
       grp.scale.setScalar(1.25); STG.add(grp);
-      const r = { g: grp, bodyP, seg: Math.min(SHORE.length - 2, Math.floor(i / CFG.rabbits * (SHORE.length - 1))), u: hash(i, 5), dir: i % 2 ? 1 : -1, hop: null, wait: hash(i, 7) * 2, dead: 0, x: 0, z: 0 };
+      const farSide = i >= CFG.rabbits, path = farSide ? RB.far : SHORE;
+      const r = { g: grp, bodyP, path, far: farSide, seg: farSide ? Math.floor(hash(i, 9) * (path.length - 1)) : Math.min(SHORE.length - 2, Math.floor(i / CFG.rabbits * (SHORE.length - 1))), u: hash(i, 5), dir: i % 2 ? 1 : -1, hop: null, wait: hash(i, 7) * 2, dead: farSide ? 4 + hash(i, 11) * 20 : 0, stay: 0, x: 0, z: 0 };
+      if (farSide) grp.visible = false;
       placeRabbit(r); RB.list.push(r);
     }
   }
-  function shorePoint(seg, u) { const a = SHORE[seg], b = SHORE[seg + 1]; return [lerp(a[0], b[0], u), lerp(a[1], b[1], u)]; }
+  function shorePoint(path, seg, u) { const a = path[seg], b = path[seg + 1]; return [lerp(a[0], b[0], u), lerp(a[1], b[1], u)]; }
+  const groundY = (x, z) => Math.max(API.heightAt(x, z), WATER + 0.3);   // jamais les pattes dans l'eau
   function placeRabbit(r) {
-    const [x, z] = shorePoint(r.seg, r.u); r.x = x; r.z = z;
-    r.g.position.set(x, API.heightAt(x, z), z);
+    const [x, z] = shorePoint(r.path, r.seg, r.u); r.x = x; r.z = z;
+    r.g.position.set(x, groundY(x, z), z);
   }
   function rabbitsTick(dt) {
     for (const r of RB.list) {
-      if (r.dead > 0) { r.dead -= dt; if (r.dead <= 0) { r.g.visible = true; r.seg = Math.random() < 0.5 ? 0 : SHORE.length - 2; r.u = r.seg ? 1 : 0; r.dir = r.seg ? -1 : 1; placeRabbit(r); } continue; }
+      if (r.dead > 0) { r.dead -= dt; if (r.dead <= 0) { r.g.visible = true; r.seg = Math.random() < 0.5 ? 0 : r.path.length - 2; r.u = r.seg ? 1 : 0; r.dir = r.seg ? -1 : 1; r.stay = r.far ? 14 + Math.random() * 16 : 0; placeRabbit(r); } continue; }
+      // sur l'autre rive, les lapins ne font que passer
+      if (r.far && r.stay > 0) { r.stay -= dt; if (r.stay <= 0) { r.g.visible = false; r.dead = 12 + Math.random() * 25; continue; } }
       if (r.hop) {
         r.hop.t += dt; const k = Math.min(1, r.hop.t / r.hop.dur);
         r.u = lerp(r.hop.u0, r.hop.u1, k);
-        const [x, z] = shorePoint(r.seg, r.u); r.x = x; r.z = z;
-        r.g.position.set(x, API.heightAt(x, z) + Math.sin(k * Math.PI) * 0.9, z);
+        const [x, z] = shorePoint(r.path, r.seg, r.u); r.x = x; r.z = z;
+        r.g.position.set(x, groundY(x, z) + Math.sin(k * Math.PI) * 0.9, z);
         r.bodyP.rotation.x = -Math.sin(k * Math.PI) * 0.25;
         if (k >= 1) { r.hop = null; r.wait = 0.15 + Math.random() * 1.1; if (Math.random() < 0.08) r.dir *= -1; }
         continue;
@@ -468,9 +493,9 @@
       r.wait -= dt;
       if (r.wait > 0) continue;
       let u1 = r.u + r.dir * 0.22;
-      if (u1 > 1) { if (r.seg < SHORE.length - 2) { r.seg++; r.u = 0; u1 = 0.22; } else { r.dir = -1; u1 = r.u - 0.22; } }
+      if (u1 > 1) { if (r.seg < r.path.length - 2) { r.seg++; r.u = 0; u1 = 0.22; } else { r.dir = -1; u1 = r.u - 0.22; } }
       if (u1 < 0) { if (r.seg > 0) { r.seg--; r.u = 1; u1 = 0.78; } else { r.dir = 1; u1 = r.u + 0.22; } }
-      const [x1, z1] = shorePoint(r.seg, u1);
+      const [x1, z1] = shorePoint(r.path, r.seg, u1);
       r.g.rotation.y = Math.atan2(x1 - r.x, z1 - r.z);
       r.hop = { t: 0, dur: 0.42, u0: r.u, u1 };
     }
@@ -487,7 +512,7 @@
     return best;
   }
   function popRabbit(r) {
-    r.dead = 5 + Math.random() * 5; r.g.visible = false;
+    r.dead = (r.far ? 15 : 5) + Math.random() * 5; r.g.visible = false;
     burstChips(r.x, r.g.position.y + 1.4, r.z, 26, 0xf4eee4, 7, 10, 'fluff');
     burstChips(r.x, r.g.position.y + 1.4, r.z, 1, 0xf08a24, 5, 12, 'carrot');
     puffSmoke(r.x, r.g.position.y + 1.6, r.z, 5, { o: 0.55, size: 1.4, rise: 1.2, life: 1.1, col: 0xfaf6ef, spread: 2.2 });
@@ -965,7 +990,7 @@
       // la cible revient neuve et debout pour la prochaine fois
       TG.st = 'up'; FX.drone.visible = false; FX.board.visible = true; FX.beacon.visible = true; paintFreshTarget();
       FX.shards.count = 0; FX.shards.instanceMatrix.needsUpdate = true;
-      RB.list.forEach(r => { if (r.dead > 0) { r.dead = 0; r.g.visible = true; placeRabbit(r); } });
+      RB.list.forEach(r => { if (r.far) { r.g.visible = false; r.dead = 4 + Math.random() * 20; } else if (r.dead > 0) { r.dead = 0; r.g.visible = true; placeRabbit(r); } });
       resetMagazine();
       restoreCamera();
       soldierLOD(true);
@@ -1294,7 +1319,7 @@
     fire() { if (!pressFire()) return false; FP.charge = 1; return releaseFire(); },
     get state() { return FP.st; },
     get on() { return FP.on; },
-    _dbg: { FP, FX, TG, RB, CFG, TGT, POST, FLAG2, SHORE, TARGET_R, BOARD, ZONES, AIM0, DIST, C_W, C_K, C_H, get targetCtx() { return targetCtx; }, get cuts() { return CUTS.length; }, tick, discharge, traceShot, currentAim, dirOf, scoreAt, standHit, boardFrame, get built() { return built; }, get UI() { return UI; },
+    _dbg: { FP, FX, TG, RB, CFG, TGT, POST, FLAG2, get SHORE() { return SHORE; }, TARGET_R, BOARD, ZONES, AIM0, DIST, C_W, C_K, C_H, get targetCtx() { return targetCtx; }, get cuts() { return CUTS.length; }, tick, discharge, traceShot, currentAim, dirOf, scoreAt, standHit, boardFrame, get built() { return built; }, get UI() { return UI; },
       aimAt(x, y) { const f = boardFrame(), p = f.c.clone().addScaledVector(f.right, x).addScaledVector(f.up, y), o = P.camera.position, d = p.sub(o); FP.yaw = Math.atan2(d.x, -d.z) - AIM0; FP.pitch = Math.atan2(d.y, Math.hypot(d.x, d.z)); } },
   };
 })();

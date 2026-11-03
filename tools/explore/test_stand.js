@@ -44,7 +44,7 @@ let fails=0,okc=0; const ok=(c,m,x)=>{ if(c){okc++;console.log('ok  ',m);} else 
   const dbg=await p.evaluate(()=>{const d=SBStand._dbg;SBStand.pressFire();__adv(.3);const a=d.currentAim(),k=d.traceShot(Planet3D.camera.position.clone(),d.dirOf(a.yaw,a.pitch)).kind;SBStand.releaseFire();return {k,hit:d.FP.lastHit.kind,st:SBStand.state};});
   console.log('   lapin :',JSON.stringify(dbg));
   h=await hud(); ok(h.shots===before+1&&h.score===300,'lapin touché : 0 point, une cartouche en moins',h);
-  ok(await p.evaluate(()=>!SBStand._dbg.RB.list[0].g.visible&&SBStand._dbg.RB.list[0].dead>0),'le lapin a éclaté et reviendra');
+  ok(await p.evaluate(()=>{const r=SBStand._dbg.FP.lastHit.rabbit;return !!r&&!r.g.visible&&r.dead>0;}),'le lapin a éclaté et reviendra');
   // lunette et apnée
   const fov0=await p.evaluate(()=>Planet3D.camera.fov);
   await touch('touchStart',[{x:150,y:400,id:1},{x:250,y:400,id:2}]); await touch('touchMove',[{x:90,y:400,id:1},{x:310,y:400,id:2}]); await touch('touchEnd',[]);

@@ -28,7 +28,7 @@ let fails=0; const ok=(c,m,x)=>{console.log((c?'ok   ':'FAIL ')+m,c?'':JSON.stri
   await tap(40,400);
   ok((await p.evaluate(()=>document.getElementById('sbx-flag').className))==='','toucher ailleurs referme la bulle');
   // vue rapprochée, de nuit
-  await p.evaluate(()=>{const P=Planet3D,E=SBExplore._dbg;P.controls.target.set(E.FLAG.x,0,E.FLAG.z-10);P.camera.position.copy(P.controls.target).addScaledVector(P.camDir,180);P.controls.update();P.camera.updateMatrixWorld();SBSky.force(0.05);SBFluid.poke();__frames(2);});
+  await p.evaluate(()=>{const P=Planet3D,E=SBExplore._dbg;P.controls.target.set(E.FLAG.x,0,E.FLAG.z+6);P.camera.position.copy(P.controls.target).addScaledVector(P.camDir,330);P.controls.update();P.camera.updateMatrixWorld();SBSky.force(0.05);SBFluid.poke();__frames(2);});
   await shot(p,'s_night',1);
   await p.evaluate(()=>{SBSky.force(1);__frames(1);});
   await shot(p,'s_day',1);
