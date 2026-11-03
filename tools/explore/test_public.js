@@ -1,0 +1,36 @@
+// joueur ordinaire (pas un compte d'Adrien), partie neuve : didacticiel, puis pin, puis jeu
+const { chromium } = require('playwright');
+let fail=0; const check=(n,c,x)=>{ console.log((c?'  ok   ':' FAIL  ')+n,c?'':JSON.stringify(x)); if(!c) fail++; };
+(async()=>{
+  const b = await chromium.launch({ args: ['--use-gl=angle','--use-angle=swiftshader','--enable-webgl','--ignore-gpu-blocklist','--enable-unsafe-swiftshader','--host-resolver-rules=MAP play.starbyte.test 127.0.0.1'] });
+  const c = await b.newContext({ viewport:{width:390,height:844}, hasTouch:true, isMobile:true });
+  const p = await c.newPage();
+  const errs=[]; p.on('pageerror',e=>errs.push(e.message)); p.on('console',m=>{ if(/\[explore\]/.test(m.text())) errs.push(m.text()); });
+  await p.goto('http://play.starbyte.test:8765/index.html',{waitUntil:'domcontentloaded',timeout:60000});
+  await p.waitForFunction(()=>window.Planet3D&&Planet3D.ready,{timeout:90000,polling:300});
+  await p.evaluate(()=>{ Planet3D.renderer.setAnimationLoop(null); window.__frames=(n=1)=>{for(let i=0;i<n;i++)Planet3D._frame()}; goto('planet'); });
+  await p.waitForFunction(()=>SBExplore._dbg.installed,{timeout:60000,polling:300});
+  const place=()=>{const P=Planet3D;P._focusAnim=null;P.controls.target.set(-20,0,-105);P.camera.position.copy(P.controls.target).addScaledVector(P.camDir,420);P.controls.update();P.camera.updateMatrixWorld();};
+  await p.evaluate(place); await p.waitForTimeout(350); await p.evaluate(()=>__frames(1));
+  let s=await p.evaluate(()=>({dev:_sbDevAllowed(),tuto:SBTuto.active(),pin:!!Planet3D.scene.getObjectByName('SB_EXPLORE_FLAG'),toast:document.getElementById('toast').textContent}));
+  check('joueur ordinaire : le jeu est installé',!s.dev,s);
+  check('pendant le didacticiel : le mât est là quand même',s.tuto&&s.pin,s);
+  await p.waitForTimeout(1500);
+  check('plus de bulle d\'aperçu',!/Aperçu Explorer/.test(await p.evaluate(()=>document.getElementById('toast').textContent)));
+  await p.evaluate(()=>{ G.tuto.done=true; }); await p.waitForTimeout(350); await p.evaluate(()=>__frames(1));
+  s=await p.evaluate(()=>({tuto:SBTuto.active()}));
+  check('didacticiel fini',!s.tuto,s);
+  await p.evaluate(()=>SBExplore.enter());
+  await p.waitForFunction(()=>SBExplore.active,{timeout:15000,polling:100});
+  const e=await p.evaluate(()=>({n:SBExplore._dbg.W.rabbits.length,hint:document.getElementById('sbx-hint').textContent}));
+  check('le jeu s\'ouvre',e.n===3&&/Tire la catapulte/.test(e.hint),e);
+  await p.waitForTimeout(700);
+  const st=await p.evaluate(()=>{const P=Planet3D;const sc=SBExplore.api.screenOf(SBStand._dbg.TGT.x,5,SBStand._dbg.TGT.z+6);return {built:SBStand._dbg.built,offer:!!document.getElementById('sbs-offer'),hud:!!document.getElementById('sbs-hud'),stand:!!P.scene.getObjectByName('SB_STAND'),obstacles:SBExplore.api.extra.obstacles.length,passes:P.composer.passes.length,sc};});
+  check('joueur ordinaire : aucun stand, rien de construit',!st.built&&!st.offer&&!st.hud&&!st.stand&&st.obstacles===0&&st.passes===3,st);
+  await p.evaluate(()=>SBStand.open());
+  await p.waitForTimeout(600);
+  check('joueur ordinaire : la vue de tir ne s\'ouvre pas',!(await p.evaluate(()=>SBStand.on)));
+  console.log('erreurs',errs.length,errs.slice(0,3));
+  if(errs.length) fail++;
+  await b.close(); process.exit(fail?1:0);
+})().catch(e=>{console.error(e);process.exit(1)});

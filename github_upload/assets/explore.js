@@ -1514,7 +1514,7 @@
   window.SBExplore = {
     enter, exit,
     get active() { return active; },
-    api: { extra: EXTRA, get root() { return root; }, get active() { return active; }, heightAt: (x, z) => heightAt(x, z), screenOf: (x, y, z) => screenOf(x, y, z) },
+    api: { extra: EXTRA, get root() { return root; }, get active() { return active; }, heightAt: (x, z) => heightAt(x, z), screenOf: (x, y, z) => screenOf(x, y, z), get GEO() { return GEO; }, get MAT() { return MAT; }, WATER },
     // mesure du rythme, pour équilibrer ensuite (brief §4)
     stats() {
       const s = S(), min = (s.secs || 0) / 60;

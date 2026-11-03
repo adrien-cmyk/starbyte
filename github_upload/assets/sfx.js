@@ -155,25 +155,38 @@
     // EXPLORE_0311 — clairière aux lapins : discret, de la matière plutôt que des notes
     exThrow(t) { noise({ t, filter: 'bandpass', f: 1100, f2: 380, q: 1.1, a: 0.01, d: 0.2, g: 0.05 }); MX.tap(t, 0.05, 520); },
     exLand(t) { noise({ t, filter: 'lowpass', f: 620, f2: 220, a: 0.002, d: 0.09, g: 0.09 }); },
-    // STAND_0311 — le stand de tir : de la masse et de la matière, un écho de forêt ; rien de strident
-    stCharge(t) { tone({ type: 'sawtooth', f: 150, f2: 520, t, a: 0.02, d: 0.1, g: 0.05, lp: 1300 }); noise({ t, filter: 'bandpass', f: 900, f2: 2600, q: 2, a: 0.02, d: 0.1, g: 0.035 }); },
-    stShot(t) {
-      tone({ f: 92, f2: 34, t, a: 0.002, d: 0.42, g: 0.62, lp: 420 });
-      tone({ type: 'sawtooth', f: 1500, f2: 110, t, a: 0.001, d: 0.2, g: 0.14, lp: 3000, rev: 0.25 });
-      noise({ t, filter: 'lowpass', f: 6000, f2: 380, a: 0.001, d: 0.3, g: 0.34, rev: 0.45 });
-      // écho dans la forêt : trois retours de plus en plus sourds
-      [[0.32, 0.075, 900], [0.68, 0.045, 620], [1.12, 0.024, 420]].forEach(([dt, g, f]) => noise({ t: t + dt, filter: 'lowpass', f, f2: f * 0.45, a: 0.012, d: 0.34, g, rev: 0.6 }));
+    // STAND_0311 — le stand de tir : laser rouge « tziuww », charge, explosion de cible, drone ; rien de strident
+    stChg1(t) { tone({ type: 'sawtooth', f: 110, f2: 160, t, a: 0.03, d: 0.3, g: 0.028, lp: 900 }); },
+    stChg2(t) { tone({ type: 'sawtooth', f: 170, f2: 260, t, a: 0.03, d: 0.3, g: 0.034, lp: 1300 }); },
+    stChg3(t) { tone({ type: 'sawtooth', f: 280, f2: 420, t, a: 0.03, d: 0.3, g: 0.04, lp: 1800 }); noise({ t, filter: 'bandpass', f: 1800, q: 3, a: 0.03, d: 0.26, g: 0.02 }); },
+    stChg4(t) { tone({ type: 'sawtooth', f: 440, f2: 470, t, a: 0.02, d: 0.3, g: 0.05, lp: 2400 }); noise({ t, filter: 'bandpass', f: 2600, q: 4, a: 0.02, d: 0.28, g: 0.03 }); },
+    stShotLo(t) {
+      tone({ type: 'sawtooth', f: 1900, f2: 160, t, a: 0.002, d: 0.26, g: 0.2, lp: 4200, rev: 0.3 });
+      tone({ type: 'square', f: 520, f2: 70, t, a: 0.002, d: 0.22, g: 0.1, lp: 1400 });
+      noise({ t, filter: 'lowpass', f: 5000, f2: 400, a: 0.001, d: 0.18, g: 0.16, rev: 0.4 });
+      [[0.3, 0.05, 700], [0.62, 0.028, 520]].forEach(([dt, g, f]) => noise({ t: t + dt, filter: 'lowpass', f, f2: f * 0.45, a: 0.012, d: 0.3, g, rev: 0.6 }));
     },
-    stWood(t) { noise({ t, filter: 'bandpass', f: 1500, f2: 620, q: 1.1, a: 0.001, d: 0.13, g: 0.17 }); MX.gravel(t + 0.02, 4, 0.05, 0.03); },
+    stShotHi(t) {
+      tone({ type: 'sawtooth', f: 2600, f2: 120, t, a: 0.002, d: 0.36, g: 0.3, lp: 5000, rev: 0.35 });
+      tone({ type: 'square', f: 640, f2: 48, t, a: 0.002, d: 0.34, g: 0.16, lp: 1500 });
+      tone({ f: 80, f2: 30, t, a: 0.002, d: 0.4, g: 0.5, lp: 380 });
+      noise({ t, filter: 'lowpass', f: 6000, f2: 300, a: 0.001, d: 0.3, g: 0.3, rev: 0.5 });
+      [[0.34, 0.08, 900], [0.72, 0.05, 620], [1.18, 0.028, 420]].forEach(([dt, g, f]) => noise({ t: t + dt, filter: 'lowpass', f, f2: f * 0.45, a: 0.012, d: 0.34, g, rev: 0.6 }));
+    },
+    stClang(t) { noise({ t, filter: 'bandpass', f: 2400, f2: 900, q: 2, a: 0.001, d: 0.16, g: 0.12, rev: 0.5 }); tone({ f: 1250, f2: 900, t, a: 0.001, d: 0.2, g: 0.05, rev: 0.5 }); },
     stDirt(t) { noise({ t, filter: 'lowpass', f: 1100, f2: 180, a: 0.002, d: 0.28, g: 0.15 }); MX.gravel(t + 0.05, 3, 0.05, 0.02); },
-    stVent(t) { noise({ t, filter: 'highpass', f: 2800, a: 0.05, d: 0.62, g: 0.028, rev: 0.12 }); },
-    stCrack(t) {
-      for (let k = 0; k < 7; k++) noise({ t: t + k * 0.055 + Math.random() * 0.03, filter: 'bandpass', f: 900 + Math.random() * 1600, q: 3, a: 0.001, d: 0.035, g: 0.11 - k * 0.008 });
-      noise({ t: t + 0.32, filter: 'lowpass', f: 500, f2: 160, a: 0.01, d: 0.3, g: 0.08 });
+    stSplash(t) { noise({ t, filter: 'bandpass', f: 1600, f2: 500, q: 0.8, a: 0.004, d: 0.32, g: 0.14, rev: 0.5 }); },
+    stBoom(t) {
+      MX.thud(t, 0.4); tone({ f: 70, f2: 24, t, a: 0.002, d: 0.7, g: 0.6, lp: 300 });
+      noise({ t, filter: 'lowpass', f: 3500, f2: 180, a: 0.002, d: 0.6, g: 0.4, rev: 0.6 });
+      for (let k = 0; k < 6; k++) noise({ t: t + 0.08 + k * 0.07, filter: 'bandpass', f: 1200 + k * 400, q: 3, a: 0.001, d: 0.05, g: 0.08 });
+      [[0.5, 0.1, 800], [1.0, 0.06, 560], [1.6, 0.03, 400]].forEach(([dt, g, f]) => noise({ t: t + dt, filter: 'lowpass', f, f2: f * 0.4, a: 0.02, d: 0.4, g, rev: 0.7 }));
     },
-    stCrane(t) { tone({ type: 'sawtooth', f: 70, f2: 96, t, a: 0.04, d: 0.4, g: 0.05, lp: 420 }); noise({ t, filter: 'bandpass', f: 520, q: 2, a: 0.05, d: 0.36, g: 0.022 }); },
-    stThud(t) { MX.thud(t, 0.26); noise({ t: t + 0.01, filter: 'lowpass', f: 420, f2: 120, a: 0.004, d: 0.24, g: 0.1 }); },
+    stPof(t) { noise({ t, filter: 'lowpass', f: 2400, f2: 500, a: 0.002, d: 0.14, g: 0.2 }); tone({ f: 520, f2: 180, t, a: 0.002, d: 0.14, g: 0.06, lp: 1200 }); },
+    stDrone(t) { for (let k = 0; k < 8; k++) tone({ type: 'sawtooth', f: 160 + k * 6, f2: 190, t: t + k * 0.5, a: 0.1, d: 0.5, g: 0.016, lp: 700 }); },
     stLock(t) { noise({ t, filter: 'bandpass', f: 2200, q: 5, a: 0.001, d: 0.045, g: 0.075, rev: 0.05 }); noise({ t: t + 0.06, filter: 'bandpass', f: 3000, q: 6, a: 0.001, d: 0.035, g: 0.05 }); },
+    stBreath(t) { noise({ t, filter: 'lowpass', f: 1400, f2: 500, a: 0.2, d: 0.5, g: 0.03 }); },
+    stHeart(t) { for (let k = 0; k < 4; k++) { MX.thud(t + k * 0.72, 0.1); MX.thud(t + k * 0.72 + 0.18, 0.07); } },
     exPull(t) { noise({ t, filter: 'bandpass', f: 1500, q: 7, a: 0.001, d: 0.018, g: 0.03 }); },
     exBox(t) { noise({ t, filter: 'bandpass', f: 2100, q: 6, a: 0.001, d: 0.04, g: 0.06, rev: 0.08 }); MX.thud(t, 0.06); },
     exSplash(t) { noise({ t, filter: 'lowpass', f: 2400, f2: 500, a: 0.004, d: 0.26, g: 0.07, rev: 0.12 }); },
