@@ -5,7 +5,7 @@
    `ship` (facultatif) : profil d'un autre vaisseau mis à l'échelle de la scène du KV-01 (V m de scène par m réel,
    proue glTF recalée sur z = 600) — tuyères, axe de la bulle, table de section de coque (voir PROFIL_KV01).
 */
-import { createOrbitSky, forwardFrom } from './3d/sky/orbitsky.js?v=20261103c';   // fond orbital partagé (planète, soleil haut-gauche)
+import { createOrbitSky, forwardFrom } from './3d/sky/orbitsky.js?v=20261103d';   // fond orbital partagé (planète, soleil haut-gauche)
 // Moteur 3D partagé du jeu (window.SB3D, exposé par planet3d.js) : pas de seconde copie de three.js.
 // MapControls = OrbitControls avec une autre affectation des gestes ; on remet celle d'une orbite.
 function libs() {

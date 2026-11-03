@@ -6,7 +6,7 @@
    Les JPEG sont pré-compensés pour l'ACES de three.js (exposition 1) et stockés à mi-échelle (gain 2 dans le shader) : l'image à l'écran est l'image cuite. */
 export const SUN_CANON = [-0.2034, 0.2079, -0.9568];   // soleil visible du fond : 12° à gauche de -Z, 12° au-dessus de l'horizontale cuite
 export function createOrbitSky(THREE, opts = {}) {
-  const base = opts.base || new URL('./', import.meta.url).href, version = opts.version || '20261103c';   // les JPEG vivent à côté de ce module
+  const base = opts.base || new URL('./', import.meta.url).href, version = opts.version || '20261103d';   // les JPEG vivent à côté de ce module
   const fwd = opts.forward || [0, 0, -1];
   const th = Math.atan2(fwd[0], -fwd[2]);                       // rotation monde → repère cuit (autour de Y)
   // bascule : les caméras des fiches plongent de ~15° vers le vaisseau et l'horizon cuit est 35° sous l'horizontale ; on incline le ciel
