@@ -1178,14 +1178,15 @@
     // le mât-drapeau : pris avant la carte (phase de capture), pour qu'elle ne choisisse pas une parcelle derrière
     let fdown = null;
     P.host.addEventListener('pointerdown', e => {
-      fdown = !active && e.isPrimary && flagAllowed() && flagHit(e.clientX, e.clientY) ? { x: e.clientX, y: e.clientY, t: performance.now(), id: e.pointerId } : null;
+      const f = !active && e.isPrimary && flagAllowed() ? flagHit(e.clientX, e.clientY) : null;
+      fdown = f ? { x: e.clientX, y: e.clientY, t: performance.now(), id: e.pointerId, f } : null;
       if (fdown) e.stopPropagation();
     }, { capture: true });
     P.host.addEventListener('pointerup', e => {
       if (!fdown || e.pointerId !== fdown.id) return;
-      const d = Math.hypot(e.clientX - fdown.x, e.clientY - fdown.y), a = performance.now() - fdown.t; fdown = null;
+      const d = Math.hypot(e.clientX - fdown.x, e.clientY - fdown.y), a = performance.now() - fdown.t, fdownF = fdown.f; fdown = null;
       e.stopPropagation();
-      if (d <= 12 && a <= 600) showFlagBubble();
+      if (d <= 12 && a <= 600) showFlagBubble(fdownF);
     }, { capture: true });
     P.host.addEventListener('pointercancel', () => { fdown = null; }, { capture: true });
     el.addEventListener('pointerup', up);
@@ -1243,7 +1244,7 @@
     pin.innerHTML = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3.5 14.5v-12M3.5 2.8h8.2l-1.6 2.9 1.6 2.9H3.5"/></svg><span>' + tr('explore.flag') + '</span>';
     scr.appendChild(pin);
     UI.pin = pin;
-    pin.addEventListener('click', () => { hideFlagBubble(); enter(); });
+    pin.addEventListener('click', () => { const f = bubbleFlag; hideFlagBubble(); if (f && f.action) f.action(); });
     pin.addEventListener('pointerdown', e => e.stopPropagation());
     const hud = document.createElement('div'); hud.id = 'sbx-hud';
     hud.innerHTML = `<div id="sbx-chip"><svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="5.6" fill="none" stroke="currentColor" stroke-width="1.6"/><circle cx="8" cy="8" r="2.6" fill="currentColor"/></svg><b>0</b></div>
@@ -1303,57 +1304,69 @@
 
   /* ── le mât-drapeau : l'entrée du jeu, plantée à l'orée de la forêt, visible depuis la colonie ──
      Un vrai objet du décor plutôt qu'un repère d'interface : il ne dépend ni du zoom, ni du didacticiel, ni des cartes ouvertes. */
-  let flag = null, cloth = null, lamp = null, cloth0 = null;
-  function buildFlag() {
-    if (flag) return;
-    const y0 = heightAt(FLAG.x, FLAG.z);
-    flag = new T.Group(); flag.name = 'SB_EXPLORE_FLAG'; flag.position.set(FLAG.x, y0, FLAG.z);
+  // plusieurs mâts possibles : le premier ouvre l'Explorer ; les autres activités (stand de tir) ajoutent le leur via l'api
+  const FLAGS = [];
+  let windT = 0, bubbleFlag = null;
+  function addFlag(def) {   // { x, z, h?, label, action(), stripe? }
+    const f = Object.assign({ h: 30, stripe: 0xf08a24 }, def);
+    FLAGS.push(f);
+    if (installed) buildOneFlag(f);
+    return f;
+  }
+  function buildOneFlag(f) {
+    if (f.g) return;
+    const y0 = heightAt(f.x, f.z), H0 = f.h;
+    const grp = new T.Group(); grp.name = 'SB_EXPLORE_FLAG'; grp.position.set(f.x, y0, f.z);
     const parts = [];
     parts.push([new T.CylinderGeometry(1.3, 1.6, 0.8, 8), 0x3a4048, M4(0, 0.4, 0)]);
     parts.push([new T.CylinderGeometry(0.9, 1.1, 0.5, 8), 0x1d2126, M4(0, 1.0, 0)]);
-    parts.push([new T.CylinderGeometry(0.26, 0.34, FLAG.h, 8), 0xaeb6bf, M4(0, FLAG.h / 2 + 1, 0)]);
-    parts.push([new T.CylinderGeometry(0.42, 0.42, 0.5, 8), 0x3a4048, M4(0, FLAG.h - 7.2, 0)]);
-    parts.push([new T.CylinderGeometry(0.42, 0.42, 0.5, 8), 0x3a4048, M4(0, FLAG.h + 0.4, 0)]);
+    parts.push([new T.CylinderGeometry(0.26, 0.34, H0, 8), 0xaeb6bf, M4(0, H0 / 2 + 1, 0)]);
+    parts.push([new T.CylinderGeometry(0.42, 0.42, 0.5, 8), 0x3a4048, M4(0, H0 - 7.2, 0)]);
+    parts.push([new T.CylinderGeometry(0.42, 0.42, 0.5, 8), 0x3a4048, M4(0, H0 + 0.4, 0)]);
     const pole = new T.Mesh(merge(parts), new T.MeshStandardMaterial({ vertexColors: true, roughness: 0.45, metalness: 0.5 }));
-    pole.castShadow = true; pole.receiveShadow = true; flag.add(pole);
-    // le drapeau : orange Starbyte, bande blanche, animé par le vent
-    const W = 12, H = 7, g = new T.PlaneGeometry(W, H, 12, 5); g.translate(W / 2 + 0.3, FLAG.h - 2.8, 0);
-    const pa = g.attributes.position, col = new Float32Array(pa.count * 3), c1 = new T.Color(0xf08a24), c2 = new T.Color(0xf7f3ea);
-    for (let i = 0; i < pa.count; i++) { const u = (pa.getX(i) - 0.3) / W, v = (pa.getY(i) - (FLAG.h - 2.8)) / H; const c = (v > 0.22 && v < 0.52) || u > 0.84 ? c2 : c1; col[i * 3] = c.r; col[i * 3 + 1] = c.g; col[i * 3 + 2] = c.b; }
+    pole.castShadow = true; pole.receiveShadow = true; grp.add(pole);
+    // le drapeau : fond clair, bande de couleur, animé par le vent
+    const W = 12, H = 7, g = new T.PlaneGeometry(W, H, 12, 5); g.translate(W / 2 + 0.3, H0 - 2.8, 0);
+    const pa = g.attributes.position, col = new Float32Array(pa.count * 3), c1 = new T.Color(f.stripe), c2 = new T.Color(0xf7f3ea);
+    for (let i = 0; i < pa.count; i++) { const u = (pa.getX(i) - 0.3) / W, v = (pa.getY(i) - (H0 - 2.8)) / H; const c = (v > 0.22 && v < 0.52) || u > 0.84 ? c2 : c1; col[i * 3] = c.r; col[i * 3 + 1] = c.g; col[i * 3 + 2] = c.b; }
     g.setAttribute('color', new T.BufferAttribute(col, 3));
-    cloth0 = Float32Array.from(pa.array);
-    cloth = new T.Mesh(g, new T.MeshStandardMaterial({ vertexColors: true, roughness: 0.85, metalness: 0, side: T.DoubleSide }));
-    cloth.castShadow = true; flag.add(cloth);
-    // la lampe de tête : un repère la nuit
-    lamp = new T.Mesh(new T.SphereGeometry(0.55, 10, 8), new T.MeshBasicMaterial({ color: 0xffd9a0, transparent: true, opacity: 0.9, toneMapped: false }));
-    lamp.position.y = FLAG.h + 1.1; flag.add(lamp);
+    f.cloth0 = Float32Array.from(pa.array);
+    f.cloth = new T.Mesh(g, new T.MeshStandardMaterial({ vertexColors: true, roughness: 0.85, metalness: 0, side: T.DoubleSide }));
+    f.cloth.castShadow = true; grp.add(f.cloth);
+    f.lamp = new T.Mesh(new T.SphereGeometry(0.55, 10, 8), new T.MeshBasicMaterial({ color: 0xffd9a0, transparent: true, opacity: 0.9, toneMapped: false }));
+    f.lamp.position.y = H0 + 1.1; grp.add(f.lamp);
     const halo = new T.Sprite(new T.SpriteMaterial({ map: glowTex(), color: 0xffc070, transparent: true, opacity: 0.5, depthWrite: false, blending: T.AdditiveBlending, toneMapped: false }));
-    halo.scale.setScalar(4.5); halo.position.y = FLAG.h + 1.1; flag.add(halo); lamp.userData.halo = halo;
-    P.scene.add(flag);
+    halo.scale.setScalar(4.5); halo.position.y = H0 + 1.1; grp.add(halo); f.halo = halo;
+    f.g = grp; P.scene.add(grp);
     if (P.renderer) P.renderer.shadowMap.needsUpdate = true;
   }
+  function buildFlag() { FLAGS.forEach(buildOneFlag); }
+  let _glowTex = null;
   function glowTex() {
+    if (_glowTex) return _glowTex;
     const c = document.createElement('canvas'); c.width = c.height = 64;
     const g = c.getContext('2d'), r = g.createRadialGradient(32, 32, 1, 32, 32, 31);
     r.addColorStop(0, 'rgba(255,255,255,1)'); r.addColorStop(0.3, 'rgba(255,255,255,.5)'); r.addColorStop(1, 'rgba(255,255,255,0)');
     g.fillStyle = r; g.fillRect(0, 0, 64, 64);
-    return new T.CanvasTexture(c);
+    return (_glowTex = new T.CanvasTexture(c));
   }
-  let windT = 0;
   function flagTick(dt) {
-    if (!flag || !P.host || P.host.offsetParent === null) return;
+    if (!P.host || P.host.offsetParent === null) return;
     windT += dt;
-    const pa = cloth.geometry.attributes.position, W = 12;
-    for (let i = 0; i < pa.count; i++) {
-      const x0 = cloth0[i * 3], u = Math.max(0, (x0 - 0.3) / W);
-      const w = Math.sin(windT * 4.2 - u * 5.5) * 0.55 + Math.sin(windT * 2.3 - u * 2.1 + 1.1) * 0.3;
-      pa.array[i * 3 + 2] = w * u * u * 2.1;
-      pa.array[i * 3 + 1] = cloth0[i * 3 + 1] + Math.sin(windT * 3.1 - u * 4) * u * 0.25;
+    const k = window.SBSky && SBSky.k != null ? SBSky.k : 1, night = 1 - k, W = 12;
+    for (const f of FLAGS) {
+      if (!f.g) continue;
+      const pa = f.cloth.geometry.attributes.position;
+      for (let i = 0; i < pa.count; i++) {
+        const x0 = f.cloth0[i * 3], u = Math.max(0, (x0 - 0.3) / W);
+        const w = Math.sin(windT * 4.2 - u * 5.5) * 0.55 + Math.sin(windT * 2.3 - u * 2.1 + 1.1) * 0.3;
+        pa.array[i * 3 + 2] = w * u * u * 2.1;
+        pa.array[i * 3 + 1] = f.cloth0[i * 3 + 1] + Math.sin(windT * 3.1 - u * 4) * u * 0.25;
+      }
+      pa.needsUpdate = true; f.cloth.geometry.computeVertexNormals();
+      f.lamp.material.opacity = 0.25 + night * 0.75;
+      f.halo.material.opacity = 0.08 + night * 0.6 + Math.sin(windT * 2) * 0.04 * night;
     }
-    pa.needsUpdate = true; cloth.geometry.computeVertexNormals();
-    const k = window.SBSky && SBSky.k != null ? SBSky.k : 1, night = 1 - k;
-    lamp.material.opacity = 0.25 + night * 0.75;
-    lamp.userData.halo.material.opacity = 0.08 + night * 0.6 + Math.sin(windT * 2) * 0.04 * night;
     if (UI.pin.classList.contains('on')) placeFlagBubble();
   }
   function flagAllowed() {
@@ -1364,23 +1377,28 @@
     if (document.querySelector('.w-sheet.on, #sb-sheet, #sb-away, #mp-choose, #sb-notif')) return false;
     return true;
   }
-  // zone de toucher généreuse : tout le mât et le drapeau, au moins 56 px de large
+  // zone de toucher généreuse : tout le mât et le drapeau, au moins 56 px de large ; renvoie le mât touché
   function flagHit(cx, cy) {
-    if (!flag) return false;
-    const y0 = flag.position.y, pts = [[FLAG.x, y0, FLAG.z], [FLAG.x, y0 + FLAG.h + 2, FLAG.z], [FLAG.x + 12.5, y0 + FLAG.h - 7, FLAG.z], [FLAG.x + 12.5, y0 + FLAG.h + 1, FLAG.z]];
-    let x0 = 1e9, x1 = -1e9, y1 = 1e9, y2 = -1e9;
-    for (const [x, y, z] of pts) { const [sx, sy] = screenOf(x, y, z); x0 = Math.min(x0, sx); x1 = Math.max(x1, sx); y1 = Math.min(y1, sy); y2 = Math.max(y2, sy); }
-    const mx = (x0 + x1) / 2, my = (y1 + y2) / 2, hw = Math.max(28, (x1 - x0) / 2 + 10), hh = Math.max(32, (y2 - y1) / 2 + 10);
-    return Math.abs(cx - mx) <= hw && Math.abs(cy - my) <= hh;
+    for (const f of FLAGS) {
+      if (!f.g) continue;
+      const y0 = f.g.position.y, pts = [[f.x, y0, f.z], [f.x, y0 + f.h + 2, f.z], [f.x + 12.5, y0 + f.h - 7, f.z], [f.x + 12.5, y0 + f.h + 1, f.z]];
+      let x0 = 1e9, x1 = -1e9, y1 = 1e9, y2 = -1e9;
+      for (const [x, y, z] of pts) { const [sx, sy] = screenOf(x, y, z); x0 = Math.min(x0, sx); x1 = Math.max(x1, sx); y1 = Math.min(y1, sy); y2 = Math.max(y2, sy); }
+      const mx = (x0 + x1) / 2, my = (y1 + y2) / 2, hw = Math.max(28, (x1 - x0) / 2 + 10), hh = Math.max(32, (y2 - y1) / 2 + 10);
+      if (Math.abs(cx - mx) <= hw && Math.abs(cy - my) <= hh) return f;
+    }
+    return null;
   }
-  function showFlagBubble() { UI.pin.classList.add('on'); placeFlagBubble(); }
-  function hideFlagBubble() { if (UI.pin) UI.pin.classList.remove('on'); }
+  function showFlagBubble(f) { bubbleFlag = f; UI.pin.querySelector('span').textContent = tr(f.label); UI.pin.classList.add('on'); placeFlagBubble(); }
+  function hideFlagBubble() { if (UI.pin) UI.pin.classList.remove('on'); bubbleFlag = null; }
   function placeFlagBubble() {
-    if (!flagAllowed()) { hideFlagBubble(); return; }
-    const [sx, sy] = screenOf(FLAG.x, flag.position.y + FLAG.h + 3, FLAG.z), hr = document.getElementById('scr-planet').getBoundingClientRect(), w = UI.pin.offsetWidth || 110;
+    const f = bubbleFlag;
+    if (!f || !flagAllowed()) { hideFlagBubble(); return; }
+    const [sx, sy] = screenOf(f.x, f.g.position.y + f.h + 3, f.z), hr = document.getElementById('scr-planet').getBoundingClientRect(), w = UI.pin.offsetWidth || 110;
     const x = Math.round(Math.max(8, Math.min(hr.width - w - 8, sx - hr.left - w / 2))), y = Math.round(Math.max(60, sy - hr.top - 46));
     UI.pin.style.transform = `translate3d(${x}px,${y}px,0)`;
   }
+  addFlag({ x: FLAG.x, z: FLAG.z, h: FLAG.h, label: 'explore.flag', action: () => enter() });
 
   /* ───────────────────────── entrer, sortir ───────────────────────── */
   // tout le terrain d'un coup d'œil : la caisse en haut, la catapulte en bas, avec la place de tirer
@@ -1514,12 +1532,12 @@
   window.SBExplore = {
     enter, exit,
     get active() { return active; },
-    api: { extra: EXTRA, get root() { return root; }, get active() { return active; }, heightAt: (x, z) => heightAt(x, z), screenOf: (x, y, z) => screenOf(x, y, z), get GEO() { return GEO; }, get MAT() { return MAT; }, WATER },
+    api: { extra: EXTRA, get root() { return root; }, get active() { return active; }, heightAt: (x, z) => heightAt(x, z), screenOf: (x, y, z) => screenOf(x, y, z), get GEO() { return GEO; }, get MAT() { return MAT; }, WATER, addFlag, flags: FLAGS },
     // mesure du rythme, pour équilibrer ensuite (brief §4)
     stats() {
       const s = S(), min = (s.secs || 0) / 60;
       return { lapins: s.caught || 0, biomasse: (s.caught || 0) * CFG.reward, minutes: +min.toFixed(1), biomasse_par_minute: min > 0 ? +(((s.caught || 0) * CFG.reward) / min).toFixed(1) : 0 };
     },
-    _dbg: { W, S, CFG, CRATE, SITE, CATA, HOME, NAV, UI, FLAG, flagHit, flagAllowed, get flag() { return flag; }, tick, fullyIn, inDoorway, onTap, screenOf, findPath, closeDoor, launch, slingAim, pullMax, isBlockedAt, heightAt, fieldView, aliveTarget, get Y0() { return Y0; }, get installed() { return installed; } },
+    _dbg: { W, S, CFG, CRATE, SITE, CATA, HOME, NAV, UI, FLAG, FLAGS, flagHit, flagAllowed, get flag() { return FLAGS[0].g; }, tick, fullyIn, inDoorway, onTap, screenOf, findPath, closeDoor, launch, slingAim, pullMax, isBlockedAt, heightAt, fieldView, aliveTarget, get Y0() { return Y0; }, get installed() { return installed; } },
   };
 })();

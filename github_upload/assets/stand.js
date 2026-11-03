@@ -20,12 +20,12 @@
     chargeTime: 1.2,        // maintenir « Tirer » : de 0 à pleine charge
     full: 0.92,             // à partir de là, le coup fait exploser la cible
     cooldown: 0.3,          // après un tir, avant de pouvoir recharger
-    swayYaw: 0.42,          // oscillation régulière, en degrés
-    swayPitch: 0.3,
-    swayHz: 0.58,
-    breathHold: 4,          // apnée : durée maximale
-    breathCalm: 0.3,        // oscillation pendant l'apnée (part de la normale)
-    breathRecover: 3,       // après l'apnée : le cœur bat, oscillation ×heart
+    swayYaw: 0.12,          // respiration : lente, surtout de haut en bas, en degrés
+    swayPitch: 0.5,
+    swayHz: 0.22,
+    breathHold: 2,          // apnée : durée maximale
+    breathCalm: [0.06, 0.6],// oscillation pendant l'apnée : presque immobile au début, de plus en plus dure à tenir
+    breathRecover: 2.5,     // après l'apnée : le cœur bat, oscillation ×heart
     breathHeart: 1.8,
     kickPitch: [1.4, 6.5],  // recul qui revient tout seul, en degrés, à charge nulle / pleine
     kickYaw: [0.35, 1.4],
@@ -35,23 +35,22 @@
     limitPitch: 12,
     sensitivity: 0.045,     // degrés par pixel, à l'œil nu (divisé par le grossissement dans la lunette)
     fov: 58, fovWide: 44,   // champ à l'œil nu (hauteur / largeur)
-    scopeFov: 14,           // champ dans la lunette
+    scopeFov: 10,           // champ dans la lunette (×6)
     resultDelay: 0.9,
     gunTall: { x: 0.18, y: -0.8, z: -1.5, s: 1, tilt: 0.07 },
     gunWide: { x: 0.72, y: -0.72, z: -1.5, s: 1, tilt: 0.05 },
-    rabbits: 3,
+    rabbits: 6,
   };
-  const ZONES = [[0.25, 100], [0.5, 75], [0.75, 50], [1, 25]];   // part du rayon → points d'un coup partiel
+  const ZONES = [[0.34, 100], [0.67, 50], [1, 25]];   // part du rayon → points d'un coup partiel (trois cercles)
 
   /* ── le terrain : la pointe est, face au lac ── */
   const POST = { x: 178, z: 137 };                      // poste de tir, sur la pointe
-  const TGT = { x: 222, z: 22 };                        // plateforme sur le lac
+  const TGT = { x: 246, z: -95 };                       // plateforme sur le lac, à 242 unités
   const EYE = 4.6;
-  const BOARD = { w: 7.2, h: 7.2, y: 4.3 };             // plaque-cible : largeur, hauteur, hauteur du centre au-dessus du pont
-  const TARGET_R = 3.2;                                 // rayon des anneaux peints
+  const BOARD = { w: 5.2, h: 5.2, y: 3.6 };             // plaque-cible : largeur, hauteur, hauteur du centre au-dessus du pont
+  const TARGET_R = 2.3;                                 // rayon des anneaux peints
   const DECK = { w: 11, d: 9, y: 0.45 };                // pont de la plateforme (hauteur au-dessus de l'eau)
   const LANE = { r: 14 };                               // rayon sans arbres autour du poste, pendant l'exploration
-  const SHORE = [[187, 100], [189, 88], [188, 76], [190, 64], [189, 52], [191, 42]];   // chemin des lapins le long de la berge
 
   const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
   const lerp = (a, b, t) => a + (b - a) * t;
@@ -60,6 +59,13 @@
   const hash = (x, y) => { let h = (x * 374761393 + y * 668265263) | 0; h = (h ^ (h >>> 13)) * 1274126177 | 0; return ((h ^ (h >>> 16)) >>> 0) / 4294967296; };
   const AIM0 = Math.atan2(TGT.x - POST.x, -(TGT.z - POST.z));   // direction de la plateforme (yaw 0 = nord)
   const DIST = Math.hypot(TGT.x - POST.x, TGT.z - POST.z);
+  // chemin des lapins : le long de la berge, dans le couloir de tir, de 16 à 72 unités du poste
+  const SHORE = (() => {
+    const ux = (TGT.x - POST.x) / DIST, uz = (TGT.z - POST.z) / DIST, rx = -uz, rz = ux, out = [];
+    for (let a = 16; a <= 72; a += 8) out.push([POST.x + ux * a + rx * 5.5, POST.z + uz * a + rz * 5.5]);
+    return out;
+  })();
+  const FLAG2 = { x: POST.x - 8, z: POST.z + 7 };        // le mât du stand, visible depuis la colonie
 
   let T = null, P = null, API = null, built = false, WATER = -1.75;
   const allowed = () => {
@@ -76,6 +82,7 @@
     if (!window.I18N || !I18N.add) return;
     I18N.add('fr', {
       'stand.offer': 'S\'entraîner',
+      'stand.flag': 'Stand de tir',
       'stand.back': 'Retour à l\'exploration',
       'stand.fire': 'Tirer',
       'stand.shots': 'Tirs : {n}/{m}',
@@ -298,7 +305,7 @@
     for (let i = 0; i < 70; i++) { g.fillStyle = `rgba(${hash(i, 3) < 0.5 ? '90,80,70' : '255,255,250'},${0.05 + hash(i, 5) * 0.1})`; g.fillRect(hash(i, 7) * W, hash(i, 9) * H, 3 + hash(i, 11) * 40, 1 + hash(i, 13) * 3); }
     g.strokeStyle = 'rgba(40,36,30,.7)'; g.lineWidth = 10; g.strokeRect(5, 5, W - 10, H - 10);
     g.fillStyle = 'rgba(30,28,26,.8)'; for (let i = 0; i < 8; i++) { g.beginPath(); g.arc(14 + (i % 2) * (W - 28), 14 + Math.floor(i / 2) % 4 * ((H - 28) / 3), 4, 0, 6.2832); g.fill(); }
-    const px = TARGET_R * C_K, cols = ['#efe9d8', '#b7221a', '#efe9d8', '#b7221a'];
+    const px = TARGET_R * C_K, cols = ['#b7221a', '#efe9d8', '#b7221a'];
     for (let i = ZONES.length - 1; i >= 0; i--) {
       g.beginPath(); g.arc(cx, cy, ZONES[i][0] * px, 0, 6.2832);
       g.fillStyle = cols[ZONES.length - 1 - i]; g.fill();
@@ -394,8 +401,6 @@
     for (const s of [-1, 1]) add(cbox(0.36, BOARD.y + BOARD.h / 2 + 0.6, 0.36, 0.04), 0x767b84, M4(s * (BOARD.w / 2 + 0.4), DECK.y + (BOARD.y + BOARD.h / 2 + 0.6) / 2, -0.4));
     add(cbox(BOARD.w + 1.3, 0.3, 0.3, 0.03), 0x767b84, M4(0, DECK.y + BOARD.y + BOARD.h / 2 + 0.5, -0.4));
     for (const s of [-1, 1]) add(cbox(0.2, 5, 0.2, 0.02), 0x3a3d42, M4(s * (BOARD.w / 2 + 0.4), DECK.y + 3, -2.2, 0.62, 0, 0));
-    // projecteurs au sol, braqués vers la plaque
-    for (const s of [-1, 1]) { add(cbox(0.9, 0.5, 0.7, 0.05), 0x1d2126, M4(s * 2.6, DECK.y + 0.5, 3.4, -1.05, 0, 0)); add(cbox(0.95, 0.08, 0.72, 0.01), 0x101214, M4(s * 2.6, DECK.y + 0.3, 3.6)); }
     const m = new T.Mesh(merge(parts), MAT.hard); m.castShadow = true; m.receiveShadow = true; grp.add(m);
     // la plaque peinte
     const cv = document.createElement('canvas'); cv.width = C_W; cv.height = C_H; targetCtx = cv.getContext('2d');
@@ -406,14 +411,6 @@
     const face = new T.Mesh(new T.PlaneGeometry(BOARD.w, BOARD.h), bm); face.castShadow = true; board.add(face);
     const back = new T.Mesh(cbox(BOARD.w + 0.2, BOARD.h + 0.2, 0.25, 0.03), new T.MeshStandardMaterial({ color: 0x3a3d42, roughness: 0.6, metalness: 0.4 })); back.position.z = -0.14; board.add(back);
     FX.board = board; FX.boardMat = bm;
-    // faisceaux des projecteurs (visibles la nuit) et lueur sur la plaque
-    const beamMat = new T.MeshBasicMaterial({ color: 0xffd080, transparent: true, opacity: 0, depthWrite: false, blending: T.AdditiveBlending, side: T.DoubleSide, toneMapped: false });
-    FX.floods = [];
-    for (const s of [-1, 1]) {
-      const cone = new T.Mesh(new T.ConeGeometry(2.6, 6, 10, 1, true), beamMat); cone.position.set(s * 2.6 * 0.3, DECK.y + 3.4, 1.6); cone.rotation.x = -0.58; cone.rotation.z = -s * 0.25; grp.add(cone); FX.floods.push(cone);
-      const sp = new T.Sprite(new T.SpriteMaterial({ map: TEX.glow, color: 0xffe0a0, transparent: true, opacity: 0, depthWrite: false, blending: T.AdditiveBlending, toneMapped: false })); sp.position.set(s * 2.6, DECK.y + 0.6, 3.4); sp.scale.setScalar(2.2); grp.add(sp); FX.floods.push(sp);
-    }
-    FX.floodMat = beamMat;
     // balise rouge en tête de cadre
     const bk = new T.Mesh(new T.SphereGeometry(0.22, 8, 6), new T.MeshBasicMaterial({ color: 0xff3020, toneMapped: false })); bk.position.set(0, DECK.y + BOARD.y + BOARD.h / 2 + 0.85, -0.4); grp.add(bk); FX.beacon = bk;
     // éclats de la plaque quand elle explose
@@ -447,7 +444,7 @@
       const head = new T.Group(); head.position.set(0, 1.94, 1.02); bodyP.add(head); head.add(new T.Mesh(g.head, FUR));
       for (const s of [-1, 1]) { const e = new T.Group(); e.position.set(s * 0.36, 0.5, -0.14); e.rotation.z = -s * 0.14; e.add(new T.Mesh(g.ear, FUR)); head.add(e); }
       grp.scale.setScalar(1.25); STG.add(grp);
-      const r = { g: grp, bodyP, seg: Math.floor(hash(i, 3) * (SHORE.length - 1)), u: hash(i, 5), dir: i % 2 ? 1 : -1, hop: null, wait: hash(i, 7) * 2, dead: 0, x: 0, z: 0 };
+      const r = { g: grp, bodyP, seg: Math.min(SHORE.length - 2, Math.floor(i / CFG.rabbits * (SHORE.length - 1))), u: hash(i, 5), dir: i % 2 ? 1 : -1, hop: null, wait: hash(i, 7) * 2, dead: 0, x: 0, z: 0 };
       placeRabbit(r); RB.list.push(r);
     }
   }
@@ -465,7 +462,7 @@
         const [x, z] = shorePoint(r.seg, r.u); r.x = x; r.z = z;
         r.g.position.set(x, API.heightAt(x, z) + Math.sin(k * Math.PI) * 0.9, z);
         r.bodyP.rotation.x = -Math.sin(k * Math.PI) * 0.25;
-        if (k >= 1) { r.hop = null; r.wait = 0.25 + Math.random() * 1.6; if (Math.random() < 0.08) r.dir *= -1; }
+        if (k >= 1) { r.hop = null; r.wait = 0.15 + Math.random() * 1.1; if (Math.random() < 0.08) r.dir *= -1; }
         continue;
       }
       r.wait -= dt;
@@ -490,7 +487,7 @@
     return best;
   }
   function popRabbit(r) {
-    r.dead = 7 + Math.random() * 6; r.g.visible = false;
+    r.dead = 5 + Math.random() * 5; r.g.visible = false;
     burstChips(r.x, r.g.position.y + 1.4, r.z, 26, 0xf4eee4, 7, 10, 'fluff');
     burstChips(r.x, r.g.position.y + 1.4, r.z, 1, 0xf08a24, 5, 12, 'carrot');
     puffSmoke(r.x, r.g.position.y + 1.6, r.z, 5, { o: 0.55, size: 1.4, rise: 1.2, life: 1.1, col: 0xfaf6ef, spread: 2.2 });
@@ -653,7 +650,7 @@
   // l'oscillation : respiration régulière, calmée par l'apnée, agitée par le cœur qui reprend
   function swayScale() {
     if (FP.noSway) return 0;
-    if (FP.breathSt === 'hold') return CFG.breathCalm;
+    if (FP.breathSt === 'hold') { const k = FP.breathT / CFG.breathHold; return lerp(CFG.breathCalm[0], CFG.breathCalm[1], k * k); }
     if (FP.breathSt === 'heart') return lerp(CFG.breathHeart, 1, sstep(0, 1, FP.breathT / CFG.breathRecover));
     return 1;
   }
@@ -902,10 +899,10 @@
     if (window.SBFluid) SBFluid.poke();
   }
   function breathTick(dt) {
-    if (FP.breathSt === 'calm') { FP.breath = Math.min(1, FP.breath + dt / 4); if (FP.breathPtr && FP.breath > 0.25) { FP.breathSt = 'hold'; FP.breathT = 0; sfx('stBreath'); } }
+    if (FP.breathSt === 'calm') { FP.breath = Math.min(1, FP.breath + dt / 3); if (FP.breathPtr && FP.breath > 0.25) { FP.breathSt = 'hold'; FP.breathT = 0; sfx('stBreath'); } }
     else if (FP.breathSt === 'hold') {
       FP.breathT += dt; FP.breath = Math.max(0, 1 - FP.breathT / CFG.breathHold);
-      if (!FP.breathPtr || FP.breathT >= CFG.breathHold) { FP.breathSt = FP.breathT >= CFG.breathHold * 0.6 ? 'heart' : 'calm'; FP.breathT = 0; if (FP.breathSt === 'heart') sfx('stHeart'); }
+      if (!FP.breathPtr || FP.breathT >= CFG.breathHold) { FP.breathSt = FP.breathT >= CFG.breathHold * 0.5 ? 'heart' : 'calm'; FP.breathT = 0; if (FP.breathSt === 'heart') sfx('stHeart'); }
     } else if (FP.breathSt === 'heart') {
       FP.breathT += dt; FP.breath = Math.min(1, FP.breathT / CFG.breathRecover * 0.5);
       if (FP.breathT >= CFG.breathRecover) { FP.breathSt = 'calm'; FP.breathT = 0; }
@@ -915,9 +912,7 @@
   function nightTick() {
     const k = window.SBSky && SBSky.k != null ? SBSky.k : 1, night = 1 - k;
     if (FX.nightK !== undefined && Math.abs(FX.nightK - night) < 0.01) return; FX.nightK = night;
-    FX.floodMat.opacity = night * 0.16;
-    FX.floods.forEach(o => { if (o.isSprite) o.material.opacity = night * 0.8; });
-    FX.boardMat.emissiveIntensity = night * 0.75;
+    FX.boardMat.emissiveIntensity = night * 0.6;
     FX.lampHalo.material.opacity = night * 0.7;
   }
 
@@ -1254,6 +1249,7 @@
       cutLane();
       soldierLOD(true);
       STG.visible = true;
+      focusStand();
     });
     X.rebuild.push(() => { if (built && allowed()) { uncutLane(); cutLane(); } });
     X.exit.push(() => {
@@ -1273,13 +1269,32 @@
   }
   const wt = setInterval(() => { if (wire()) clearInterval(wt); }, 300);
   wire();
+  // le mât du stand sur la carte de la colonie : « Stand de tir » ouvre l'Explorer et vole jusqu'au poste
+  let flagAdded = false, flagTries = 0, pendingFocus = false;
+  const ft = setInterval(() => {
+    if (flagAdded || ++flagTries > 120) { clearInterval(ft); return; }
+    if (!window.SBExplore || !SBExplore.api || !SBExplore.api.addFlag || typeof G === 'undefined' || !G) return;
+    if (!allowed()) { if (flagTries > 40) clearInterval(ft); return; }
+    flagAdded = true; clearInterval(ft);
+    addTexts();
+    SBExplore.api.addFlag({ x: FLAG2.x, z: FLAG2.z, h: 26, stripe: 0x8e1015, label: 'stand.flag', action: () => { pendingFocus = true; SBExplore.enter(); } });
+  }, 500);
+  function focusStand() {
+    if (!pendingFocus || !built) return;
+    pendingFocus = false;
+    setTimeout(() => {
+      if (!API.active || FP.on) return;
+      try { P._focusAnim = null; P._moveTo(new T.Vector3(POST.x + 4, 0, POST.z - 12), 150, 900); } catch (e) {}
+      setTimeout(() => { if (API.active && !FP.on) showOffer(); }, 1000);
+    }, 1250);
+  }
 
   window.SBStand = {
     open: openFP, close: closeFP, pressFire, releaseFire, replay, setScope,
     fire() { if (!pressFire()) return false; FP.charge = 1; return releaseFire(); },
     get state() { return FP.st; },
     get on() { return FP.on; },
-    _dbg: { FP, FX, TG, RB, CFG, TGT, POST, TARGET_R, BOARD, ZONES, AIM0, DIST, C_W, C_K, C_H, get targetCtx() { return targetCtx; }, get cuts() { return CUTS.length; }, tick, discharge, traceShot, currentAim, dirOf, scoreAt, standHit, boardFrame, get built() { return built; }, get UI() { return UI; },
+    _dbg: { FP, FX, TG, RB, CFG, TGT, POST, FLAG2, SHORE, TARGET_R, BOARD, ZONES, AIM0, DIST, C_W, C_K, C_H, get targetCtx() { return targetCtx; }, get cuts() { return CUTS.length; }, tick, discharge, traceShot, currentAim, dirOf, scoreAt, standHit, boardFrame, get built() { return built; }, get UI() { return UI; },
       aimAt(x, y) { const f = boardFrame(), p = f.c.clone().addScaledVector(f.right, x).addScaledVector(f.up, y), o = P.camera.position, d = p.sub(o); FP.yaw = Math.atan2(d.x, -d.z) - AIM0; FP.pitch = Math.atan2(d.y, Math.hypot(d.x, d.z)); } },
   };
 })();

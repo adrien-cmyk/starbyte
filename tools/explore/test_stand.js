@@ -5,6 +5,8 @@ let fails=0,okc=0; const ok=(c,m,x)=>{ if(c){okc++;console.log('ok  ',m);} else 
   const cdp=await c.newCDPSession(p);
   const touch=async(type,pts)=>cdp.send('Input.dispatchTouchEvent',{type,touchPoints:type==='touchEnd'?[]:pts});
   await p.waitForTimeout(300);
+  const fl=await p.evaluate(()=>({n:SBExplore._dbg.FLAGS.length,built:SBExplore._dbg.FLAGS.every(f=>!!f.g),lab:SBExplore._dbg.FLAGS.map(f=>f.label)}));
+  ok(fl.n===2&&fl.built,'deux mâts sur la carte de la colonie (Explorer, Stand de tir)',fl);
   await enterNow(p);
   await p.evaluate(()=>{SBSky.force(1);document.querySelectorAll('#toast').forEach(t=>t.remove());});
   const camE=await p.evaluate(()=>{const P=Planet3D,c=P.camera;return {p:c.position.toArray(),t:P.controls.target.toArray(),fov:c.fov,near:c.near,far:c.far,min:P.controls.minDistance,max:P.controls.maxDistance};});
@@ -18,22 +20,22 @@ let fails=0,okc=0; const ok=(c,m,x)=>{ if(c){okc++;console.log('ok  ',m);} else 
   await p.evaluate(()=>{__aim(1.0,0.3);SBStand.pressFire();__adv(.4);});
   let c1=await p.evaluate(()=>SBStand._dbg.FP.charge); ok(c1>0.25&&c1<0.45,'la charge monte en maintenant',c1);
   await p.evaluate(()=>SBStand.releaseFire());
-  h=await hud(); ok(h.shots===1&&h.score===75&&h.tg==='up','coup partiel : anneau 75, la cible tient',h);
+  h=await hud(); ok(h.shots===1&&h.score===50&&h.tg==='up','coup partiel : deuxième cercle, 50, la cible tient',h);
   ok((await p.evaluate(()=>SBStand._dbg.FP.lastPower))<0.5,'la puissance du coup est celle atteinte au relâcher');
   // pleine charge : explosion et combo
   await p.evaluate(()=>{__toReady();__aim(1.2,-0.4);SBStand.pressFire();__adv(1.5);});
   ok((await p.evaluate(()=>SBStand._dbg.FP.charge))===1,'la charge plafonne à 1');
   await p.evaluate(()=>SBStand.releaseFire());
-  h=await hud(); ok(h.shots===2&&h.score===175&&h.targets===1&&h.tg==='gone','pleine charge sur la cible : explosion, +100',h);
+  h=await hud(); ok(h.shots===2&&h.score===150&&h.targets===1&&h.tg==='gone','pleine charge sur la cible : explosion, +100',h);
   await p.evaluate(()=>{__toReady();__aim(0,0);SBStand.pressFire();__adv(1.5);SBStand.releaseFire();});
-  h=await hud(); ok(h.shots===3&&h.score===175,'sans cible, le coup est consommé pour rien',h);
+  h=await hud(); ok(h.shots===3&&h.score===150,'sans cible, le coup est consommé pour rien',h);
   // le drone ramène une cible neuve
   await p.evaluate(()=>__adv(6));
   h=await hud(); ok(h.tg==='up','cible remplacée par le drone',h);
   const clean=await p.evaluate(()=>{const d=SBStand._dbg,g=d.targetCtx,cx=d.C_W/2,cy=d.C_H/2,v=g.getImageData(Math.round(cx+0.3*d.C_K),Math.round(cy-0.2*d.C_K),1,1).data;return [v[0],v[1],v[2]];});
   ok(clean[0]>150&&clean[1]<80,'aucune trace de l\'ancien impact sur la cible neuve',clean);
   await p.evaluate(()=>{__toReady();__aim(0.1,0);SBStand.pressFire();__adv(1.5);SBStand.releaseFire();});
-  h=await hud(); ok(h.targets===2&&h.score===175+150,'deuxième cible du chargeur : +150 (combo)',h);
+  h=await hud(); ok(h.targets===2&&h.score===300,'deuxième cible du chargeur : +150 (combo)',h);
   // lapin : 0 point, cartouche consommée
   await p.evaluate(()=>{__adv(6);__toReady();const d=SBStand._dbg;d.RB.list.forEach(x=>{x.hop=null;x.wait=99;x.dead=0;x.g.visible=true;});});
   const rb=await p.evaluate(()=>{const d=SBStand._dbg,r=d.RB.list[0],P=Planet3D;const [x,z]=[r.x,r.z];r.g.position.set(x,SBExplore.api.heightAt(x,z),z);const c=new (SB3D.THREE.Vector3)(x,r.g.position.y+1.6,z),o=P.camera.position,dd=c.clone().sub(o);d.FP.kp=0;d.FP.ky=0;d.FP.yaw=Math.atan2(dd.x,-dd.z)-d.AIM0;d.FP.pitch=Math.atan2(dd.y,Math.hypot(dd.x,dd.z));const a=d.currentAim();return d.traceShot(o.clone(),d.dirOf(a.yaw,a.pitch)).kind;});
@@ -41,14 +43,14 @@ let fails=0,okc=0; const ok=(c,m,x)=>{ if(c){okc++;console.log('ok  ',m);} else 
   const before=(await hud()).shots;
   const dbg=await p.evaluate(()=>{const d=SBStand._dbg;SBStand.pressFire();__adv(.3);const a=d.currentAim(),k=d.traceShot(Planet3D.camera.position.clone(),d.dirOf(a.yaw,a.pitch)).kind;SBStand.releaseFire();return {k,hit:d.FP.lastHit.kind,st:SBStand.state};});
   console.log('   lapin :',JSON.stringify(dbg));
-  h=await hud(); ok(h.shots===before+1&&h.score===325,'lapin touché : 0 point, une cartouche en moins',h);
+  h=await hud(); ok(h.shots===before+1&&h.score===300,'lapin touché : 0 point, une cartouche en moins',h);
   ok(await p.evaluate(()=>!SBStand._dbg.RB.list[0].g.visible&&SBStand._dbg.RB.list[0].dead>0),'le lapin a éclaté et reviendra');
   // lunette et apnée
   const fov0=await p.evaluate(()=>Planet3D.camera.fov);
   await touch('touchStart',[{x:150,y:400,id:1},{x:250,y:400,id:2}]); await touch('touchMove',[{x:90,y:400,id:1},{x:310,y:400,id:2}]); await touch('touchEnd',[]);
   await p.evaluate(()=>__adv(1));
   const fov1=await p.evaluate(()=>Planet3D.camera.fov);
-  ok(fov0===58&&Math.abs(fov1-14)<0.5,'pincer ouvre la lunette (champ ×4)',[fov0,fov1]);
+  ok(fov0===58&&Math.abs(fov1-10)<0.5,'pincer ouvre la lunette (champ ×6)',[fov0,fov1]);
   await p.evaluate(()=>{const d=SBStand._dbg;d.FP.noSway=false;});
   const sway=await p.evaluate(()=>{const d=SBStand._dbg;let a=0;for(let i=0;i<60;i++){d.FP.t=i*0.05;const c=d.currentAim();a=Math.max(a,Math.abs(c.yaw-d.AIM0-d.FP.yaw));}return a*180/Math.PI;});
   await touch('touchStart',[{x:60,y:500,id:3}]);
@@ -56,14 +58,14 @@ let fails=0,okc=0; const ok=(c,m,x)=>{ if(c){okc++;console.log('ok  ',m);} else 
   await p.evaluate(()=>__adv(.6));
   const st=await p.evaluate(()=>SBStand._dbg.FP.breathSt);
   const sway2=await p.evaluate(()=>{const d=SBStand._dbg;let a=0;for(let i=0;i<60;i++){d.FP.t=i*0.05;const c=d.currentAim();a=Math.max(a,Math.abs(c.yaw-d.AIM0-d.FP.yaw));}return a*180/Math.PI;});
-  ok(st==='hold'&&sway2<sway*0.45,'pouce posé : apnée, l\'oscillation tombe',{st,sway,sway2});
-  await p.evaluate(()=>__adv(4.2));
+  ok(st==='hold'&&sway2<sway*0.3,'pouce posé : apnée, l\'oscillation tombe',{st,sway,sway2});
+  await p.evaluate(()=>__adv(1.6));
   const st2=await p.evaluate(()=>SBStand._dbg.FP.breathSt);
-  ok(st2==='heart','au bout de 4 s le cœur reprend',st2);
+  ok(st2==='heart','au bout de 2 s le cœur reprend',st2);
   await touch('touchEnd',[]);
   await p.evaluate(()=>{__adv(4);SBStand._dbg.FP.noSway=true;});
   ok((await p.evaluate(()=>SBStand._dbg.FP.breathSt))==='calm','puis tout se calme');
-  ok((await p.evaluate(()=>Planet3D.camera.fov))<15,'la lunette reste active après un tir et une apnée');
+  ok((await p.evaluate(()=>Planet3D.camera.fov))<11,'la lunette reste active après un tir et une apnée');
   await touch('touchStart',[{x:90,y:400,id:1},{x:310,y:400,id:2}]);
   console.log('   pince :',JSON.stringify(await p.evaluate(()=>({p:SBStand._dbg.FP.pinch,on:SBStand._dbg.FP.scopeOn,ptr:SBStand._dbg.FP.ptr,br:SBStand._dbg.FP.breathPtr}))));
   await touch('touchMove',[{x:160,y:400,id:1},{x:240,y:400,id:2}]); await touch('touchEnd',[]);
@@ -74,8 +76,8 @@ let fails=0,okc=0; const ok=(c,m,x)=>{ if(c){okc++;console.log('ok  ',m);} else 
   h=await hud(); ok(h.shots===24&&h.st==='result','24 coups : résultat',h);
   ok(!(await p.evaluate(()=>SBStand.pressFire())),'pas de 25e coup');
   const line=await p.evaluate(()=>document.getElementById('sbs-rline').textContent);
-  ok(line==='325 points — Nouveau record personnel','message de fin',line);
-  ok((await p.evaluate(()=>G.explore.standBest))===325,'record enregistré');
+  ok(line==='300 points — Nouveau record personnel','message de fin',line);
+  ok((await p.evaluate(()=>G.explore.standBest))===300,'record enregistré');
   await p.evaluate(()=>SBStand.replay());
   h=await hud(); ok(h.shots===0&&h.score===0&&h.st==='ready','« Recharger » : nouveau chargeur',h);
   // retour : cadrage restauré
