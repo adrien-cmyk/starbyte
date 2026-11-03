@@ -63,15 +63,20 @@
   let SHORE = [];
   function buildShorePath() {   // au sec, le plus près possible du bord de l'eau, côté lac
     const ux = (TGT.x - POST.x) / DIST, uz = (TGT.z - POST.z) / DIST, rx = -uz, rz = ux, out = [];
-    for (let a = 16; a <= 72; a += 8) {
+    for (let a = 40; a <= 112; a += 8) {
       let pick = null;
-      for (const off of [5.5, 4, 2.5, 1, -1, -2.5, -4, -6, -8]) {
+      for (const off of [5.5, 4, 2.5, 1, -1, -2.5, -4, -6, -8, -10, -12, -14, -17, -20]) {
         const x = POST.x + ux * a + rx * off, z = POST.z + uz * a + rz * off;
         if (API.heightAt(x, z) > WATER + 0.25) { pick = [x, z]; break; }
       }
       if (pick) out.push(pick);
     }
-    SHORE = out;
+    // entre deux points, le trajet doit rester au sec : on garde la plus longue suite continue
+    const dry = (a, b) => [0.25, 0.5, 0.75].every(k => API.heightAt(lerp(a[0], b[0], k), lerp(a[1], b[1], k)) > WATER + 0.1);
+    let best = [], run = out.length ? [out[0]] : [];
+    for (let i = 1; i < out.length; i++) { if (dry(out[i - 1], out[i])) run.push(out[i]); else { if (run.length > best.length) best = run; run = [out[i]]; } }
+    if (run.length > best.length) best = run;
+    SHORE = best.length >= 2 ? best : out.slice(0, 2);
   }
   const FLAG2 = { x: POST.x - 8, z: POST.z + 7 };        // le mât du stand, visible depuis la colonie
   // l'autre rive : le banc de sable derrière la plateforme ; deux ou trois lapins y passent de temps en temps
@@ -419,8 +424,8 @@
     paintFreshTarget();
     const bm = new T.MeshStandardMaterial({ map: targetTex, emissiveMap: targetTex, emissive: 0xffffff, emissiveIntensity: 0, roughness: 0.7, metalness: 0.1 });
     const board = new T.Group(); board.position.set(0, DECK.y + BOARD.y, 0); grp.add(board);
-    const face = new T.Mesh(new T.PlaneGeometry(BOARD.w, BOARD.h), bm); face.castShadow = true; board.add(face);
-    const back = new T.Mesh(cbox(BOARD.w + 0.2, BOARD.h + 0.2, 0.25, 0.03), new T.MeshStandardMaterial({ color: 0x3a3d42, roughness: 0.6, metalness: 0.4 })); back.position.z = -0.14; board.add(back);
+    const face = new T.Mesh(new T.PlaneGeometry(BOARD.w, BOARD.h), bm); face.castShadow = true; face.position.z = 0.12; board.add(face);
+    const back = new T.Mesh(cbox(BOARD.w + 0.2, BOARD.h + 0.2, 0.25, 0.03), new T.MeshStandardMaterial({ color: 0x3a3d42, roughness: 0.6, metalness: 0.4 })); back.position.z = -0.3; board.add(back);
     FX.board = board; FX.boardMat = bm;
     // balise rouge en tête de cadre
     const bk = new T.Mesh(new T.SphereGeometry(0.22, 8, 6), new T.MeshBasicMaterial({ color: 0xff3020, toneMapped: false })); bk.position.set(0, DECK.y + BOARD.y + BOARD.h / 2 + 0.85, -0.4); grp.add(bk); FX.beacon = bk;
@@ -953,7 +958,7 @@
         const damp = c.enableDamping; c.enableDamping = false; c.update();
         FP.saved = { pos: cam.position.clone(), tgt: c.target.clone(), min: c.minDistance, max: c.maxDistance, fov: cam.fov, near: cam.near, far: cam.far, damp, enabled: c.enabled };
         P._focusAnim = null; c.enabled = false; c.minDistance = 0.05; c.maxDistance = 5000;
-        cam.fov = cam.aspect < 1 ? CFG.fov : CFG.fovWide; cam.near = 0.2; cam.far = 3000; cam.updateProjectionMatrix();
+        cam.fov = cam.aspect < 1 ? CFG.fov : CFG.fovWide; cam.near = 0.5; cam.far = 2600; cam.updateProjectionMatrix();
         cam.position.set(POST.x, FX.Y + EYE, POST.z);
         FP.on = true; FP.t = 0; FP.kick = 0; FP.flashT = 0; FP.recoilSign = 1; FP.scope = 0; FP.scopeOn = false; FP.breath = 1; FP.breathSt = 'calm'; FP.breathPtr = null; FP.ptr = null; FP.pinch = null;
         FP.yaw = rad(-1.5); FP.pitch = rad(0.8);
