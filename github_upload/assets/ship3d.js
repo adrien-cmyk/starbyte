@@ -38,13 +38,14 @@ const PROFIL_TK07 = {
   hull: [[0,16,280,170],[30,0,300,200],[72,0,300,205],[944,0,300,205],[984,40,290,195],[1064,40,280,190],[1144,40,270,140],[1200,50,260,150],[1300,60,280,190],[2200,20,320,240],[5000,-40,360,300]],
 };
 
-// Profil du chantier orbital OS-01 (434 m, ×2,6 → gabarit de scène, centré) : station immobile en orbite
+// Profil du chantier orbital OS-01 (±217 m en glTF, ×2,6 → gabarit de scène, centré) : station immobile en orbite.
+// osPlates : matières M_OS_* et découpage des planches projeté (voir osPlates()), comme la vitrine validée par Adrien le 03/11.
 const PROFIL_OS01 = {
-  V: 2.6, bowGltf: 0, center: true, axisY: 0.6, engineY: 0, engineZ: 0, nozzleZ: 0, targetY: 0.55,
-  nozzles: [], plasma: false, planet: true, spin: 0.018, dustSpeed: 0.35, fit: 1.3,
-  lightScale: 0.45, bloom: 0.2, glowScale: 0.3,   // station blanche et jaune : éclairage et bloom réduits (trop éblouissante sous le soleil du fond orbital)
+  V: 2.6, bowGltf: 0, center: true, axisY: 0, engineY: 0, engineZ: 0, nozzleZ: 0, targetY: 0.05,
+  nozzles: [], plasma: false, planet: true, spin: 0.018, dustSpeed: 0.35, fit: 1.3, osPlates: true,
+  lightScale: 0.5, bloom: 0.2, glowScale: 0.3,
   engineColor: [1.0, 0.62, 0.30], plume: [0xff5a1a, 0xff8a2a, 0xffc070, 0xfff2d8, 0xffc890, 0xffa060],
-  gloss: { M_TK_ARMOR_JAUNE: [0.40, 0.08], M_KV_ARMOR_WHITE: [0.40, 0.0], M_KV_ARMOR_RED: [0.28, 0.3], M_KV_GUNMETAL: [0.26, 0.85], M_KV_STRUCT_BLACK: [0.30, 0.55], M_TK_GRAPHITE: [0.30, 0.6], M_SR_VERRIERE: [0.06, 0.4] }, glossEnv: 0.9,
+  gloss: {}, glossEnv: 0.6,
   hull: [[0,0,10,10],[1,0,10,10]],
 };
 
@@ -662,12 +663,49 @@ const navMats = [];
 let scanParts = [];
 let LP = null;   // peinture du logo (createLogoPaint), si demandée
 const loader = new GLTFLoader();
+// OS-01 : matières de la vitrine et trait des 4 planches projeté selon la normale (repère de la planche : 1 unité = 1 px de la face)
+const OS_SPEC = { WHITE: ['#a8a59c', .5, .08, .34], WHITE2: ['#8d8b84', .55, .12, .38], GREY: ['#3e4146', .5, .7, .5], DARK: ['#16171a', .6, .5, .2], STEEL: ['#7f8287', .38, .85, .45], YELLOW: ['#e89a0c', .42, .25, .3], SPHERE: ['#8e8e8e', .32, .5, .12], DECK: ['#9fa2a8', .65, .5, .55] };
+const OS_GLOW = { BLUE: ['#2a96ff', 1.5], AMBER: ['#ffa53c', 1.5], LIGHT: ['#d4ebff', 1.3] };
+let osTex = null;
+function osTextures() {
+  if (osTex) return osTex;
+  const tl = new THREE.TextureLoader(), t = {};
+  for (const k of ['front', 'rear', 'right', 'top']) { t[k] = tl.load('assets/3d/os01/ln_' + k + '.jpg?v=20261103'); t[k].anisotropy = 4; }
+  return (osTex = t);
+}
+function osPlates(mat) {
+  const k = mat.name.replace('M_OS_', ''), glow = OS_GLOW[k], s = OS_SPEC[k];
+  if (glow) { mat.color.set(0x000000); mat.emissive.set(glow[0]); mat.emissiveIntensity = glow[1]; mat.roughness = 1; mat.metalness = 0; return; }
+  if (!s) return;
+  mat.color.set(s[0]); mat.roughness = Math.max(s[1], 0.5); mat.metalness = s[2] * 0.6; mat.envMapIntensity = 0.22;
+  const T = osTextures(), K = (217 / 806 * P.V).toFixed(6);
+  mat.onBeforeCompile = (sh) => {
+    Object.assign(sh.uniforms, { tF: { value: T.front }, tR: { value: T.rear }, tS: { value: T.right }, tT: { value: T.top }, amt: { value: s[3] } });
+    sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nvarying vec3 vOP; varying vec3 vON;')
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvOP = position; vON = normal;');
+    sh.fragmentShader = sh.fragmentShader.replace('#include <common>', `#include <common>
+      varying vec3 vOP; varying vec3 vON; uniform sampler2D tF, tR, tS, tT; uniform float amt;
+      float osH(vec3 p){ return fract(sin(dot(p, vec3(12.99, 78.23, 37.72))) * 43758.55); }
+      float osN(vec3 p){ vec3 i = floor(p), f = fract(p); f = f*f*(3.-2.*f);
+        return mix(mix(mix(osH(i), osH(i+vec3(1,0,0)), f.x), mix(osH(i+vec3(0,1,0)), osH(i+vec3(1,1,0)), f.x), f.y),
+                   mix(mix(osH(i+vec3(0,0,1)), osH(i+vec3(1,0,1)), f.x), mix(osH(i+vec3(0,1,1)), osH(i+vec3(1,1,1)), f.x), f.y), f.z); }`)
+      .replace('#include <color_fragment>', `#include <color_fragment>
+      { vec3 p = vec3(-vOP.x, vOP.z, vOP.y) / ${K}; vec3 nn = normalize(vec3(-vON.x, vON.z, vON.y)); vec3 a = abs(nn); a = a*a*a*a*a*a;
+        float wyf = nn.y < 0. ? a.y : 0., wyr = nn.y > 0. ? a.y : 0., tot = max(a.x + a.z + wyf + wyr, 1e-3), vv = 1. - (457. - p.z) / 941.;
+        float L = (a.x * texture2D(tS, vec2((836.5 + p.y) / 1672., vv)).r + a.z * texture2D(tT, vec2((627. + p.x / 1.3) / 1254., (649. + p.y / 1.3) / 1254.)).r
+                 + wyf * texture2D(tF, vec2((836.5 + p.x) / 1672., vv)).r + wyr * texture2D(tR, vec2((836.5 - p.x) / 1672., vv)).r) / tot;
+        diffuseColor.rgb *= 1. - amt + amt * L;
+        float w = osN(p * .33) * .6 + osN(p * 1.1) * .4; diffuseColor.rgb *= 1. - .45 * smoothstep(.60, .68, w); }`);
+  };
+  mat.customProgramCacheKey = () => 'os01-plates-' + k;
+}
 function prepMats(root, engineColor, engineInt) {
   root.traverse(o => {
     if (!o.isMesh) return;
     o.castShadow = true; o.receiveShadow = true;
     const mats = Array.isArray(o.material) ? o.material : [o.material];
     for (const mat of mats) {
+      if (P.osPlates && mat.name.startsWith('M_OS_')) { if (!mat.userData.os) { mat.userData.os = 1; osPlates(mat); } continue; }
       const gl = P.gloss && P.gloss[mat.name];   // brillance par vaisseau : rugosité, métal, reflets
       mat.envMapIntensity = gl ? (mat.name === 'M_SR_VERRIERE' ? 2.0 : P.glossEnv) : 0.45;
       if (gl) { mat.roughness = gl[0]; mat.metalness = gl[1]; }

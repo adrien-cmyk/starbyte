@@ -41003,7 +41003,7 @@ function fleetDockList() {
   // postes : tankers dans les 4 docks de maintenance, frégates en stationnement au bout des bras diagonaux,
   // un cuirassé au large (il fait 1 200 m, la station 420 m). Repère glTF de la station, en mètres.
   const out = [];
-  const tankSlots = [[187, -31.5, 0, Math.PI / 2], [-187, -31.5, 0, -Math.PI / 2], [0, -31.5, -187, Math.PI], [0, -31.5, 187, 0]];
+  const tankSlots = [[0, -10.5, -190, Math.PI], [187, -20, 0, Math.PI / 2], [-187, -20, 0, -Math.PI / 2], [0, -20, 187, 0]];   // d'abord le quai de la jetée-hangar, puis sous les bras
   for (let i = 0; i < Math.min(4, fleetStationedCount('tanker')); i++) {
     const [x, y, z, r] = tankSlots[i];
     out.push({ ...DOCK_MODELS.tanker, type: 'tanker', pos: [x, y, z], rotY: r });
@@ -41085,7 +41085,7 @@ function unmountFleetStation3D() {
 })();
 
 // ─── SHIP3D : fiche bâtiment en vue héros (chantier orbital OS-01) ───
-const BUILDING_SHIP3D = { shipyard: { url: 'assets/3d/sb_os01.glb?v=20261014-1440', code: 'OS-01 Chantier orbital', profile: 'os01' } };
+const BUILDING_SHIP3D = { shipyard: { url: 'assets/3d/sb_os01_v2.glb.gz?v=20261103', code: 'OS-01 Chantier orbital', profile: 'os01' } };
 let bdShip3D = null;   // { key, handle }
 function mountBuildingShip3D(key, tier) {
   const scr = document.getElementById('scr-building-detail');
@@ -50127,7 +50127,7 @@ if (G.knownTargets && Array.isArray(G.tankerMissions)) {
 <!-- PARRAINAGE_2410 — inviter des commandants : 5 appareils ouvrent le lien → 2 500 métal, une fois (carte en tête de la cloche) -->
 <script src="assets/invite.js?v=20261025-1350"></script>
 <script src="assets/assistance.js?v=20261026-1900"></script>
-<script type="module" src="assets/ship3d.js?v=20261103-orbit6"></script>
+<script type="module" src="assets/ship3d.js?v=20261103-os01v2"></script>
 <!-- PATCH_1510_MISSIONS — tout ce qui vole, fiche de mission des tankers -->
 <script src="assets/missions.js?v=20261103-amiral4"></script>
 <!-- PATCH_1610_SKILLS — skills des bâtiments : apprendre, découvrir, effets -->
