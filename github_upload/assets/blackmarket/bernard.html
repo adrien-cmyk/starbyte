@@ -969,18 +969,23 @@ addEventListener('message', (ev) => {
   const d = ev.data;
   if (d.bmGesture === 'begin') { controls.autoRotate = false; hint.classList.add('gone'); clearTimeout(idleTimer); }
   if (d.bmGesture === 'end') { clearTimeout(idleTimer); if (!REDUCED) idleTimer = setTimeout(() => { controls.autoRotate = true; }, 6000); }
-  if (d.bmOrbit || d.bmDolly) {
-    const off = camera.position.clone().sub(controls.target);
-    if (d.bmOrbit) {
-      const sph = new THREE.Spherical().setFromVector3(off), k = 2 * Math.PI * controls.rotateSpeed / Math.max(1, renderer.domElement.clientHeight);
-      sph.theta -= d.bmOrbit[0] * k; sph.phi -= d.bmOrbit[1] * k;
-      sph.phi = Math.max(controls.minPolarAngle, Math.min(controls.maxPolarAngle, sph.phi)); sph.makeSafe();
-      off.setFromSpherical(sph);
-    }
-    if (d.bmDolly) off.setLength(Math.max(controls.minDistance, Math.min(controls.maxDistance, off.length() * d.bmDolly)));
-    camera.position.copy(controls.target).add(off); camera.lookAt(controls.target);
-  }
+  if (d.bmOrbit) { pend.x += d.bmOrbit[0]; pend.y += d.bmOrbit[1]; }
+  if (d.bmDolly) pend.z += Math.log(d.bmDolly);
 });
+// lissage des gestes relayés (comme les fiches Ship3D) : le doigt alimente une consigne, la caméra la rattrape en douceur puis glisse sur son élan
+const pend = { x: 0, y: 0, z: 0 }; let pendT = performance.now();
+function smoothRelay() {
+  const now = performance.now(), dt = Math.min(0.1, (now - pendT) / 1000); pendT = now;
+  if (Math.abs(pend.x) + Math.abs(pend.y) < 0.01 && Math.abs(pend.z) < 1e-4) { pend.x = pend.y = pend.z = 0; return; }
+  const f = 1 - Math.exp(-dt * 7.0), ax = pend.x * f, ay = pend.y * f, az = pend.z * f;
+  pend.x -= ax; pend.y -= ay; pend.z -= az;
+  const off = camera.position.clone().sub(controls.target);
+  const sph = new THREE.Spherical().setFromVector3(off), k = 2 * Math.PI * controls.rotateSpeed / Math.max(1, renderer.domElement.clientHeight);
+  sph.theta -= ax * k; sph.phi -= ay * k;
+  sph.phi = Math.max(controls.minPolarAngle, Math.min(controls.maxPolarAngle, sph.phi)); sph.makeSafe();
+  sph.radius = Math.max(controls.minDistance, Math.min(controls.maxDistance, sph.radius * Math.exp(az)));
+  off.setFromSpherical(sph); camera.position.copy(controls.target).add(off); camera.lookAt(controls.target);
+}
 let idleTimer = null;
 const hint = document.getElementById('hint');
 controls.addEventListener('start', () => { controls.autoRotate = false; hint.classList.add('gone'); clearTimeout(idleTimer); });
@@ -1049,7 +1054,8 @@ function frame() {
     e.position.set(u.x, u.y + Math.sin(t * .4 + u.ph) * .08, ((t * u.sp + u.ph) % 14) - 7);
     e.rotation.z = Math.sin(t * .5 + u.ph) * .12;
   }
-  {   // vue perspective : grand-angle et pivot qui glisse le long de la coque quand on s'approche
+  smoothRelay();
+  if (!ORBIT) {   // vue perspective : grand-angle et pivot qui glisse le long de la coque quand on s'approche (pas en ambassade : pivot fixe au centre)
     const fit = fitDistance();
     const d = camera.position.distanceTo(controls.target);
     const k = THREE.MathUtils.smoothstep(d, controls.minDistance, 0.85 * fit);
