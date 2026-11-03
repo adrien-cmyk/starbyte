@@ -1292,7 +1292,9 @@
     if (!installed || !P.ready || active || moving || window.__sbCinema) return false;
     const scr = document.getElementById('scr-planet');
     if (!scr || scr.classList.contains('hidden') || !P.host || P.host.offsetParent === null) return false;
-    if (EXPLORE_PUBLIC && window.SBTuto && SBTuto.active && SBTuto.active()) return false;
+    // didacticiel : le pin se cache seulement quand l'officier de bord est réellement à l'écran. Un joueur qui l'a
+    // masqué (G.tuto.hidden) ou qui en est à l'étape 0 depuis longtemps reste « actif » pour le jeu, mais doit voir le pin.
+    if (EXPLORE_PUBLIC && window.SBTuto && SBTuto.active && SBTuto.active() && !(G.tuto && G.tuto.hidden) && document.querySelector('#sb-coach[style*="block"]')) return false;
     if (document.querySelector('.w-card.on, .w-sheet.on, #sb-sheet, #sb-away, #mp-choose, #sb-notif')) return false;
     return true;
   }
