@@ -7576,13 +7576,22 @@ function getCartoLevel(wid) {
   return ['local', 'sismic', 'interstellar', 'galactic', 'interCluster'][i];
 }
 // 30/10 (Adrien) : +1 secteur pour toutes les planètes — sans Labo ou Labo 1 : 1 secteur autour, Labo 2 : 2, Labo 3 : 4
-function getMaxRange(wid) {
-  const lvl = getCartoLevel(wid);
+function _rangeOfLevel(lvl) {
   if (lvl === 'interCluster') return { kind: 'universe' };
   if (lvl === 'galactic')     return { kind: 'cluster' };
   if (lvl === 'interstellar') return { kind: 'sector_radius', radius: 4 };
   if (lvl === 'sismic')       return { kind: 'sector_radius', radius: 2 };
   return { kind: 'sector_radius', radius: 1 };
+}
+// 03/11 (Adrien, précision de la décision du 30/10) : une colonie sert à voir PLUS LOIN que la capitale. Depuis sa position,
+// elle porte aussi loin que la meilleure de ses planètes (capitale comprise), plus un secteur. Son propre Laboratoire compte s'il fait mieux.
+function getMaxRange(wid) {
+  const own = _rangeOfLevel(getCartoLevel(wid));
+  if (!wid || wid === 'home' || !Array.isArray(G.worlds) || G.worlds.length < 2) return own;
+  const score = (r) => r.kind === 'universe' ? 99 : r.kind === 'cluster' ? 50 : (r.radius || 0);
+  let best = own;
+  for (const w of G.worlds) { if (!w || w.id === wid) continue; const r = _rangeOfLevel(getCartoLevel(w.id)); if (score(r) > score(best)) best = r; }
+  return best.kind === 'sector_radius' ? { kind: 'sector_radius', radius: best.radius + 1 } : best;
 }
 // la plus grande portée de mes planètes (carte : zone éclairée)
 function getMaxRangeAny() {
