@@ -1,12 +1,13 @@
 /* Starbyte — Explorer : la clairière aux lapins (03/11/2026, brief d'Adrien, GDD claude/starbyte_GDD_explorer_lapins.md)
-   Une boussole transparente, en forme de flèche, indique l'orée de la map. La toucher ouvre LA MÊME CARTE, sans bâtiments
-   ni rien d'autre : juste la nature. Dans la clairière : une catapulte à carottes, trois lapins, une caisse de collecte.
-   Lancer une carotte → le lapin réagit → il entre dans la caisse → on referme → +5 biomasse.
+   Un petit pin blanc sur la carte marque l'endroit du jeu. Le toucher ouvre LA MÊME CARTE, sans bâtiments ni rien d'autre :
+   juste la nature. Une catapulte au sud, une caisse de collecte au nord, la forêt entre les deux, trois lapins.
+   On tire la catapulte vers l'arrière et on lâche, façon Angry Birds : plus on tire, plus la carotte va loin, et le tir est
+   aveugle (aucun arc, aucun repère avant l'atterrissage). De carotte en carotte, on attire un lapin à travers la forêt
+   jusqu'à réussir à viser la caisse. Il entre, on referme : +5 biomasse.
    - même scène 3D que la planète (Planet3D) : aucun téléchargement, aucun moteur en plus ;
-   - la clairière existe vraiment sur la carte (les arbres y sont retirés), elle est donc visible depuis la colonie ;
    - états explicites du lapin et de la caisse, crédit unique par capture (voir capture()) ;
    - sauvegarde : G.explore (heures de retour des lapins, dernières captures, totaux).
-   Réservé au compte d'Adrien tant que EXPLORE_PUBLIC est à false : pour les autres joueurs, ce fichier ne touche à rien. */
+   Réservé aux comptes d'Adrien tant que EXPLORE_PUBLIC est à false : pour les autres joueurs, ce fichier ne touche à rien. */
 (function () {
   'use strict';
   const EXPLORE_PUBLIC = false;   // true = ouvert à tous les joueurs (après validation sur iPhone)
@@ -18,12 +19,17 @@
     respawnMs: 30000,       // retour d'un lapin capturé, en temps réel (survit à une sortie)
     throwEvery: 1.0,        // secondes entre deux lancers
     carrotsMax: 3,          // carottes présentes au maximum
-    carrotLife: 12,         // secondes au sol
-    detect: 16,             // portée de détection d'une carotte
-    nibble: 2.6,            // grignotage
+    carrotLife: 18,         // secondes au sol
+    detect: 40,             // portée de détection d'une carotte
+    nibble: 2.6,            // grignotage dans la caisse : c'est le temps de refermer
+    nibbleField: 1.3,       // grignotage en chemin
     hesitate: 0.75,         // le lapin hésite devant la rampe
     alert: 0.55,            // oreilles dressées avant de partir
-    viewSpan: 38,           // largeur de sol visible à l'arrivée
+    pullDead: 16,           // en dessous (pixels), lâcher annule le tir
+    pullMaxFrac: 0.44,      // traction maximale, en part du petit côté de l'écran
+    rangeMin: 14,           // portée de la plus petite traction
+    rangeMax: 250,          // portée à pleine traction (la caisse est à 220)
+    crateCatch: 3,          // marge autour de la caisse : une carotte qui y tombe rebondit dedans
   };
 
   /* ── la clairière : à la lisière nord de la carte, entre le chemin de terre et la falaise ── */
@@ -32,7 +38,10 @@
   const CUT = { x: 25, zn: 26, zs: 42 };        // zone sans arbres (plus longue au sud : les arbres du premier plan masqueraient le sol)
   const FLAT = { x: 30, zn: 30, zs: 44 };       // zone de sol aplani
   const CRATE = { x: SITE.x + 2, z: SITE.z - 8, hw: 5, hd: 4, door: 3.2, ramp: 3.4 };   // door = demi-largeur de l'ouverture
-  const CATA = { x: SITE.x + 12.5, z: SITE.z + 11.5, r: 3.5, scale: 1.25 };
+  const CATA = { x: -78, z: 60, r: 5.5, scale: 2.1 };   // au sud de la forêt, à l'endroit désigné par Adrien (capture du 03/11)
+  const HOME = { x: -70, z: 32, r: 15 };                // là où vivent les lapins au départ, juste au nord de la catapulte
+  const ZONE = { x0: -205, x1: 230, z0: -185, z1: 185 }; // sol fin de la carte (hors de là, une carotte est perdue)
+  const WATER = -1.75;                                  // sous cette altitude : eau
   const ROCKS = [[-13, -7, 1.7], [-7, 9.5, 1.4], [13, -4, 1.8], [-15.5, 6, 1.2], [-3, -15.5, 1.1], [14.5, -13, 1.2]];
   const FLOOR = 0.3;   // hauteur du plancher de la caisse
 
@@ -81,15 +90,14 @@
   function addTexts() {
     if (!window.I18N || !I18N.add) return;
     I18N.add('fr', {
-      'explore.compass': 'Explorer',
-      'explore.compass_back': 'Clairière',
       'explore.aria': 'Explorer la forêt',
+      'explore.recenter': 'Revoir tout le terrain',
       'explore.back': 'Retour à la colonie',
-      'explore.hint': 'Lance des carottes pour attirer un lapin dans la caisse. Touche la caisse pour la refermer.',
+      'explore.hint': 'Tire la catapulte vers l\'arrière et lâche : plus tu tires, plus la carotte va loin. Attire un lapin jusqu\'à la caisse, puis referme-la.',
       'explore.close': 'Refermer',
       'explore.gain': '+{n} biomasse',
       'explore.first': 'Direction la réserve biologique. Les carottes y sont gratuites aussi.',
-      'explore.preview_on': 'Aperçu Explorer actif : touche la boussole sur la carte',
+      'explore.preview_on': 'Aperçu Explorer : cherche le pin blanc au nord de la carte',
       'explore.preview_desert': 'Aperçu Explorer : pas de forêt sur cette colonie, reviens sur ta capitale',
       'explore.summary': { one: '{n} lapin · +{g} biomasse', other: '{n} lapins · +{g} biomasse' },
     });
@@ -143,7 +151,7 @@
       for (let i = 0; i < im.count; i++) {
         const o = i * 16, x = a[o + 12], z = a[o + 14];
         const edge = 1 + (vnoise(x / 6.5, z / 6.5) - 0.5) * 0.26;
-        if (q(x, z, CUT) < edge) { for (let j = 0; j < 11; j++) a[o + j] = 0; ch = true; }
+        if (q(x, z, CUT) < edge || Math.hypot(x - CATA.x, z - CATA.z) < 8) { for (let j = 0; j < 11; j++) a[o + j] = 0; ch = true; }
       }
       if (ch) im.instanceMatrix.needsUpdate = true;
     }
@@ -183,7 +191,6 @@
   }
   // là où se trouvaient les bâtiments, la forêt repousse (cases bâties = aucun arbre dans la carte normale)
   function buildWild() {
-    const parcels = (typeof G !== 'undefined' && G.planet && G.planet.parcels) || [];
     const free = new Set(['locked', 'rocky', 'resource', 'depleted', 'antenna_project']);
     const spots = [];
     P.parcelGroup.children.forEach(a => {
@@ -201,7 +208,7 @@
       for (let gx = cx - HR; gx < cx + HR; gx += 6.5) for (let gz = cz - HR; gz < cz + HR; gz += 6.5) {
         const hx = Math.round(gx * 10), hz = Math.round(gz * 10);
         const x = gx + (hash(hx, hz) - 0.5) * 5.5, z = gz + (hash(hz, hx) - 0.5) * 5.5;
-        if (Math.hypot(x - cx, z - cz) > HR * 0.98) continue;
+        if (Math.hypot(x - cx, z - cz) > HR * 0.98 || Math.hypot(x - CATA.x, z - CATA.z) < 10) continue;
         const y = heightAt(x, z); if (y < -1.6) continue;
         const r = hash(hx + 3, hz - 7);
         const dens = 0.18 + vnoise(x / 26, z / 26) * 0.5;
@@ -385,7 +392,7 @@
       beam: new T.MeshBasicMaterial({ map: TEX.beam, color: 0x8dffb0, transparent: true, opacity: 0, depthWrite: false, side: T.DoubleSide, blending: T.AdditiveBlending, toneMapped: false }),
       bang: new T.SpriteMaterial({ map: TEX.bang, transparent: true, depthWrite: false, depthTest: false, toneMapped: false }),
       dust: new T.MeshStandardMaterial({ color: 0xa79a7a, roughness: 1, transparent: true, opacity: 0.8 }),
-      target: new T.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0, depthWrite: false, toneMapped: false }),
+      target: new T.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0, depthWrite: false, depthTest: false, toneMapped: false }),
       plate: new T.MeshStandardMaterial({ map: TEX.plate, roughness: 0.6 }),
       pad: new T.MeshStandardMaterial({ color: 0x58705f, roughness: 0.7 }),
       padRing: new T.MeshBasicMaterial({ color: 0x8dffb0, transparent: true, opacity: 0.55, toneMapped: false }),
@@ -397,73 +404,96 @@
     const m = new T.Mesh(GEO.blob, MAT.blob); m.scale.set(rx, 1, rz); m.position.y = 0.05; m.renderOrder = 1; return m;
   }
 
-  /* ───────────────────────── plateau : obstacles et chemins (A* sur une grille d'une unité) ───────────────────────── */
-  const NAV = { n: 56, x0: SITE.x - 28, z0: SITE.z - 28, blocked: null };
-  const cellOf = (x, z) => [Math.round(x - NAV.x0), Math.round(z - NAV.z0)];
-  const idx = (i, j) => j * NAV.n + i;
+  /* ───────────────────────── terrain : obstacles et chemins (A* sur toute la carte, cases de 2 unités) ───────────────────────── */
+  const NAV = { c: 2, x0: -152, z0: -182, nx: 108, nz: 148, blocked: null, gs: null, from: null, seen: null, done: null, gen: 0 };
+  const cellOf = (x, z) => [Math.round((x - NAV.x0) / NAV.c), Math.round((z - NAV.z0) / NAV.c)];
+  const idx = (i, j) => j * NAV.nx + i;
+  const cellFree = (i, j) => i >= 0 && j >= 0 && i < NAV.nx && j < NAV.nz && !NAV.blocked[idx(i, j)];
+  const isBlockedAt = (x, z) => { const [i, j] = cellOf(x, z); return !cellFree(i, j); };
   const inInterior = (x, z, m = 0) => Math.abs(x - CRATE.x) <= CRATE.hw - 0.3 - m && z - CRATE.z >= -CRATE.hd + 0.3 + m && z - CRATE.z <= CRATE.hd - 0.3 - m;
-  function isBlockedAt(x, z) {
-    if (q(x, z, R) > 1.04) return true;
-    for (const [dx, dz, r] of ROCKS) if (Math.hypot(x - (SITE.x + dx), z - (SITE.z + dz)) < r + 1.0) return true;
-    if (Math.hypot(x - CATA.x, z - CATA.z) < CATA.r + 0.8) return true;
-    const lx = x - CRATE.x, lz = z - CRATE.z;
-    if (Math.abs(lx) < CRATE.hw + 1.1 && Math.abs(lz) < CRATE.hd + 1.1) {
-      const room = Math.abs(lx) <= CRATE.hw - 1.2 && lz >= -CRATE.hd + 1.2 && lz <= CRATE.hd - 1.2;
-      const door = Math.abs(lx) <= CRATE.door - 1.1 && lz > 0;
-      if (!room && !door) return true;
-    }
-    return false;
-  }
   function buildNav() {
-    NAV.blocked = new Uint8Array(NAV.n * NAV.n);
-    for (let j = 0; j < NAV.n; j++) for (let i = 0; i < NAV.n; i++) NAV.blocked[idx(i, j)] = isBlockedAt(NAV.x0 + i, NAV.z0 + j) ? 1 : 0;
+    const n = NAV.nx * NAV.nz;
+    if (!NAV.blocked) { NAV.blocked = new Uint8Array(n); NAV.gs = new Float32Array(n); NAV.from = new Int32Array(n); NAV.seen = new Uint32Array(n); NAV.done = new Uint32Array(n); }
+    const B = NAV.blocked; B.fill(0);
+    const mark = (x, z, r) => {
+      const [a, b] = cellOf(x, z), k = Math.ceil(r / NAV.c);
+      for (let j = b - k; j <= b + k; j++) for (let i = a - k; i <= a + k; i++) {
+        if (i < 0 || j < 0 || i >= NAV.nx || j >= NAV.nz) continue;
+        if (Math.hypot(NAV.x0 + i * NAV.c - x, NAV.z0 + j * NAV.c - z) <= r) B[idx(i, j)] = 1;
+      }
+    };
+    // eau et falaises
+    for (let j = 0; j < NAV.nz; j++) for (let i = 0; i < NAV.nx; i++) {
+      const x = NAV.x0 + i * NAV.c, z = NAV.z0 + j * NAV.c, y = heightAt(x, z);
+      if (y < WATER || Math.abs(heightAt(x + 2, z) - y) > 1.5 || Math.abs(heightAt(x, z + 2) - y) > 1.5) B[idx(i, j)] = 1;
+    }
+    // troncs et rochers de la carte
+    const trees = list => list.forEach(im => {
+      if (!im.isInstancedMesh || !im.visible) return;
+      const a = im.instanceMatrix.array;
+      for (let k = 0; k < im.count; k++) {
+        const o = k * 16; if (a[o] === 0 && a[o + 1] === 0 && a[o + 2] === 0) continue;
+        const [i, j] = cellOf(a[o + 12], a[o + 14]);
+        if (i >= 0 && j >= 0 && i < NAV.nx && j < NAV.nz) B[idx(i, j)] = 1;
+      }
+    });
+    P.scene.children.forEach(o => {
+      if (o.isInstancedMesh && !o.name) trees([o]);
+      if (o.name === 'SB_GRID_FLORA' || o === wild) trees(o.children);
+    });
+    // rochers de la clairière, catapulte
+    for (const [dx, dz, r] of ROCKS) mark(SITE.x + dx, SITE.z + dz, r + 1.0);
+    mark(CATA.x, CATA.z, CATA.r);
+    // la caisse : on y entre par la rampe, sur un parcours écrit (voir routeTo et l'état « hesitate »)
+    for (let z = CRATE.z - CRATE.hd - 1.4; z <= CRATE.z + CRATE.hd + 1.4; z += 1) for (let x = CRATE.x - CRATE.hw - 1.4; x <= CRATE.x + CRATE.hw + 1.4; x += 1) {
+      const [i, j] = cellOf(x, z); if (i >= 0 && j >= 0 && i < NAV.nx && j < NAV.nz) B[idx(i, j)] = 1;
+    }
   }
   function nearestFree(i, j, rad = 4) {
-    const ok = (a, b) => a >= 0 && b >= 0 && a < NAV.n && b < NAV.n && !NAV.blocked[idx(a, b)];
-    if (ok(i, j)) return [i, j];
+    if (cellFree(i, j)) return [i, j];
     for (let r = 1; r <= rad; r++) for (let a = -r; a <= r; a++) for (let b = -r; b <= r; b++) {
-      if (Math.max(Math.abs(a), Math.abs(b)) === r && ok(i + a, j + b)) return [i + a, j + b];
+      if (Math.max(Math.abs(a), Math.abs(b)) === r && cellFree(i + a, j + b)) return [i + a, j + b];
     }
     return null;
   }
   function lineFree(ax, az, bx, bz) {
-    const d = Math.hypot(bx - ax, bz - az), n = Math.ceil(d / 0.5);
-    for (let k = 1; k < n; k++) {
-      const [i, j] = cellOf(lerp(ax, bx, k / n), lerp(az, bz, k / n));
-      if (i < 0 || j < 0 || i >= NAV.n || j >= NAV.n || NAV.blocked[idx(i, j)]) return false;
-    }
+    const d = Math.hypot(bx - ax, bz - az), n = Math.ceil(d / 0.8);
+    for (let k = 1; k < n; k++) if (isBlockedAt(lerp(ax, bx, k / n), lerp(az, bz, k / n))) return false;
     return true;
   }
   // chemin de (ax,az) à (bx,bz), lissé ; null si inaccessible
   function findPath(ax, az, bx, bz) {
     const s = cellOf(ax, az), g = cellOf(bx, bz);
-    const st = nearestFree(s[0], s[1], 6), go = nearestFree(g[0], g[1], 3);
+    const st = nearestFree(s[0], s[1], 4), go = nearestFree(g[0], g[1], 3);
     if (!st || !go) return null;
-    const N = NAV.n, startK = idx(st[0], st[1]), goalK = idx(go[0], go[1]);
-    const gs = new Float32Array(N * N).fill(1e9), from = new Int32Array(N * N).fill(-1), closed = new Uint8Array(N * N);
-    const h = (i, j) => { const dx = Math.abs(i - go[0]), dz = Math.abs(j - go[1]); return Math.max(dx, dz) + 0.414 * Math.min(dx, dz); };
-    const open = [startK]; gs[startK] = 0;
-    const fs = new Float32Array(N * N).fill(1e9); fs[startK] = h(st[0], st[1]);
-    let found = false, guard = 0;
-    while (open.length && guard++ < 6000) {
-      let bi = 0; for (let k = 1; k < open.length; k++) if (fs[open[k]] < fs[open[bi]]) bi = k;
-      const cur = open[bi]; open.splice(bi, 1);
+    const N = NAV.nx, startK = idx(st[0], st[1]), goalK = idx(go[0], go[1]), gen = ++NAV.gen;
+    const gs = NAV.gs, from = NAV.from, seen = NAV.seen, done = NAV.done, Bk = NAV.blocked;
+    const hx = (i, j) => { const dx = Math.abs(i - go[0]), dz = Math.abs(j - go[1]); return Math.max(dx, dz) + 0.414 * Math.min(dx, dz); };
+    // file de priorité (tas binaire)
+    const hK = [], hF = [];
+    const push = (k, f) => { let i = hK.length; hK.push(k); hF.push(f); while (i > 0) { const u = (i - 1) >> 1; if (hF[u] <= hF[i]) break; [hK[u], hK[i]] = [hK[i], hK[u]]; [hF[u], hF[i]] = [hF[i], hF[u]]; i = u; } };
+    const pop = () => { const top = hK[0], lk = hK.pop(), lf = hF.pop(); if (hK.length) { hK[0] = lk; hF[0] = lf; let i = 0; for (;;) { const a = i * 2 + 1, b = a + 1; let m = i; if (a < hK.length && hF[a] < hF[m]) m = a; if (b < hK.length && hF[b] < hF[m]) m = b; if (m === i) break; [hK[m], hK[i]] = [hK[i], hK[m]]; [hF[m], hF[i]] = [hF[i], hF[m]]; i = m; } } return top; };
+    seen[startK] = gen; gs[startK] = 0; from[startK] = -1; push(startK, hx(st[0], st[1]));
+    let found = false;
+    while (hK.length) {
+      const cur = pop();
+      if (done[cur] === gen) continue;
+      done[cur] = gen;
       if (cur === goalK) { found = true; break; }
-      closed[cur] = 1;
       const ci = cur % N, cj = Math.floor(cur / N);
       for (let a = -1; a <= 1; a++) for (let b = -1; b <= 1; b++) {
         if (!a && !b) continue;
         const ni = ci + a, nj = cj + b;
-        if (ni < 0 || nj < 0 || ni >= N || nj >= N) continue;
+        if (ni < 0 || nj < 0 || ni >= N || nj >= NAV.nz) continue;
         const nk = idx(ni, nj);
-        if (closed[nk] || NAV.blocked[nk]) continue;
-        if (a && b && (NAV.blocked[idx(ci + a, cj)] || NAV.blocked[idx(ci, cj + b)])) continue;
+        if (done[nk] === gen || Bk[nk]) continue;
+        if (a && b && (Bk[idx(ci + a, cj)] || Bk[idx(ci, cj + b)])) continue;
         const ng = gs[cur] + (a && b ? 1.414 : 1);
-        if (ng < gs[nk]) { gs[nk] = ng; fs[nk] = ng + h(ni, nj); from[nk] = cur; if (!open.includes(nk)) open.push(nk); }
+        if (seen[nk] !== gen || ng < gs[nk]) { seen[nk] = gen; gs[nk] = ng; from[nk] = cur; push(nk, ng + hx(ni, nj)); }
       }
     }
     if (!found) return null;
-    const raw = []; for (let k = goalK; k !== -1; k = from[k]) raw.unshift([NAV.x0 + (k % N), NAV.z0 + Math.floor(k / N)]);
+    const raw = []; for (let k = goalK; k !== -1; k = from[k]) raw.unshift([NAV.x0 + (k % N) * NAV.c, NAV.z0 + Math.floor(k / N) * NAV.c]);
     const out = []; let anchor = [ax, az], i = 0;
     while (i < raw.length) {
       let j = raw.length - 1;
@@ -472,9 +502,15 @@
     }
     return out;
   }
+  // depuis la caisse, on sort d'abord par la rampe
+  const inCrateZone = r => inInterior(r.x, r.z, -0.5) || inDoorway(r);
+  function routeTo(r, tx, tz) {
+    if (inCrateZone(r)) { const f = frontOfRamp(), p = findPath(f[0], f[1], tx, tz); return p ? [[CRATE.x, CRATE.z + CRATE.hd - 0.5], f].concat(p) : null; }
+    return findPath(r.x, r.z, tx, tz);
+  }
 
   /* ───────────────────────── scène de la clairière ───────────────────────── */
-  const W = { t: 0, rabbits: [], carrots: [], dust: [], crate: null, cata: null, nextThrow: 0, seq: 0, sessionCaught: 0, enteredAt: 0, respawnChk: 0 };
+  const W = { t: 0, rabbits: [], carrots: [], dust: [], crate: null, cata: null, nextThrow: 0, seq: 0, sessionCaught: 0, enteredAt: 0, respawnChk: 0, zoomK: 1, sling: null };
   function buildScene() {
     buildAssets();
     root = new T.Group(); root.name = 'SB_EXPLORE'; root.visible = false;
@@ -503,17 +539,18 @@
     root.add(cg);
     W.crate = { st: 'open', t: 0, angle: 0, hinge, lamp, halo, ringG, beam, group: cg, promptOn: false, occupant: null };
     // catapulte
-    const ca = new T.Group(); ca.position.set(CATA.x, Y0, CATA.z);
+    const cataY = heightAt(CATA.x, CATA.z);
+    const ca = new T.Group(); ca.position.set(CATA.x, cataY, CATA.z);
     const yawG = new T.Group(); yawG.scale.setScalar(CATA.scale); ca.add(yawG);
     const base = new T.Mesh(GEO.cataBase, MAT.hard); base.castShadow = true; base.receiveShadow = true; yawG.add(base);
     const armP = new T.Group(); armP.position.set(0, 1.5, 0.2); yawG.add(armP);
     const arm = new T.Mesh(GEO.cataArm, MAT.hard); arm.castShadow = true; armP.add(arm);
     const loaded = new T.Mesh(GEO.carrot, MAT.veg); loaded.scale.setScalar(0.62); loaded.rotation.set(Math.PI / 2.3, 0, 0.4); loaded.position.set(0, 0.62, -3.05); armP.add(loaded);
-    const cb = blob(3.9, 4.3); ca.add(cb);
+    const cb = blob(6, 6.6); ca.add(cb);
     yawG.rotation.y = Math.atan2(CRATE.x - CATA.x, CRATE.z - CATA.z);
     armP.rotation.x = -0.34;
     root.add(ca);
-    W.cata = { group: ca, yawG, armP, loaded, yaw: yawG.rotation.y, yawT: yawG.rotation.y, fire: 1, rest: -0.34 };
+    W.cata = { group: ca, yawG, armP, loaded, y: cataY, yaw: yawG.rotation.y, yawT: yawG.rotation.y, fire: 1, rest: -0.34, pull: 0 };
     // rochers (ceux de la carte) et petites touffes, pour que la clairière ne soit pas nue
     const rockP = P.kit && P.kit.veg && P.kit.veg[4];
     if (rockP) ROCKS.forEach(([dx, dz, r], i) => {
@@ -558,8 +595,8 @@
       flowers.forEach(([x, z, k], j) => { sc.setScalar(0.8 + hash(k, 77) * 0.8); qt.identity(); v.set(x, Y0, z); m4.compose(v, qt, sc); fm.setMatrixAt(j, m4); fm.setColorAt(j, cc.setHex(FL[Math.floor(hash(k, 79) * 4)])); });
       root.add(fm);
     }
-    // cible du lancer
-    W.target = new T.Mesh(GEO.ring, MAT.target); W.target.visible = false; W.target.renderOrder = 2; root.add(W.target);
+    // onde au point de chute : seulement à l'atterrissage (tir aveugle), visible même sous les arbres
+    W.target = new T.Mesh(GEO.ring, MAT.target); W.target.visible = false; W.target.renderOrder = 7; root.add(W.target);
     P.scene.add(root);
   }
   const dzFor = a => (Math.sin(a) > 0 ? R.zs : R.zn);
@@ -579,7 +616,7 @@
     head.add(earL, earR);
     const sh = blob(1.5, 2.1); rootG.add(sh);
     const bang = new T.Sprite(MAT.bang); bang.position.set(0, 5.2, 0.6); bang.scale.setScalar(0.01); bang.visible = false; bang.renderOrder = 6; rootG.add(bang);
-    rootG.scale.setScalar(1.06);
+    rootG.scale.setScalar(1.12);
     root.add(rootG);
     const r = {
       uid: 'L' + Date.now().toString(36) + '-' + (W.seq++) + '-' + Math.floor(Math.random() * 1e6).toString(36),
@@ -591,21 +628,22 @@
     W.rabbits.push(r);
     return r;
   }
-  function placeRabbit(r, x, z) { r.x = x; r.z = z; r.g.position.set(x, Y0, z); }
-  function randomWander(fromX, fromZ, far) {
+  function placeRabbit(r, x, z) { r.x = x; r.z = z; r.g.position.set(x, heightAt(x, z), z); }
+  function randomWander(fromX, fromZ) {
+    const home = fromX == null;
     for (let k = 0; k < 40; k++) {
-      const a = Math.random() * 6.28, d = far ? Math.random() * 12 + 2 : 3 + Math.random() * 8;
-      const x = (fromX == null ? SITE.x : fromX) + Math.cos(a) * d, z = (fromZ == null ? SITE.z : fromZ) + Math.sin(a) * d;
-      if (q(x, z, R) > 0.92 || isBlockedAt(x, z) || inInterior(x, z, -1.4) || onRamp(x, z, 1)) continue;
+      const a = Math.random() * 6.28, d = home ? Math.random() * HOME.r : 3 + Math.random() * 8;
+      const x = (home ? HOME.x : fromX) + Math.cos(a) * d, z = (home ? HOME.z : fromZ) + Math.sin(a) * d;
+      if (isBlockedAt(x, z) || onRamp(x, z, 1)) continue;
       return [x, z];
     }
-    return [SITE.x - 6, SITE.z + 4];
+    return home ? [HOME.x, HOME.z] : [fromX, fromZ];
   }
   const onRamp = (x, z, m = 0) => Math.abs(x - CRATE.x) < CRATE.door + m && z - CRATE.z >= CRATE.hd - 0.2 - m && z - CRATE.z <= CRATE.hd + CRATE.ramp + m;
   const frontOfRamp = () => [CRATE.x, CRATE.z + CRATE.hd + CRATE.ramp + 1.6];
   // entièrement à l'intérieur : tout le corps du lapin a passé le seuil
-  const fullyIn = r => Math.abs(r.x - CRATE.x) <= CRATE.hw - 1.1 && r.z - CRATE.z >= -CRATE.hd + 0.5 && r.z - CRATE.z <= CRATE.hd - 2.0;
-  const inDoorway = r => Math.abs(r.x - CRATE.x) < CRATE.door + 0.6 && r.z - CRATE.z > CRATE.hd - 2.0 && r.z - CRATE.z < CRATE.hd + CRATE.ramp + 0.8;
+  const fullyIn = r => Math.abs(r.x - CRATE.x) <= CRATE.hw - 1.1 && r.z - CRATE.z >= -CRATE.hd + 0.5 && r.z - CRATE.z <= CRATE.hd - 2.4;
+  const inDoorway = r => Math.abs(r.x - CRATE.x) < CRATE.door + 0.6 && r.z - CRATE.z > CRATE.hd - 2.4 && r.z - CRATE.z < CRATE.hd + CRATE.ramp + 0.8;
 
   function startHop(r, x1, z1, dur, h) {
     r.hop = { t: 0, dur, x0: r.x, z0: r.z, x1, z1, h };
@@ -637,12 +675,13 @@
   }
   function releaseCarrot(r) { if (r.carrot) { r.carrot.res = null; r.carrot = null; } }
   function toWander(r, delay) {
-    releaseCarrot(r); r.st = 'wander'; r.path = null; r.enter = false; r.timer = delay == null ? 0.6 + Math.random() * 1.8 : delay;
+    releaseCarrot(r); r.st = 'wander'; r.enter = false; r.timer = delay == null ? 0.6 + Math.random() * 1.8 : delay;
+    r.path = inCrateZone(r) ? [[CRATE.x, CRATE.z + CRATE.hd - 0.5], frontOfRamp()] : null;   // jamais à travers les murs de la caisse
   }
   function seekCarrot(r) {
     let best = null, bd = 1e9;
     for (const c of W.carrots) {
-      if (c.state !== 'ground' || c.res) continue;
+      if (c.state !== 'ground' || c.res || r.ignore === c) continue;
       // un seul lapin dans la caisse à la fois
       if (c.inCrate && W.rabbits.some(o => o !== r && !o.gone && (fullyIn(o) || inDoorway(o) || (o.carrot && o.carrot.inCrate)))) continue;
       const d = Math.hypot(c.x - r.x, c.z - r.z);
@@ -655,17 +694,18 @@
     r.bangT = 0.75; r.bang.visible = true;
     return true;
   }
+  const crateStop = c => [c.x, Math.min(c.z + 2.1, CRATE.z + 1.2)];
   function pathToCarrot(r) {
     const c = r.carrot; if (!c) return false;
     if (c.inCrate) {
       const f = frontOfRamp();
-      if (fullyIn(r) || inDoorway(r)) { r.enter = false; r.path = [[c.x, Math.min(c.z + 1.75, CRATE.z + 2)]]; return true; }
-      const p = findPath(r.x, r.z, f[0], f[1]);
+      if (fullyIn(r) || inDoorway(r)) { r.enter = false; r.path = [crateStop(c)]; return true; }
+      const p = routeTo(r, f[0], f[1]);
       if (!p) return false;
       p.push(f); r.path = p; r.enter = true;
       return true;
     }
-    const p = findPath(r.x, r.z, c.x, c.z);
+    const p = routeTo(r, c.x, c.z);
     if (!p) return false;
     r.path = p; r.enter = false;
     return true;
@@ -705,7 +745,7 @@
         if (!r.path) {
           r.timer -= dt;
           if (r.timer <= 0) {
-            const t = randomWander(r.x, r.z); const p = findPath(r.x, r.z, t[0], t[1]);
+            const t = randomWander(r.x, r.z); const p = routeTo(r, t[0], t[1]);
             if (p) r.path = p; else r.timer = 0.6;
           }
         } else if (followPath(r, 1.55, 0.3, 0.72, 0.16 + Math.random() * 0.24)) {
@@ -718,7 +758,7 @@
         if (!r.carrot) { toWander(r); break; }
         r.look = sstep(0, 0.2, CFG.alert - r.timer);
         if (r.timer <= 0) {
-          if (pathToCarrot(r)) { r.st = 'move'; } else { toWander(r); }
+          if (pathToCarrot(r)) { r.st = 'move'; } else { r.ignore = r.carrot; toWander(r); }   // inaccessible : il n'y pense plus
         }
         break;
       }
@@ -727,11 +767,11 @@
         const c = r.carrot;
         if (!c) { toWander(r); break; }
         if (c.inCrate && !r.enter && W.crate.st !== 'open' && !fullyIn(r)) { r.earUp = 0.85; r.wait = Math.max(r.wait, 0.1); break; }   // porte fermée : il attend
-        const stop = r.enter ? null : [c.x, c.z, 1.75];
-        const done = followPath(r, 2.5, 0.3, 1.02, 0.09, stop);
+        const stop = r.enter ? null : [c.x, c.z, 2.1];
+        const done = followPath(r, 3, 0.3, 1.25, 0.08, stop);
         if (done && !r.hop) {
           if (r.enter) { r.st = 'hesitate'; r.timer = CFG.hesitate; r.yawT = Math.PI; }
-          else { r.st = 'nibble'; r.timer = CFG.nibble; r.yawT = Math.atan2(c.x - r.x, c.z - r.z); c.nibbled = true; }
+          else { r.st = 'nibble'; r.nibT = c.inCrate ? CFG.nibble : CFG.nibbleField; r.timer = r.nibT; r.yawT = Math.atan2(c.x - r.x, c.z - r.z); c.nibbled = true; }
         }
         break;
       }
@@ -741,7 +781,7 @@
         r.timer -= dt;
         if (r.timer <= 0 && W.crate.st === 'open') {
           r.enter = false; r.st = 'move';
-          r.path = [[CRATE.x, CRATE.z + CRATE.hd], [c.x, Math.min(c.z + 1.75, CRATE.z + 2)]];
+          r.path = [[CRATE.x, CRATE.z + CRATE.hd], crateStop(c)];
           r.yawT = Math.atan2(c.x - r.x, c.z - r.z);
         }
         break;
@@ -750,9 +790,9 @@
         const c = r.carrot; if (!c) { toWander(r); break; }
         r.earUp = 0.3;
         r.timer -= dt;
-        c.eaten = 1 - clamp(r.timer / CFG.nibble, 0, 1);
+        c.eaten = 1 - clamp(r.timer / r.nibT, 0, 1);
         if (Math.floor(r.t0 * 5) !== Math.floor((r.t0 - dt) * 5)) sfx('exNibble');
-        if (r.timer <= 0) { removeCarrot(c, true); r.carrot = null; r.st = 'wander'; r.timer = 0.7; r.path = null; }
+        if (r.timer <= 0) { removeCarrot(c, true); r.carrot = null; toWander(r, 0.7); }
         break;
       }
       case 'kicked': { r.earUp = 1; if (!r.hop) { r.st = 'wander'; r.timer = 0.5; } break; }
@@ -767,12 +807,13 @@
     }
     if (r.bangT > 0) {
       r.bangT -= dt; const a = 0.75 - r.bangT, sz = (a < 0.1 ? a / 0.1 * 2.3 : 1.9) * (r.bangT < 0.12 ? r.bangT / 0.12 : 1);
-      r.bang.scale.setScalar(Math.max(0.01, sz)); r.bang.position.y = 5 + r.bodyP.position.y;
+      r.bang.scale.setScalar(Math.max(0.01, sz * W.zoomK)); r.bang.position.y = 5 + (W.zoomK - 1) * 1.6 + r.bodyP.position.y;
       if (r.bangT <= 0) r.bang.visible = false;
     }
     // pose : hauteur (plancher de la caisse), orientation, tête, oreilles
     const floor = inInterior(r.x, r.z) ? FLOOR : (onRamp(r.x, r.z) ? FLOOR * 0.55 : 0);
-    r.g.position.set(r.x, Y0 + floor, r.z);
+    r.g.position.set(r.x, heightAt(r.x, r.z) + floor, r.z);
+    r.g.scale.setScalar(1.12 * (1 + (W.zoomK - 1) * 0.22));   // de loin, un lapin doit rester lisible
     let dy = r.yawT - r.yaw; while (dy > Math.PI) dy -= 6.2832; while (dy < -Math.PI) dy += 6.2832;
     r.yaw += dy * Math.min(1, dt * 11); r.g.rotation.y = r.yaw;
     const nib = r.st === 'nibble', sniff = r.st === 'hesitate' || (r.st === 'wander' && !r.path && !r.hop);
@@ -788,8 +829,8 @@
     r.wasIn = fullyIn(r);
   }
 
-  /* ── carottes ── */
-  function throwCarrot(tx, tz, inCrate) {
+  /* ── carottes : le tir est aveugle, ni arc ni ombre ni repère avant l'atterrissage ── */
+  function launch(dx, dz, range) {
     if (W.t < W.nextThrow) return false;
     const live = W.carrots.filter(c => c.state !== 'dead');
     if (live.length >= CFG.carrotsMax) {
@@ -798,27 +839,53 @@
       removeCarrot(old);
     }
     W.nextThrow = W.t + CFG.throwEvery;
-    const y1 = Y0 + (inCrate ? FLOOR + 0.3 : 0.3);
-    const dist = Math.hypot(tx - CATA.x, tz - CATA.z);
-    const m = new T.Mesh(GEO.carrot, MAT.veg); m.scale.setScalar(1.25); m.castShadow = false;
-    const sh = blob(1.05, 1.05); sh.position.set(tx, y1 - 0.25, tz);
-    const c = { x: tx, z: tz, y1, x0: CATA.x, z0: CATA.z, y0: Y0 + 4.4, t: 0, dur: 0.46 + dist * 0.012, h: 5 + dist * 0.2, mesh: m, sh, state: 'fly', born: W.t, res: null, inCrate: !!inCrate, eaten: 0, nibbled: false, spin: 6 + Math.random() * 3, rz: 1.25 + Math.random() * 0.25, ry: Math.random() * 6.28 };
+    const tx = CATA.x + dx * range, tz = CATA.z + dz * range, y0 = W.cata.y + 2.2 * CATA.scale;
+    const y1 = (tx > ZONE.x0 && tx < ZONE.x1 && tz > ZONE.z0 && tz < ZONE.z1 ? heightAt(tx, tz) : 0) + 0.3;
+    const m = new T.Mesh(GEO.carrot, MAT.veg); m.scale.setScalar(1.4 * (1 + (W.zoomK - 1) * 0.35)); m.castShadow = false;
+    const c = { x: tx, z: tz, y1, x0: CATA.x, z0: CATA.z, y0, t: 0, dur: 0.55 + range * 0.0058, h: 8 + range * 0.16, mesh: m, sh: null, state: 'fly', born: W.t, res: null, inCrate: false, eaten: 0, nibbled: false, spin: 6 + Math.random() * 3, rz: 1.25 + Math.random() * 0.25, ry: Math.random() * 6.28 };
     m.position.set(c.x0, c.y0, c.z0);
-    root.add(m, sh);
+    root.add(m);
     W.carrots.push(c);
-    // catapulte
-    const ca = W.cata; ca.yawT = Math.atan2(tx - CATA.x, tz - CATA.z); ca.fire = 0;
-    ca.loaded.visible = false;
+    const ca = W.cata; ca.yawT = Math.atan2(dx, dz); ca.fire = 0; ca.loaded.visible = false;
     sfx('exThrow');
-    // repère au sol, pour confirmer le toucher tout de suite
-    W.target.position.set(tx, y1 - 0.2, tz); W.target.visible = true; W.target.scale.setScalar(0.6); W.targetT = 0;
+    const s = S(); s.shots = (s.shots || 0) + 1;
+    if (UI.grab) UI.grab.classList.remove('on');
+    if (s.shots >= 2 && UI.hint.style.display !== 'none' && !UI.hint.classList.contains('flav')) UI.hint.style.display = 'none';
     return true;
+  }
+  function ripple(x, y, z) {
+    W.target.position.set(x, y, z); W.target.visible = true; W.targetT = 0;
+  }
+  // le point de chute décide de tout : la caisse, l'eau, la forêt lointaine, ou le sol
+  function landCarrot(c) {
+    if (c.x <= ZONE.x0 || c.x >= ZONE.x1 || c.z <= ZONE.z0 || c.z >= ZONE.z1) { removeCarrot(c); return; }   // perdue au loin
+    const zx = c.x - CRATE.x, zz = c.z - CRATE.z, M = CFG.crateCatch;
+    const inBox = Math.abs(zx) <= CRATE.hw + M && zz >= -CRATE.hd - M && zz <= CRATE.hd + CRATE.ramp + M * 0.5;
+    c.from = null;
+    if (inBox) {
+      c.from = [c.x, c.z, c.mesh.position.y]; c.fromT = 0;
+      const baited = W.carrots.some(o => o !== c && o.inCrate && o.state !== 'dead');
+      if (W.crate.st === 'open' && !baited) {
+        c.inCrate = true; c.x = CRATE.x + clamp(zx, -2.4, 2.4); c.z = CRATE.z - 1.5; c.y1 = Y0 + FLOOR + 0.3;
+        sfx('exBox');
+      } else {   // porte fermée, ou déjà un appât : elle rebondit devant la rampe
+        c.x = CRATE.x + clamp(zx, -5, 5); c.z = CRATE.z + CRATE.hd + CRATE.ramp + 2.6; c.y1 = heightAt(c.x, c.z) + 0.3;
+        sfx('exBox');
+      }
+    } else if (heightAt(c.x, c.z) < WATER) {   // plouf
+      sfx('exSplash'); ripple(c.x, WATER - 0.2, c.z); removeCarrot(c); return;
+    } else sfx('exLand');
+    c.state = 'ground'; c.landed = W.t;
+    c.mesh.rotation.set(0, c.ry, c.rz);
+    if (!c.from) { c.mesh.position.set(c.x, c.y1, c.z); puff(c.x, c.y1, c.z); }
+    c.sh = blob(1.05, 1.05); c.sh.position.set(c.x, c.y1 - 0.25, c.z); root.add(c.sh);
+    ripple(c.x, c.y1 + 0.1, c.z);
   }
   function removeCarrot(c, eaten) {
     if (c.state === 'dead') return;
     c.state = 'dead';
     if (c.res) { const r = c.res; c.res = null; if (r.carrot === c) { r.carrot = null; if (!eaten && r.st !== 'captured') toWander(r); } }
-    root.remove(c.mesh); root.remove(c.sh);
+    root.remove(c.mesh); if (c.sh) root.remove(c.sh);
     W.carrots = W.carrots.filter(x => x !== c);
   }
   function carrotTick(c, dt) {
@@ -826,23 +893,21 @@
       c.t += dt; const k = Math.min(1, c.t / c.dur);
       c.mesh.position.set(lerp(c.x0, c.x, k), lerp(c.y0, c.y1, k) + c.h * 4 * k * (1 - k), lerp(c.z0, c.z, k));
       c.mesh.rotation.set(c.t * c.spin, c.ry, c.t * c.spin * 0.6);
-      const s = 0.45 + 0.55 * k; c.sh.scale.set(1.05 * s, 1, 1.05 * s); c.sh.material = MAT.blob;
-      if (k >= 1) {
-        c.state = 'ground'; c.landed = W.t; c.bounce = 0;
-        c.mesh.position.set(c.x, c.y1, c.z); c.mesh.rotation.set(0, c.ry, c.rz);
-        sfx('exLand'); puff(c.x, c.y1, c.z);
-      }
+      if (k >= 1) landCarrot(c);
       return;
     }
-    // sur le sol : petit rebond, puis il attend
     const a = W.t - c.landed;
-    if (a < 0.26) c.mesh.position.y = c.y1 + Math.abs(Math.sin(a / 0.26 * Math.PI)) * 0.55 * (1 - a / 0.26);
+    if (c.from) {   // rebond vers l'intérieur de la caisse
+      c.fromT += dt; const k = Math.min(1, c.fromT / 0.24);
+      c.mesh.position.set(lerp(c.from[0], c.x, k), lerp(c.from[2], c.y1, k) + Math.sin(Math.PI * k) * 2.2, lerp(c.from[1], c.z, k));
+      if (k >= 1) { c.from = null; c.landed = W.t; }
+    } else if (a < 0.26) c.mesh.position.y = c.y1 + Math.abs(Math.sin(a / 0.26 * Math.PI)) * 0.55 * (1 - a / 0.26);
     else c.mesh.position.y = c.y1;
     const left = CFG.carrotLife - a;
-    let s = 1.25 * (1 - c.eaten * 0.72);
-    if (!c.nibbled && left < 1.2) s *= Math.max(0.05, left / 1.2);
+    let s = 1.4 * (1 + (W.zoomK - 1) * 0.35) * (1 - c.eaten * 0.72);
+    if (!c.nibbled && !c.res && left < 1.2) s *= Math.max(0.05, left / 1.2);
     c.mesh.scale.setScalar(s);
-    if (!c.nibbled && left <= 0) removeCarrot(c);
+    if (!c.nibbled && !c.res && left <= 0) removeCarrot(c);
   }
   function puff(x, y, z) {
     for (let i = 0; i < 4; i++) {
@@ -902,6 +967,7 @@
     const pulse = ready ? 0.5 + Math.sin(W.t * 7) * 0.25 : 0;
     MAT.ring.opacity += (pulse - MAT.ring.opacity) * Math.min(1, dt * 12);
     K.ringG.visible = MAT.ring.opacity > 0.01;
+    K.halo.scale.setScalar(3.4 * (1 + (W.zoomK - 1) * 0.6));
     K.halo.material.opacity = ready ? 0.75 + Math.sin(W.t * 7) * 0.2 : (K.st === 'locked' ? 0.9 : 0.42);
   }
 
@@ -931,14 +997,14 @@
   function aliveTarget() { return Math.max(0, CFG.rabbits - S().respawns.filter(t => t > Date.now()).length); }
   function spawnRim(r) {
     for (let k = 0; k < 30; k++) {
-      const a = Math.random() * 6.28, x = SITE.x + Math.cos(a) * R.x * 0.97, z = SITE.z + Math.sin(a) * dzFor(a) * 0.97;
+      const a = Math.random() * 6.28, x = HOME.x + Math.cos(a) * HOME.r * 1.3, z = HOME.z + Math.sin(a) * HOME.r * 1.3;
       if (isBlockedAt(x, z)) continue;
-      placeRabbit(r, x, z); r.yaw = r.yawT = Math.atan2(SITE.x - x, SITE.z - z);
-      const t = randomWander(null, null, true), p = findPath(x, z, t[0], t[1]);
+      placeRabbit(r, x, z); r.yaw = r.yawT = Math.atan2(HOME.x - x, HOME.z - z);
+      const t = randomWander(), p = findPath(x, z, t[0], t[1]);
       if (p) { r.path = p; r.st = 'wander'; }
       return;
     }
-    placeRabbit(r, SITE.x, SITE.z + 8);
+    placeRabbit(r, HOME.x, HOME.z);
   }
   function respawnTick() {
     const s = S(), now = Date.now();
@@ -951,16 +1017,16 @@
   }
   function resetField() {
     W.rabbits.forEach(r => { root.remove(r.g); }); W.rabbits = [];
-    W.carrots.slice().forEach(c => { root.remove(c.mesh); root.remove(c.sh); }); W.carrots = [];
+    W.carrots.slice().forEach(c => { root.remove(c.mesh); if (c.sh) root.remove(c.sh); }); W.carrots = [];
     W.dust.forEach(d => root.remove(d.m)); W.dust = [];
     const K = W.crate; K.st = 'open'; K.t = 0; K.angle = 0; K.hinge.rotation.x = 0; K.beam.visible = false; K.promptOn = false; setLamp(LAMP.idle); MAT.ring.opacity = 0; showPrompt(false);
     W.nextThrow = W.t;
-    W.cata.fire = 1; W.cata.loaded.visible = true; W.cata.armP.rotation.x = W.cata.rest; W.target.visible = false;
+    W.cata.fire = 1; W.cata.pull = 0; W.cata.loaded.visible = true; W.cata.armP.rotation.x = W.cata.rest; W.cata.armP.position.z = 0.2; W.target.visible = false; cancelSling();
     const s = S(), now = Date.now();
     s.respawns = s.respawns.filter(t => t > now);
     const n = CFG.rabbits - s.respawns.length;
     for (let i = 0; i < n; i++) {
-      const r = makeRabbit(i), t = randomWander(null, null, true);
+      const r = makeRabbit(i), t = randomWander();
       placeRabbit(r, t[0], t[1]);
       r.timer = 0.4 + Math.random() * 2;
     }
@@ -969,6 +1035,7 @@
   /* ── boucle ── */
   function tick(dt) {
     W.t += dt;
+    W.zoomK = clamp(P.camera.position.distanceTo(P.controls.target) / 165, 1, 3.4);
     W.respawnChk -= dt;
     if (W.respawnChk <= 0) { W.respawnChk = 0.5; respawnTick(); hideStragglers(); }   // effets ajoutés entre-temps (fête de caserne, après-attaque…)
     W.carrots.slice().forEach(c => carrotTick(c, dt));
@@ -979,12 +1046,28 @@
     const ca = W.cata;
     let dy = ca.yawT - ca.yaw; while (dy > Math.PI) dy -= 6.2832; while (dy < -Math.PI) dy += 6.2832;
     ca.yaw += dy * Math.min(1, dt * 16); ca.yawG.rotation.y = ca.yaw;
+    const aim = W.sling ? slingAim() : null;
+    if (aim && aim.t > 0) ca.yawT = Math.atan2(aim.dx, aim.dz);
+    ca.pull += ((aim ? aim.t : 0) - ca.pull) * Math.min(1, dt * 22);
     if (ca.fire < 1) {
       ca.fire = Math.min(1, ca.fire + dt / (CFG.throwEvery * 0.86));
       const f = ca.fire, kick = Math.min(1, f / 0.1);
       const out = 1 - Math.pow(1 - kick, 3), back = sstep(0.24, 1, f);
-      ca.armP.rotation.x = lerp(ca.rest, 1.85, out * (1 - back)) ;
+      ca.armP.rotation.x = lerp(ca.rest, 1.85, out * (1 - back));
       if (f >= 1) ca.loaded.visible = true;
+    } else ca.armP.rotation.x = ca.rest - ca.pull * 0.16;
+    // le bras recule à mesure qu'on tire, et l'engin tremble un peu quand il est à fond
+    ca.armP.position.z = 0.2 - ca.pull * 2.1;
+    ca.yawG.rotation.z = ca.pull > 0.7 ? Math.sin(W.t * 70) * 0.012 * (ca.pull - 0.7) / 0.3 : 0;
+    if (aim) {
+      const step = Math.floor(aim.t * 5);
+      if (step !== W.sling.step) { if (step > W.sling.step) sfx('exPull'); W.sling.step = step; }
+      drawBand(aim);
+      if (window.SBFluid) SBFluid.poke();
+    }
+    if (UI.grab && UI.grab.classList.contains('on')) {
+      const [gx, gy] = screenOf(CATA.x, W.cata.y + 2, CATA.z), hr = UI.hud.getBoundingClientRect();
+      UI.grab.style.transform = `translate3d(${Math.round(gx - hr.left - 34)}px,${Math.round(gy - hr.top - 34)}px,0)`;
     }
     // poussière, cible
     for (let i = W.dust.length - 1; i >= 0; i--) {
@@ -993,8 +1076,8 @@
       if (d.t >= d.life) { root.remove(d.m); W.dust.splice(i, 1); }
     }
     if (W.target.visible) {
-      W.targetT += dt; const k = W.targetT / 0.5;
-      W.target.scale.setScalar(0.5 + k * 1.1); MAT.target.opacity = 0.55 * Math.max(0, 1 - k);
+      W.targetT += dt; const k = W.targetT / 0.55;
+      W.target.scale.setScalar((0.5 + k * 1.3) * W.zoomK * 1.5); MAT.target.opacity = 0.7 * Math.max(0, 1 - k);
       if (k >= 1) W.target.visible = false;
     }
     S().secs = (S().secs || 0) + dt;
@@ -1003,19 +1086,10 @@
     if (window.SBFluid && (W.carrots.length || W.crate.st !== 'open' || W.rabbits.some(r => r.st === 'move'))) SBFluid.poke();
   }
 
-  /* ───────────────────────── toucher : la caisse, ou le sol ───────────────────────── */
-  let ray = null, plane = null;
+  /* ───────────────────────── toucher : tirer la catapulte, ou refermer la caisse ───────────────────────── */
   function screenOf(x, y, z) {
     const r = P.host.getBoundingClientRect(), v = new T.Vector3(x, y, z).project(P.camera);
     return [r.left + (v.x * 0.5 + 0.5) * r.width, r.top + (-v.y * 0.5 + 0.5) * r.height, v.z];
-  }
-  function groundPoint(cx, cy) {
-    const r = P.host.getBoundingClientRect();
-    if (!ray) { ray = new T.Raycaster(); plane = new T.Plane(new T.Vector3(0, 1, 0), 0); }
-    plane.constant = -Y0;
-    ray.setFromCamera(new T.Vector2((cx - r.left) / r.width * 2 - 1, -((cy - r.top) / r.height) * 2 + 1), P.camera);
-    const hit = new T.Vector3();
-    return ray.ray.intersectPlane(plane, hit) ? hit : null;
   }
   function crateHit(cx, cy) {
     const W2 = CRATE.hw + 0.2, D2 = CRATE.hd + 0.2; let x0 = 1e9, x1 = -1e9, y0 = 1e9, y1 = -1e9;
@@ -1026,31 +1100,60 @@
     const cxm = (x0 + x1) / 2, cym = (y0 + y1) / 2, hw = Math.max(46, (x1 - x0) / 2), hh = Math.max(46, (y1 - y0) / 2);   // zone tactile confortable, même de loin
     return Math.abs(cx - cxm) <= hw && Math.abs(cy - cym) <= hh;
   }
-  function floorHit(p) { return p && inInterior(p.x, p.z, 0.2); }
   function onTap(cx, cy) {
     if (!active || moving) return;
-    const p = groundPoint(cx, cy);
-    const K = W.crate;
-    if (crateHit(cx, cy)) {
-      if (K.st !== 'open') return;
-      const someoneThere = W.rabbits.some(r => !r.gone && r.st !== 'captured' && (fullyIn(r) || inDoorway(r)));
-      const baited = W.carrots.some(c => c.inCrate);
-      if (!someoneThere && !baited && floorHit(p)) {
-        // carotte déposée dans la caisse : c'est le moyen le plus simple d'y attirer un lapin
-        const x = clamp(p.x, CRATE.x - 2.4, CRATE.x + 2.4);
-        throwCarrot(x, CRATE.z - 1.5, true);
-        return;
-      }
-      closeDoor();
-      return;
-    }
-    if (!p) return;
-    if (q(p.x, p.z, R) > 1.02) return;                // hors de la clairière : point inaccessible
-    if (isBlockedAt(p.x, p.z) && q(p.x, p.z, R) <= 1.0) return;   // rocher, catapulte
-    throwCarrot(p.x, p.z, false);
+    if (crateHit(cx, cy)) closeDoor();
   }
-  function bindTaps() {
+  // la catapulte se saisit au doigt : zone large, elle est petite de loin
+  function grabHit(cx, cy) {
+    const [sx, sy] = screenOf(CATA.x, W.cata.y + 2, CATA.z), [ex] = screenOf(CATA.x + CATA.r, W.cata.y + 2, CATA.z);
+    return Math.hypot(cx - sx, cy - sy) <= Math.max(50, Math.abs(ex - sx) * 1.2);
+  }
+  const pullMax = () => { const r = UI.hud.getBoundingClientRect(); return clamp(Math.min(r.width, r.height) * CFG.pullMaxFrac, 130, 240); };
+  // à l'opposé du doigt, à l'écran comme sur le sol (la caméra écrase la profondeur)
+  function slingAim() {
+    const A = W.sling, px = A.x - A.sx, py = A.y - A.sy, len = Math.hypot(px, py), maxP = pullMax();
+    const t = clamp((len - CFG.pullDead) / (maxP - CFG.pullDead), 0, 1);
+    const dx0 = -px, dz0 = -py / Math.max(0.2, P.camDir.y), n = Math.hypot(dx0, dz0) || 1;
+    return { t, len, maxP, px, py, dx: dx0 / n, dz: dz0 / n, range: lerp(CFG.rangeMin, CFG.rangeMax, t) };
+  }
+  function drawBand(aim) {
+    const A = W.sling, hr = UI.hud.getBoundingClientRect(), k = aim.len > aim.maxP ? aim.maxP / aim.len : 1;
+    const fx = A.sx + aim.px * k - hr.left, fy = A.sy + aim.py * k - hr.top, yaw = W.cata.yaw, sc = CATA.scale;
+    [-1, 1].forEach((side, i) => {
+      const lx = side * 1.2 * sc, lz = 0.2 * sc;
+      const wx = CATA.x + lx * Math.cos(yaw) + lz * Math.sin(yaw), wz = CATA.z - lx * Math.sin(yaw) + lz * Math.cos(yaw);
+      const [sx, sy] = screenOf(wx, W.cata.y + 2.35 * sc, wz), l = UI.bandL[i];
+      l.setAttribute('x1', (sx - hr.left).toFixed(1)); l.setAttribute('y1', (sy - hr.top).toFixed(1)); l.setAttribute('x2', fx.toFixed(1)); l.setAttribute('y2', fy.toFixed(1));
+      l.setAttribute('stroke-width', (3 - aim.t * 1.6).toFixed(2));
+    });
+    UI.bandC.setAttribute('cx', fx.toFixed(1)); UI.bandC.setAttribute('cy', fy.toFixed(1));
+  }
+  function cancelSling() {
+    W.sling = null;
+    if (UI.band) UI.band.style.display = 'none';
+  }
+  function bindInput() {
     const el = P.renderer.domElement; let down = null, touches = 0;
+    // en phase de capture : si le doigt saisit la catapulte, la carte ne reçoit rien et ne bouge pas
+    P.host.addEventListener('pointerdown', e => {
+      if (!active || moving) return;
+      if (W.sling) { cancelSling(); e.stopPropagation(); return; }   // un deuxième doigt annule le tir
+      if (!e.isPrimary || !grabHit(e.clientX, e.clientY)) return;
+      W.sling = { id: e.pointerId, sx: e.clientX, sy: e.clientY, x: e.clientX, y: e.clientY, step: 0 };
+      UI.band.style.display = 'block';
+      e.stopPropagation();
+    }, { capture: true });
+    addEventListener('pointermove', e => { if (W.sling && e.pointerId === W.sling.id) { W.sling.x = e.clientX; W.sling.y = e.clientY; } }, { passive: true });
+    const slingEnd = e => {
+      if (!W.sling || e.pointerId !== W.sling.id) return;
+      W.sling.x = e.clientX; W.sling.y = e.clientY;
+      const aim = slingAim(), cancelled = e.type === 'pointercancel';
+      cancelSling();
+      if (!cancelled && aim.len >= CFG.pullDead) { if (!launch(aim.dx, aim.dz, aim.range)) sfx('nope'); }
+    };
+    addEventListener('pointerup', slingEnd); addEventListener('pointercancel', slingEnd);
+    // un toucher bref sur la caisse la referme
     el.addEventListener('pointerdown', e => {
       touches = e.isPrimary ? 1 : touches + 1;
       if (!active) return;
@@ -1074,17 +1177,11 @@
   function buildUI() {
     const css = document.createElement('style');
     css.textContent = `
-    #sbx-compass { position:absolute; left:0; top:0; z-index:19; width:58px; padding:0; margin:0; border:0; background:none; cursor:pointer; color:rgba(150,235,255,.95);
-      display:flex; flex-direction:column; align-items:center; gap:3px; opacity:0; pointer-events:none; transition:opacity .35s ease; -webkit-tap-highlight-color:transparent; will-change:transform; }
-    #sbx-compass.on { opacity:1; pointer-events:auto; }
-    #sbx-compass .disc { position:relative; width:50px; height:50px; border-radius:50%; background:rgba(8,18,26,.4); border:1px solid rgba(130,230,255,.6);
-      backdrop-filter:blur(2.5px); -webkit-backdrop-filter:blur(2.5px); box-shadow:0 0 16px rgba(90,210,255,.14), inset 0 0 12px rgba(90,210,255,.08); animation:sbxBreathe 3.4s ease-in-out infinite; }
-    #sbx-compass.hello .disc::after { content:''; position:absolute; inset:-1px; border-radius:50%; border:2px solid rgba(150,235,255,.9); animation:sbxHello 1.25s ease-out 3; pointer-events:none; }
-    @keyframes sbxHello { from { transform:scale(1); opacity:.95 } to { transform:scale(2.1); opacity:0 } }
-    #sbx-compass:active .disc { transform:scale(.93); }
-    #sbx-compass svg { position:absolute; inset:0; width:100%; height:100%; display:block; }
-    #sbx-compass .lab { font:600 9px/1 'Space Grotesk',system-ui,sans-serif; letter-spacing:.16em; text-transform:uppercase; color:rgba(205,245,255,.92); text-shadow:0 1px 3px rgba(0,0,0,.8); }
-    @keyframes sbxBreathe { 0%,100% { opacity:.76 } 50% { opacity:1 } }
+    #sbx-pin { position:absolute; left:0; top:0; z-index:19; width:44px; height:44px; margin:0; padding:0; border:0; background:none; cursor:pointer; display:none;
+      align-items:flex-end; justify-content:center; -webkit-tap-highlight-color:transparent; will-change:transform; }
+    #sbx-pin.on { display:flex; }
+    #sbx-pin svg { width:15px; height:21px; display:block; opacity:.62; filter:drop-shadow(0 1px 2px rgba(0,0,0,.4)); }
+    #sbx-pin:active svg { opacity:.9; }
     #scr-planet.sbx-on > .w-top, #scr-planet.sbx-on > .w-nav, #scr-planet.sbx-on > .w-center, #scr-planet.sbx-on > .w-card, #scr-planet.sbx-on > .w-pop,
     #scr-planet.sbx-on > .w-sheet, #scr-planet.sbx-on > #sb-radio-btn, #scr-planet.sbx-on .p3d-overlay { display:none !important; }
     body.sbx-on #sb-bringue, body.sbx-on #sb-party, body.sbx-on #sb-devast, body.sbx-on #sb-install { display:none !important; }
@@ -1102,6 +1199,15 @@
       border-radius:22px; background:rgba(6,14,20,.72); border:1px solid rgba(120,220,255,.42); color:#d6f3ff; font:500 13px/1 'Space Grotesk',system-ui,sans-serif; letter-spacing:.03em; cursor:pointer; backdrop-filter:blur(6px); -webkit-backdrop-filter:blur(6px); }
     #sbx-back svg { width:15px; height:15px; }
     #sbx-back:active { transform:translateX(-50%) scale(.97); }
+    #sbx-re { position:absolute; right:12px; bottom:calc(var(--sab,0px) + 22px); pointer-events:auto; width:44px; height:44px; padding:10px; border-radius:50%; cursor:pointer;
+      background:rgba(6,14,20,.72); border:1px solid rgba(120,220,255,.42); color:#d6f3ff; backdrop-filter:blur(6px); -webkit-backdrop-filter:blur(6px); }
+    #sbx-re svg { width:100%; height:100%; display:block; }
+    #sbx-band { position:absolute; left:0; top:0; width:100%; height:100%; display:none; pointer-events:none; overflow:visible; }
+    #sbx-grab { position:absolute; left:0; top:0; width:68px; height:68px; display:none; pointer-events:none; will-change:transform; }
+    #sbx-grab.on { display:block; }
+    #sbx-grab::before, #sbx-grab::after { content:''; position:absolute; inset:14px; border-radius:50%; border:2px solid rgba(255,255,255,.75); animation:sbxGrab 1.8s ease-out infinite; }
+    #sbx-grab::after { animation-delay:.9s; }
+    @keyframes sbxGrab { from { transform:scale(.7); opacity:.9 } to { transform:scale(1.7); opacity:0 } }
     #sbx-close { position:absolute; left:0; top:0; pointer-events:auto; padding:0 15px; height:38px; display:none; align-items:center; border-radius:19px; cursor:pointer;
       background:rgba(8,22,14,.88); border:1px solid rgba(160,255,185,.75); color:#e4ffe9; font:600 13px/1 'Space Grotesk',system-ui,sans-serif; letter-spacing:.05em; box-shadow:0 0 16px rgba(120,255,160,.3); will-change:transform; }
     #sbx-close.on { display:flex; animation:sbxPop .16s ease-out both; }
@@ -1112,22 +1218,24 @@
     #sbx-veil.on { opacity:1; pointer-events:auto; }`;
     document.head.appendChild(css);
     const scr = document.getElementById('scr-planet');
-    const cp = document.createElement('button');
-    cp.id = 'sbx-compass'; cp.setAttribute('aria-label', tr('explore.aria'));
-    cp.innerHTML = `<span class="disc"><svg viewBox="0 0 48 48" fill="none" aria-hidden="true">
-        <g stroke="currentColor" stroke-opacity=".42" stroke-width="1.2" stroke-linecap="round"><path d="M24 4.5v3M24 40.5v3M4.5 24h3M40.5 24h3"/></g>
-        <g class="needle"><path d="M24 7.5 31 25.5 24 22 17 25.5Z" fill="currentColor" fill-opacity=".92"/><path d="M24 22 31 25.5 24 38 17 25.5Z" fill="currentColor" fill-opacity=".2"/></g>
-      </svg></span><span class="lab"></span>`;
-    scr.appendChild(cp);
-    UI.compass = cp; UI.needle = cp.querySelector('.needle'); UI.lab = cp.querySelector('.lab');
-    cp.addEventListener('click', () => { if (active) flyToClearing(); else enter(); });
+    const pin = document.createElement('button');
+    pin.id = 'sbx-pin'; pin.setAttribute('aria-label', tr('explore.aria'));
+    pin.innerHTML = '<svg viewBox="0 0 18 25" aria-hidden="true"><path fill="#fff" fill-rule="evenodd" d="M9 0C4 0 0 4 0 9c0 6.3 7.8 15 8.2 15.6.4.5 1.2.5 1.6 0C10.200 24 18 15.300 18 9c0-5-4-9-9-9zm0 12.200A3.200 3.200 0 1 1 9 5.800a3.200 3.200 0 0 1 0 6.400z"/></svg>';
+    scr.appendChild(pin);
+    UI.pin = pin;
+    pin.addEventListener('click', () => enter());
     const hud = document.createElement('div'); hud.id = 'sbx-hud';
     hud.innerHTML = `<div id="sbx-chip"><svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="5.6" fill="none" stroke="currentColor" stroke-width="1.6"/><circle cx="8" cy="8" r="2.6" fill="currentColor"/></svg><b>0</b></div>
       <div id="sbx-hint" style="display:none"></div>
+      <svg id="sbx-band"><line stroke="#fff" stroke-opacity=".85" stroke-linecap="round"/><line stroke="#fff" stroke-opacity=".85" stroke-linecap="round"/><circle r="6" fill="#f08a24" stroke="#fff" stroke-width="1.5"/></svg>
+      <div id="sbx-grab"></div>
       <button id="sbx-close"></button>
+      <button id="sbx-re"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="12" cy="12" r="6.5"/><circle cx="12" cy="12" r="1.8" fill="currentColor"/><path d="M12 2.500v3M12 18.500v3M2.500 12h3M18.500 12h3"/></svg></button>
       <button id="sbx-back"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M7 3 2.5 8 7 13M3 8h10.5"/></svg><span></span></button>`;
     scr.appendChild(hud);
     UI.hud = hud; UI.chip = hud.querySelector('#sbx-chip'); UI.chipN = UI.chip.querySelector('b'); UI.hint = hud.querySelector('#sbx-hint'); UI.close = hud.querySelector('#sbx-close'); UI.back = hud.querySelector('#sbx-back');
+    UI.band = hud.querySelector('#sbx-band'); UI.bandL = [...UI.band.querySelectorAll('line')]; UI.bandC = UI.band.querySelector('circle'); UI.grab = hud.querySelector('#sbx-grab');
+    const re = hud.querySelector('#sbx-re'); re.setAttribute('aria-label', tr('explore.recenter')); re.addEventListener('click', () => flyToField());
     UI.back.querySelector('span').textContent = tr('explore.back');
     UI.close.textContent = tr('explore.close');
     UI.back.addEventListener('click', () => exit());
@@ -1146,7 +1254,8 @@
     if (!W.crate.promptOn) return;
     const [sx, sy] = screenOf(CRATE.x, Y0 + 7, CRATE.z - 1);
     const w = UI.close.offsetWidth || 90, r = UI.hud.getBoundingClientRect();
-    UI.close.style.transform = `translate3d(${Math.round(clamp(sx - r.left - w / 2, 8, r.width - w - 8))}px,${Math.round(Math.max(sy - r.top - 19, 96))}px,0)`;
+    // toujours au-dessus de la caisse, jamais dessus : de loin, elle est toute petite
+    UI.close.style.transform = `translate3d(${Math.round(clamp(sx - r.left - w / 2, 8, r.width - w - 8))}px,${Math.round(Math.max(sy - r.top - 46, 52))}px,0)`;
   }
   function showGain(first) {
     const r = UI.hud.getBoundingClientRect(), [sx, sy] = screenOf(CRATE.x, Y0 + 6, CRATE.z);
@@ -1171,62 +1280,48 @@
     }
   }
 
-  /* ── boussole : flèche qui indique la clairière, et qui glisse le long du bord de l'écran ── */
-  const CP = { x: null, y: null, a: 0, show: false, okAt: 0, ok: false, top: 120, bot: 112 };
-  function compassAllowed() {
-    if (!installed || !P.ready || window.__sbCinema) return false;
+  /* ── pin : un petit repère blanc posé sur la carte à l'endroit du jeu ; il suit la carte, et s'efface sous l'interface ── */
+  const PN = { okAt: 0, ok: false, top: 120, show: false, tr: '' };
+  function pinAllowed() {
+    if (!installed || !P.ready || active || moving || window.__sbCinema) return false;
     const scr = document.getElementById('scr-planet');
     if (!scr || scr.classList.contains('hidden') || !P.host || P.host.offsetParent === null) return false;
     if (EXPLORE_PUBLIC && window.SBTuto && SBTuto.active && SBTuto.active()) return false;
     if (document.querySelector('.w-card.on, .w-sheet.on, #sb-sheet, #sb-away, #mp-choose, #sb-notif')) return false;
     return true;
   }
-  function compassTick(dt, now) {
-    if (now - CP.okAt > 250) {
-      CP.okAt = now; CP.ok = compassAllowed();
+  function pinTick(now) {
+    if (now - PN.okAt > 250) {
+      PN.okAt = now; PN.ok = pinAllowed();
       const goal = document.querySelector('.p3d-goal'), top = document.querySelector('#scr-planet .w-top');
       let b = 0;
       if (top && top.offsetParent !== null) b = Math.max(b, top.getBoundingClientRect().bottom);
       if (goal && goal.offsetParent !== null) b = Math.max(b, goal.getBoundingClientRect().bottom);
-      if (active) { const h = UI.hint.style.display !== 'none' ? UI.hint : UI.chip; b = h.getBoundingClientRect().bottom; }
-      CP.top = b + 6;
+      PN.top = b;
     }
-    if (!CP.ok) { if (CP.show) { CP.show = false; UI.compass.classList.remove('on'); } return; }
-    const host = document.getElementById('scr-planet').getBoundingClientRect();
-    const W_ = host.width, H_ = host.height;
-    const [sx0, sy0] = screenOf(SITE.x, Y0 + 1, SITE.z);
-    const sx = sx0 - host.left, sy = sy0 - host.top;
-    const L = 40, Rr = W_ - 40, Tp = CP.top + 30, Bt = H_ - (active ? 110 : 128);
-    const onscreen = sx > L && sx < Rr && sy > Tp && sy < Bt;
-    // dans l'exploration, la boussole ne sert que si on s'est éloigné de la clairière
-    const wantShow = active ? (!moving && !onscreen) : !moving;
-    if (wantShow !== CP.show) {
-      CP.show = wantShow; UI.compass.classList.toggle('on', wantShow);
-      if (wantShow && !CP.greeted) { CP.greeted = true; UI.compass.classList.add('hello'); setTimeout(() => UI.compass.classList.remove('hello'), 4000); }
+    let want = PN.ok, x = 0, y = 0;
+    if (want) {
+      const host = document.getElementById('scr-planet').getBoundingClientRect(), [sx, sy] = screenOf(CRATE.x, Y0 + 2, CRATE.z);
+      x = sx - host.left; y = sy - host.top;
+      want = x > 10 && x < host.width - 10 && y - 22 > PN.top && y < host.height - 100;
     }
-    if (!wantShow) { CP.x = null; return; }
-    let px, py, ang;
-    if (onscreen) { px = sx; py = Math.max(Tp, sy - 58); ang = Math.PI / 2; }     // la clairière est à l'écran : la flèche se pose au-dessus
-    else {
-      const cx = W_ / 2, cy = (Tp + Bt) / 2, dx = sx - cx, dy = sy - cy, tx = dx ? ((dx > 0 ? Rr : L) - cx) / dx : 1e9, ty = dy ? ((dy > 0 ? Bt : Tp) - cy) / dy : 1e9, t = Math.min(tx, ty);
-      px = cx + dx * t; py = cy + dy * t; ang = Math.atan2(dy, dx);
+    if (want !== PN.show) { PN.show = want; UI.pin.classList.toggle('on', want); }
+    if (want) {
+      const t = `translate3d(${(x - 22).toFixed(1)}px,${(y - 44).toFixed(1)}px,0)`;
+      if (t !== PN.tr) { PN.tr = t; UI.pin.style.transform = t; }
     }
-    const k = CP.x == null ? 1 : Math.min(1, dt * 9);
-    if (CP.x == null) { CP.x = px; CP.y = py; CP.a = ang; }
-    CP.x += (px - CP.x) * k; CP.y += (py - CP.y) * k;
-    let da = ang - CP.a; while (da > Math.PI) da -= 6.2832; while (da < -Math.PI) da += 6.2832; CP.a += da * k;
-    const nudge = Math.sin(now / 420) * 2.2;   // elle tire légèrement vers la forêt
-    const lab = active ? tr('explore.compass_back') : tr('explore.compass');
-    if (UI.lab.textContent !== lab) UI.lab.textContent = lab;
-    UI.compass.style.transform = `translate3d(${(CP.x + Math.cos(CP.a) * nudge - 29).toFixed(1)}px,${(CP.y + Math.sin(CP.a) * nudge - 25).toFixed(1)}px,0)`;
-    UI.needle.setAttribute('transform', `rotate(${(CP.a * 180 / Math.PI + 90).toFixed(1)} 24 24)`);
   }
 
   /* ───────────────────────── entrer, sortir ───────────────────────── */
-  const viewDist = () => clamp(CFG.viewSpan / (2 * Math.tan(P.camera.fov * Math.PI / 360) * P.camera.aspect), 120, 210);
-  const viewTarget = () => new T.Vector3(SITE.x, 0, SITE.z - 1);
+  // tout le terrain d'un coup d'œil : la caisse en haut, la catapulte en bas, avec la place de tirer
+  function fieldView() {
+    const depth = Math.abs(CATA.z - CRATE.z) / 0.58;               // la distance caisse-catapulte occupe 58 % de la hauteur
+    const sinE = Math.max(0.2, P.camDir.y), tanF = Math.tan(P.camera.fov * Math.PI / 360);
+    const d = Math.max(depth * sinE / (2 * tanF), (Math.abs(CATA.x - CRATE.x) + 40) / (2 * tanF * P.camera.aspect));
+    return { tgt: new T.Vector3((CATA.x + CRATE.x) / 2, 0, (CATA.z + CRATE.z) / 2 + depth * 0.07), d };
+  }
   function veil(on) { UI.veil.classList.toggle('on', on); }
-  function flyToClearing() { P._moveTo(viewTarget(), viewDist(), 800); }
+  function flyToField() { const v = fieldView(); P._moveTo(v.tgt, v.d, 700); }
   function enter() {
     if (active || moving || !installed || !P.ready) return;
     moving = true;
@@ -1235,24 +1330,26 @@
       try {
         if (!root) buildScene();
         buildWild();
+        natureOn();
+        buildNav();   // chemins refaits à chaque entrée : la forêt dépend des bâtiments
         const c = P.controls;
         saved = { pos: P.camera.position.clone(), tgt: c.target.clone(), min: c.minDistance, max: c.maxDistance, b: P._camB || null };
         P._focusAnim = null;
         P._pickOff = true;
         P._camB = [-175, 200, -172, 150];
-        c.minDistance = 85; c.maxDistance = 560;
-        const tgt = viewTarget(), d = viewDist();
-        c.target.copy(tgt); P.camera.position.copy(tgt).addScaledVector(P.camDir, d + 46); c.update();
+        c.minDistance = 85; c.maxDistance = 640;
+        const { tgt, d } = fieldView();
+        c.target.copy(tgt); P.camera.position.copy(tgt).addScaledVector(P.camDir, d + 60); c.update();
         active = true;
         document.getElementById('scr-planet').classList.add('sbx-on'); document.body.classList.add('sbx-on');
-        natureOn();
         resetField();
         W.sessionCaught = 0; W.enteredAt = W.t; chipPending = 0; chipShown = null; updateChip();
         const s = S();
-        if (!s.hintSeen) {
-          s.hintSeen = true; save();
+        if ((s.hintV || 0) < 2) {   // nouvelle règle (catapulte à tirer) : la consigne repasse une fois
+          s.hintV = 2; s.hintSeen = true; s.shots = 0; save();
           const h = UI.hint; h.className = ''; h.textContent = tr('explore.hint'); h.style.display = 'block'; h.style.opacity = 1;
         } else UI.hint.style.display = 'none';
+        UI.grab.classList.toggle('on', !s.shots);   // deux anneaux sur la catapulte tant qu'on n'a jamais tiré
         P._moveTo(tgt, d, 1100);
       } catch (e) { console.warn('[explore] entrée', e); }
       veil(false);
@@ -1266,7 +1363,8 @@
       document.getElementById('scr-planet').classList.remove('sbx-on'); document.body.classList.remove('sbx-on');
       showPrompt(false);
       natureOff();
-      W.carrots.slice().forEach(c => { root.remove(c.mesh); root.remove(c.sh); }); W.carrots = [];
+      cancelSling();
+      W.carrots.slice().forEach(c => { root.remove(c.mesh); if (c.sh) root.remove(c.sh); }); W.carrots = [];
       W.rabbits.forEach(r => root.remove(r.g)); W.rabbits = [];
       const c = P.controls; P._pickOff = false; P._camB = saved ? saved.b : null; P._focusAnim = null;
       if (saved) {
@@ -1293,11 +1391,10 @@
     P = window.Planet3D; T = window.SB3D.THREE;
     if (!findGround()) return false;
     shapeGround();
-    buildNav();
     carve();
     addTexts();
     buildUI();
-    bindTaps();
+    bindInput();
     const orig = P._rebuild;
     P._rebuild = function () { const r = orig.apply(this, arguments); try { carve(); if (active) natureOn(); } catch (e) { console.warn('[explore] rebuild', e); } return r; };
     const of = P._frame;
@@ -1305,7 +1402,7 @@
     P._frame = function () {
       const now = performance.now(), dt = Math.min(0.1, (now - last) / 1000); last = now;
       try {
-        compassTick(dt, now);
+        pinTick(now);
         if (active && P.host && P.host.offsetParent !== null) tick(dt);
       } catch (e) { console.warn('[explore]', e); }
       return of.apply(this, arguments);
@@ -1348,6 +1445,6 @@
       const s = S(), min = (s.secs || 0) / 60;
       return { lapins: s.caught || 0, biomasse: (s.caught || 0) * CFG.reward, minutes: +min.toFixed(1), biomasse_par_minute: min > 0 ? +(((s.caught || 0) * CFG.reward) / min).toFixed(1) : 0 };
     },
-    _dbg: { W, S, CFG, CRATE, SITE, CATA, tick, fullyIn, inDoorway, onTap, screenOf, findPath, closeDoor, throwCarrot, aliveTarget, get Y0() { return Y0; }, get installed() { return installed; } },
+    _dbg: { W, S, CFG, CRATE, SITE, CATA, HOME, NAV, UI, tick, fullyIn, inDoorway, onTap, screenOf, findPath, closeDoor, launch, slingAim, pullMax, isBlockedAt, heightAt, fieldView, aliveTarget, get Y0() { return Y0; }, get installed() { return installed; } },
   };
 })();

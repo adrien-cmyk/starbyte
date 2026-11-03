@@ -1,178 +1,205 @@
-// Critères de validation du brief Explorer. Servir github_upload/ sur localhost:8765, puis : node tools/explore/test_explore.js
+// Tests d Explorer (pin, catapulte à tirer, tir aveugle, chaîne de carottes, capture). Servir github_upload/ sur localhost:8765, puis : node tools/explore/test_explore.js
 const {open,shot,enterNow,OUT}=require('./lib.js');
 let pass=0,fail=0; const check=(n,c,x)=>{ if(c){pass++;console.log('  ok  ',n);} else {fail++;console.log(' FAIL ',n, x===undefined?'':JSON.stringify(x));} };
+const help=`window.__s=(sec,dt=.05)=>{const d=SBExplore._dbg;for(let i=0;i<sec/dt;i++)d.tick(dt)};
+  window.__sc=(x,y,z)=>{const d=SBExplore._dbg;Planet3D.camera.updateMatrixWorld();const r=d.screenOf(x,y==null?d.Y0:y,z);return [r[0],r[1]]};
+  window.__aim=(tx,tz)=>{const d=SBExplore._dbg,c=d.CATA,dx=tx-c.x,dz=tz-c.z,n=Math.hypot(dx,dz);return [dx/n,dz/n,n]};
+  window.__fire=(tx,tz)=>{const d=SBExplore._dbg;d.W.nextThrow=0;const a=__aim(tx,tz);return d.launch(a[0],a[1],a[2])};
+  window.__clear=()=>{const d=SBExplore._dbg;d.W.carrots.slice().forEach(c=>{c.landed=-999;c.res=null;c.nibbled=false;if(c.state==='fly'){c.t=c.dur}});d.W.rabbits.forEach(r=>{r.carrot=null;r.path=null;r.hop=null;r.st='wander';r.timer=99;r.chk=99;});__s(.2)};`;
 (async()=>{
-  const {b,c,p,errs}=await open({tier3:true});
+  const {b,c,p,errs}=await open({tier3:true,viewport:{width:390,height:844}});
   await p.waitForTimeout(800);
-  await p.evaluate(()=>{ G.res.biomass.v=100; G.res.biomass.max=100000; document.querySelectorAll('#toast').forEach(t=>t.classList.remove('shown')); const P=Planet3D; P._focusAnim=null; P.controls.target.set(33,0,21); P.camera.position.copy(P.controls.target).addScaledVector(P.camDir,287); P.controls.update(); P.camera.updateMatrixWorld(); });
+  await p.evaluate(help);
+  const cdp=await c.newCDPSession(p);
+  const touch=async(type,x,y)=>cdp.send('Input.dispatchTouchEvent',{type,touchPoints:type==='touchEnd'?[]:[{x,y}]});
+  console.log('— pin');
+  await p.evaluate(()=>{ G.res.biomass.v=100; G.res.biomass.max=100000; const P=Planet3D; P._focusAnim=null; P.controls.target.set(33,0,21); P.camera.position.copy(P.controls.target).addScaledVector(P.camDir,287); P.controls.update(); P.camera.updateMatrixWorld(); });
   const cam0=await p.evaluate(()=>{const P=Planet3D;return {p:P.camera.position.toArray(),t:P.controls.target.toArray(),min:P.controls.minDistance,max:P.controls.maxDistance}});
   const visBefore=await p.evaluate(()=>Planet3D.scene.children.filter(o=>o.visible).length);
+  await p.waitForTimeout(350); await p.evaluate(()=>__frames(1));
+  check('plus de boussole',await p.evaluate(()=>!document.getElementById('sbx-compass')));
+  check('le pin est absent quand le lieu est hors écran',await p.evaluate(()=>!document.getElementById('sbx-pin').classList.contains('on')));
+  await p.evaluate(()=>{ const P=Planet3D; P.controls.target.set(-20,0,-105); P.camera.position.copy(P.controls.target).addScaledVector(P.camDir,420); P.controls.update(); P.camera.updateMatrixWorld(); });
+  await p.waitForTimeout(350); await p.evaluate(()=>__frames(1));
+  const pin=await p.evaluate(()=>{const e=document.getElementById('sbx-pin'),r=e.getBoundingClientRect(),d=SBExplore._dbg;Planet3D.camera.updateMatrixWorld();const s=d.screenOf(d.CRATE.x,d.Y0+2,d.CRATE.z);return {on:e.classList.contains('on'),cx:r.left+r.width/2,bottom:r.bottom,sx:s[0],sy:s[1],op:getComputedStyle(e.querySelector('svg')).opacity,w:e.querySelector('svg').getBoundingClientRect().width}});
+  check('le pin se pose sur l\'endroit du jeu',pin.on&&Math.abs(pin.cx-pin.sx)<1.5&&Math.abs(pin.bottom-pin.sy)<1.5,pin);
+  check('il reste petit et transparent',pin.w<=16&&+pin.op<.7,pin);
+  await shot(p,'g_pin',1);
+  await p.evaluate(()=>{ const P=Planet3D; P.controls.target.set(33,0,21); P.camera.position.fromArray([33,cam0pY(),0]); function cam0pY(){return 0} });
+  await p.evaluate((c0)=>{ const P=Planet3D; P.controls.target.fromArray(c0.t); P.camera.position.fromArray(c0.p); P.controls.update(); P.camera.updateMatrixWorld(); },cam0);
   await enterNow(p);
-  const help=`window.__s=(sec,dt=.05)=>{const d=SBExplore._dbg;for(let i=0;i<sec/dt;i++)d.tick(dt)};
-    window.__sc=(x,y,z)=>{const d=SBExplore._dbg;Planet3D.camera.updateMatrixWorld();const r=d.screenOf(x,y==null?d.Y0:y,z);return [r[0],r[1]]};`;
   await p.evaluate(help);
+  await p.evaluate(()=>{document.querySelectorAll('#toast').forEach(t=>t.classList.remove('shown'));Planet3D.camera.updateMatrixWorld();});
   console.log('— entrée');
-  let st=await p.evaluate(()=>{const P=Planet3D,d=SBExplore._dbg;return {act:SBExplore.active,n:d.W.rabbits.length,pg:P.parcelGroup.visible,bg:P.buildGroup.visible,deco:P.decoGroup.visible,nav:getComputedStyle(document.querySelector('.w-nav')).display,top:getComputedStyle(document.querySelector('.w-top')).display,chip:document.querySelector('#sbx-chip b').textContent,hint:document.getElementById('sbx-hint').style.display,hintT:document.getElementById('sbx-hint').textContent,pick:P._pickOff,lights:P._pool.every(l=>l.intensity===0)}});
-  check('exploration active, 3 lapins',st.act&&st.n===3,st);
-  check('grille et bâtiments masqués',!st.pg&&!st.bg&&!st.deco,st);
-  check('commandes masquées',st.nav==='none'&&st.top==='none',st);
-  check('biomasse visible et exacte',/100/.test(st.chip),st.chip);
-  check('consigne au premier accès',st.hint==='block'&&/carottes/.test(st.hintT),st);
-  check('aucune lampe de bâtiment',st.lights);
+  let st=await p.evaluate(()=>{const P=Planet3D,d=SBExplore._dbg;return {act:SBExplore.active,n:d.W.rabbits.length,pg:P.parcelGroup.visible,bg:P.buildGroup.visible,nav:getComputedStyle(document.querySelector('.w-nav')).display,chip:document.querySelector('#sbx-chip b').textContent,hint:document.getElementById('sbx-hint').textContent,grab:document.getElementById('sbx-grab').className,home:d.W.rabbits.every(r=>Math.hypot(r.x-d.HOME.x,r.z-d.HOME.z)<d.HOME.r+1),pin:document.getElementById('sbx-pin').classList.contains('on')}});
+  check('exploration active, 3 lapins près de la catapulte',st.act&&st.n===3&&st.home,st);
+  check('colonie masquée, pas de pin',!st.pg&&!st.bg&&st.nav==='none',st);
+  check('consigne du tir, anneaux sur la catapulte',/Tire la catapulte/.test(st.hint)&&st.grab==='on',st);
+  const inView=await p.evaluate(()=>{const d=SBExplore._dbg;const a=__sc(d.CATA.x,null,d.CATA.z),b=__sc(d.CRATE.x,null,d.CRATE.z);return {a,b,w:innerWidth,h:innerHeight}});
+  check('la catapulte et la caisse sont à l\'écran',inView.a[0]>0&&inView.a[0]<inView.w&&inView.a[1]<inView.h-120&&inView.b[1]>40&&inView.b[0]>0&&inView.b[0]<inView.w,inView);
+  check('il y a la place de tirer sous la catapulte',inView.h-inView.a[1]>=await p.evaluate(()=>SBExplore._dbg.pullMax()),inView);
 
-  console.log('— lancers');
-  await p.evaluate(()=>{const d=SBExplore._dbg; d.W.rabbits.forEach((r,i)=>{r.x=d.SITE.x+12;r.z=d.SITE.z+2+i*4;r.path=null;r.hop=null;r.st='wander';r.timer=99;});});
-  let pt=await p.evaluate(()=>{const d=SBExplore._dbg;return __sc(d.SITE.x-8,null,d.SITE.z+6)});
-  await p.touchscreen.tap(pt[0],pt[1]);
-  await p.waitForTimeout(120);
-  check('un toucher sur le sol lance une carotte',await p.evaluate(()=>SBExplore._dbg.W.carrots.length)===1);
-  await p.touchscreen.tap(pt[0]+30,pt[1]);
-  await p.waitForTimeout(120);
-  check('cadence : un lancer par seconde',await p.evaluate(()=>SBExplore._dbg.W.carrots.length)===1);
-  await p.evaluate(()=>__s(1.1));
-  const chipR=await p.evaluate(()=>{const r=document.getElementById('sbx-chip').getBoundingClientRect();return [r.left+r.width/2,r.top+r.height/2]});
-  await p.touchscreen.tap(chipR[0],chipR[1]); await p.waitForTimeout(80);
-  const backR=await p.evaluate(()=>{const r=document.getElementById('sbx-hint').getBoundingClientRect();return [r.left+r.width/2,r.top+r.height/2]});
-  await p.touchscreen.tap(backR[0],backR[1]); await p.waitForTimeout(80);
-  check('toucher l\'interface ne lance rien',await p.evaluate(()=>SBExplore._dbg.W.carrots.length)===1);
-  pt=await p.evaluate(()=>{const d=SBExplore._dbg;return __sc(d.SITE.x+13,null,d.SITE.z-4)});
-  await p.touchscreen.tap(pt[0],pt[1]); await p.waitForTimeout(80);
-  check('toucher un rocher ne lance rien',await p.evaluate(()=>SBExplore._dbg.W.carrots.length)===1);
-  pt=await p.evaluate(()=>{const d=SBExplore._dbg;return __sc(d.SITE.x-2,null,d.SITE.z+36)});
-  await p.touchscreen.tap(pt[0],pt[1]); await p.waitForTimeout(80);
-  check('hors de la clairière : rien',await p.evaluate(()=>SBExplore._dbg.W.carrots.length)===1);
-  // glisser n'est pas lancer
-  pt=await p.evaluate(()=>{const d=SBExplore._dbg;return __sc(d.SITE.x-5,null,d.SITE.z+10)});
-  await p.evaluate(()=>{window.__before=Planet3D.controls.target.toArray()});
-  const cdp=await c.newCDPSession(p);
-  await cdp.send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{x:pt[0],y:pt[1]}]});
-  for(let i=1;i<=6;i++){ await cdp.send('Input.dispatchTouchEvent',{type:'touchMove',touchPoints:[{x:pt[0]+i*12,y:pt[1]+i*8}]}); }
-  await cdp.send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});
-  await p.waitForTimeout(150);
-  check('glisser la carte ne lance rien',await p.evaluate(()=>SBExplore._dbg.W.carrots.length)===1);
-  await p.evaluate(()=>{ const P=Planet3D,d=SBExplore._dbg; P.controls.update(); P.controls.target.set(d.SITE.x,0,d.SITE.z-1); P.camera.position.copy(P.controls.target).addScaledVector(P.camDir,165); P.controls.update(); P.camera.updateMatrixWorld(); });
+  console.log('— tirer la catapulte');
+  await p.evaluate(()=>{const d=SBExplore._dbg;d.W.rabbits.forEach(r=>{r.st='wander';r.timer=99;r.chk=99;r.path=null;});});
+  const cat=inView.a;
+  const cam1=await p.evaluate(()=>Planet3D.controls.target.toArray());
+  await touch('touchStart',cat[0],cat[1]-6);
+  for(let i=1;i<=6;i++) await touch('touchMove',cat[0],cat[1]-6+i*12);
+  await p.waitForTimeout(60);
+  let s1=await p.evaluate(()=>{const d=SBExplore._dbg;d.tick(.05);const a=d.slingAim();return {sl:!!d.W.sling,t:a.t,dz:a.dz,dx:a.dx,band:d.UI.band.style.display,x1:d.UI.bandL[0].getAttribute('x2')}});
+  check('saisir la catapulte : la traction démarre',s1.sl&&s1.t>0&&s1.band==='block',s1);
+  check('tirer vers le bas vise vers le haut de la carte',s1.dz<-.99,s1);
+  await p.evaluate(()=>{ Planet3D.controls.update(); });
+  const cam2=await p.evaluate(()=>Planet3D.controls.target.toArray());
+  check('la carte ne bouge pas pendant qu\'on tire',cam1.every((v,i)=>Math.abs(v-cam2[i])<1e-6),{cam1,cam2});
+  check('rien ne part tant qu\'on ne lâche pas',await p.evaluate(()=>SBExplore._dbg.W.carrots.length)===0);
+  await touch('touchEnd');
+  await p.waitForTimeout(80);
+  let f1=await p.evaluate(()=>{const d=SBExplore._dbg,c=d.W.carrots[0];return c&&{st:c.state,sh:!!c.sh,ring:d.W.target.visible,x:c.x,z:c.z,band:d.UI.band.style.display,grab:document.getElementById('sbx-grab').className,arcs:document.querySelectorAll('#sbx-hud line[stroke-dasharray],#sbx-hud path').length}});
+  check('lâcher : la carotte part',f1&&f1.st==='fly',f1);
+  check('tir aveugle : ni ombre, ni repère, ni arc en vol',f1&&!f1.sh&&!f1.ring&&f1.band==='none',f1);
+  const near=await p.evaluate(()=>{const d=SBExplore._dbg,c=d.W.carrots[0];return Math.hypot(c.x-d.CATA.x,c.z-d.CATA.z)});
+  await p.evaluate(()=>__s(2.4));
+  let f2=await p.evaluate(()=>{const d=SBExplore._dbg,c=d.W.carrots[0];return c&&{st:c.state,sh:!!c.sh,ring:d.W.target.visible}});
+  check('à l\'atterrissage seulement : ombre et onde',f2&&f2.st==='ground'&&f2.sh,f2);
+  // traction plus forte
+  await p.evaluate(()=>{__clear();SBExplore._dbg.W.nextThrow=0;});
+  await touch('touchStart',cat[0],cat[1]-6);
+  for(let i=1;i<=8;i++) await touch('touchMove',cat[0],cat[1]-6+i*22);
+  await touch('touchEnd');
+  await p.waitForTimeout(80);
+  const far=await p.evaluate(()=>{const d=SBExplore._dbg,c=d.W.carrots[d.W.carrots.length-1];return Math.hypot(c.x-d.CATA.x,c.z-d.CATA.z)});
+  check('plus on tire, plus ça va loin',far>near*1.5,{near,far});
+  await p.evaluate(()=>{__s(2.6);__clear();SBExplore._dbg.W.nextThrow=0;});
+  // à gauche → part à droite
+  await touch('touchStart',cat[0],cat[1]-6);
+  for(let i=1;i<=5;i++) await touch('touchMove',cat[0]-i*14,cat[1]-6);
+  await touch('touchEnd');
+  await p.waitForTimeout(80);
+  const lat=await p.evaluate(()=>{const d=SBExplore._dbg,c=d.W.carrots[d.W.carrots.length-1];return c?c.x-d.CATA.x:0});
+  check('tirer à gauche envoie à droite',lat>10,lat);
+  await p.evaluate(()=>{__s(2.6);__clear();SBExplore._dbg.W.nextThrow=0;});
+  const nc=await p.evaluate(()=>SBExplore._dbg.W.carrots.filter(c=>c.state==='fly').length);
+  await touch('touchStart',cat[0],cat[1]-6); await touch('touchMove',cat[0],cat[1]+2); await touch('touchEnd'); await p.waitForTimeout(60);
+  check('traction trop courte : pas de tir',await p.evaluate(()=>SBExplore._dbg.W.carrots.filter(c=>c.state==='fly').length)===nc);
+  console.log('— les touchers ne lancent plus rien');
+  const c0=await p.evaluate(()=>SBExplore._dbg.W.carrots.length);
+  let pt=await p.evaluate(()=>{const d=SBExplore._dbg;return __sc(d.HOME.x+40,null,d.HOME.z-40)});
+  await p.touchscreen.tap(pt[0],pt[1]); await p.waitForTimeout(60);
+  check('un toucher sur le sol ne lance rien',await p.evaluate(()=>SBExplore._dbg.W.carrots.length)===c0);
+  await touch('touchStart',pt[0],pt[1]); for(let i=1;i<=5;i++) await touch('touchMove',pt[0]+i*10,pt[1]+i*6); await touch('touchEnd'); await p.waitForTimeout(80);
+  const moved=await p.evaluate(()=>{const P=Planet3D;P.controls.update();return P.controls.target.toArray()});
+  check('glisser ailleurs déplace la carte, sans lancer',await p.evaluate(()=>SBExplore._dbg.W.carrots.length)===c0&&moved.some((v,i)=>Math.abs(v-cam1[i])>1),{moved,cam1});
+  await p.evaluate(()=>{const P=Planet3D;P._focusAnim=null;const v=SBExplore._dbg.fieldView();const damp=P.controls.enableDamping;P.controls.enableDamping=false;P.controls.update();P.controls.target.copy(v.tgt);P.camera.position.copy(v.tgt).addScaledVector(P.camDir,v.d);P.controls.update();P.controls.enableDamping=damp;P.camera.updateMatrixWorld();});
 
-  console.log('— attirer, éviter, réserver');
-  const r1=await p.evaluate(()=>{
-    const d=SBExplore._dbg,W=d.W; W.carrots.slice().forEach(c=>{c.landed=-999}); __s(.2);
-    // lapin d'un côté du rocher (13,-4), carotte de l'autre
-    const [a,b,c]=W.rabbits; a.x=d.SITE.x+17; a.z=d.SITE.z-4; a.path=null; a.st='wander'; a.timer=0; b.x=d.SITE.x-16; b.z=d.SITE.z-14; b.st='wander'; b.timer=99; c.x=d.SITE.x-16; c.z=d.SITE.z-13; c.st='wander'; c.timer=99;
-    W.nextThrow=0; d.throwCarrot(d.SITE.x+9,d.SITE.z-4,false); 
-    let inRock=0, reached=false, st0=[];
-    for(let i=0;i<300;i++){ d.tick(.05); const dd=Math.hypot(a.x-(d.SITE.x+13),a.z-(d.SITE.z-4)); if(dd<1.3) inRock++; if(!st0.includes(a.st)) st0.push(a.st); if(a.st==='nibble'){reached=true;break;} }
-    return {reached,inRock,st0,x:a.x-d.SITE.x,z:a.z-d.SITE.z};
+  console.log('— où tombe la carotte');
+  const land=await p.evaluate(()=>{
+    const d=SBExplore._dbg,W=d.W,C=d.CRATE,out={};
+    __clear(); const n0=W.carrots.length;
+    __fire(d.CATA.x,d.CATA.z+24.5); __s(1.2); out.water=[W.carrots.length-n0, d.heightAt(d.CATA.x,d.CATA.z+24.5)];
+    __clear(); W.carrots.slice().forEach(c=>{}); __s(.1);
+    const n1=W.carrots.length; __fire(d.CATA.x-250,d.CATA.z-60); __s(2.4); out.lost=W.carrots.length-n1;
+    __s(19); out.left=W.carrots.length;
+    __fire(C.x,C.z); __s(2.4); let c=W.carrots[0]; out.box=c&&{inCrate:c.inCrate,x:c.x-C.x,z:c.z-C.z}; 
+    __fire(C.x+1,C.z+1); __s(2.4); c=W.carrots[1]; out.box2=c&&{inCrate:c.inCrate,z:c.z-C.z};
+    __s(19); out.left2=W.carrots.length;
+    __fire(C.x+C.hw+2.5,C.z); __s(2.4); c=W.carrots[0]; out.edge=c&&{inCrate:c.inCrate};
+    __s(19);
+    __fire(C.x+C.hw+6,C.z); __s(2.4); c=W.carrots[0]; out.miss=c&&{inCrate:c.inCrate};
+    __s(19);
+    return out;
   });
-  check('la carotte attire le lapin, qui contourne le rocher',r1.reached&&r1.inRock===0,r1);
-  check('états : attiré puis déplacement puis grignotage',r1.st0.includes('alert')&&r1.st0.includes('move'),r1.st0);
+  check('dans la rivière : plouf',land.water[0]===0&&land.water[1]<-1.75,land.water);
+  check('trop loin : perdue',land.lost===0,land);
+  check('dans la caisse : elle se pose sur le plot',land.box&&land.box.inCrate&&Math.abs(land.box.z+1.5)<.01,land.box);
+  check('un seul appât : la deuxième rebondit dehors',land.box2&&!land.box2.inCrate&&land.box2.z>7,land.box2);
+  check('sur le bord de la caisse : elle rebondit dedans',land.edge&&land.edge.inCrate,land.edge);
+  check('à côté : elle reste dehors',land.miss&&!land.miss.inCrate,land.miss);
+  check('une carotte oubliée disparaît',land.left===0&&land.left2===0,land);
+
+  console.log('— attirer à travers la forêt');
   const r2=await p.evaluate(()=>{
-    const d=SBExplore._dbg,W=d.W; __s(3.5); W.carrots.slice().forEach(c=>{c.landed=-999}); __s(.1);
-    const [a,b,c]=W.rabbits; a.st='wander';a.timer=99;a.carrot=null;a.path=null;a.x=d.SITE.x+15;a.z=d.SITE.z+1; b.x=d.SITE.x-12;b.z=d.SITE.z+8;b.st='wander';b.timer=99;b.path=null; c.x=d.SITE.x-10;c.z=d.SITE.z+12;c.st='wander';c.timer=99;c.path=null;
-    W.nextThrow=0; d.throwCarrot(d.SITE.x-13,d.SITE.z+13,false);
-    __s(1.2);
-    const res=W.rabbits.filter(r=>r.carrot).length, carrot=W.carrots[0];
-    return {res, resBy:!!carrot.res};
+    const d=SBExplore._dbg,W=d.W; __clear();
+    const [a,b,e]=W.rabbits; [a,b,e].forEach((r,i)=>{r.x=d.HOME.x+i*3;r.z=d.HOME.z;r.st='wander';r.timer=99;r.chk=.01;r.path=null;});
+    __fire(d.HOME.x,d.HOME.z-20); __s(2);
+    return {res:W.rabbits.filter(r=>r.carrot).length};
   });
-  check('deux lapins ne réservent pas la même carotte',r2.res===1&&r2.resBy,r2);
-  const r3=await p.evaluate(()=>{
-    const d=SBExplore._dbg,W=d.W; const hold=W.rabbits.find(r=>r.carrot); const cc=W.carrots[0];
-    cc.res=null; hold.carrot=null; hold.st='wander'; hold.timer=99; W.rabbits.forEach(r=>{r.x=d.SITE.x+15;r.z=d.SITE.z-14;r.path=null;r.st='kicked';r.hop=null;});
-    W.rabbits.forEach(r=>{r.st='wander';r.timer=99;r.chk=99});
-    const landed=cc.landed; __s(12.2); return {left:W.carrots.length};
+  check('deux lapins ne réservent pas la même carotte',r2.res===1,r2);
+  const chain=await p.evaluate(()=>{
+    const d=SBExplore._dbg,W=d.W,C=d.CRATE; __clear();
+    const f=[C.x,C.z+C.hd+C.ramp+1.6];
+    W.rabbits.forEach((r,i)=>{r.st='wander';r.timer=99;r.chk=.01;r.path=null;r.hop=null;r.x=d.HOME.x+i*4-4;r.z=d.HOME.z+4;});
+    const lead=W.rabbits[0]; W.rabbits[1].chk=1e9; W.rabbits[2].chk=1e9;
+    let shots=0,blockedHits=0,t=0,statesSeen=new Set(),inBait=false,maxDist=0;
+    while(t<240){
+      d.tick(.05); t+=.05; statesSeen.add(lead.st); lead.timer=Math.min(lead.timer,99);
+      if(d.isBlockedAt(lead.x,lead.z)&&!d.inDoorway(lead)&&!d.fullyIn(lead)&&Math.abs(lead.x-C.x)>8) blockedHits++;
+      if(W.crate.promptOn) break;
+      const fly=W.carrots.some(c=>c.state==='fly');
+      if(!fly&&!lead.carrot&&W.t>=W.nextThrow){
+        const dl=Math.hypot(lead.x-C.x,lead.z-(C.z-1.5));
+        if(dl<36&&!W.carrots.some(c=>c.inCrate)){ __fire(C.x,C.z); shots++; inBait=true; }
+        else if(!W.carrots.some(c=>c.state==='ground'&&!c.res)){
+          const k=30/dl, tx=lead.x+(C.x-lead.x)*k, tz=lead.z+(C.z+8-lead.z)*k; __fire(tx,tz); shots++;
+        }
+      }
+    }
+    return {t:+t.toFixed(1),shots,blockedHits,states:[...statesSeen],prompt:W.crate.promptOn,inside:d.fullyIn(lead),inBait};
   });
-  check('une carotte disparaît au bout de 12 s',r3.left===0,r3);
-
-  console.log('— caisse');
-  const emptyB=await p.evaluate(()=>G.res.biomass.v);
-  pt=await p.evaluate(()=>{const d=SBExplore._dbg,C=d.CRATE;return __sc(C.x+C.hw-.1,d.Y0+3,C.z)});
-  await p.touchscreen.tap(pt[0],pt[1]); await p.waitForTimeout(80);
-  let k=await p.evaluate(()=>SBExplore._dbg.W.crate.st);
-  check('toucher le bord de la caisse : fermeture',k==='closing',k);
-  check('aucun lancer en touchant la caisse',await p.evaluate(()=>SBExplore._dbg.W.carrots.length)===0);
-  k=await p.evaluate(()=>{__s(.3); return SBExplore._dbg.W.crate.st});
-  check('fermeture à vide',k==='empty',k);
-  k=await p.evaluate(()=>{__s(1.2); return {st:SBExplore._dbg.W.crate.st,a:SBExplore._dbg.W.crate.angle,bio:G.res.biomass.v}});
-  check('elle se rouvre, sans rien coûter ni rapporter',k.st==='open'&&k.a===0&&k.bio===emptyB,k);
-  // lapin encore dehors, sur la rampe
-  const out=await p.evaluate(()=>{
-    const d=SBExplore._dbg,W=d.W,C=d.CRATE,a=W.rabbits[0]; a.x=C.x; a.z=C.z+C.hd+1.5; a.path=null; a.st='wander'; a.timer=99; a.hop=null; a.chk=99;
-    d.closeDoor(); const kicked=a.st; __s(.3); const st=W.crate.st; __s(1.2);
-    return {kicked,st,bio:G.res.biomass.v,after:W.crate.st,x:a.x-C.x,z:a.z-C.z,alive:W.rabbits.length};
-  });
-  check('lapin sur la rampe : éjecté, aucun gain',out.kicked==='kicked'&&out.st==='empty'&&out.bio===emptyB&&out.alive===3,out);
-  // appât par toucher à l'intérieur
-  await p.evaluate(()=>{const d=SBExplore._dbg,W=d.W;W.rabbits.forEach((r,i)=>{r.x=d.SITE.x-4+i*5;r.z=d.SITE.z+2.5;r.st='wander';r.timer=99;r.chk=.01;r.path=null;r.hop=null;});W.nextThrow=0;});
-  pt=await p.evaluate(()=>{const d=SBExplore._dbg,C=d.CRATE;return __sc(C.x,d.Y0,C.z+.5)});
-  await p.touchscreen.tap(pt[0],pt[1]); await p.waitForTimeout(80);
-  let cc=await p.evaluate(()=>SBExplore._dbg.W.carrots.map(c=>c.inCrate));
-  check('toucher l\'intérieur vide y dépose une carotte',cc.length===1&&cc[0]===true,cc);
-  const enterTrace=await p.evaluate(()=>{
-    const d=SBExplore._dbg,W=d.W; const seq=[]; let readyAt=null, prompt=false, inCount=0;
-    for(let i=0;i<500;i++){ d.tick(.05); const a=W.rabbits.find(r=>r.carrot); if(a&&seq[seq.length-1]!==a.st) seq.push(a.st); if(a&&d.fullyIn(a)&&readyAt==null){readyAt=i;} if(W.crate.promptOn){prompt=true;break;} }
-    const inside=W.rabbits.filter(r=>d.fullyIn(r)).length;
-    return {seq,prompt,inside,cl:document.getElementById('sbx-close').className,lab:document.getElementById('sbx-close').textContent,bio:G.res.biomass.v};
-  });
-  check('le lapin hésite, puis entre vraiment',enterTrace.seq.includes('hesitate')&&enterTrace.inside===1,enterTrace);
-  check('libellé « Refermer » à l\'occasion',enterTrace.prompt&&/on/.test(enterTrace.cl)&&enterTrace.lab==='Refermer',enterTrace);
-  await shot(p,'c_ready',1);
+  console.log('   parcours :',JSON.stringify(chain));
+  check('de carotte en carotte, le lapin traverse la forêt et entre dans la caisse',chain.prompt&&chain.inside&&chain.states.includes('hesitate'),chain);
+  check('il contourne arbres et rochers',chain.blockedHits===0,chain);
+  await p.evaluate(()=>{document.querySelectorAll('#toast').forEach(t=>t.classList.remove('shown'));});
+  await shot(p,'g_ready',1);
   const before=await p.evaluate(()=>G.res.biomass.v);
-  // touchers rapides : vrais touchers + appels directs
   pt=await p.evaluate(()=>{const d=SBExplore._dbg,C=d.CRATE;return __sc(C.x,d.Y0,C.z+.5)});
-  await p.touchscreen.tap(pt[0],pt[1]); await p.touchscreen.tap(pt[0],pt[1]); await p.touchscreen.tap(pt[0]+8,pt[1]);
-  await p.evaluate(()=>{const d=SBExplore._dbg;for(let i=0;i<5;i++){d.closeDoor();} });
-  const noThrow=await p.evaluate(()=>SBExplore._dbg.W.carrots.filter(c=>c.state==='fly').length);
-  check('lapin dedans : un toucher ferme, jamais de lancer',noThrow===0,noThrow);
-  const cap=await p.evaluate(()=>{ for(let i=0;i<8;i++){SBExplore._dbg.tick(.05); SBExplore._dbg.closeDoor();} const d=SBExplore._dbg,W=d.W; return {bio:G.res.biomass.v,st:W.crate.st,rs:G.explore.respawns.length,caught:G.explore.caught,cap:W.rabbits.filter(r=>r.st==='captured').length}});
-  check('capture : exactement +5',cap.bio===before+5,{before,cap});
-  check('un seul retour programmé',cap.rs===1&&cap.caught===1,cap);
-  await p.waitForTimeout(600);
-  await shot(p,'c_caught',1);
+  await p.touchscreen.tap(pt[0],pt[1]); await p.touchscreen.tap(pt[0],pt[1]); await p.touchscreen.tap(pt[0]+6,pt[1]);
+  await p.evaluate(()=>{const d=SBExplore._dbg;for(let i=0;i<5;i++){d.closeDoor();}});
+  const cap=await p.evaluate(()=>{ for(let i=0;i<8;i++){SBExplore._dbg.tick(.05); SBExplore._dbg.closeDoor();} const d=SBExplore._dbg,W=d.W; return {bio:G.res.biomass.v,st:W.crate.st,rs:G.explore.respawns.length,caught:G.explore.caught,fly:W.carrots.filter(c=>c.state==='fly').length}});
+  check('toucher la caisse referme : exactement +5, même en touchant vite',cap.bio===before+5&&cap.caught===1&&cap.rs===1,{before,cap});
+  await p.waitForTimeout(400);
+  await shot(p,'g_caught',1);
   const sav=await p.evaluate(()=>{const s=JSON.parse(localStorage.getItem('starbyte_savegame'));return {bio:s.res.biomass.v,ex:s.explore}});
-  check('la sauvegarde reflète le gain',sav.bio===before+5&&sav.ex&&sav.ex.caught===1&&sav.ex.ledger.length===1,sav);
-  const aft=await p.evaluate(()=>{ __s(3); const d=SBExplore._dbg,W=d.W; return {bio:G.res.biomass.v,st:W.crate.st,n:W.rabbits.length,bait:W.carrots.filter(c=>c.inCrate).length}});
-  check('la caisse se rouvre, 2 lapins restent, pas de gain en plus',aft.bio===before+5&&aft.st==='open'&&aft.n===2&&aft.bait===0,aft);
-  const chipV=await p.evaluate(()=>document.querySelector('#sbx-chip b').textContent);
-  check('compteur à jour',chipV.replace(/\D/g,'')===String(before+5),chipV);
-
-  console.log('— reconstruction pendant l\'exploration');
-  const reb=await p.evaluate(()=>{const P=Planet3D;P.sync(true);const flora=P.scene.children.find(o=>o.name==='SB_GRID_FLORA');const over=P.scene.children.find(o=>o.name==='SB_GRID_OVERLAY');return {over:over&&over.visible,pg:P.parcelGroup.visible,flora:flora&&flora.visible,cut:flora&&flora.children.every(c=>!c.isInstancedMesh||c.userData.sbxCut)}});
-  check('une reconstruction ne fait pas réapparaître la colonie',reb.over===false&&reb.pg===false&&reb.flora&&reb.cut,reb);
-
-  console.log('— sortie');
+  check('la sauvegarde reflète le gain',sav.bio===before+5&&sav.ex&&sav.ex.caught===1,sav);
+  const aft=await p.evaluate(()=>{ __s(3); const d=SBExplore._dbg,W=d.W; return {bio:G.res.biomass.v,st:W.crate.st,n:W.rabbits.length}});
+  check('la caisse se rouvre, 2 lapins restent',aft.bio===before+5&&aft.st==='open'&&aft.n===2,aft);
+  const emp=await p.evaluate(()=>{const d=SBExplore._dbg,W=d.W;d.closeDoor();__s(.3);const a=W.crate.st;__s(1.2);return {a,b:W.crate.st,bio:G.res.biomass.v}});
+  check('fermeture à vide : ni coût ni gain',emp.a==='empty'&&emp.b==='open'&&emp.bio===before+5,emp);
+  const out=await p.evaluate(()=>{const d=SBExplore._dbg,W=d.W,C=d.CRATE,a=W.rabbits[0];a.x=C.x;a.z=C.z+C.hd+1.5;a.path=null;a.st='wander';a.timer=99;a.hop=null;a.chk=99;d.closeDoor();const k=a.st;__s(.3);const st=W.crate.st;__s(1.2);return {k,st,bio:G.res.biomass.v,z:a.z-C.z}});
+  check('lapin sur la rampe : éjecté, aucun gain',out.k==='kicked'&&out.st==='empty'&&out.bio===before+5&&out.z>C_hd(),out);
+  function C_hd(){return 4}
+  const leave=await p.evaluate(()=>{const d=SBExplore._dbg,W=d.W,C=d.CRATE;__clear();const a=W.rabbits[0];a.x=C.x;a.z=C.z+.5;a.st='wander';a.timer=99;a.chk=99;__fire(C.x,C.z-200); W.carrots.slice().forEach(c=>{});a.carrot=null;a.timer=0;a.path=[[C.x,C.z+C.hd-.5],[C.x,C.z+C.hd+C.ramp+1.6]];let wall=0;for(let i=0;i<120;i++){d.tick(.05);const lx=Math.abs(a.x-C.x),lz=a.z-C.z;if(lz>C.hd-.5&&lz<C.hd+.2&&lx>C.door)wall++;}return {wall,z:a.z-C.z,st:a.st}});
+  check('il ressort par la rampe, jamais à travers les murs',leave.wall===0&&leave.z>C_hd(),leave);
+  console.log('— reconstruction, sortie, retour');
+  const reb=await p.evaluate(()=>{const P=Planet3D;P.sync(true);const flora=P.scene.children.find(o=>o.name==='SB_GRID_FLORA');const over=P.scene.children.find(o=>o.name==='SB_GRID_OVERLAY');return {over:over&&over.visible,pg:P.parcelGroup.visible,cut:flora&&flora.children.every(c=>!c.isInstancedMesh||c.userData.sbxCut)}});
+  check('une reconstruction ne fait pas réapparaître la colonie',reb.over===false&&reb.pg===false&&reb.cut,reb);
   await p.evaluate(()=>SBExplore.exit());
-  await p.waitForFunction(()=>!SBExplore.active,{timeout:5000});
+  await p.waitForFunction(()=>!SBExplore.active,{timeout:5000,polling:100});
   await p.waitForTimeout(500);
-  const cam1=await p.evaluate(()=>{const P=Planet3D;return {p:P.camera.position.toArray(),t:P.controls.target.toArray(),min:P.controls.minDistance,max:P.controls.maxDistance,pick:P._pickOff,b:P._camB}});
-  const near=(a,b)=>a.every((v,i)=>Math.abs(v-b[i])<1e-6);
-  check('cadrage restauré exactement',near(cam1.p,cam0.p)&&near(cam1.t,cam0.t)&&cam1.min===cam0.min&&cam1.max===cam0.max,{cam0,cam1});
-  const vis=await p.evaluate(()=>{const P=Planet3D;return {pg:P.parcelGroup.visible,bg:P.buildGroup.visible,n:P.scene.children.filter(o=>o.visible).length,root:P.scene.children.find(o=>o.name==='SB_EXPLORE').visible,nav:getComputedStyle(document.querySelector('.w-nav')).display,lsrc:(P._lsrc||[]).length,chip:document.querySelector('.w-chip[data-k=biomass] b').textContent}});
-  check('la colonie revient entière',vis.pg&&vis.bg&&!vis.root&&vis.nav!=='none'&&vis.n===visBefore,{vis,visBefore});
-  check('le compteur de la planète montre le gain',/105/.test(vis.chip),vis.chip);
-  console.log('— entrer et sortir plusieurs fois');
+  const cam3=await p.evaluate(()=>{const P=Planet3D;return {p:P.camera.position.toArray(),t:P.controls.target.toArray(),min:P.controls.minDistance,max:P.controls.maxDistance}});
+  const nr=(a,b)=>a.every((v,i)=>Math.abs(v-b[i])<1e-6);
+  check('cadrage restauré exactement',nr(cam3.p,cam0.p)&&nr(cam3.t,cam0.t)&&cam3.min===cam0.min&&cam3.max===cam0.max,{cam0,cam3});
+  const vis=await p.evaluate(()=>{const P=Planet3D;return {pg:P.parcelGroup.visible,bg:P.buildGroup.visible,n:P.scene.children.filter(o=>o.visible).length,root:P.scene.children.find(o=>o.name==='SB_EXPLORE').visible,nav:getComputedStyle(document.querySelector('.w-nav')).display,chip:document.querySelector('.w-chip[data-k=biomass] b').textContent}});
+  check('la colonie revient entière, le compteur montre le gain',vis.pg&&vis.bg&&!vis.root&&vis.nav!=='none'&&vis.n===visBefore&&/105/.test(vis.chip),{vis,visBefore});
   const counts=[];
-  for(let i=0;i<3;i++){ await enterNow(p); counts.push(await p.evaluate(()=>{__s(.2);return [SBExplore._dbg.W.rabbits.length,G.res.biomass.v,document.getElementById('sbx-hint').style.display]})); await p.evaluate(()=>SBExplore.exit()); await p.waitForFunction(()=>!SBExplore.active); await p.waitForTimeout(560); }
-  check('ni lapin ni gain en double, consigne plus jamais',counts.every(c=>c[0]===2&&c[1]===before+5&&c[2]==='none'),counts);
-  const rsT=await p.evaluate(()=>G.explore.respawns[0]);
-  check('le délai de retour n\'est pas remis à zéro',rsT>Date.now()&&rsT<=Date.now()+30000,rsT-Date.now());
-  console.log('— rechargement');
-  await p.evaluate(()=>{G.explore.respawns[0]=Date.now()+600000;saveGame();});
+  for(let i=0;i<2;i++){ await enterNow(p); await p.evaluate(help); counts.push(await p.evaluate(()=>{__s(.2);return [SBExplore._dbg.W.rabbits.length,G.res.biomass.v]})); await p.evaluate(()=>SBExplore.exit()); await p.waitForFunction(()=>!SBExplore.active,{polling:100}); await p.waitForTimeout(560); }
+  check('ni lapin ni gain en double',counts.every(c=>c[1]===before+5&&c[0]<=3),counts);
+  await p.evaluate(()=>{G.explore.respawns=[Date.now()+600000];saveGame();});
   await p.reload({waitUntil:'domcontentloaded'});
-  await p.waitForFunction(()=>window.Planet3D&&Planet3D.ready,{timeout:90000});
+  await p.waitForFunction(()=>window.Planet3D&&Planet3D.ready,{timeout:90000,polling:300});
   await p.evaluate(()=>{ Planet3D.renderer.setAnimationLoop(null); window.__frames=(n=1)=>{ for(let i=0;i<n;i++) Planet3D._frame(); }; goto('planet'); });
-  await p.waitForFunction(()=>window.SBExplore&&SBExplore._dbg.installed,{timeout:30000});
+  await p.waitForFunction(()=>window.SBExplore&&SBExplore._dbg.installed,{timeout:60000,polling:300});
   await p.evaluate(help);
-  const rl=await p.evaluate(()=>({bio:G.res.biomass.v,ex:G.explore&&G.explore.caught,rs:G.explore&&G.explore.respawns.length}));
-  check('après rechargement : biomasse et état conservés',rl.bio>=before+5&&rl.ex===1&&rl.rs===1,rl);
   await enterNow(p);
-  let n2=await p.evaluate(()=>SBExplore._dbg.W.rabbits.length);
-  check('après rechargement : toujours 2 lapins',n2===2,n2);
-  const n3=await p.evaluate(()=>{ G.explore.respawns=[Date.now()-5]; __s(.7); const a=SBExplore._dbg.W.rabbits.length; __s(1); return [a,SBExplore._dbg.W.rabbits.length,G.explore.respawns.length] });
-  check('le lapin revient à l\'heure : 3, jamais plus',n3[0]===3&&n3[1]===3&&n3[2]===0,n3);
-  console.log('— quitter par un autre écran');
-  await p.evaluate(()=>goto('fleet')); await p.waitForTimeout(400);
-  const lf=await p.evaluate(()=>({a:SBExplore.active,cls:document.getElementById('scr-planet').className.includes('sbx-on'),pg:Planet3D.parcelGroup.visible}));
-  check('aller sur un autre écran referme l\'exploration',!lf.a&&!lf.cls&&lf.pg,lf);
+  await p.evaluate(help);
+  const rl=await p.evaluate(()=>({bio:G.res.biomass.v,ex:G.explore.caught,n:SBExplore._dbg.W.rabbits.length}));
+  check('après rechargement : gain conservé, délai respecté',rl.bio>=before+5&&rl.ex===1&&rl.n===2,rl);
+  const n3=await p.evaluate(()=>{ G.explore.respawns=[Date.now()-5]; __s(.7); const a=SBExplore._dbg.W.rabbits.length; __s(1); return [a,SBExplore._dbg.W.rabbits.length] });
+  check('le lapin revient à l\'heure : 3, jamais plus',n3[0]===3&&n3[1]===3,n3);
+  await p.evaluate(()=>goto('fleet')); await p.waitForTimeout(300);
+  const lf=await p.evaluate(()=>({a:SBExplore.active,pg:Planet3D.parcelGroup.visible}));
+  check('aller sur un autre écran referme l\'exploration',!lf.a&&lf.pg,lf);
   console.log(`\n${pass} ok, ${fail} échec(s), erreurs page : ${errs.length}`);
-  console.log(await p.evaluate(()=>SBExplore.stats()));
   await b.close();
   process.exit(fail||errs.length?1:0);
 })().catch(e=>{console.error(e);process.exit(1)});

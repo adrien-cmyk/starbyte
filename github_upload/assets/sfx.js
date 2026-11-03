@@ -155,6 +155,9 @@
     // EXPLORE_0311 — clairière aux lapins : discret, de la matière plutôt que des notes
     exThrow(t) { noise({ t, filter: 'bandpass', f: 1100, f2: 380, q: 1.1, a: 0.01, d: 0.2, g: 0.05 }); MX.tap(t, 0.05, 520); },
     exLand(t) { noise({ t, filter: 'lowpass', f: 620, f2: 220, a: 0.002, d: 0.09, g: 0.09 }); },
+    exPull(t) { noise({ t, filter: 'bandpass', f: 1500, q: 7, a: 0.001, d: 0.018, g: 0.03 }); },
+    exBox(t) { noise({ t, filter: 'bandpass', f: 2100, q: 6, a: 0.001, d: 0.04, g: 0.06, rev: 0.08 }); MX.thud(t, 0.06); },
+    exSplash(t) { noise({ t, filter: 'lowpass', f: 2400, f2: 500, a: 0.004, d: 0.26, g: 0.07, rev: 0.12 }); },
     exNibble(t) { noise({ t, filter: 'bandpass', f: 3200, q: 2.4, a: 0.001, d: 0.022, g: 0.018 }); },
     exReady(t) { tone({ f: 1320, t, a: 0.002, d: 0.07, g: 0.035, rev: 0.12 }); },
     exDoor(t) { noise({ t, filter: 'bandpass', f: 500, f2: 900, q: 0.9, a: 0.02, d: 0.17, g: 0.05 }); },
