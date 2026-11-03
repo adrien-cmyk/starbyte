@@ -262,7 +262,8 @@
       const sys = sysOf(b.deployedSystem);
       const on = sys && net.bySys[sys];
       if (!on) { b._linesAt = now; continue; }
-      const from = Math.max(b._linesAt || (b.deployedAt || b.builtAt || now - 60000), now - 6 * 3600 * 1000);
+      // v2 : à sa première relève, la balise lit aussi les traces des 3 dernières heures — la route se révèle dès la pose, pas au prochain horaire
+      const from = Math.max(b._linesAt || ((b.deployedAt || b.builtAt || now - 60000) - 3 * 3600 * 1000), now - 6 * 3600 * 1000);
       b._linesAt = now;
       let seenHere = [];
       for (const { line, i, isPort } of on) {
@@ -310,6 +311,7 @@
       if (network().ports[cap]) discoverPort(cap, now);
     }
     if (isPort) discoverPort(sys, now);
+    revealLine(line, now, cv.label);   // v2 : un passage vu suffit, la ligne entière entre sur la carte
     // rapport de balise (interceptable seulement pendant la fenêtre de passage)
     if (now - t < WINDOW_MS) {
       if (!Array.isArray(G.beaconReports)) G.beaconReports = [];
@@ -325,6 +327,40 @@
         beaconToast(sys, `📡 ${sys} : ${cv.label.toLowerCase()} · ${cv.ships} vaisseaux${cap ? ' · cap sur ' + cap : ''}`, cv.cargo === 'lourd');
       }
     }
+  }
+  // v2 (03/11, Adrien) : une balise qui voit passer un convoi révèle TOUTE la ligne — tous les tronçons, le lieu au bout.
+  // Idempotent ; sert aussi aux cartes de route et à la révélation depuis une balise posée n'importe où sur la ligne.
+  function revealLine(line, now, why) {
+    if (!line) return false;
+    state();
+    let added = false;
+    const stops = line.chain.concat([line.port]);
+    if (!G.mapSeen) G.mapSeen = {};
+    for (let i = 0; i < stops.length - 1; i++) {
+      const from = stops[i], to = stops[i + 1];
+      if (!G.mapSeen[from]) G.mapSeen[from] = now;
+      if (!G.spottedLegs.some(l => l.npc && l.lineId === line.id && l.from === from && l.to === to)) {
+        G.spottedLegs.unshift({ id: `rv-${line.id}-${from}`, lineId: line.id, from, to, pseudo: why || line.kind.label, at: now, npc: true, cargo: 'lourd', revealed: true });
+        added = true;
+      }
+    }
+    G.spottedLegs = capLegs(G.spottedLegs);
+    const wasKnown = !!G.hiddenPorts[line.port];
+    discoverPort(line.port, now);
+    // le signal d'antenne qui pointait cette ligne est traité
+    for (const [k, e] of Object.entries(G.trafficEchoes)) if (e.lineId === line.id && !e.fromCard) e.done = e.done || now;
+    if (!wasKnown && window.SBMap && SBMap.render) { try { SBMap.render(); } catch (e) {} }
+    return added || !wasKnown;
+  }
+  // le signal d'antenne en attente (un seul à la fois) : { sys, lineId, at, home } ou null
+  function activeSignal() {
+    if (typeof G === 'undefined' || !G) return null;
+    state();
+    const net = network();
+    const beaconSys = new Set((typeof sbAllProbes === 'function' ? sbAllProbes() : (G.probesPool || [])).filter(p => p.tier === 'beacon' && p.state === 'deployed').map(p => sysOf(p.deployedSystem)));
+    const list = Object.entries(G.trafficEchoes).filter(([sys, e]) => !e.fromCard && !e.done && net.byId[e.lineId] && !G.hiddenPorts[net.byId[e.lineId].port] && !beaconSys.has(sys))
+      .sort((a, b) => (b[1].at || 0) - (a[1].at || 0));
+    return list.length ? Object.assign({ sys: list[0][0] }, list[0][1]) : null;
   }
   function discoverPort(portSys, now) {
     state();
@@ -1305,7 +1341,7 @@
     G.trafficEchoes[sys] = { lineId: line.id, at: now, fromCard: card.name || null };
     if (!G.mapSeen) G.mapSeen = {};
     G.mapSeen[sys] = now;
-    if (kind === 'singing') discoverPort(line.port, now);
+    revealLine(line, now, 'Carte : ' + (card.name || 'carte de route'));   // v2 (03/11) : une carte payée révèle la route entière
     if (typeof saveGame === 'function') saveGame();
     if (window.SBMap && SBMap.render) { try { SBMap.render(); } catch (e) {} }
     return { sys, lineId: line.id, kind };
@@ -1345,18 +1381,16 @@
     if (!homes.length) return;
     state();
     const echoes = Object.entries(G.trafficEchoes).filter(([, e]) => !e.fromCard);   // les pistes des cartes ne comptent pas
-    // une antenne neuve (colonie) capte tout de suite son premier écho
-    const fresh = homes.find(h => !echoes.some(([, e]) => (e.home || myHome()) === h));
-    const last = echoes.reduce((m, [, e]) => Math.max(m, e.at || 0), 0);
+    // v2 (03/11) : UN seul signal en attente à la fois, affiché en évidence ; le suivant vient 3 h après que le précédent a été traité
+    // (balise posée ou ligne révélée). Plus de blocage silencieux « deux échos attendent ».
+    if (activeSignal()) return;
+    const fresh = homes.find(h => !echoes.some(([, e]) => (e.home || myHome()) === h));   // une antenne neuve capte tout de suite
+    const last = echoes.reduce((m, [, e]) => Math.max(m, Math.max(e.at || 0, e.done || 0)), 0);
     if (!fresh && echoes.length && now - last < ECHO_EVERY_MS) return;
-    // pas d'écho de plus tant que deux échos attendent une balise
-    const beaconSys = new Set((typeof sbAllProbes === 'function' ? sbAllProbes() : (G.probesPool || [])).filter(p => p.tier === 'beacon' && p.state === 'deployed').map(p => sysOf(p.deployedSystem)));
-    const waiting = echoes.filter(([s]) => !beaconSys.has(s)).length;
-    if (!fresh && waiting >= 2) return;
     // à tour de rôle entre les antennes
     const home = fresh || homes[echoes.length % homes.length]; if (!home) return;
     const sec = home.split('-')[1];
-    const lines = network().lines;
+    const lines = network().lines.filter(l => !G.hiddenPorts[l.port]);   // v2 : jamais une ligne dont le lieu est déjà connu
     let mine = lines.filter(l => l.sector === sec);
     // 22/10 — de temps en temps, l'antenne capte un trafic plus lointain : un secteur plus loin (1 écho sur 4), deux (1 sur 8)
     const _gap = (x) => Math.abs(String(x).charCodeAt(0) - sec.charCodeAt(0));
@@ -1375,8 +1409,9 @@
     if (!G.mapSeen) G.mapSeen = {};
     G.mapSeen[sys] = now;
     if (typeof saveGame === 'function') saveGame();
-    if (typeof toast === 'function') toast(`📡 ${antennaName(home) ? 'L\'antenne de ' + antennaName(home) : 'Ton antenne'} capte un trafic régulier vers ${sys} · pose une balise pour voir qui passe`, () => { if (typeof openSystemOnMap === 'function') openSystemOnMap(sys); });
+    if (typeof toast === 'function') toast(`📡 ${antennaName(home) ? 'L\'antenne de ' + antennaName(home) : 'Ton antenne'} capte un trafic régulier vers ${sys} · pose une balise dessus : elle remontera la route jusqu'au lieu caché`, () => { if (typeof openSystemOnMap === 'function') openSystemOnMap(sys); });
     if (window.SBMap && SBMap.render) { try { SBMap.render(); } catch (e) {} }
+    if (typeof sbSignalRender === 'function') { try { sbSignalRender(); } catch (e) {} }
   }
 
   /* ── ce que la carte doit savoir d'un système ── */
@@ -1423,7 +1458,7 @@
   setInterval(() => { try { tickEcho(Date.now()); } catch (e) { console.warn('[lignes] écho', e); } }, 20000);
 
   window.SBLines = {
-    beaconToast, network, passages, capOf, convoyOf, tickBeacons, tickEcho, infoFor, knownSystems, discoverPort,
+    beaconToast, network, passages, capOf, convoyOf, tickBeacons, tickEcho, infoFor, knownSystems, discoverPort, revealLine, activeSignal,
     activateCard, ensureRoute, knownChain, balisage, balisageChain, routesBalisedBy, noteUser,
     openedRoutes, openedTo, scoutInFlight, scoutLaunch, scoutArrived, forgetOpened, giveRoute, pollGifts,
     dockMarketHtml, sellHere, withdrawOffer, buyOffer, learnRoute, noteRobbery, tickMarket, fetchOffers, sellableRoutes,

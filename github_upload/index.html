@@ -9152,6 +9152,22 @@ function mpRenderIncoming(list) {
   el.innerHTML = `⚠ Flotte hostile · <strong>${r.attacker_pseudo}</strong>${_on} · impact dans ${min} min${_mpIncoming.length > 1 ? ` · +${_mpIncoming.length - 1}` : ''}`;
 }
 setInterval(() => { try { mpRenderIncoming(); } catch (e) {} }, 30000);
+// ROUTES_V2 (03/11) — le signal d'antenne : un seul à la fois, en évidence sur l'accueil et le Centre de prospection, jusqu'à ce qu'une balise soit posée
+function sbSignalRender() {
+  let el = document.getElementById('sb-signal');
+  const scr = typeof getCurrentScreen === 'function' ? getCurrentScreen() : '';
+  const sig = (scr === 'planet' || scr === 'prospect' || scr === 'dashboard') && window.SBLines && SBLines.activeSignal ? SBLines.activeSignal() : null;
+  if (!sig || document.getElementById('mp-incoming')) { if (el) el.remove(); return; }
+  if (!el) {
+    el = document.createElement('div'); el.id = 'sb-signal';
+    el.style.cssText = 'position:fixed;left:50%;transform:translateX(-50%);bottom:calc(env(safe-area-inset-bottom, 0px) + 86px);z-index:8990;max-width:92vw;padding:9px 16px;border-radius:20px;background:rgba(40,30,8,.9);border:1px solid rgba(255,200,100,.55);color:#ffe3b0;font-size:12px;letter-spacing:.02em;box-shadow:0 0 18px rgba(255,190,80,.3);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;animation:sbSignalPulse 2.4s ease-in-out infinite';
+    if (!document.getElementById('sb-signal-css')) { const st = document.createElement('style'); st.id = 'sb-signal-css'; st.textContent = '@keyframes sbSignalPulse{0%,100%{box-shadow:0 0 14px rgba(255,190,80,.25)}50%{box-shadow:0 0 26px rgba(255,190,80,.55)}}'; document.head.appendChild(st); }
+    document.body.appendChild(el);
+  }
+  el.onclick = () => { if (typeof openSystemOnMap === 'function') openSystemOnMap(sig.sys); if (typeof toast === 'function') toast(`Pose une balise sur ${sig.sys} : au premier convoi qui passe, elle remonte toute la route jusqu'au lieu caché.`); };
+  el.innerHTML = `<span style="display:inline-flex;align-items:center;gap:8px">${typeof icon === 'function' ? icon('satellite', { size: 14, color: '#ffc864' }) : ''}<span>Trafic régulier vers <strong style="font-family:var(--font-mono)">${sig.sys}</strong> · <span style="color:#ffc864">pose une balise</span></span></span>`;
+}
+setInterval(() => { try { sbSignalRender(); } catch (e) {} }, 3000);
 
 // REDALERT_1310 — flotte hostile en approche : la carte planète passe en alerte rouge
 // (girophares, voile rouge pulsé, bandeau à rayures avec compte à rebours). Les autres écrans
@@ -49812,7 +49828,7 @@ if (G.knownTargets && Array.isArray(G.tankerMissions)) {
 <!-- PERF_1310 — mesure des performances chez les joueurs + qualité 3D automatique (assets/perf.js) -->
 <script src="assets/perf.js?v=20261022-2000"></script>
 <!-- PATCH_1410_LIGNES — lignes PNJ à horaire sur les routes cachées (assets/lines.js) -->
-<script src="assets/lines.js?v=20261030-1820"></script>
+<script src="assets/lines.js?v=20261103-v2"></script>
 <!-- CLOUD — sauvegarde Supabase (source : sb-build/src/cloud.js) -->
 <script type="module" src="assets/cloud.js?v=20261022-1420"></script>
 <!-- MATCH3 — Match-3 V2 (assets/match3.js, source src/match3.js + src/m3core.js) : remplace startM3 -->
