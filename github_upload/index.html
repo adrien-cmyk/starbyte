@@ -8926,7 +8926,7 @@ function loadGame() {
     refreshParcelProdLabels();
     syncCapitalParcelTier();   // PATCH_1910_CAPITAL
     try { sbMigrateBrest(); } catch (e) { console.warn('[brest]', e); }   // PATCH_1910_BREST
-    setTimeout(() => { try { sbMigrateBrest(); } catch (e) {} }, 3000);
+    setTimeout(() => { try { sbMigrateBrest(); sbRepairDockReports(); } catch (e) {} }, 3000);
     // AUDIT_1110 — l'adresse fait foi (déménagement vers la zone de test)
     if (G.planet && (!G.activeWorld || G.activeWorld === 'home')) { G.planet.address = MY_ADDRESS; G.planet.coordString = MY_COORD_STRING; }   // PATCH_2010_WORLDS : seulement la capitale
     if (typeof sbWorldsInit === 'function') sbWorldsInit();
@@ -38118,6 +38118,7 @@ function renderTankerReportRow(r, isUnread) {
         <div class="rapport-name" style="margin-top:4px">${tankerIconMini}${r.tankerName || 'Tanker'}</div>
         <div style="margin-top:12px">
           ${bannerHtml}
+          ${sbDockFoundHtml(r)}
           ${routeCardHtml}
           ${cargoFlowHtml}
           ${narrativeHtml}
@@ -43549,6 +43550,54 @@ function sbBrestFromLead(d) {
   if (sys && window.SBLines && SBLines.discoverPort) { try { SBLines.discoverPort(sys, Date.now()); } catch (e) {} }
   return d;
 }
+// 03/11 — une piste dock_coords mène à un vrai lieu caché du réseau (SBLines) : le plus proche de chez soi parmi ceux encore inconnus,
+// tiré de façon stable pour la piste. null s'il ne reste rien à découvrir (ou si les lignes ne sont pas chargées).
+function sbPickPortForLead(lead) {
+  try {
+    if (!window.SBLines || !SBLines.network) return null;
+    const ports = Object.values(SBLines.network().ports).filter(p => p && p.sys && !(G.hiddenPorts && G.hiddenPorts[p.sys]));
+    if (!ports.length) return null;
+    const o = typeof sbOrigin === 'function' ? sbOrigin() : MY_ADDRESS;
+    const home = (o && o.sector) || MY_ADDRESS.sector || 'N';
+    const gap = (p) => Math.abs(String(p.sys).split('-')[1].charCodeAt(0) - home.charCodeAt(0));
+    ports.sort((a, b) => gap(a) - gap(b) || (a.sys < b.sys ? -1 : 1));
+    const best = ports.filter(p => gap(p) === gap(ports[0]));
+    const h = _hashStringDeterministic(String((lead && lead.id) || 'lead'));
+    return best[Math.abs(h) % best.length];
+  } catch (e) { return null; }
+}
+// bloc « lieu découvert » dans le rapport d'exploration : nom, système, accès direct à la carte
+function sbDockFoundHtml(r) {
+  const d = r && r.kind === 'exploration' && r.result && r.result.kind === 'dock_success' && r.result.newDock;
+  if (!d) return '';
+  const sys = r.result.portSys || d.portSys || null;
+  if (sys && window.SBLines && SBLines.discoverPort && !(G.hiddenPorts && G.hiddenPorts[sys])) { try { SBLines.discoverPort(sys, r.createdAt || Date.now()); } catch (e) {} }   // auto-réparation : le lieu doit être sur la carte
+  const safe = (x) => String(x == null ? '' : x).replace(/[<>&"]/g, '');
+  return `<div style="margin-bottom:14px;padding:14px;background:rgba(122,170,220,.07);border:1px solid rgba(122,170,220,.35);border-radius:6px">
+      <div style="font-size:9px;color:#7aaadc;letter-spacing:.14em;text-transform:uppercase;margin-bottom:6px">Lieu caché découvert</div>
+      <div style="font-size:14px;color:#e6f0ff;font-weight:600">${safe(d.name)}</div>
+      <div style="font-size:11px;color:var(--mut);margin-top:2px">${safe(d.sub || '')}${sys ? ` · <span style="font-family:'SF Mono',monospace;color:#7aaadc">${safe(sys)}</span>` : ''}</div>
+      ${sys ? `<div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap">
+        <button onclick="event.stopPropagation();openSystemOnMap('${safe(sys)}')" style="flex:1;min-width:140px;padding:10px 12px;border-radius:8px;border:1px solid rgba(122,170,220,.5);background:rgba(122,170,220,.12);color:#e6f0ff;font-size:11px;letter-spacing:.12em;text-transform:uppercase;cursor:pointer">Voir sur la carte</button>
+      </div><div style="font-size:11px;color:var(--mut);margin-top:8px;line-height:1.5">Sa route est ouverte au Commerce : envoie-y un tanker depuis le Centre de prospection.</div>`
+      : `<div style="font-size:11px;color:var(--mut);margin-top:8px">Ce dock pourra être proposé comme destination de tes prochaines routes.</div>`}
+    </div>`;
+}
+// anciens rapports « dock découvert » sans système : on les relie au port réel (le Refuge de Brest) et on le met sur la carte
+function sbRepairDockReports() {
+  try {
+    if (!window.SBLines || !SBLines.network) return;
+    for (const r of G.tankerReports || []) {
+      if (!(r && r.kind === 'exploration' && r.result && r.result.kind === 'dock_success' && r.result.newDock) || r.result.portSys) continue;
+      const d = r.result.newDock;
+      let sys = d.portSys || null;
+      if (!sys && (d.id === REFUGE_DOCK_ID || /refuge de brest/i.test(d.name || ''))) sys = sbBrestPortSys();
+      if (!sys) continue;
+      r.result.portSys = sys; d.portSys = sys; r.targetCoords = sys;
+      if (!(G.hiddenPorts && G.hiddenPorts[sys])) SBLines.discoverPort(sys, r.createdAt || Date.now());
+    }
+  } catch (e) { console.warn('[docks]', e); }
+}
 function sbMigrateBrest() {
   if (G._brest1) return;
   if (!window.SBLines || !SBLines.network) return;      // lignes pas encore chargées : on réessaiera au prochain chargement
@@ -45148,29 +45197,45 @@ function completeExplorationReturn(missionId) {
   } else if (lead.type === 'dock_coords') {
     // Ajouter un nouveau dock au pool des docks découverts
     if (!G.discoveredDocks) G.discoveredDocks = [];
-    const newDockTypes = ['hidden_freeport', 'asteroid_bar'];
-    const newDockType = newDockTypes[Math.floor(Math.random() * newDockTypes.length)];
-    const newDockNames = {
-      hidden_freeport: ['Le Port d\'Ahar', 'Le Refuge de Brest', 'L\'Anse de Vol-Noir', 'Le Passage Cieux-Gris'],
-      asteroid_bar: ['Le Comptoir d\'Ihor', 'L\'Astéroïde Suspendu', 'La Halte des Trois-Souffles'],
-    };
-    const namesPool = newDockNames[newDockType] || ['Dock découvert'];
-    const newDockName = namesPool[Math.floor(Math.random() * namesPool.length)];
-    const newDock = {
-      id: 'discovered_dock_' + Date.now(),
-      name: newDockName,
-      type: newDockType,
-      sub: newDockType === 'hidden_freeport' ? 'Port-franc dissimulé' : 'Comptoir d\'astéroïdes',
-      detail: 'Découvert par tes explorations. N\'apparaît pas sur les cartes officielles.',
-      discovered: true,
-    };
-    if (newDockName === 'Le Refuge de Brest') sbBrestFromLead(newDock);   // PATCH_1910_BREST
+    // 03/11 (Adrien) : une info achetée doit mener quelque part. Le dock révélé est un VRAI lieu caché du réseau des lignes
+    // (pas encore connu), le plus proche de chez soi : il entre sur la carte et sa route s'ouvre au Commerce, comme s'il avait
+    // été remonté à la balise. L'ancien tirage de noms ne sert plus que s'il ne reste aucun lieu à découvrir.
+    const port = sbPickPortForLead(lead);
+    let newDock, newDockName;
+    if (port) {
+      newDockName = port.name;
+      newDock = { id: port.dockId, name: port.name, type: port.type, sub: port.typeLabel || (port.type === 'asteroid_bar' ? 'Comptoir d\'astéroïdes' : 'Port-franc dissimulé'),
+        detail: 'Découvert par tes explorations. N\'apparaît pas sur les cartes officielles.', discovered: true, portSys: port.sys, usedAsRouteDock: true };
+      if (port.dockId === REFUGE_DOCK_ID) _crownDock(newDock);
+      try { SBLines.discoverPort(port.sys, Date.now()); } catch (e) {}
+    } else {
+      const newDockTypes = ['hidden_freeport', 'asteroid_bar'];
+      const newDockType = newDockTypes[Math.floor(Math.random() * newDockTypes.length)];
+      const newDockNames = {
+        hidden_freeport: ['Le Port d\'Ahar', 'Le Refuge de Brest', 'L\'Anse de Vol-Noir', 'Le Passage Cieux-Gris'],
+        asteroid_bar: ['Le Comptoir d\'Ihor', 'L\'Astéroïde Suspendu', 'La Halte des Trois-Souffles'],
+      };
+      const namesPool = newDockNames[newDockType] || ['Dock découvert'];
+      newDockName = namesPool[Math.floor(Math.random() * namesPool.length)];
+      newDock = {
+        id: 'discovered_dock_' + Date.now(),
+        name: newDockName,
+        type: newDockType,
+        sub: newDockType === 'hidden_freeport' ? 'Port-franc dissimulé' : 'Comptoir d\'astéroïdes',
+        detail: 'Découvert par tes explorations. N\'apparaît pas sur les cartes officielles.',
+        discovered: true,
+      };
+      if (newDockName === 'Le Refuge de Brest') { sbBrestFromLead(newDock); newDock.portSys = sbBrestPortSys() || undefined; }   // PATCH_1910_BREST
+    }
     G.discoveredDocks.push(newDock);
     if (window.SBMP && window.SBMP.ready()) window.SBMP.reportEvent('rare_discovery', 'un dock secret');   // RUMORS_1110
     result = {
       kind: 'dock_success',
       newDock,
-      narrative: `${mission.tankerName} a confirmé l'existence de ${newDockName}. ${newDock.sub}. Ce dock est désormais disponible pour tes prochaines routes.`,
+      portSys: newDock.portSys || null,
+      narrative: newDock.portSys
+        ? `${mission.tankerName} a confirmé l'existence de ${newDockName}, en ${newDock.portSys}. ${newDock.sub}. Le lieu est maintenant sur ta carte et sa route est ouverte au Commerce : tes tankers peuvent s'y rendre.`
+        : `${mission.tankerName} a confirmé l'existence de ${newDockName}. ${newDock.sub}. Ce dock est désormais disponible pour tes prochaines routes.`,
     };
   } else if (lead.type === 'wanted_target') {
     // V1 : juste un flag pour Phase 4
@@ -45206,7 +45271,7 @@ function completeExplorationReturn(missionId) {
     leadCoords: mission.leadCoords,
     isLie: mission.isLie,
     isLost: false, // exploration ne perd pas le tanker (V1 simple)
-    targetCoords: mission.leadCoords,
+    targetCoords: (result && result.portSys) || mission.leadCoords,   // 03/11 : un dock découvert = le système du port, pas l'indice de départ
     targetLabel: mission.leadTitle,
     result,
     loot,
