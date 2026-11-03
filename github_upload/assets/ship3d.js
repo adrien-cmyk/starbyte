@@ -5,7 +5,7 @@
    `ship` (facultatif) : profil d'un autre vaisseau mis à l'échelle de la scène du KV-01 (V m de scène par m réel,
    proue glTF recalée sur z = 600) — tuyères, axe de la bulle, table de section de coque (voir PROFIL_KV01).
 */
-import { createOrbitSky, forwardFrom } from './3d/sky/orbitsky.js?v=20261103d';   // fond orbital partagé (planète, soleil haut-gauche)
+import { createOrbitSky, forwardFrom } from './3d/sky/orbitsky.js?v=20261103e';   // fond orbital partagé (planète, soleil haut-gauche)
 // Moteur 3D partagé du jeu (window.SB3D, exposé par planet3d.js) : pas de seconde copie de three.js.
 // MapControls = OrbitControls avec une autre affectation des gestes ; on remet celle d'une orbite.
 function libs() {
@@ -42,7 +42,7 @@ const PROFIL_TK07 = {
 const PROFIL_OS01 = {
   V: 2.6, bowGltf: 0, center: true, axisY: 0.6, engineY: 0, engineZ: 0, nozzleZ: 0, targetY: 0.55,
   nozzles: [], plasma: false, planet: true, spin: 0.018, dustSpeed: 0.35, fit: 1.3,
-  lightScale: 0.6, bloom: 0.3, glowScale: 0.5,   // station blanche et jaune : éclairage et bloom réduits (trop éblouissante sous le soleil du fond orbital)
+  lightScale: 0.45, bloom: 0.2, glowScale: 0.3,   // station blanche et jaune : éclairage et bloom réduits (trop éblouissante sous le soleil du fond orbital)
   engineColor: [1.0, 0.62, 0.30], plume: [0xff5a1a, 0xff8a2a, 0xffc070, 0xfff2d8, 0xffc890, 0xffa060],
   gloss: { M_TK_ARMOR_JAUNE: [0.40, 0.08], M_KV_ARMOR_WHITE: [0.40, 0.0], M_KV_ARMOR_RED: [0.28, 0.3], M_KV_GUNMETAL: [0.26, 0.85], M_KV_STRUCT_BLACK: [0.30, 0.55], M_TK_GRAPHITE: [0.30, 0.6], M_SR_VERRIERE: [0.06, 0.4] }, glossEnv: 0.9,
   hull: [[0,0,10,10],[1,0,10,10]],

@@ -39,7 +39,7 @@
     'Tu négocies ? Retourne compter tes cailloux au match-3.',
     "T'as vu l'acier ? Ça, ça se construit pas dans ton petit chantier.",
   ];
-  const VERSION = '20261103i';
+  const VERSION = '20261103j';
   // Serveur (schema_mp_v31_blackmarket.sql + fonctions bm-checkout / bm-webhook)
   const SB = 'https://elupnpdcblztpfywnhjl.supabase.co';
   const KEY = 'sb_publishable_tXGrQIROzH2DwBrny1GcHQ_iKJKoBOQ';
@@ -903,6 +903,7 @@
     if (f === undefined) { try { f = await call('/rest/v1/rpc/bm_envoy_face', { p_kind: 'orbit', p_presence: presenceId }); } catch (e) { f = null; } envoyFaces[presenceId] = f || null; }
     return f && f.item_id ? f : null;
   }
+  const envoyFaceCached = (presenceId) => { const f = envoyFaces[presenceId]; return f === undefined ? undefined : (f && f.item_id ? f : null); };   // synchrone : connu / inconnu / pas de vaisseau d'exception
   // Ambassade : le vaisseau amiral en orbite, en vue héros (le mien : ma peinture ; celui d'un visiteur : son visage via bm_envoy_face)
   function envoyHero(host, ownItem, presenceId) {
     if (!host) return null;
@@ -1085,5 +1086,5 @@
     c.dataset.bmEnvoy = '1'; c.style.marginBottom = '10px';
     host.insertBefore(c, host.firstChild);
   }
-  window.SBBlackmarket = { open, close, openOwned, ships: SHIPS, cats: CATS, owned: () => owned, units: () => units, reload: loadOwned, fillRaidFaces, fillFlagship, fillEnvoy, interceptShip, envoyChoices, envoyRows, envoyLost, shipThumbHtml, missionHero, envoyHero, shipModel, heroLogo, envoyFace };
+  window.SBBlackmarket = { open, close, openOwned, ships: SHIPS, cats: CATS, owned: () => owned, units: () => units, reload: loadOwned, fillRaidFaces, fillFlagship, fillEnvoy, interceptShip, envoyChoices, envoyRows, envoyLost, shipThumbHtml, missionHero, envoyHero, shipModel, heroLogo, envoyFace, envoyFaceCached };
 })();

@@ -6,7 +6,7 @@
    Les JPEG sont pré-compensés pour l'ACES de three.js (exposition 1) et stockés à mi-échelle (gain 2 dans le shader) : l'image à l'écran est l'image cuite. */
 export const SUN_CANON = [-0.2034, 0.2079, -0.9568];   // soleil visible du fond : 12° à gauche de -Z, 12° au-dessus de l'horizontale cuite
 export function createOrbitSky(THREE, opts = {}) {
-  const base = opts.base || new URL('./', import.meta.url).href, version = opts.version || '20261103d';   // les JPEG vivent à côté de ce module
+  const base = opts.base || new URL('./', import.meta.url).href, version = opts.version || '20261103e';   // les JPEG vivent à côté de ce module
   const fwd = opts.forward || [0, 0, -1];
   const th = Math.atan2(fwd[0], -fwd[2]);                       // rotation monde → repère cuit (autour de Y)
   // bascule : les caméras des fiches plongent de ~15° vers le vaisseau et l'horizon cuit est 35° sous l'horizontale ; on incline le ciel
@@ -26,12 +26,14 @@ export function createOrbitSky(THREE, opts = {}) {
     fragmentShader: `uniform sampler2D uSky; uniform mat3 uRot; uniform float uOn, uDim; varying vec3 vDir;
       void main(){ vec3 d = normalize(uRot * vDir);
         vec2 uv = vec2(atan(d.x, -d.z) / 6.2831853 + 0.5, asin(clamp(d.y, -1.0, 1.0)) / 3.1415927 + 0.5);   // panorama : colonne centrale = -Z, haut = +Y
-        vec4 c = texture2D(uSky, uv); gl_FragColor = vec4(c.rgb * (2.0 * uOn * uDim), 1.0); }`   // GAIN 2 : les JPEG sont stockés à mi-échelle (plage > 1 pour l'ACES),
+        vec3 c = texture2D(uSky, uv).rgb;
+        c = mix(c / 12.92, pow((c + 0.055) / 1.055, vec3(2.4)), step(0.04045, c));   // sRGB → linéaire fait ici, pas par le GPU : identique sur tous les appareils (iOS affichait le fond bien trop clair)
+        gl_FragColor = vec4(c * (2.0 * uOn * uDim), 1.0); }`   // GAIN 2 : les JPEG sont stockés à mi-échelle (plage > 1 pour l'ACES),
   }));
   mesh.frustumCulled = false; mesh.renderOrder = -100; mesh.name = 'orbitSky';
   // une seule image équirectangulaire (5120 × 2560) : aucune couture (six faces séparées donnaient des raccords visibles sur iOS)
   const tex = new THREE.TextureLoader().setPath(base).load(`orbit_pano.jpg?v=${version}`, () => { uni.uOn.value = 1; if (opts.onLoad) opts.onLoad(tex); }, undefined, (e) => { console.warn('[OrbitSky]', e); if (opts.onError) opts.onError(e); });
-  tex.colorSpace = THREE.SRGBColorSpace; uni.uSky.value = tex;
+  tex.colorSpace = THREE.NoColorSpace; uni.uSky.value = tex;   // données brutes : le décodage sRGB est dans le shader
   tex.wrapS = THREE.RepeatWrapping; tex.wrapT = THREE.ClampToEdgeWrapping;   // le tour se referme derrière la vue, sans trait
   tex.generateMipmaps = false; tex.minFilter = THREE.LinearFilter; tex.magFilter = THREE.LinearFilter;   // vue en agrandissement : pas de mipmaps (et pas de trait au raccord)
   tex.flipY = true;

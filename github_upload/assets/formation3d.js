@@ -291,7 +291,7 @@
     let orbitSky = null;
     if (!mission) {
       const camDir = [Math.sin(0.35) * Math.cos(0.3), Math.sin(0.3), Math.cos(0.35) * Math.cos(0.3)];   // axe de départ (az 0.35, el 0.3)
-      import('./3d/sky/orbitsky.js?v=20261103d').then(({ createOrbitSky, forwardFrom }) => {
+      import('./3d/sky/orbitsky.js?v=20261103e').then(({ createOrbitSky, forwardFrom }) => {
         orbitSky = createOrbitSky(THREE, { forward: forwardFrom(camDir), aspect: W() / H(), radius: 60000, dim: 1 / renderer.toneMappingExposure });
         scene.add(orbitSky.mesh);
         key.position.copy(orbitSky.sunDir).multiplyScalar(3000); key.color.set(0xffd9a8); key.intensity = 3.4;

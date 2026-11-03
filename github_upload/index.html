@@ -11228,7 +11228,14 @@ function mpEmbassyMountHero(m, inc, pseudo) {
   const scroll = scr.querySelector('.screen-scroll');
   const model = typeof UNIT_SHIP3D_MODELS !== 'undefined' && UNIT_SHIP3D_MODELS.tanker;
   // PATCH_0211_AMBASSADEUR — pas de modèle de tanker au-dessus d'un vaisseau d'exception : c'est sa fiche qui le montre
-  const _isEnvoy = (m && m.bmEnvoy) || (!m && inc && window.SBBlackmarket && SBBlackmarket.shipThumbHtml(inc.tanker));
+  // visiteur : c'est le serveur (bm_envoy_face) qui dit si le vaisseau en orbite est un vaisseau d'exception — pas son nom (03/11 : le nom annoncé
+  // peut être celui d'un tanker, et l'hôte voyait un TK-07 à la place du vaisseau amiral). Première ouverture : on demande, puis on remonte la vue.
+  let _face;
+  if (!m && inc && inc.presenceId && window.SBBlackmarket && SBBlackmarket.envoyFaceCached) {
+    _face = SBBlackmarket.envoyFaceCached(inc.presenceId);
+    if (_face === undefined) SBBlackmarket.envoyFace(inc.presenceId).then(() => { if (!scr.classList.contains('hidden')) mpEmbassyMountHero(m, inc, pseudo); }).catch(() => {});
+  }
+  const _isEnvoy = (m && m.bmEnvoy) || (!m && inc && window.SBBlackmarket && (!!_face || SBBlackmarket.shipThumbHtml(inc.tanker)));
   if ((!model || !window.WebGLRenderingContext) && !_isEnvoy) { scr.classList.remove('ud-hero', 'ud-ship'); return; }
   if (_emb.hero && (!!_isEnvoy !== !!_emb.heroEnvoy)) { try { _emb.hero.dispose(); } catch (e) {} _emb.hero = null; }   // tanker ↔ vaisseau amiral : on remonte
   let hero = document.getElementById('emb-hero');
@@ -50108,16 +50115,16 @@ if (G.knownTargets && Array.isArray(G.tankerMissions)) {
 <!-- PARRAINAGE_2410 — inviter des commandants : 5 appareils ouvrent le lien → 2 500 métal, une fois (carte en tête de la cloche) -->
 <script src="assets/invite.js?v=20261025-1350"></script>
 <script src="assets/assistance.js?v=20261026-1900"></script>
-<script type="module" src="assets/ship3d.js?v=20261103-orbit4"></script>
+<script type="module" src="assets/ship3d.js?v=20261103-orbit5"></script>
 <!-- PATCH_1510_MISSIONS — tout ce qui vole, fiche de mission des tankers -->
 <script src="assets/missions.js?v=20261103-amiral4"></script>
 <!-- PATCH_1610_SKILLS — skills des bâtiments : apprendre, découvrir, effets -->
 <script src="assets/skills.js?v=20261021-1130"></script>
 <script src="assets/maj.js?v=20261025-1800"></script>
-<script src="assets/blackmarket.js?v=20261103-orbit4"></script>   <!-- Blackmarket v0 : aperçu du catalogue, réservé au compte d'Adrien -->
+<script src="assets/blackmarket.js?v=20261103-orbit5"></script>   <!-- Blackmarket v0 : aperçu du catalogue, réservé au compte d'Adrien -->
 <!-- PATCH_1510_CROWN — The Drifting Crown en 3D (assets/station3d.js, sur le moteur partagé window.SB3D) -->
 <script type="module" src="assets/station3d.js?v=20261022-1047"></script>
 <!-- FORMATION3D — flotte déployée en orbite, vue de haut en formation (remplace la vue orbite) -->
-<script src="assets/formation3d.js?v=20261103-orbit"></script>
+<script src="assets/formation3d.js?v=20261103-orbit2"></script>
 </body>
 </html>
