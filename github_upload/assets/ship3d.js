@@ -5,6 +5,7 @@
    `ship` (facultatif) : profil d'un autre vaisseau mis à l'échelle de la scène du KV-01 (V m de scène par m réel,
    proue glTF recalée sur z = 600) — tuyères, axe de la bulle, table de section de coque (voir PROFIL_KV01).
 */
+import { createOrbitSky, forwardFrom } from './3d/sky/orbitsky.js?v=20261103';   // fond orbital partagé (planète, soleil haut-gauche)
 // Moteur 3D partagé du jeu (window.SB3D, exposé par planet3d.js) : pas de seconde copie de three.js.
 // MapControls = OrbitControls avec une autre affectation des gestes ; on remet celle d'une orbite.
 function libs() {
@@ -164,7 +165,9 @@ const sky = new THREE.Mesh(new THREE.SphereGeometry(300, 48, 32), new THREE.Shad
       gl_FragColor = vec4(col, 1.0);
     }`
 }));
-scene.add(sky);
+// Vue orbitale : fond photographique partagé (planète immense, soleil chaud haut-gauche) ; le ciel procédural ne sert plus qu'au sol
+const ORBIT = !P.ground ? createOrbitSky(THREE, { forward: forwardFrom(P.camDir || [0.55, 0.24, -0.80]) }) : null;
+if (ORBIT) scene.add(ORBIT.mesh); else scene.add(sky);
 if (P.ground) {                                    // bâtiment au sol : crépuscule sur Kerath, régolithe, dalle
   sky.material = new THREE.ShaderMaterial({
     side: THREE.BackSide, depthWrite: false, fog: false,
@@ -216,7 +219,7 @@ if (P.ground) {                                    // bâtiment au sol : crépus
   const ring = new THREE.Mesh(new THREE.RingGeometry(60 * K, 60.8 * K, 128), new THREE.MeshBasicMaterial({ color: 0x3fb6e6, transparent: true, opacity: .5 }));
   ring.rotation.x = -Math.PI / 2; ring.position.y = 0.01; scene.add(ring);
 }
-if (P.planet) {                                    // planète sous la station : limbe à contre-jour + atmosphère
+if (P.planet && !ORBIT) {                          // (ancienne planète procédurale ; le fond orbital la remplace)
   const PR = 165, PPOS = P.planetPos ? new THREE.Vector3(...P.planetPos) : new THREE.Vector3(25, -PR - 2.5, 135), SD = new THREE.Vector3(-0.42, 0.03, P.planetPos ? -0.91 : 0.91).normalize();   // vaisseau vu de la proue : planète côté poupe
   const planet = new THREE.Mesh(new THREE.SphereGeometry(PR, 96, 72), new THREE.ShaderMaterial({
     uniforms: { uSun: { value: SD } },
@@ -265,7 +268,7 @@ function starField(count, radius, size) {
   g.setAttribute('color', new THREE.BufferAttribute(col, 3));
   return new THREE.Points(g, new THREE.PointsMaterial({ size, sizeAttenuation: false, vertexColors: true, depthWrite: false, fog: false }));
 }
-scene.add(starField(3000, 280, 1.2), starField(220, 280, 2.2));
+if (!ORBIT) scene.add(starField(3000, 280, 1.2), starField(220, 280, 2.2));   // les étoiles sont dans le fond cuit
 
 const DUST_N = 420, DUST_BOX = 40;
 const dustGeo = new THREE.BufferGeometry();
@@ -280,8 +283,8 @@ if (P.ground) dust.visible = false;
 const ship = new THREE.Group();
 scene.add(ship);
 // soleil puissant droit devant : le cuirassé fonce dans la lumière
-const SUN_DIR = new THREE.Vector3(-0.42, 0.03, 0.91).normalize();
-const key = new THREE.DirectionalLight(0xfff0dc, 3.4);
+const SUN_DIR = ORBIT ? ORBIT.sunDir.clone() : new THREE.Vector3(-0.42, 0.03, 0.91).normalize();   // en orbite : le soleil du fond (haut-gauche de la vue)
+const key = new THREE.DirectionalLight(ORBIT ? 0xffe3c2 : 0xfff0dc, ORBIT ? 3.6 : 3.4);
 key.position.copy(SUN_DIR).multiplyScalar(14);
 key.castShadow = true;
 key.shadow.mapSize.set(MOBILE ? 1024 : 2048, MOBILE ? 1024 : 2048);
@@ -293,9 +296,10 @@ if (P.ground) {                                    // soleil bas sur la gauche, 
   Object.assign(key.shadow.camera, { left: -9, right: 9, top: 12, bottom: -4, near: 1, far: 80 }); key.shadow.camera.updateProjectionMatrix();
 }
 scene.add(key);
-const rim = new THREE.DirectionalLight(0x9db8e8, 1.3); rim.position.set(-9, 4, -10); scene.add(rim);   // contre-jour froid
-const fill = new THREE.DirectionalLight(0xb8c6e8, 0.8); fill.position.set(3, 10, -4); scene.add(fill);
-scene.add(new THREE.HemisphereLight(0x2c3a58, 0x05060a, 0.55));
+const rim = new THREE.DirectionalLight(0x9db8e8, ORBIT ? 0.9 : 1.3); rim.position.set(-9, 4, -10); scene.add(rim);   // contre-jour froid
+const fill = new THREE.DirectionalLight(ORBIT ? 0xd8c8b8 : 0xb8c6e8, ORBIT ? 0.55 : 0.8); fill.position.set(3, 10, -4); scene.add(fill);
+if (ORBIT) { const bounce = new THREE.DirectionalLight(0xe8cfae, 0.7); bounce.position.set(1, -10, 2); scene.add(bounce); }   // rebond crème de la planète, par en dessous
+scene.add(new THREE.HemisphereLight(ORBIT ? 0x1a2238 : 0x2c3a58, ORBIT ? 0x3a3024 : 0x05060a, 0.55));
 const engineLight = new THREE.PointLight(PL[5], 0, 10, 1.7);
 engineLight.position.set(0, P.engineY, P.engineZ);
 ship.add(engineLight);
