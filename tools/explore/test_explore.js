@@ -1,4 +1,3 @@
-// Tests d Explorer (pin, catapulte à tirer, tir aveugle, chaîne de carottes, capture). Servir github_upload/ sur localhost:8765, puis : node tools/explore/test_explore.js
 const {open,shot,enterNow,OUT}=require('./lib.js');
 let pass=0,fail=0; const check=(n,c,x)=>{ if(c){pass++;console.log('  ok  ',n);} else {fail++;console.log(' FAIL ',n, x===undefined?'':JSON.stringify(x));} };
 const help=`window.__s=(sec,dt=.05)=>{const d=SBExplore._dbg;for(let i=0;i<sec/dt;i++)d.tick(dt)};
@@ -18,12 +17,9 @@ const help=`window.__s=(sec,dt=.05)=>{const d=SBExplore._dbg;for(let i=0;i<sec/d
   const visBefore=await p.evaluate(()=>Planet3D.scene.children.filter(o=>o.visible).length);
   await p.waitForTimeout(350); await p.evaluate(()=>__frames(1));
   check('plus de boussole',await p.evaluate(()=>!document.getElementById('sbx-compass')));
-  check('le pin est absent quand le lieu est hors écran',await p.evaluate(()=>!document.getElementById('sbx-pin').classList.contains('on')));
+  check('plus de pin : un mât-drapeau dans la scène',await p.evaluate(()=>!document.getElementById('sbx-pin')&&!!Planet3D.scene.getObjectByName('SB_EXPLORE_FLAG')));
   await p.evaluate(()=>{ const P=Planet3D; P.controls.target.set(-20,0,-105); P.camera.position.copy(P.controls.target).addScaledVector(P.camDir,420); P.controls.update(); P.camera.updateMatrixWorld(); });
   await p.waitForTimeout(350); await p.evaluate(()=>__frames(1));
-  const pin=await p.evaluate(()=>{const e=document.getElementById('sbx-pin'),r=e.getBoundingClientRect(),d=SBExplore._dbg;Planet3D.camera.updateMatrixWorld();const s=d.screenOf(d.CRATE.x,d.Y0+2,d.CRATE.z);return {on:e.classList.contains('on'),cx:r.left+r.width/2,bottom:r.bottom,sx:s[0],sy:s[1],op:getComputedStyle(e.querySelector('svg')).opacity,w:e.querySelector('svg').getBoundingClientRect().width}});
-  check('le pin se pose sur l\'endroit du jeu',pin.on&&Math.abs(pin.cx-pin.sx)<1.5&&Math.abs(pin.bottom-pin.sy)<1.5,pin);
-  check('il reste petit et transparent',pin.w<=16&&+pin.op<.7,pin);
   await shot(p,'g_pin',1);
   await p.evaluate(()=>{ const P=Planet3D; P.controls.target.set(33,0,21); P.camera.position.fromArray([33,cam0pY(),0]); function cam0pY(){return 0} });
   await p.evaluate((c0)=>{ const P=Planet3D; P.controls.target.fromArray(c0.t); P.camera.position.fromArray(c0.p); P.controls.update(); P.camera.updateMatrixWorld(); },cam0);
@@ -31,9 +27,9 @@ const help=`window.__s=(sec,dt=.05)=>{const d=SBExplore._dbg;for(let i=0;i<sec/d
   await p.evaluate(help);
   await p.evaluate(()=>{document.querySelectorAll('#toast').forEach(t=>t.classList.remove('shown'));Planet3D.camera.updateMatrixWorld();});
   console.log('— entrée');
-  let st=await p.evaluate(()=>{const P=Planet3D,d=SBExplore._dbg;return {act:SBExplore.active,n:d.W.rabbits.length,pg:P.parcelGroup.visible,bg:P.buildGroup.visible,nav:getComputedStyle(document.querySelector('.w-nav')).display,chip:document.querySelector('#sbx-chip b').textContent,hint:document.getElementById('sbx-hint').textContent,grab:document.getElementById('sbx-grab').className,home:d.W.rabbits.every(r=>Math.hypot(r.x-d.HOME.x,r.z-d.HOME.z)<d.HOME.r+1),pin:document.getElementById('sbx-pin').classList.contains('on')}});
+  let st=await p.evaluate(()=>{const P=Planet3D,d=SBExplore._dbg;return {act:SBExplore.active,n:d.W.rabbits.length,pg:P.parcelGroup.visible,bg:P.buildGroup.visible,nav:getComputedStyle(document.querySelector('.w-nav')).display,chip:document.querySelector('#sbx-chip b').textContent,hint:document.getElementById('sbx-hint').textContent,grab:document.getElementById('sbx-grab').className,home:d.W.rabbits.every(r=>Math.hypot(r.x-d.HOME.x,r.z-d.HOME.z)<d.HOME.r+1)}});
   check('exploration active, 3 lapins près de la catapulte',st.act&&st.n===3&&st.home,st);
-  check('colonie masquée, pas de pin',!st.pg&&!st.bg&&st.nav==='none',st);
+  check('colonie masquée',!st.pg&&!st.bg&&st.nav==='none',st);
   check('consigne du tir, anneaux sur la catapulte',/Tire la catapulte/.test(st.hint)&&st.grab==='on',st);
   const inView=await p.evaluate(()=>{const d=SBExplore._dbg;const a=__sc(d.CATA.x,null,d.CATA.z),b=__sc(d.CRATE.x,null,d.CRATE.z);return {a,b,w:innerWidth,h:innerHeight}});
   check('la catapulte et la caisse sont à l\'écran',inView.a[0]>0&&inView.a[0]<inView.w&&inView.a[1]<inView.h-120&&inView.b[1]>40&&inView.b[0]>0&&inView.b[0]<inView.w,inView);

@@ -37,6 +37,7 @@
   const R = { x: 19, zn: 20, zs: 20 };          // zone où vivent les lapins
   const CUT = { x: 25, zn: 26, zs: 42 };        // zone sans arbres (plus longue au sud : les arbres du premier plan masqueraient le sol)
   const FLAT = { x: 30, zn: 30, zs: 44 };       // zone de sol aplani
+  const FLAG = { x: SITE.x - 16, z: SITE.z + 28, h: 30 };   // le mât-drapeau : l'entrée du jeu, visible depuis la colonie
   const CRATE = { x: SITE.x + 2, z: SITE.z - 8, hw: 5, hd: 4, door: 3.2, ramp: 3.4 };   // door = demi-largeur de l'ouverture
   const CATA = { x: -78, z: 60, r: 5.5, scale: 2.1 };   // au sud de la forêt, à l'endroit désigné par Adrien (capture du 03/11)
   const HOME = { x: -70, z: 32, r: 15 };                // là où vivent les lapins au départ, juste au nord de la catapulte
@@ -94,6 +95,7 @@
     if (!window.I18N || !I18N.add) return;
     I18N.add('fr', {
       'explore.aria': 'Explorer la forêt',
+      'explore.flag': 'Explorer',
       'explore.recenter': 'Revoir tout le terrain',
       'explore.back': 'Retour à la colonie',
       'explore.hint': 'Tire la catapulte vers l\'arrière et lâche : plus tu tires, plus la carotte va loin. Attire un lapin jusqu\'à la caisse, puis referme-la.',
@@ -170,7 +172,7 @@
 
   /* ───────────────────────── carte « juste la nature » ───────────────────────── */
   const keepTop = o => o === root || o === wild || o.isHemisphereLight || o.isDirectionalLight || o.isPointLight
-    || (o.type === 'Object3D') || o.name === 'SB_PLANET_MVP' || o.name === 'SB_GROUND_FINE' || o.name === 'SB_GRID_FLORA' || (o.isInstancedMesh && !o.name);
+    || (o.type === 'Object3D') || o.name === 'SB_PLANET_MVP' || o.name === 'SB_EXPLORE_FLAG' || o.name === 'SB_GROUND_FINE' || o.name === 'SB_GRID_FLORA' || (o.isInstancedMesh && !o.name);
   function natureOn() {
     hideStragglers();
     // ruines et passerelles de la grille : des traces humaines, à masquer aussi
@@ -447,6 +449,7 @@
     // rochers de la clairière, catapulte
     for (const [dx, dz, r] of ROCKS) mark(SITE.x + dx, SITE.z + dz, r + 1.0);
     mark(CATA.x, CATA.z, CATA.r);
+    mark(FLAG.x, FLAG.z, 2.5);
     for (const [x, z, r] of EXTRA.obstacles) mark(x, z, r);
     // la caisse : on y entre par la rampe, sur un parcours écrit (voir routeTo et l'état « hesitate »)
     for (let z = CRATE.z - CRATE.hd - 1.4; z <= CRATE.z + CRATE.hd + 1.4; z += 1) for (let x = CRATE.x - CRATE.hw - 1.4; x <= CRATE.x + CRATE.hw + 1.4; x += 1) {
@@ -1161,17 +1164,30 @@
     // un toucher bref sur la caisse la referme
     el.addEventListener('pointerdown', e => {
       touches = e.isPrimary ? 1 : touches + 1;
-      if (!active) return;
       down = e.isPrimary && touches === 1 ? { x: e.clientX, y: e.clientY, t: performance.now(), id: e.pointerId } : null;
     });
     const up = e => {
       touches = Math.max(0, touches - 1);
-      if (!active || !down || e.pointerId !== down.id) { if (touches === 0) down = null; return; }
+      if (!down || e.pointerId !== down.id) { if (touches === 0) down = null; return; }
       const d = Math.hypot(e.clientX - down.x, e.clientY - down.y), a = performance.now() - down.t;
       down = null;
       if (d > 10 || a > 450) return;
-      onTap(e.clientX, e.clientY);
+      if (active) { onTap(e.clientX, e.clientY); return; }
+      hideFlagBubble();   // sur la carte de la colonie : un toucher ailleurs que sur le mât referme la bulle
     };
+    // le mât-drapeau : pris avant la carte (phase de capture), pour qu'elle ne choisisse pas une parcelle derrière
+    let fdown = null;
+    P.host.addEventListener('pointerdown', e => {
+      fdown = !active && e.isPrimary && flagAllowed() && flagHit(e.clientX, e.clientY) ? { x: e.clientX, y: e.clientY, t: performance.now(), id: e.pointerId } : null;
+      if (fdown) e.stopPropagation();
+    }, { capture: true });
+    P.host.addEventListener('pointerup', e => {
+      if (!fdown || e.pointerId !== fdown.id) return;
+      const d = Math.hypot(e.clientX - fdown.x, e.clientY - fdown.y), a = performance.now() - fdown.t; fdown = null;
+      e.stopPropagation();
+      if (d <= 12 && a <= 600) showFlagBubble();
+    }, { capture: true });
+    P.host.addEventListener('pointercancel', () => { fdown = null; }, { capture: true });
     el.addEventListener('pointerup', up);
     el.addEventListener('pointercancel', () => { touches = Math.max(0, touches - 1); down = null; });
     el.addEventListener('pointermove', e => { if (down && e.pointerId === down.id && Math.hypot(e.clientX - down.x, e.clientY - down.y) > 10) down = null; });
@@ -1182,11 +1198,10 @@
   function buildUI() {
     const css = document.createElement('style');
     css.textContent = `
-    #sbx-pin { position:absolute; left:0; top:0; z-index:19; width:44px; height:44px; margin:0; padding:0; border:0; background:none; cursor:pointer; display:none;
-      align-items:flex-end; justify-content:center; -webkit-tap-highlight-color:transparent; will-change:transform; }
-    #sbx-pin.on { display:flex; }
-    #sbx-pin svg { width:15px; height:21px; display:block; opacity:.62; filter:drop-shadow(0 1px 2px rgba(0,0,0,.4)); }
-    #sbx-pin:active svg { opacity:.9; }
+    #sbx-flag { position:absolute; left:0; top:0; z-index:19; display:none; height:40px; padding:0 16px; align-items:center; gap:8px; border-radius:20px; cursor:pointer; white-space:nowrap;
+      background:rgba(8,14,20,.9); border:1px solid rgba(255,255,255,.3); color:#f4f7f9; font:600 13px/1 'Space Grotesk',system-ui,sans-serif; letter-spacing:.04em; box-shadow:0 4px 16px rgba(0,0,0,.4); will-change:transform; }
+    #sbx-flag.on { display:flex; }
+    #sbx-flag svg { width:14px; height:14px; }
     #scr-planet.sbx-on > .w-top, #scr-planet.sbx-on > .w-nav, #scr-planet.sbx-on > .w-center, #scr-planet.sbx-on > .w-card, #scr-planet.sbx-on > .w-pop,
     #scr-planet.sbx-on > .w-sheet, #scr-planet.sbx-on > #sb-radio-btn, #scr-planet.sbx-on .p3d-overlay { display:none !important; }
     body.sbx-on #sb-bringue, body.sbx-on #sb-party, body.sbx-on #sb-devast, body.sbx-on #sb-install { display:none !important; }
@@ -1224,11 +1239,12 @@
     document.head.appendChild(css);
     const scr = document.getElementById('scr-planet');
     const pin = document.createElement('button');
-    pin.id = 'sbx-pin'; pin.setAttribute('aria-label', tr('explore.aria'));
-    pin.innerHTML = '<svg viewBox="0 0 18 25" aria-hidden="true"><path fill="#fff" fill-rule="evenodd" d="M9 0C4 0 0 4 0 9c0 6.3 7.8 15 8.2 15.6.4.5 1.2.5 1.6 0C10.200 24 18 15.300 18 9c0-5-4-9-9-9zm0 12.200A3.200 3.200 0 1 1 9 5.800a3.200 3.200 0 0 1 0 6.400z"/></svg>';
+    pin.id = 'sbx-flag'; pin.setAttribute('aria-label', tr('explore.aria'));
+    pin.innerHTML = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3.5 14.5v-12M3.5 2.8h8.2l-1.6 2.9 1.6 2.9H3.5"/></svg><span>' + tr('explore.flag') + '</span>';
     scr.appendChild(pin);
     UI.pin = pin;
-    pin.addEventListener('click', () => enter());
+    pin.addEventListener('click', () => { hideFlagBubble(); enter(); });
+    pin.addEventListener('pointerdown', e => e.stopPropagation());
     const hud = document.createElement('div'); hud.id = 'sbx-hud';
     hud.innerHTML = `<div id="sbx-chip"><svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="5.6" fill="none" stroke="currentColor" stroke-width="1.6"/><circle cx="8" cy="8" r="2.6" fill="currentColor"/></svg><b>0</b></div>
       <div id="sbx-hint" style="display:none"></div>
@@ -1285,43 +1301,85 @@
     }
   }
 
-  /* ── pin : un petit repère blanc posé sur la carte à l'endroit du jeu ; il suit la carte, et s'efface sous l'interface ── */
-  const PN = { okAt: 0, ok: false, top: 120, show: false, tr: '' };
-  const PIN_STICK = 320;   // au-delà de cette distance (en pixels) au-dessus de l'interface, on a zoomé loin du jeu : le pin s'efface
-  function pinAllowed() {
+  /* ── le mât-drapeau : l'entrée du jeu, plantée à l'orée de la forêt, visible depuis la colonie ──
+     Un vrai objet du décor plutôt qu'un repère d'interface : il ne dépend ni du zoom, ni du didacticiel, ni des cartes ouvertes. */
+  let flag = null, cloth = null, lamp = null, cloth0 = null;
+  function buildFlag() {
+    if (flag) return;
+    const y0 = heightAt(FLAG.x, FLAG.z);
+    flag = new T.Group(); flag.name = 'SB_EXPLORE_FLAG'; flag.position.set(FLAG.x, y0, FLAG.z);
+    const parts = [];
+    parts.push([new T.CylinderGeometry(1.3, 1.6, 0.8, 8), 0x3a4048, M4(0, 0.4, 0)]);
+    parts.push([new T.CylinderGeometry(0.9, 1.1, 0.5, 8), 0x1d2126, M4(0, 1.0, 0)]);
+    parts.push([new T.CylinderGeometry(0.26, 0.34, FLAG.h, 8), 0xaeb6bf, M4(0, FLAG.h / 2 + 1, 0)]);
+    parts.push([new T.CylinderGeometry(0.42, 0.42, 0.5, 8), 0x3a4048, M4(0, FLAG.h - 7.2, 0)]);
+    parts.push([new T.CylinderGeometry(0.42, 0.42, 0.5, 8), 0x3a4048, M4(0, FLAG.h + 0.4, 0)]);
+    const pole = new T.Mesh(merge(parts), new T.MeshStandardMaterial({ vertexColors: true, roughness: 0.45, metalness: 0.5 }));
+    pole.castShadow = true; pole.receiveShadow = true; flag.add(pole);
+    // le drapeau : orange Starbyte, bande blanche, animé par le vent
+    const W = 12, H = 7, g = new T.PlaneGeometry(W, H, 12, 5); g.translate(W / 2 + 0.3, FLAG.h - 2.8, 0);
+    const pa = g.attributes.position, col = new Float32Array(pa.count * 3), c1 = new T.Color(0xf08a24), c2 = new T.Color(0xf7f3ea);
+    for (let i = 0; i < pa.count; i++) { const u = (pa.getX(i) - 0.3) / W, v = (pa.getY(i) - (FLAG.h - 2.8)) / H; const c = (v > 0.22 && v < 0.52) || u > 0.84 ? c2 : c1; col[i * 3] = c.r; col[i * 3 + 1] = c.g; col[i * 3 + 2] = c.b; }
+    g.setAttribute('color', new T.BufferAttribute(col, 3));
+    cloth0 = Float32Array.from(pa.array);
+    cloth = new T.Mesh(g, new T.MeshStandardMaterial({ vertexColors: true, roughness: 0.85, metalness: 0, side: T.DoubleSide }));
+    cloth.castShadow = true; flag.add(cloth);
+    // la lampe de tête : un repère la nuit
+    lamp = new T.Mesh(new T.SphereGeometry(0.55, 10, 8), new T.MeshBasicMaterial({ color: 0xffd9a0, transparent: true, opacity: 0.9, toneMapped: false }));
+    lamp.position.y = FLAG.h + 1.1; flag.add(lamp);
+    const halo = new T.Sprite(new T.SpriteMaterial({ map: glowTex(), color: 0xffc070, transparent: true, opacity: 0.5, depthWrite: false, blending: T.AdditiveBlending, toneMapped: false }));
+    halo.scale.setScalar(4.5); halo.position.y = FLAG.h + 1.1; flag.add(halo); lamp.userData.halo = halo;
+    P.scene.add(flag);
+    if (P.renderer) P.renderer.shadowMap.needsUpdate = true;
+  }
+  function glowTex() {
+    const c = document.createElement('canvas'); c.width = c.height = 64;
+    const g = c.getContext('2d'), r = g.createRadialGradient(32, 32, 1, 32, 32, 31);
+    r.addColorStop(0, 'rgba(255,255,255,1)'); r.addColorStop(0.3, 'rgba(255,255,255,.5)'); r.addColorStop(1, 'rgba(255,255,255,0)');
+    g.fillStyle = r; g.fillRect(0, 0, 64, 64);
+    return new T.CanvasTexture(c);
+  }
+  let windT = 0;
+  function flagTick(dt) {
+    if (!flag || !P.host || P.host.offsetParent === null) return;
+    windT += dt;
+    const pa = cloth.geometry.attributes.position, W = 12;
+    for (let i = 0; i < pa.count; i++) {
+      const x0 = cloth0[i * 3], u = Math.max(0, (x0 - 0.3) / W);
+      const w = Math.sin(windT * 4.2 - u * 5.5) * 0.55 + Math.sin(windT * 2.3 - u * 2.1 + 1.1) * 0.3;
+      pa.array[i * 3 + 2] = w * u * u * 2.1;
+      pa.array[i * 3 + 1] = cloth0[i * 3 + 1] + Math.sin(windT * 3.1 - u * 4) * u * 0.25;
+    }
+    pa.needsUpdate = true; cloth.geometry.computeVertexNormals();
+    const k = window.SBSky && SBSky.k != null ? SBSky.k : 1, night = 1 - k;
+    lamp.material.opacity = 0.25 + night * 0.75;
+    lamp.userData.halo.material.opacity = 0.08 + night * 0.6 + Math.sin(windT * 2) * 0.04 * night;
+    if (UI.pin.classList.contains('on')) placeFlagBubble();
+  }
+  function flagAllowed() {
     if (!installed || !P.ready || active || moving || window.__sbCinema) return false;
     const scr = document.getElementById('scr-planet');
     if (!scr || scr.classList.contains('hidden') || !P.host || P.host.offsetParent === null) return false;
-    // didacticiel : le pin se cache seulement quand l'officier de bord est réellement à l'écran. Un joueur qui l'a
-    // masqué (G.tuto.hidden) ou qui en est à l'étape 0 depuis longtemps reste « actif » pour le jeu, mais doit voir le pin.
-    if (EXPLORE_PUBLIC && window.SBTuto && SBTuto.active && SBTuto.active() && !(G.tuto && G.tuto.hidden) && document.querySelector('#sb-coach[style*="block"]')) return false;
-    if (document.querySelector('.w-card.on, .w-sheet.on, #sb-sheet, #sb-away, #mp-choose, #sb-notif')) return false;
+    // la petite fiche de parcelle (.w-card) n'est pas modale : le mât reste touchable avec elle ouverte
+    if (document.querySelector('.w-sheet.on, #sb-sheet, #sb-away, #mp-choose, #sb-notif')) return false;
     return true;
   }
-  function pinTick(now) {
-    if (now - PN.okAt > 250) {
-      PN.okAt = now; PN.ok = pinAllowed();
-      const goal = document.querySelector('.p3d-goal'), top = document.querySelector('#scr-planet .w-top');
-      let b = 0;
-      if (top && top.offsetParent !== null) b = Math.max(b, top.getBoundingClientRect().bottom);
-      if (goal && goal.offsetParent !== null) b = Math.max(b, goal.getBoundingClientRect().bottom);
-      PN.top = b;
-    }
-    let want = PN.ok, x = 0, y = 0;
-    if (want) {
-      const host = document.getElementById('scr-planet').getBoundingClientRect(), [sx, sy] = screenOf(CRATE.x, Y0 + 2, CRATE.z);
-      x = sx - host.left; y = sy - host.top;
-      // Le jeu est au nord de la colonie : dans le cadrage d'ouverture, il tombe sous la barre du haut.
-      // Le pin reste alors juste sous l'interface, à la verticale du jeu, tant qu'on n'a pas zoomé très près.
-      const minY = PN.top + 38;
-      if (y < minY && y > minY - PIN_STICK) y = minY;
-      want = x > 10 && x < host.width - 10 && y >= minY && y < host.height - 100;
-    }
-    if (want !== PN.show) { PN.show = want; UI.pin.classList.toggle('on', want); }
-    if (want) {
-      const t = `translate3d(${(x - 22).toFixed(1)}px,${(y - 44).toFixed(1)}px,0)`;
-      if (t !== PN.tr) { PN.tr = t; UI.pin.style.transform = t; }
-    }
+  // zone de toucher généreuse : tout le mât et le drapeau, au moins 56 px de large
+  function flagHit(cx, cy) {
+    if (!flag) return false;
+    const y0 = flag.position.y, pts = [[FLAG.x, y0, FLAG.z], [FLAG.x, y0 + FLAG.h + 2, FLAG.z], [FLAG.x + 12.5, y0 + FLAG.h - 7, FLAG.z], [FLAG.x + 12.5, y0 + FLAG.h + 1, FLAG.z]];
+    let x0 = 1e9, x1 = -1e9, y1 = 1e9, y2 = -1e9;
+    for (const [x, y, z] of pts) { const [sx, sy] = screenOf(x, y, z); x0 = Math.min(x0, sx); x1 = Math.max(x1, sx); y1 = Math.min(y1, sy); y2 = Math.max(y2, sy); }
+    const mx = (x0 + x1) / 2, my = (y1 + y2) / 2, hw = Math.max(28, (x1 - x0) / 2 + 10), hh = Math.max(32, (y2 - y1) / 2 + 10);
+    return Math.abs(cx - mx) <= hw && Math.abs(cy - my) <= hh;
+  }
+  function showFlagBubble() { UI.pin.classList.add('on'); placeFlagBubble(); }
+  function hideFlagBubble() { if (UI.pin) UI.pin.classList.remove('on'); }
+  function placeFlagBubble() {
+    if (!flagAllowed()) { hideFlagBubble(); return; }
+    const [sx, sy] = screenOf(FLAG.x, flag.position.y + FLAG.h + 3, FLAG.z), hr = document.getElementById('scr-planet').getBoundingClientRect(), w = UI.pin.offsetWidth || 110;
+    const x = Math.round(Math.max(8, Math.min(hr.width - w - 8, sx - hr.left - w / 2))), y = Math.round(Math.max(60, sy - hr.top - 46));
+    UI.pin.style.transform = `translate3d(${x}px,${y}px,0)`;
   }
 
   /* ───────────────────────── entrer, sortir ───────────────────────── */
@@ -1337,6 +1395,7 @@
   function enter() {
     if (active || moving || !installed || !P.ready) return;
     moving = true;
+    hideFlagBubble();
     veil(true);
     setTimeout(() => {
       try {
@@ -1409,6 +1468,7 @@
     addTexts();
     buildUI();
     bindInput();
+    buildFlag();
     const orig = P._rebuild;
     P._rebuild = function () { const r = orig.apply(this, arguments); try { carve(); if (active) { natureOn(); callAll(EXTRA.rebuild); } } catch (e) { console.warn('[explore] rebuild', e); } return r; };
     const of = P._frame;
@@ -1416,7 +1476,7 @@
     P._frame = function () {
       const now = performance.now(), dt = Math.min(0.1, (now - last) / 1000); last = now;
       try {
-        pinTick(now);
+        flagTick(dt);
         if (active && P.host && P.host.offsetParent !== null) { tick(dt); callAll(EXTRA.tick, dt); }
       } catch (e) { console.warn('[explore]', e); }
       return of.apply(this, arguments);
@@ -1460,6 +1520,6 @@
       const s = S(), min = (s.secs || 0) / 60;
       return { lapins: s.caught || 0, biomasse: (s.caught || 0) * CFG.reward, minutes: +min.toFixed(1), biomasse_par_minute: min > 0 ? +(((s.caught || 0) * CFG.reward) / min).toFixed(1) : 0 };
     },
-    _dbg: { W, S, CFG, CRATE, SITE, CATA, HOME, NAV, UI, tick, fullyIn, inDoorway, onTap, screenOf, findPath, closeDoor, launch, slingAim, pullMax, isBlockedAt, heightAt, fieldView, aliveTarget, get Y0() { return Y0; }, get installed() { return installed; } },
+    _dbg: { W, S, CFG, CRATE, SITE, CATA, HOME, NAV, UI, FLAG, flagHit, flagAllowed, get flag() { return flag; }, tick, fullyIn, inDoorway, onTap, screenOf, findPath, closeDoor, launch, slingAim, pullMax, isBlockedAt, heightAt, fieldView, aliveTarget, get Y0() { return Y0; }, get installed() { return installed; } },
   };
 })();
