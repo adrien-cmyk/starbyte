@@ -8801,6 +8801,7 @@ var EXTRA_SAVE_KEYS = [
   'mpGrowthMilestone',
   'systemTags', 'mapSeen', 'mapCells', 'beaconRoutes', 'spottedLegs',
   'lineObs', 'trafficEchoes', 'hiddenPorts', '_linesNet', '_linesRoutes', '_linesLabels',   // PATCH_1410_PISTES
+  '_sigShown', '_sigRead',   // ROUTES_V2 — signal d'antenne vu / replié
   'lineUsers',   // PATCH_1410_BALISAGE — convois de joueurs vus sur mes lignes
   'lineHeat', '_spiedPending', 'pendingRouteBuys',   // PATCH_1510_ORDRES — escortes renforcées après un pillage, filatures à relever, achats à vérifier
   'openedRoutes',   // PATCH_1410_ECLAIREUR — routes ouvertes par une Moyenne ou offertes par un allié
@@ -9152,20 +9153,43 @@ function mpRenderIncoming(list) {
   el.innerHTML = `⚠ Flotte hostile · <strong>${r.attacker_pseudo}</strong>${_on} · impact dans ${min} min${_mpIncoming.length > 1 ? ` · +${_mpIncoming.length - 1}` : ''}`;
 }
 setInterval(() => { try { mpRenderIncoming(); } catch (e) {} }, 30000);
-// ROUTES_V2 (03/11) — le signal d'antenne : un seul à la fois, en évidence sur l'accueil et le Centre de prospection, jusqu'à ce qu'une balise soit posée
+// ROUTES_V2 (03/11) — le signal d'antenne : un seul à la fois, visible sans peser (retour d'Adrien : « je me sens obligé ») —
+// pleine phrase les 90 premières secondes, puis une petite pastille discrète en bas à droite ; il est aussi dans les rapports
+// (onglet Balises, compté dans le badge de Prospection) tant qu'on ne l'a pas regardé.
 function sbSignalRender() {
   let el = document.getElementById('sb-signal');
   const scr = typeof getCurrentScreen === 'function' ? getCurrentScreen() : '';
   const sig = (scr === 'planet' || scr === 'prospect' || scr === 'dashboard') && window.SBLines && SBLines.activeSignal ? SBLines.activeSignal() : null;
   if (!sig || document.getElementById('mp-incoming')) { if (el) el.remove(); return; }
+  if (!G._sigShown) G._sigShown = {};
+  if (!G._sigShown[sig.sys]) G._sigShown[sig.sys] = Date.now();
+  const compact = Date.now() - G._sigShown[sig.sys] > 90000 || !!(G._sigRead && G._sigRead[sig.sys]);
   if (!el) {
     el = document.createElement('div'); el.id = 'sb-signal';
-    el.style.cssText = 'position:fixed;left:50%;transform:translateX(-50%);bottom:calc(env(safe-area-inset-bottom, 0px) + 86px);z-index:8990;max-width:92vw;padding:9px 16px;border-radius:20px;background:rgba(40,30,8,.9);border:1px solid rgba(255,200,100,.55);color:#ffe3b0;font-size:12px;letter-spacing:.02em;box-shadow:0 0 18px rgba(255,190,80,.3);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;animation:sbSignalPulse 2.4s ease-in-out infinite';
-    if (!document.getElementById('sb-signal-css')) { const st = document.createElement('style'); st.id = 'sb-signal-css'; st.textContent = '@keyframes sbSignalPulse{0%,100%{box-shadow:0 0 14px rgba(255,190,80,.25)}50%{box-shadow:0 0 26px rgba(255,190,80,.55)}}'; document.head.appendChild(st); }
     document.body.appendChild(el);
   }
-  el.onclick = () => { if (typeof openSystemOnMap === 'function') openSystemOnMap(sig.sys); if (typeof toast === 'function') toast(`Pose une balise sur ${sig.sys} : au premier convoi qui passe, elle remonte toute la route jusqu'au lieu caché.`); };
-  el.innerHTML = `<span style="display:inline-flex;align-items:center;gap:8px">${typeof icon === 'function' ? icon('satellite', { size: 14, color: '#ffc864' }) : ''}<span>Trafic régulier vers <strong style="font-family:var(--font-mono)">${sig.sys}</strong> · <span style="color:#ffc864">pose une balise</span></span></span>`;
+  el.style.cssText = compact
+    ? 'position:fixed;right:12px;bottom:calc(env(safe-area-inset-bottom, 0px) + 86px);z-index:8990;padding:7px 10px;border-radius:16px;background:rgba(30,24,8,.78);border:1px solid rgba(255,200,100,.35);color:#e8cf9a;font-size:11px;letter-spacing:.02em;backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);cursor:pointer;white-space:nowrap;opacity:.9'
+    : 'position:fixed;left:50%;transform:translateX(-50%);bottom:calc(env(safe-area-inset-bottom, 0px) + 86px);z-index:8990;max-width:92vw;padding:9px 16px;border-radius:20px;background:rgba(40,30,8,.9);border:1px solid rgba(255,200,100,.5);color:#ffe3b0;font-size:12px;letter-spacing:.02em;backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis';
+  el.onclick = () => { sbSignalMarkRead(sig.sys); if (typeof openSystemOnMap === 'function') openSystemOnMap(sig.sys); if (typeof toast === 'function') toast(`Pose une balise sur ${sig.sys} : au premier convoi qui passe, elle remonte toute la route jusqu'au lieu caché.`); };
+  const ic = typeof icon === 'function' ? icon('satellite', { size: compact ? 12 : 14, color: '#ffc864' }) : '';
+  el.innerHTML = compact
+    ? `<span style="display:inline-flex;align-items:center;gap:6px">${ic}<span style="font-family:var(--font-mono)">${sig.sys}</span></span>`
+    : `<span style="display:inline-flex;align-items:center;gap:8px">${ic}<span>Trafic régulier vers <strong style="font-family:var(--font-mono)">${sig.sys}</strong> · <span style="color:#ffc864">pose une balise</span></span></span>`;
+}
+function sbSignalMarkRead(sys) { if (!G._sigRead) G._sigRead = {}; if (!G._sigRead[sys]) { G._sigRead[sys] = Date.now(); if (typeof updateProspectRapportsBadge === 'function') updateProspectRapportsBadge(); } }
+function sbSignalUnread() { const sig = window.SBLines && SBLines.activeSignal ? SBLines.activeSignal() : null; return sig && !(G._sigRead && G._sigRead[sig.sys]) ? 1 : 0; }
+// la carte du signal dans les rapports (onglet Balises)
+function sbSignalReportHtml() {
+  const sig = window.SBLines && SBLines.activeSignal ? SBLines.activeSignal() : null;
+  if (!sig) return '';
+  sbSignalMarkRead(sig.sys);
+  const ic = typeof icon === 'function' ? icon('satellite', { size: 14, color: '#ffc864' }) : '';
+  return `<div style="margin:0 16px 12px;padding:14px 16px;border-radius:10px;border:1px solid rgba(255,200,100,.4);background:linear-gradient(180deg,rgba(255,200,100,.10),rgba(255,200,100,.03))">
+    <div style="display:flex;align-items:center;gap:8px;font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:#ffc864">${ic} Signal d'antenne</div>
+    <div style="font-size:13px;color:#e6f0ff;margin-top:6px;line-height:1.5">Trafic régulier vers <strong style="font-family:var(--font-mono)">${sig.sys}</strong>. Une balise posée dessus remonte toute la route jusqu'au lieu caché qu'il dessert.</div>
+    <button onclick="openSystemOnMap('${sig.sys}')" style="margin-top:10px;width:100%;padding:10px;border-radius:8px;border:1px solid rgba(255,200,100,.5);background:rgba(255,200,100,.12);color:#ffe3b0;font:inherit;font-size:11px;letter-spacing:.12em;text-transform:uppercase;cursor:pointer">Voir sur la carte · poser une balise</button>
+  </div>`;
 }
 setInterval(() => { try { sbSignalRender(); } catch (e) {} }, 3000);
 
@@ -35080,7 +35104,8 @@ function updateProspectRapportsBadge() {
   const unreadProbe = (G.probeReports || []).filter(r => !r.read).length;
   const unreadTanker = (G.tankerReports || []).filter(r => !r.read).length;
   const unreadBeacon = (G.beaconReports || []).filter(r => !r.read).length;
-  const unread = unreadPlanet + unreadProbe + unreadTanker + unreadBeacon;
+  const unreadSignal = typeof sbSignalUnread === 'function' ? sbSignalUnread() : 0;   // ROUTES_V2
+  const unread = unreadPlanet + unreadProbe + unreadTanker + unreadBeacon + unreadSignal;
   if (unread > 0) {
     badge.style.display = '';
     badge.textContent = unread;
@@ -36488,6 +36513,7 @@ function _rapTabs(all) {
     html += `<div class="rap-subs">${mis.map(o => `<button class="rap-sub${o.k === mk ? ' on' : ''}" style="--c:${o.c}" onclick="setRapMis('${o.k}')">${o.l}${o.items.length ? ` <em>${o.items.length}</em>` : ''}${unread(o.items) ? '<i></i>' : ''}</button>`).join('')}</div>`;
     const cur = mis.find(o => o.k === mk);
     if (mk === 'balises') {
+      html += (typeof sbSignalReportHtml === 'function' ? sbSignalReportHtml() : '');   // ROUTES_V2 : le signal d'antenne en attente
       const live = cur.items.filter(x => (x.report.expiresAt || 0) > Date.now()).length;
       html += `<div style="margin:-4px 18px 10px;font-size:10px;color:var(--mut);line-height:1.5">${live ? `<span style="color:#a370ff">${live} fenêtre${live > 1 ? 's' : ''} d'interception ouverte${live > 1 ? 's' : ''}</span> · ` : ''}historique des passages : 24 h, 30 derniers</div>`;
       list = cur.items;
