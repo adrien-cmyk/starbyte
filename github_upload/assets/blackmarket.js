@@ -1,8 +1,7 @@
 /* Starbyte — Blackmarket v0 (31/10/2026) — GDD : claude/starbyte_GDD_blackmarket.md
-   Aperçu du catalogue : les 7 vaisseaux payants dans leur vitrine validée (assets/blackmarket/<id>.html,
-   modèle assets/3d/bm/<id>.glb.gz). Pas encore de paiement ni de marchand IA.
-   Réservé au compte d'Adrien (_sbDevAllowed) tant que BM_PUBLIC est à false : entrée en haut de l'écran Commerce.
-   Les prix et plafonds affichés ici sont indicatifs : la vente réelle passera par un catalogue serveur. */
+   Vaisseaux payants dans leur vitrine (assets/blackmarket/<id>.html, modèle assets/3d/bm/<id>.glb.gz), paiement Stripe dans le jeu.
+   Entrée en haut de l'écran Commerce, ouverte à tous tant que BM_PUBLIC est à true.
+   Les prix et plafonds qui font foi sont ceux du catalogue serveur (bm_catalog). */
 (function () {
   'use strict';
 
@@ -39,7 +38,7 @@
     'Tu négocies ? Retourne compter tes cailloux au match-3.',
     "T'as vu l'acier ? Ça, ça se construit pas dans ton petit chantier.",
   ];
-  const VERSION = '20261103paie4';
+  const VERSION = '20261103open1';
   // Serveur (schema_mp_v31_blackmarket.sql + fonctions bm-checkout / bm-webhook)
   const SB = 'https://elupnpdcblztpfywnhjl.supabase.co';
   const KEY = 'sb_publishable_tXGrQIROzH2DwBrny1GcHQ_iKJKoBOQ';
@@ -160,7 +159,7 @@
   const fmt = (n) => Math.round(n).toLocaleString('fr-CH').replace(/ |\s/g, ' ');
   const chf = (n) => 'CHF ' + n + '.–';
   const esc = (s) => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
-  const BM_PUBLIC = false;   // true = Blackmarket ouvert à tous les joueurs (à activer après l'achat réel de contrôle)
+  const BM_PUBLIC = true;   // ouvert à tous les joueurs le 03/11/2026 ; false = réservé au compte d'Adrien
   const allowed = () => { if (BM_PUBLIC) return true; try { return typeof _sbDevAllowed === 'function' && _sbDevAllowed(); } catch (e) { return false; } };
 
   function baseT3() {
