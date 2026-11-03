@@ -472,6 +472,7 @@
   }
   setInterval(() => { try { envoyTick(); } catch (e) { console.warn('[Ambassadeur]', e); } }, 15000);
   // Vignette d'un vaisseau d'après son nom affiché (ligne du bar) : vide pour un tanker ordinaire
+  const shipName = (id) => { const s = SHIPS.find(x => x.id === id); return s ? s.name : ''; };
   function shipThumbHtml(name) {
     const s = SHIPS.find(x => x.name === name && x.cat !== 'arche');
     return s ? `<img src="${thumb(s.id)}" alt="" style="flex:none;width:52px;height:34px;object-fit:cover;border-radius:4px;background:#000;border:1px solid rgba(201,164,90,.4)">` : '';
@@ -1078,13 +1079,16 @@
   const envoyFaces = {};
   async function fillEnvoy(host, presenceId, tankerName) {
     if (!host || !presenceId) return;
-    if (tankerName && !shipThumbHtml(tankerName)) return;   // un tanker ordinaire : rien à demander
+    // on demande toujours au serveur (réponse mise en cache) : le nom annoncé peut être celui d'un tanker alors qu'un vaisseau d'exception est là (03/11)
     let f = envoyFaces[presenceId];
     if (f === undefined) { try { f = await call('/rest/v1/rpc/bm_envoy_face', { p_kind: 'orbit', p_presence: presenceId }); } catch (e) { return; } envoyFaces[presenceId] = f || null; }
-    if (!f || !f.item_id || !host.isConnected || host.querySelector('[data-bm-envoy]')) return;
+    if (!f || !f.item_id || !host.isConnected) return;
+    const row = host.querySelector('[data-emb-row="tanker"]'), sn = shipName(f.item_id);   // « Son tanker X » → « Son vaisseau amiral NOM · X »
+    if (row && sn) row.textContent = `Son vaisseau amiral ${sn}${tankerName ? ' · ' + tankerName : ''} est en orbite chez toi`;
+    if (host.querySelector('[data-bm-envoy]')) return;
     const c = faceCard(f, 'En orbite, en personne', 'Touche pour le voir de près'); if (!c) return;
     c.dataset.bmEnvoy = '1'; c.style.marginBottom = '10px';
     host.insertBefore(c, host.firstChild);
   }
-  window.SBBlackmarket = { open, close, openOwned, ships: SHIPS, cats: CATS, owned: () => owned, units: () => units, reload: loadOwned, fillRaidFaces, fillFlagship, fillEnvoy, interceptShip, envoyChoices, envoyRows, envoyLost, shipThumbHtml, missionHero, envoyHero, shipModel, heroLogo, envoyFace, envoyFaceCached };
+  window.SBBlackmarket = { open, close, openOwned, ships: SHIPS, cats: CATS, owned: () => owned, units: () => units, reload: loadOwned, fillRaidFaces, fillFlagship, fillEnvoy, interceptShip, envoyChoices, envoyRows, envoyLost, shipThumbHtml, missionHero, envoyHero, shipModel, heroLogo, envoyFace, envoyFaceCached, shipName };
 })();

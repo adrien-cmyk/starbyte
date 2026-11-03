@@ -11140,7 +11140,7 @@ function mpEmbassyRender() {
   if (!status) {
     const rows = [];
     if (m) rows.push(`<div style="font-size:12px;color:#e6f0ff">${_esc(m.tankerName)} en orbite chez ${_esc(pseudo)}</div>`);
-    if (inc) rows.push(`<div style="font-size:12px;color:#e6f0ff">${window.SBBlackmarket && SBBlackmarket.shipThumbHtml(inc.tanker) ? '' : 'Son tanker '}${_esc(inc.tanker || '')} est en orbite chez toi</div>`);
+    if (inc) rows.push(`<div data-emb-row="tanker" style="font-size:12px;color:#e6f0ff">${window.SBBlackmarket && SBBlackmarket.shipThumbHtml(inc.tanker) ? '' : 'Son tanker '}${_esc(inc.tanker || '')} est en orbite chez toi</div>`);
     const _post = typeof _mpPostWith === 'function' ? _mpPostWith(addr) : null;   // PATCH_1310_POSTES
     if (_post) rows.push(`<div style="font-size:12px;color:#e6f0ff">Vos postes se font face à <span style="font-family:var(--font-mono)">${_post.system}</span></div>`);
     if (!rows.length) rows.push(`<div style="font-size:12px;color:var(--mut)">Aucun tanker en orbite entre vous : l'ambassade est fermée.</div>`);
@@ -11245,7 +11245,8 @@ function mpEmbassyMountHero(m, inc, pseudo) {
   scr.classList.add('ud-hero', 'ud-ship');
   hero.style.display = ''; space.style.display = '';
   if (!hero.querySelector('.u3d-hint')) hero.insertAdjacentHTML('beforeend', '<div class="u3d-hint"></div>');
-  hero.querySelector('.u3d-hint').textContent = _isEnvoy ? (m ? `${m.tankerName} · vaisseau amiral · en orbite chez ${pseudo}` : `${inc.tanker || ''} · vaisseau amiral de ${pseudo} · en orbite chez toi`)
+  const _faceName = _face && _face.item_id && SBBlackmarket.shipName ? SBBlackmarket.shipName(_face.item_id) : '';
+  hero.querySelector('.u3d-hint').textContent = _isEnvoy ? (m ? `${m.tankerName} · vaisseau amiral · en orbite chez ${pseudo}` : `${_faceName || inc.tanker || ''}${_faceName && inc.tanker ? ' · ' + inc.tanker : ''} · vaisseau amiral de ${pseudo} · en orbite chez toi`)
     : m ? `TK-07 ${m.tankerName} · en orbite chez ${pseudo}` : inc ? `TK-07 ${inc.tanker || ''} de ${pseudo} · en orbite chez toi` : `Ambassade de ${pseudo}`;
   requestAnimationFrame(() => {
     const hb = hero.getBoundingClientRect(), sb = space.getBoundingClientRect();
@@ -50121,7 +50122,7 @@ if (G.knownTargets && Array.isArray(G.tankerMissions)) {
 <!-- PATCH_1610_SKILLS — skills des bâtiments : apprendre, découvrir, effets -->
 <script src="assets/skills.js?v=20261021-1130"></script>
 <script src="assets/maj.js?v=20261025-1800"></script>
-<script src="assets/blackmarket.js?v=20261103-orbit5"></script>   <!-- Blackmarket v0 : aperçu du catalogue, réservé au compte d'Adrien -->
+<script src="assets/blackmarket.js?v=20261103-orbit6"></script>   <!-- Blackmarket v0 : aperçu du catalogue, réservé au compte d'Adrien -->
 <!-- PATCH_1510_CROWN — The Drifting Crown en 3D (assets/station3d.js, sur le moteur partagé window.SB3D) -->
 <script type="module" src="assets/station3d.js?v=20261022-1047"></script>
 <!-- FORMATION3D — flotte déployée en orbite, vue de haut en formation (remplace la vue orbite) -->
