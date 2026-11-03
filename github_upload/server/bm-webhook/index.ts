@@ -3,10 +3,11 @@
 //  · la signature Stripe est vérifiée (sinon n'importe qui pourrait s'offrir un vaisseau) ;
 //  · un paiement = un achat (Stripe peut renvoyer le même avis plusieurs fois) ;
 //  · plafond dépassé (deux paiements lancés en même temps) → achat marqué over_cap et remboursé automatiquement ;
-//  · remboursement fait dans Stripe → l'achat passe en refunded (le vaisseau est retiré).
+//  · remboursement fait dans Stripe → l'achat passe en refunded (le vaisseau est retiré) ;
+//  · contestation bancaire → l'achat passe en disputed (vaisseau retiré), et revient en paid si elle se conclut en faveur du vendeur.
 // À déployer SANS vérification JWT (Stripe n'a pas de session Supabase).
 // Secrets requis : STRIPE_SECRET_KEY et STRIPE_WEBHOOK_SECRET (whsec_…).
-// Événements à cocher dans Stripe : checkout.session.completed, charge.refunded.
+// Événements à cocher dans Stripe : checkout.session.completed, charge.refunded, charge.dispute.created, charge.dispute.closed.
 
 import { createClient } from 'npm:@supabase/supabase-js@2';
 
@@ -30,6 +31,23 @@ async function refund(stripeKey: string, paymentIntent: string) {
   await fetch('https://api.stripe.com/v1/refunds', {
     method: 'POST', headers: { Authorization: `Bearer ${stripeKey}`, 'Content-Type': 'application/x-www-form-urlencoded' }, body: f,
   });
+}
+
+// Contestation levée : le vaisseau revient. Si son numéro de TAXI a été repris entre-temps, il reçoit le suivant libre.
+async function restore(admin: any, paymentIntent: string) {
+  const { data: rows, error } = await admin.from('bm_purchases').select('id, category')
+    .eq('payment_intent', paymentIntent).eq('status', 'disputed');
+  if (error) return error;
+  for (const r of rows || []) {
+    const { error: e1 } = await admin.from('bm_purchases').update({ status: 'paid' }).eq('id', r.id);
+    if (!e1) continue;
+    if (e1.code !== '23505' || r.category !== 'arche') return e1;
+    const { data: top } = await admin.from('bm_purchases').select('edition_no').eq('category', 'arche').eq('status', 'paid')
+      .order('edition_no', { ascending: false }).limit(1).maybeSingle();
+    const { error: e2 } = await admin.from('bm_purchases').update({ status: 'paid', edition_no: (top?.edition_no || 0) + 1 }).eq('id', r.id);
+    if (e2) return e2;
+  }
+  return null;
 }
 
 Deno.serve(async (req) => {
@@ -76,6 +94,24 @@ Deno.serve(async (req) => {
     const c = evt.data.object;
     if (c.payment_intent && c.refunded) {
       await admin.from('bm_purchases').update({ status: 'refunded' }).eq('payment_intent', c.payment_intent).eq('status', 'paid');
+    }
+    return new Response('ok', { status: 200 });
+  }
+
+  if (evt.type === 'charge.dispute.created') {
+    const d = evt.data.object;
+    if (d.payment_intent) {
+      const { error } = await admin.from('bm_purchases').update({ status: 'disputed' }).eq('payment_intent', d.payment_intent).eq('status', 'paid');
+      if (error) return new Response(error.message, { status: 500 });   // Stripe réessaiera
+    }
+    return new Response('ok', { status: 200 });
+  }
+
+  if (evt.type === 'charge.dispute.closed') {
+    const d = evt.data.object;
+    if (d.payment_intent && (d.status === 'won' || d.status === 'warning_closed')) {
+      const err = await restore(admin, d.payment_intent);
+      if (err) return new Response(err.message, { status: 500 });   // Stripe réessaiera
     }
     return new Response('ok', { status: 200 });
   }

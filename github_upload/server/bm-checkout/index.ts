@@ -2,7 +2,8 @@
 // Le jeu envoie seulement { item_id } et le jeton de session du joueur.
 // Le prix et le plafond sont lus dans la base (bm_catalog / bm_categories), jamais dans la demande du jeu.
 // Réponse : { url } — la page de paiement Stripe vers laquelle le jeu redirige.
-// Secret requis (Supabase → Edge Functions → Secrets) : STRIPE_SECRET_KEY (sk_test_… pour le mode test).
+// Le joueur doit avoir accepté les CGV et la livraison immédiate (case à cocher) : son accord est gardé dans Stripe.
+// Secret requis (Supabase → Edge Functions → Secrets) : STRIPE_SECRET_KEY (sk_live_… en réel, sk_test_… en test).
 
 import { createClient } from 'npm:@supabase/supabase-js@2';
 
@@ -12,6 +13,7 @@ const CORS = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
 const SITE = 'https://play.starbyte.online/';
+const CGV_VERSION = '2026-11-03';   // à changer quand la section Achats des CGV change
 
 function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: { ...CORS, 'Content-Type': 'application/json' } });
@@ -33,9 +35,10 @@ Deno.serve(async (req) => {
   const user = who.user;
 
   // quoi
-  let itemId = '';
-  try { itemId = String((await req.json()).item_id || ''); } catch (_) { /* corps vide */ }
+  let itemId = '', consent = false;
+  try { const b = await req.json(); itemId = String(b.item_id || ''); consent = b.consent === true; } catch (_) { /* corps vide */ }
   if (!/^[a-z0-9-]{2,40}$/.test(itemId)) return json({ error: 'bad_item' }, 400);
+  if (!consent) return json({ error: 'consent_required' }, 400);
   const { data: item, error: e1 } = await admin.from('bm_catalog').select('item_id, category, name, price_cents, active').eq('item_id', itemId).maybeSingle();
   if (e1) return json({ error: e1.message }, 500);
   if (!item || !item.active) return json({ error: 'unknown_item' }, 404);
@@ -60,12 +63,22 @@ Deno.serve(async (req) => {
   f.set('metadata[item_id]', item.item_id);
   f.set('payment_intent_data[metadata][user_id]', user.id);
   f.set('payment_intent_data[metadata][item_id]', item.item_id);
+  // preuve de l'accord : CGV acceptées et livraison immédiate demandée (renonciation à la rétractation)
+  const consentAt = new Date().toISOString();
+  for (const k of ['metadata', 'payment_intent_data[metadata]']) {
+    f.set(`${k}[cgv_version]`, CGV_VERSION);
+    f.set(`${k}[consent_at]`, consentAt);
+  }
+  f.set('custom_text[submit][message]', 'Contenu numérique livré dans ton jeu dès le paiement confirmé.');
   f.set('line_items[0][quantity]', '1');
   f.set('line_items[0][price_data][currency]', 'chf');
   f.set('line_items[0][price_data][unit_amount]', String(item.price_cents));
   f.set('line_items[0][price_data][product_data][name]', `${item.name} — Starbyte`);
   f.set('line_items[0][price_data][product_data][description]', `${cat?.label || 'Vaisseau'} du Blackmarket`);
-  if (user.email) f.set('customer_email', user.email);
+  if (user.email) {
+    f.set('customer_email', user.email);
+    f.set('payment_intent_data[receipt_email]', user.email);   // reçu de Stripe par email
+  }
   f.set('success_url', `${SITE}?bm=ok&item=${encodeURIComponent(item.item_id)}`);
   f.set('cancel_url', `${SITE}?bm=annule`);
 
