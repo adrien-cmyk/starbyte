@@ -74,7 +74,6 @@ Deno.serve(async (req) => {
     f.set(`${k}[cgv_version]`, CGV_VERSION);
     f.set(`${k}[consent_at]`, consentAt);
   }
-  f.set('custom_text[submit][message]', 'Contenu numérique livré dans ton jeu dès le paiement confirmé.');
   f.set('line_items[0][quantity]', '1');
   f.set('line_items[0][price_data][currency]', 'chf');
   f.set('line_items[0][price_data][unit_amount]', String(item.price_cents));
