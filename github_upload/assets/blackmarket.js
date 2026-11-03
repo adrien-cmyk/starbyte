@@ -39,7 +39,7 @@
     'Tu négocies ? Retourne compter tes cailloux au match-3.',
     "T'as vu l'acier ? Ça, ça se construit pas dans ton petit chantier.",
   ];
-  const VERSION = '20261103p';
+  const VERSION = '20261103paie4';
   // Serveur (schema_mp_v31_blackmarket.sql + fonctions bm-checkout / bm-webhook)
   const SB = 'https://elupnpdcblztpfywnhjl.supabase.co';
   const KEY = 'sb_publishable_tXGrQIROzH2DwBrny1GcHQ_iKJKoBOQ';
@@ -325,11 +325,14 @@
     btn.disabled = true; say('Pauline prépare la facture…');
     try {
       const [r] = await Promise.all([call('/functions/v1/bm-checkout', { item_id: btn.dataset.buy, consent: true }), loadOwned()]);
-      if (r && r.url) {
+      if (r && (r.client_secret || r.url)) {
         const ids = units.filter(u => u.item === btn.dataset.buy).map(u => u.id);
         try { localStorage.setItem('bm_pending', JSON.stringify({ item: btn.dataset.buy, n: ids.length, ids, at: Date.now() })); } catch (e) {}
         watchPending();   // app installée : Stripe s'ouvre par-dessus le jeu, sans événement au retour → on guette l'inscription
-        location.href = r.url; return;
+        if (!r.client_secret) { location.href = r.url; return; }
+        await openPay(r, btn.dataset.buy);
+        say('Paiement par Stripe · vendu via Link, taxes incluses'); btn.disabled = false;
+        return;
       }
       throw new Error('no_url');
     } catch (e) {
@@ -337,11 +340,60 @@
       say(m === 'sold_out' ? 'Édition épuisée : les 100 TAXI sont partis.' : m === 'cap_reached' ? `Plafond atteint : ${e.data && e.data.cap} ${(e.data && e.data.label || '').toLowerCase()} max. « T'en as assez, non ? »`
         : m === 'not_signed_in' ? 'Connecte ton compte (cloud) pour acheter.'
         : m === 'consent_required' ? 'Coche la case pour accepter les conditions de vente.'
+        : m === 'stripe_js' ? 'Connexion à Stripe impossible. Vérifie ton réseau et réessaie.'
         : m === 'stripe_not_configured' ? 'Clé Stripe absente côté serveur (secret STRIPE_SECRET_KEY).'
         : 'Paiement indisponible pour le moment (' + m + (!BM_PUBLIC && e.data && e.data.detail ? ' : ' + e.data.detail : '') + ').', true);
       btn.disabled = false;
     }
   }
+  // Paiement DANS le jeu (Embedded Checkout) : sur iPhone, la fenêtre Safari de l'app installée laisse une bande noire
+  // au retour (bug d'iOS) et se bloque sans la partie du joueur. Ici on ne quitte jamais le jeu.
+  let payCheckout = null;
+  function stripeJs() {
+    if (window.Stripe) return Promise.resolve();
+    return new Promise((ok, ko) => {
+      const s = document.createElement('script');
+      s.src = 'https://js.stripe.com/basil/stripe.js';
+      s.onload = () => ok(); s.onerror = () => { s.remove(); ko(new Error('stripe_js')); };
+      document.head.appendChild(s);
+    });
+  }
+  async function openPay(r, id) {
+    await stripeJs();
+    const d = document.createElement('div'); d.id = 'bm-pay';
+    d.style.cssText = 'position:fixed;inset:0;z-index:2147481000;display:flex;flex-direction:column;background:#fff;font-family:"Space Grotesk",system-ui,sans-serif';
+    d.innerHTML = `<div style="display:flex;align-items:center;gap:12px;padding:calc(env(safe-area-inset-top,0px) + 10px) 14px 10px;background:#0d1114;color:#e6edf2">
+        <button data-pay-x style="min-height:44px;padding:0 14px;border:1px solid #2a3138;border-radius:22px;background:transparent;color:#e6edf2;font-size:15px;font-weight:500;font-family:inherit">‹ Retour</button>
+        <div style="font:500 10px 'JetBrains Mono',monospace;letter-spacing:.14em;text-transform:uppercase;color:#8d98a3">Blackmarket · paiement sécurisé</div>
+      </div>
+      <div id="bm-pay-form" style="flex:1;min-height:0;overflow-y:auto;-webkit-overflow-scrolling:touch;padding-bottom:env(safe-area-inset-bottom,0px)"></div>`;
+    d.querySelector('[data-pay-x]').addEventListener('click', () => closePay(false));
+    document.body.appendChild(d);
+    try {
+      const st = window.Stripe(r.publishable_key);
+      const init = st.initEmbeddedCheckout || st.createEmbeddedCheckoutPage;
+      payCheckout = await init.call(st, { fetchClientSecret: async () => r.client_secret, onComplete: () => closePay(true, id) });
+      payCheckout.mount('#bm-pay-form');
+    } catch (e) { closePay(false); throw e; }
+  }
+  function closePay(done, id) {
+    try { if (payCheckout) payCheckout.destroy(); } catch (e) {}
+    payCheckout = null;
+    const d = document.getElementById('bm-pay'); if (d) d.remove();
+    if (done) confirmPurchase(id).catch(() => {});
+    else { try { localStorage.removeItem('bm_pending'); } catch (e) {} clearTimeout(pendTimer); }
+    remeasure();
+  }
+  // iOS peut garder une hauteur d'écran réduite après le clavier ou une fenêtre Safari : on le force à la recalculer.
+  let peakW = innerWidth, peakH = innerHeight;
+  function remeasure() {
+    if (innerWidth !== peakW) { peakW = innerWidth; peakH = innerHeight; return; }
+    if (innerHeight >= peakH) { peakH = innerHeight; return; }
+    if (peakH - innerHeight <= 4) return;
+    const a = document.activeElement; if (a && /^(INPUT|TEXTAREA)$/.test(a.tagName)) return;
+    const b = document.body; b.style.display = 'none'; void b.offsetHeight; b.style.display = '';
+  }
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') setTimeout(remeasure, 300); });
   // Retour de Stripe : ?bm=ok&item=… ou ?bm=annule
   (function back() {
     try {
