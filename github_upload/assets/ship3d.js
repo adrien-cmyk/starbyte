@@ -301,8 +301,10 @@ if (P.ground) {                                    // soleil bas sur la gauche, 
 }
 scene.add(key);
 const rim = new THREE.DirectionalLight(0x9db8e8, ORBIT ? 0.9 : 1.3); rim.position.set(-9, 4, -10); scene.add(rim);   // contre-jour froid
-const fill = new THREE.DirectionalLight(ORBIT ? 0xd8c8b8 : 0xb8c6e8, (ORBIT ? 0.55 : 0.8) * LS); fill.position.set(3, 10, -4); scene.add(fill);
-if (ORBIT) { const bounce = new THREE.DirectionalLight(0xa9c4f0, 1.0 * LS); bounce.position.set(1, -10, 2); scene.add(bounce); }   // rebond bleuté de la planète et de son atmosphère, par en dessous
+const fill = new THREE.DirectionalLight(ORBIT ? 0xffe0c2 : 0xb8c6e8, (ORBIT ? 1.3 : 0.8) * LS); fill.position.set(3, 10, -4); scene.add(fill);
+// en orbite le soleil du fond est devant la caméra (contre-jour) : un appoint chaud vient du côté de la caméra pour lire les coques (flotte à quai, cuirassé au large)
+if (ORBIT) fill.position.set(...(P.camDir || [0.55, 0.24, -0.80])).normalize().multiplyScalar(12).add(new THREE.Vector3(0, 5, 0));
+if (ORBIT) { const bounce = new THREE.DirectionalLight(0xc8d0dc, 0.7 * LS); bounce.position.set(1, -10, 2); scene.add(bounce); }   // rebond bleuté de la planète et de son atmosphère, par en dessous
 scene.add(new THREE.HemisphereLight(ORBIT ? 0x1a2238 : 0x2c3a58, ORBIT ? 0x2a3a58 : 0x05060a, 0.55 * LS));
 const engineLight = new THREE.PointLight(PL[5], 0, 10, 1.7);
 engineLight.position.set(0, P.engineY, P.engineZ);
