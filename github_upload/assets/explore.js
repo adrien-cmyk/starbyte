@@ -1282,6 +1282,7 @@
 
   /* ── pin : un petit repère blanc posé sur la carte à l'endroit du jeu ; il suit la carte, et s'efface sous l'interface ── */
   const PN = { okAt: 0, ok: false, top: 120, show: false, tr: '' };
+  const PIN_STICK = 320;   // au-delà de cette distance (en pixels) au-dessus de l'interface, on a zoomé loin du jeu : le pin s'efface
   function pinAllowed() {
     if (!installed || !P.ready || active || moving || window.__sbCinema) return false;
     const scr = document.getElementById('scr-planet');
@@ -1303,7 +1304,11 @@
     if (want) {
       const host = document.getElementById('scr-planet').getBoundingClientRect(), [sx, sy] = screenOf(CRATE.x, Y0 + 2, CRATE.z);
       x = sx - host.left; y = sy - host.top;
-      want = x > 10 && x < host.width - 10 && y - 22 > PN.top && y < host.height - 100;
+      // Le jeu est au nord de la colonie : dans le cadrage d'ouverture, il tombe sous la barre du haut.
+      // Le pin reste alors juste sous l'interface, à la verticale du jeu, tant qu'on n'a pas zoomé très près.
+      const minY = PN.top + 38;
+      if (y < minY && y > minY - PIN_STICK) y = minY;
+      want = x > 10 && x < host.width - 10 && y >= minY && y < host.height - 100;
     }
     if (want !== PN.show) { PN.show = want; UI.pin.classList.toggle('on', want); }
     if (want) {
