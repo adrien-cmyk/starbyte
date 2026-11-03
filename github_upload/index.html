@@ -35491,11 +35491,25 @@ function validateAddressForTier(addr, tier) {
   // Message volontairement physique ("capteurs actuels"), pas pédagogique :
   // on n'aiguille jamais le joueur vers tel ou tel skill (Pilier 7 + Principe #7).
   if (typeof isInRange === 'function' && !isInRange(parsed)) {
+    // 03/11 (retour joueur : « les sondes furtives ne marchent pas depuis la colonie ») : la portée est celle du Laboratoire de la planète
+    // affichée (décision du 30/10) — on le dit, et on nomme la planète d'où la cible est à portée, s'il y en a une
+    let from = null;
+    try {
+      const act = G.activeWorld || 'home';
+      for (const w of (Array.isArray(G.worlds) ? G.worlds : [])) {
+        if (!w || w.id === act) continue;
+        const o = w.id === 'home' ? MY_ADDRESS : _sbAddrOf(w.coord);
+        if (o && typeof _isInRangeFrom === 'function' && _isInRangeFrom(parsed, o, w.id)) { from = w; break; }
+      }
+    } catch (e) {}
+    const many = Array.isArray(G.worlds) && G.worlds.length > 1;
     return {
       valid: false,
-      error: (Array.isArray(G.worlds) && G.worlds.length > 1) ? `Trop loin pour les capteurs de ${(G.planet && G.planet.name) || 'cette planète'}` : 'Trop loin pour les capteurs actuels',
+      error: (many ? `Trop loin pour les capteurs de ${(G.planet && G.planet.name) || 'cette planète'}` : 'Trop loin pour les capteurs actuels')
+        + (from ? ` · à portée depuis ${from.name || (from.id === 'home' ? 'la capitale' : 'une autre de tes planètes')} : lance-la depuis là-bas` : ''),
       parsed,
       reason: 'out_of_range',  // tag interne pour styler le message différemment
+      fromWorld: from ? from.id : null,
     };
   }
 
