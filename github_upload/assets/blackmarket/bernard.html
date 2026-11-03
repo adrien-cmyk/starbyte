@@ -429,12 +429,13 @@ if (ORBIT) {   // planète d'ambassade : limbe à contre-jour + atmosphère, der
       void main(){
         vec3 d = normalize(vP), N = d;
         float land = smoothstep(.52, .58, fbm(d * 3.2));
-        vec3 col = mix(mix(vec3(.01,.05,.13), vec3(.02,.11,.25), fbm(d * 9.0)), mix(vec3(.06,.12,.05), vec3(.16,.14,.08), fbm(d * 14.0)), land);
-        col = mix(col, vec3(.85,.88,.92), smoothstep(.5, .78, fbm(d * 5.5)) * .85);
-        float day = clamp(dot(N, normalize(uSun)) * 1.2 + .15, 0., 1.);
-        col *= .04 + 1.05 * day;
-        float rim = pow(1.0 - max(dot(N, normalize(cameraPosition - vW)), 0.0), 3.0);
-        col += vec3(.25,.5,1.0) * rim * (.25 + 1.2 * day);
+        // monde sombre et sérieux : océans d'encre, terres brunes, nuages gris épars, terminateur dur, nuit presque noire
+        vec3 col = mix(mix(vec3(.004,.012,.03), vec3(.01,.03,.06), fbm(d * 9.0)), mix(vec3(.05,.045,.035), vec3(.10,.08,.06), fbm(d * 14.0)), land);
+        col = mix(col, vec3(.42,.43,.45), smoothstep(.56, .82, fbm(d * 5.5)) * .55);
+        float day = clamp(dot(N, normalize(uSun)) * 1.6 - .05, 0., 1.);
+        col *= .015 + .55 * pow(day, 1.4);
+        float rim = pow(1.0 - max(dot(N, normalize(cameraPosition - vW)), 0.0), 4.0);
+        col += vec3(.18,.32,.6) * rim * (.08 + .5 * day);
         gl_FragColor = vec4(col, 1.0);
       }`
   }));
@@ -446,7 +447,7 @@ if (ORBIT) {   // planète d'ambassade : limbe à contre-jour + atmosphère, der
     fragmentShader: `uniform vec3 uSun; varying vec3 vN; varying vec3 vW;
       void main(){ vec3 V = normalize(cameraPosition - vW); float f = pow(clamp(dot(normalize(vN), V) + 1.0, 0.0, 1.0), 5.0);
         float day = clamp(dot(normalize(vW), normalize(uSun)) * 1.2 + .3, 0., 1.);
-        gl_FragColor = vec4(vec3(.3,.55,1.0) * f * (.35 + .9 * day), f * .9); }`
+        gl_FragColor = vec4(vec3(.22,.4,.8) * f * (.12 + .45 * day), f * .6); }`
   }));
   atmo.position.copy(PPOS); scene.add(atmo);
 }
