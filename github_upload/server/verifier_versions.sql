@@ -26,5 +26,6 @@ select v as script, case when ok then 'oui' else 'NON — à lancer' end as lanc
   ('v36 historique saves',   to_regclass('public.saves_history') is not null),
   ('v37 triche colonie',     exists (select 1 from pg_proc where proname = 'dev_colony_remove')),
   ('v38 ambassadeur',        exists (select 1 from pg_proc where proname = 'bm_envoy_arrive')),
-  ('v39 Bernard',            exists (select 1 from public.bm_catalog where item_id = 'bernard'))
+  ('v39 Bernard',            exists (select 1 from public.bm_catalog where item_id = 'bernard')),
+  ('v40 mur du bar',         exists (select 1 from pg_proc where proname = 'mp_station_post'))
 ) t(v, ok);

@@ -47131,6 +47131,10 @@ function _crownCss2() {
     #scr-dock.cr-scene{background:#010207}
     /* PATCH_1510_HERO_SCROLL — comme la flotte : la 3D derrière, la fiche défile par-dessus, la zone du haut garde les gestes */
     #scr-dock.cr-scene .screen-scroll{overscroll-behavior:contain}
+    /* ROUTES_V2 (03/11, Adrien) : le tiroir prend toute la largeur de l'écran */
+    #scr-dock.cr-scene #dock-body{padding:0 !important}
+    #scr-dock.cr-scene #dock-body > div{border-radius:0 !important;border-left:0 !important;border-right:0 !important;margin-left:0 !important;margin-right:0 !important}
+    #scr-dock.cr-scene #dock-body > div > div[style*="border-radius"]{border-radius:0 !important}
     #scr-dock.cr-scene #crown-space{touch-action:none}
     #crown-scene3d.crh{z-index:auto}
     #crown-scene3d .cr-ttl{z-index:1}
@@ -47533,6 +47537,9 @@ function renderDockScreen() {
     ${typeof sbImperialDockHtml === 'function' ? sbImperialDockHtml(mission, dock) : ''}
     ${_renderDockPlayersSection(mission, dock)}
 
+    <!-- ROUTES_V2 : le mur du bar — tableau commun et persistant de la station -->
+    ${sbStationWallHtml(mission, dock)}
+
     <!-- D3 : Autres convois amarrés -->
     ${_renderDockNpcSection(mission, dock)}
 
@@ -47541,6 +47548,78 @@ function renderDockScreen() {
   `;
 }
 
+// ─── ROUTES_V2 (03/11) : le mur du bar — chaque port-franc a un tableau commun ; les messages restent quand on repart ───
+// Clé = identifiant de présence au dock (mpDockIdForMission) : le même pour tous les tankers amarrés au même endroit.
+// Lecture pour tous ; écriture quand un de mes tankers est amarré ici (le registre le vérifie). Registre : schema_mp_v40_mur_du_bar.sql.
+const _wallCache = {};
+function sbStationWallHtml(mission, dock) {
+  const id = mission ? mpDockIdForMission(mission) : null;
+  if (!id) return '';
+  const accent = (dock && dock.accent) || '#ffc864';
+  setTimeout(() => sbStationWallLoad(id, false), 0);
+  const c = _wallCache[id];
+  return `<div id="station-wall" data-station="${id}" style="margin-bottom:18px;padding:14px 16px;background:rgba(255,255,255,.02);border:1px solid var(--border);border-radius:6px">
+    <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:8px">
+      <div style="font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:${accent}">Le mur du bar</div>
+      <div style="font-size:10px;color:var(--mut)">${c && c.posts ? c.posts.length + ' message' + (c.posts.length > 1 ? 's' : '') : ''}</div>
+    </div>
+    <div id="station-wall-list">${c ? sbStationWallList(c) : '<div style="font-size:11px;color:var(--mut);font-style:italic">Lecture du mur…</div>'}</div>
+    <div id="station-wall-form">${c ? sbStationWallForm(c) : ''}</div>
+  </div>`;
+}
+function sbStationWallList(c) {
+  const esc = (x) => String(x == null ? '' : x).replace(/[<>&"]/g, (ch) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;' }[ch]));
+  const ago = (t) => { const m = Math.max(0, Math.round((Date.now() - Date.parse(t)) / 60000)); return m < 1 ? 'à l\'instant' : m < 60 ? `il y a ${m} min` : m < 1440 ? `il y a ${Math.round(m / 60)} h` : `il y a ${Math.round(m / 1440)} j`; };
+  if (!c || !c.posts || !c.posts.length) return '<div style="font-size:12px;color:var(--mut);font-style:italic;padding:6px 0">Personne n\'a encore rien écrit ici. Les habitués laissent un mot.</div>';
+  return c.posts.slice(0, 40).map(p => `<div style="padding:8px 0;border-top:1px solid rgba(255,255,255,.06)">
+      <div style="display:flex;justify-content:space-between;gap:8px"><span style="font-size:11px;font-weight:600;color:${p.mine ? '#ffc864' : '#e6f0ff'}">${esc(p.pseudo)}</span><span style="font-size:10px;color:var(--mut);font-family:'SF Mono',monospace">${ago(p.at)}</span></div>
+      <div style="font-size:13px;color:#e6f0ff;line-height:1.5;margin-top:2px;word-break:break-word">${esc(p.body)}</div>
+    </div>`).join('');
+}
+function sbStationWallForm(c) {
+  if (!c) return '';
+  if (!c.can_post) return '<div style="font-size:11px;color:var(--mut);font-style:italic;margin-top:8px">Pour écrire sur le mur, il faut un tanker amarré ici.</div>';
+  return `<div style="display:flex;gap:8px;margin-top:10px">
+    <input id="station-wall-input" maxlength="280" placeholder="Laisser un mot aux commandants de passage…" style="flex:1;min-width:0;padding:10px 12px;border-radius:8px;border:1px solid var(--border);background:rgba(0,0,0,.35);color:#e6f0ff;font:inherit;font-size:13px">
+    <button onclick="sbStationWallSend()" style="padding:10px 14px;border-radius:8px;border:1px solid rgba(255,200,100,.5);background:rgba(255,200,100,.12);color:#ffc864;font:inherit;font-size:11px;letter-spacing:.12em;text-transform:uppercase;cursor:pointer">Publier</button>
+  </div>`;
+}
+async function sbStationWallLoad(id, force) {
+  if (!id || !window.SBMP || !window.SBMP.ready || !window.SBMP.ready()) return;
+  const c = _wallCache[id];
+  if (!force && c && Date.now() - (c.at || 0) < 20000) return sbStationWallPaint(id);
+  try {
+    const r = await window.SBMP._arpc('mp_station_wall', { p_station: id });
+    _wallCache[id] = { posts: (r && r.posts) || [], can_post: !!(r && r.can_post), at: Date.now() };
+  } catch (e) {
+    if (!c) _wallCache[id] = { posts: [], can_post: false, at: Date.now(), err: String(e && e.message || e) };
+    console.warn('[mur du bar]', e && e.message || e);
+  }
+  sbStationWallPaint(id);
+}
+function sbStationWallPaint(id) {
+  const box = document.getElementById('station-wall'); if (!box || box.dataset.station !== id) return;
+  const c = _wallCache[id]; if (!c) return;
+  const list = document.getElementById('station-wall-list'), form = document.getElementById('station-wall-form');
+  if (list) list.innerHTML = c.err && !c.posts.length ? '<div style="font-size:11px;color:var(--mut);font-style:italic">Le mur n\'est pas joignable pour le moment (registre : ' + c.err.replace(/[<>&"]/g, '') + ').</div>' : sbStationWallList(c);
+  if (form && !document.getElementById('station-wall-input')) form.innerHTML = sbStationWallForm(c);
+}
+async function sbStationWallSend() {
+  const box = document.getElementById('station-wall'), inp = document.getElementById('station-wall-input');
+  if (!box || !inp) return;
+  const id = box.dataset.station, body = String(inp.value || '').trim();
+  if (!body) return;
+  inp.disabled = true;
+  try {
+    const p = await window.SBMP._arpc('mp_station_post', { p_station: id, p_body: body });
+    const c = _wallCache[id] = _wallCache[id] || { posts: [], can_post: true, at: Date.now() };
+    c.posts.unshift(p); c.at = Date.now(); inp.value = '';
+    sbStationWallPaint(id);
+  } catch (e) {
+    const m = String(e && e.message || e);
+    toast(/too_fast/.test(m) ? 'Doucement : un message toutes les 20 secondes' : /too_many/.test(m) ? 'Tu as assez écrit pour aujourd\'hui' : /not_docked/.test(m) ? 'Il faut un tanker amarré ici pour écrire' : /does not exist|PGRST202|Could not find/.test(m) ? 'Le mur n\'est pas encore ouvert (registre à mettre à jour)' : 'Le mur n\'a pas pris ton message : ' + m.slice(0, 80));
+  } finally { inp.disabled = false; }
+}
 // ─── D3 : Section "Autres convois amarrés" ───
 // Affiche 0-4 tankers PNJ générés déterministe-ment pour ce dock + jour.
 // Tap sur un PNJ ouvre sa fiche (info only, aucune interaction D3).
