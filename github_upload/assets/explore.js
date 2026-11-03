@@ -7,10 +7,10 @@
    - même scène 3D que la planète (Planet3D) : aucun téléchargement, aucun moteur en plus ;
    - états explicites du lapin et de la caisse, crédit unique par capture (voir capture()) ;
    - sauvegarde : G.explore (heures de retour des lapins, dernières captures, totaux).
-   Réservé aux comptes d'Adrien tant que EXPLORE_PUBLIC est à false : pour les autres joueurs, ce fichier ne touche à rien. */
+   EXPLORE_PUBLIC à false : réservé aux comptes d'Adrien, et le fichier ne touche à rien pour les autres joueurs. */
 (function () {
   'use strict';
-  const EXPLORE_PUBLIC = false;   // true = ouvert à tous les joueurs (après validation sur iPhone)
+  const EXPLORE_PUBLIC = true;   // ouvert à tous les joueurs le 03/11/2026, après le test d'Adrien sur iPhone ; false = réservé à ses comptes
 
   /* ── réglages du prototype (brief §4) : tout le rythme se règle ici ── */
   const CFG = {
