@@ -209,10 +209,9 @@
     heroFade(_sc, _sp, el);
     // le vaisseau, comme sur sa fiche d'unité — un vaisseau amiral (Blackmarket) se montre dans sa vitrine, avec son logo (03/11)
     const hero = el.querySelector('.sbm-3d');
-    // vaisseau amiral : sa fiche 3D du jeu (même vue que le tanker, même plasma), avec le logo ; à défaut sa vitrine Blackmarket (03/11, Adrien)
-    const envoyModel = m.bmEnvoy && window.SBBlackmarket && SBBlackmarket.shipModel ? SBBlackmarket.shipModel(m.bmEnvoy.item) : null;
-    const model = envoyModel || ((typeof UNIT_SHIP3D_MODELS !== 'undefined') ? UNIT_SHIP3D_MODELS.tanker : null);
-    const envoyHero = m.bmEnvoy && !envoyModel && window.SBBlackmarket && SBBlackmarket.missionHero ? SBBlackmarket.missionHero(hero, m.bmEnvoy.item) : null;
+    // vaisseau amiral en route : sa vitrine Blackmarket (la plus belle vue, Adrien 03/11), avec son logo
+    const model = (typeof UNIT_SHIP3D_MODELS !== 'undefined') ? UNIT_SHIP3D_MODELS.tanker : null;
+    const envoyHero = m.bmEnvoy && window.SBBlackmarket && SBBlackmarket.missionHero ? SBBlackmarket.missionHero(hero, m.bmEnvoy.item) : null;
     if (envoyHero) {
       _open.frame = envoyHero; el.classList.add('sbm-frame'); hero.classList.add('on');
       const dr = document.createElement('div'); dr.className = 'sbm-drawer'; dr.innerHTML = '<div class="sbm-grip"><i></i></div>';
@@ -222,7 +221,6 @@
     const start = () => {
       if (!_open || _open.el !== el || !model) return;
       try { _open.ship = window.Ship3D.mount(hero, { url: model.url, shiftY: 0.15, ship: model.profile && window.Ship3D.profiles ? window.Ship3D.profiles[model.profile] : undefined,
-        logo: envoyModel ? { ship: m.bmEnvoy.item, face: SBBlackmarket.heroLogo(m.bmEnvoy.item) } : undefined,
         onReady: () => hero.classList.add('on'), onError: () => hero.classList.add('fail') }); } catch (e) {}
     };
     if (!envoyHero && window.WebGLRenderingContext && model) { if (window.Ship3D) start(); else window.addEventListener('ship3d-ready', start, { once: true }); }

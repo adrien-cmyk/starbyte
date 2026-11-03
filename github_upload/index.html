@@ -11246,35 +11246,13 @@ function mpEmbassyMountHero(m, inc, pseudo) {
   });
   if (typeof shipHeroGestures === 'function') shipHeroGestures('scr-embassy', () => _emb.hero);
   if (_emb.hero) return;
-  if (_isEnvoy) {   // PATCH_0311 : la vue des tankers (planète, dérive lente), le vaisseau amiral à la place du TK-07, avec le logo de son commandant
-    if (_emb.heroPending) return;
+  if (_isEnvoy) {   // PATCH_0311 : le vaisseau amiral dans sa vitrine Blackmarket en mode orbite (réacteurs éteints, sans effet de déplacement, planète derrière), avec son logo
     if (typeof fleetShip3D !== 'undefined' && fleetShip3D) { try { fleetShip3D.handle.dispose(); } catch (e) {} fleetShip3D = null; }
     if (typeof bdShip3D !== 'undefined' && bdShip3D) { try { bdShip3D.handle.dispose(); } catch (e) {} bdShip3D = null; }
-    hero.classList.remove('u3d-fail'); hero.classList.add('u3d-loading');
-    _emb.heroEnvoy = true; _emb.heroPending = true;
-    const presence = m ? null : inc && inc.presenceId, ownItem = m && m.bmEnvoy ? m.bmEnvoy.item : null;
-    (async () => {
-      const face = ownItem ? null : await SBBlackmarket.envoyFace(presence);
-      const item = ownItem || (face && face.item_id);
-      await new Promise(ok => { if (window.Ship3D) ok(); else window.addEventListener('ship3d-ready', ok, { once: true }); });
-      _emb.heroPending = false;
-      if (!_emb.heroEnvoy || _emb.hero || document.getElementById('scr-embassy').classList.contains('hidden')) return;
-      const em = SBBlackmarket.shipModel(item);
-      if (em) {
-        const base = window.Ship3D.profiles[em.profile];
-        _emb.hero = window.Ship3D.mount(hero, {
-          url: em.url, shiftY: 0.2,
-          ship: Object.assign({}, base, { planet: true, plasma: false, nozzles: [], dustSpeed: 0.35 }),
-          logo: { ship: item, face: SBBlackmarket.heroLogo(item, face) },
-          onReady: () => hero.classList.remove('u3d-loading'),
-          onError: () => { hero.classList.remove('u3d-loading'); hero.classList.add('u3d-fail'); },
-        });
-        return;
-      }
-      hero.classList.remove('u3d-loading');   // vaisseau sans fiche 3D du jeu : sa vitrine Blackmarket
-      _emb.hero = SBBlackmarket.envoyHero(hero, ownItem, presence) || null;
-      if (!_emb.hero) { hero.style.display = 'none'; space.style.display = 'none'; scr.classList.remove('ud-hero', 'ud-ship'); }
-    })().catch(() => { _emb.heroPending = false; hero.classList.remove('u3d-loading'); hero.classList.add('u3d-fail'); });
+    hero.classList.remove('u3d-fail', 'u3d-loading');
+    _emb.heroEnvoy = true;
+    _emb.hero = SBBlackmarket.envoyHero(hero, m && m.bmEnvoy ? m.bmEnvoy.item : null, m ? m.mpPresenceId : inc && inc.presenceId) || null;
+    if (!_emb.hero) { hero.style.display = 'none'; space.style.display = 'none'; scr.classList.remove('ud-hero', 'ud-ship'); }
     return;
   }
   _emb.heroEnvoy = false;
@@ -50132,11 +50110,11 @@ if (G.knownTargets && Array.isArray(G.tankerMissions)) {
 <script src="assets/assistance.js?v=20261026-1900"></script>
 <script type="module" src="assets/ship3d.js?v=20261103-bernard"></script>
 <!-- PATCH_1510_MISSIONS — tout ce qui vole, fiche de mission des tankers -->
-<script src="assets/missions.js?v=20261103-amiral3"></script>
+<script src="assets/missions.js?v=20261103-amiral4"></script>
 <!-- PATCH_1610_SKILLS — skills des bâtiments : apprendre, découvrir, effets -->
 <script src="assets/skills.js?v=20261021-1130"></script>
 <script src="assets/maj.js?v=20261025-1800"></script>
-<script src="assets/blackmarket.js?v=20261103-amiral3"></script>   <!-- Blackmarket v0 : aperçu du catalogue, réservé au compte d'Adrien -->
+<script src="assets/blackmarket.js?v=20261103-amiral4"></script>   <!-- Blackmarket v0 : aperçu du catalogue, réservé au compte d'Adrien -->
 <!-- PATCH_1510_CROWN — The Drifting Crown en 3D (assets/station3d.js, sur le moteur partagé window.SB3D) -->
 <script type="module" src="assets/station3d.js?v=20261022-1047"></script>
 <!-- FORMATION3D — flotte déployée en orbite, vue de haut en formation (remplace la vue orbite) -->

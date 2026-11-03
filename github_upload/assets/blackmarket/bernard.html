@@ -103,6 +103,7 @@ import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 /* ================================================================== réglages */
 const S = 0.01;                                   // 1 unité = 100 m de scène
 const REDUCED = matchMedia('(prefers-reduced-motion: reduce)').matches;
+const ORBIT = /[?&]orbit=1/.test(location.search);   // ambassade : à l'arrêt en orbite — réacteurs éteints, aucun effet de déplacement, planète en arrière-plan
 const ENGINE_COLOR = new THREE.Color(1.0, 0.50, 0.22);   // propergol solide : orange incandescent
 // FATHER-ID (1 300 m, des canons du mufle aux tuyères) au gabarit de scène du KV-01 : V = 0,9 m de scène par m réel,
 // proue (glTF z = +664 m, bouches des canons) recalée sur z = 600.
@@ -223,6 +224,7 @@ const escorts = [];
     const fx = new THREE.Sprite(new THREE.SpriteMaterial({ color: 0x9cc4ff, blending: THREE.AdditiveBlending, depthWrite: false, transparent: true, opacity: .8 }));
     fx.scale.setScalar(k * .5); fx.position.z = -k * .48; g.add(fx);
     g.userData = { x: side * (1.6 + off), y, sp, ph, fx };
+    if (ORBIT) continue;
     scene.add(g); escorts.push(g);
   }
 }
@@ -385,6 +387,7 @@ for (const nz of NOZZLES) {
   const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex, color: 0xffb060, blending: THREE.AdditiveBlending, depthWrite: false, transparent: true, opacity: .22, fog: false }));
   sp.scale.setScalar(R * 2.6); sp.position.z = -R * .3;
   g.add(sp);
+  if (ORBIT) g.visible = false;
   ship.add(g);
 }
 
@@ -410,6 +413,43 @@ for (const [size, stops, opacity, sx] of [
   sunGroup.add(sp);
 }
 scene.add(sunGroup);
+if (ORBIT) {   // planète d'ambassade : limbe à contre-jour + atmosphère, derrière et sous le vaisseau (la caméra part de la proue)
+  const PR = 165, PPOS = new THREE.Vector3(-30, -PR - 2.6, -125), SD = SUN_DIR;
+  const pnoise = `
+    float h(vec3 p){ p = fract(p*0.3183099+.1); p *= 17.0; return fract(p.x*p.y*p.z*(p.x+p.y+p.z)); }
+    float n(vec3 x){ vec3 i=floor(x), f=fract(x); f=f*f*(3.0-2.0*f);
+      return mix(mix(mix(h(i),h(i+vec3(1,0,0)),f.x),mix(h(i+vec3(0,1,0)),h(i+vec3(1,1,0)),f.x),f.y),
+                 mix(mix(h(i+vec3(0,0,1)),h(i+vec3(1,0,1)),f.x),mix(h(i+vec3(0,1,1)),h(i+vec3(1,1,1)),f.x),f.y),f.z); }
+    float fbm(vec3 p){ float s=0., a=.5; for(int i=0;i<5;i++){ s+=a*n(p); p=p*2.03+1.7; a*=.5; } return s; }`;
+  const planet = new THREE.Mesh(new THREE.SphereGeometry(PR, 96, 72), new THREE.ShaderMaterial({
+    uniforms: { uSun: { value: SD } },
+    vertexShader: `varying vec3 vP; varying vec3 vW;
+      void main(){ vP = position; vec4 w = modelMatrix * vec4(position,1.0); vW = w.xyz; gl_Position = projectionMatrix * viewMatrix * w; }`,
+    fragmentShader: `uniform vec3 uSun; varying vec3 vP; varying vec3 vW;` + pnoise + `
+      void main(){
+        vec3 d = normalize(vP), N = d;
+        float land = smoothstep(.52, .58, fbm(d * 3.2));
+        vec3 col = mix(mix(vec3(.01,.05,.13), vec3(.02,.11,.25), fbm(d * 9.0)), mix(vec3(.06,.12,.05), vec3(.16,.14,.08), fbm(d * 14.0)), land);
+        col = mix(col, vec3(.85,.88,.92), smoothstep(.5, .78, fbm(d * 5.5)) * .85);
+        float day = clamp(dot(N, normalize(uSun)) * 1.2 + .15, 0., 1.);
+        col *= .04 + 1.05 * day;
+        float rim = pow(1.0 - max(dot(N, normalize(cameraPosition - vW)), 0.0), 3.0);
+        col += vec3(.25,.5,1.0) * rim * (.25 + 1.2 * day);
+        gl_FragColor = vec4(col, 1.0);
+      }`
+  }));
+  planet.position.copy(PPOS); scene.add(planet);
+  const atmo = new THREE.Mesh(new THREE.SphereGeometry(PR * 1.025, 72, 48), new THREE.ShaderMaterial({
+    transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.BackSide,
+    uniforms: { uSun: { value: SD } },
+    vertexShader: `varying vec3 vN; varying vec3 vW; void main(){ vN = normalize(normalMatrix * normal); vec4 w = modelMatrix * vec4(position,1.0); vW = w.xyz; gl_Position = projectionMatrix * viewMatrix * w; }`,
+    fragmentShader: `uniform vec3 uSun; varying vec3 vN; varying vec3 vW;
+      void main(){ vec3 V = normalize(cameraPosition - vW); float f = pow(clamp(dot(normalize(vN), V) + 1.0, 0.0, 1.0), 5.0);
+        float day = clamp(dot(normalize(vW), normalize(uSun)) * 1.2 + .3, 0., 1.);
+        gl_FragColor = vec4(vec3(.3,.55,1.0) * f * (.35 + .9 * day), f * .9); }`
+  }));
+  atmo.position.copy(PPOS); scene.add(atmo);
+}
 
 /* ================================================================== bulle de choc plasma
    Proue en brique : front de choc détaché devant l'étrave, enveloppe large et aplatie. */
@@ -468,6 +508,7 @@ shock.add(new THREE.Mesh(bubbleGeo(1.0), shockMat(.36, 2.2, 1.6)));
 shock.add(new THREE.Mesh(bubbleGeo(1.12), shockMat(.18, 3.2, 1.1)));
 shock.add(new THREE.Mesh(bubbleGeo(0.9), shockMat(.14, 1.6, 2.4)));
 shock.children.forEach(m => { m.renderOrder = 2; m.frustumCulled = false; });
+if (ORBIT) shock.visible = false;
 ship.add(shock);
 
 // filaments de plasma calés sur la section réelle : [station, bas, haut, demi-largeur] en m de scène
@@ -537,7 +578,7 @@ const smokeMat = new THREE.ShaderMaterial({
 const smoke = new THREE.Mesh(filGeo, smokeMat);
 smoke.frustumCulled = false; smoke.renderOrder = 3;
 const fxScene = new THREE.Scene();
-const fxShip = new THREE.Group(); fxScene.add(fxShip);
+const fxShip = new THREE.Group(); fxScene.add(fxShip); if (ORBIT) fxShip.visible = false;
 fxShip.add(smoke);
 
 /* traînée de fumée des boosters : nappe sombre qui s'élargit derrière chaque tuyère, braises près de la sortie */
@@ -935,7 +976,7 @@ loadShip().then((gltf) => {
       if (mat.name === 'M_FD_VOID') { mat.color.setRGB(0, 0, 0); mat.roughness = 1; mat.metalness = 0; mat.envMapIntensity = 0; }
       const look = LOOK[mat.name];
       if (look && !mat.userData.bm) { mat.userData.bm = 1; premium(mat, look); if (LOGO) LOGO.wrap(mat); }
-      if (mat.name === 'M_KV_GLOW_MOTEUR') { mat.emissive.setRGB(1.0, 0.34, 0.10); mat.emissiveIntensity = 1.25; mat.color.setRGB(0.6, 0.15, 0.05); }
+      if (mat.name === 'M_KV_GLOW_MOTEUR') { mat.emissive.setRGB(1.0, 0.34, 0.10); mat.emissiveIntensity = ORBIT ? 0.12 : 1.25; mat.color.setRGB(ORBIT ? 0.12 : 0.6, ORBIT ? 0.05 : 0.15, 0.05); }   // orbite : tuyères froides, une braise
       else if (mat.name === 'M_FD_LIGHT') { mat.emissive.setRGB(1.0, 0.70, 0.38); mat.emissiveIntensity = 2.4; }
       else if (mat.name === 'M_FD_EYE') { mat.emissive.setRGB(1.0, 0.16, 0.08); mat.emissiveIntensity = 4.5; mat.color.setRGB(0.6, 0.02, 0.01); eyeMats.push(mat); }
       else if (mat.name === 'M_FD_CABINL') { mat.emissive.setRGB(1.0, 0.55, 0.25); mat.emissiveIntensity = 0.35; }
@@ -950,7 +991,7 @@ loadShip().then((gltf) => {
   const depthOnly = new THREE.MeshBasicMaterial({ colorWrite: false });
   occ.traverse(o => { if (o.isMesh) { o.material = depthOnly; o.castShadow = o.receiveShadow = false; } });
   fxShip.add(occ);
-  engineLight.intensity = 2.5; for (const l of engineLights) l.intensity = 3.0;
+  if (!ORBIT) { engineLight.intensity = 2.5; for (const l of engineLights) l.intensity = 3.0; }
   loadEl.classList.add('done');
 }).catch((e) => {
   console.error(e);
@@ -1026,19 +1067,19 @@ addEventListener('resize', () => {
 
 /* ================================================================== boucle */
 const clock = new THREE.Clock();
-const SPEED = 9;
+const SPEED = ORBIT ? 0.12 : 9;
 let frames = 0, perfT = 0, perfChecked = false;
 function frame() {
   const dt = Math.min(clock.getDelta(), 0.05), t = clock.elapsedTime;
-  const amp = REDUCED ? 0.25 : 1;
+  const amp = REDUCED ? 0.25 : ORBIT ? 0.5 : 1;
   ship.position.y = Math.sin(t * 0.45) * 0.05 * amp;
   ship.rotation.z = Math.sin(t * 0.32) * 0.012 * amp;
   ship.rotation.x = Math.sin(t * 0.27 + 1.0) * 0.006 * amp;
   for (const m of plumeMats) m.uniforms.uTime.value = t;
   PLASMA_T.value = t;
-  updateSmoke(t);
+  if (!ORBIT) updateSmoke(t);
   fxShip.position.copy(ship.position); fxShip.rotation.copy(ship.rotation);
-  shockLight.intensity = 0.4 * (0.9 + 0.1 * Math.sin(t * 7.0));
+  shockLight.intensity = ORBIT ? 0 : 0.4 * (0.9 + 0.1 * Math.sin(t * 7.0));
   if (engineLight.intensity > 0) { const f = 0.90 + 0.10 * Math.sin(t * 29.0) * Math.sin(t * 7.3); engineLight.intensity = 2.5 * f; engineLights.forEach((l, i) => { l.intensity = 3.0 * (0.9 + 0.1 * Math.sin(t * 23.0 + i * 1.7)); }); }
   for (const m of eyeMats) m.emissiveIntensity = 4.0 + 2.2 * Math.pow(0.5 + 0.5 * Math.sin(t * 1.3), 3.0);
   for (const m of navMats) {
