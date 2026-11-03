@@ -1,7 +1,7 @@
 /* Starbyte — Blackmarket v0 (31/10/2026) — GDD : claude/starbyte_GDD_blackmarket.md
    Aperçu du catalogue : les 7 vaisseaux payants dans leur vitrine validée (assets/blackmarket/<id>.html,
    modèle assets/3d/bm/<id>.glb.gz). Pas encore de paiement ni de marchand IA.
-   Réservé au compte d'Adrien (_sbDevAllowed) tant qu'il n'a pas validé : entrée en haut de l'écran Commerce.
+   Réservé au compte d'Adrien (_sbDevAllowed) tant que BM_PUBLIC est à false : entrée en haut de l'écran Commerce.
    Les prix et plafonds affichés ici sont indicatifs : la vente réelle passera par un catalogue serveur. */
 (function () {
   'use strict';
@@ -39,7 +39,7 @@
     'Tu négocies ? Retourne compter tes cailloux au match-3.',
     "T'as vu l'acier ? Ça, ça se construit pas dans ton petit chantier.",
   ];
-  const VERSION = '20261103n';
+  const VERSION = '20261103p';
   // Serveur (schema_mp_v31_blackmarket.sql + fonctions bm-checkout / bm-webhook)
   const SB = 'https://elupnpdcblztpfywnhjl.supabase.co';
   const KEY = 'sb_publishable_tXGrQIROzH2DwBrny1GcHQ_iKJKoBOQ';
@@ -133,6 +133,9 @@
   font: 600 14px 'Space Grotesk', sans-serif; letter-spacing: .08em; text-transform: uppercase; }
 #bm-root .bm-buy:not([disabled]) { background: #c9a45a; color: #15110a; cursor: pointer; }
 #bm-root .bm-buy-sub.err { color: #d9845a; }
+#bm-root .bm-consent { display: flex; gap: 10px; align-items: flex-start; margin-bottom: 12px; font-size: 12px; line-height: 1.4; color: #c7d0d8; cursor: pointer; }
+#bm-root .bm-consent input { flex: none; width: 20px; height: 20px; margin: 0; accent-color: #c9a45a; }
+#bm-root .bm-consent a { color: #c9a45a; }
 #bm-root .bm-atelier { display: flex; flex-direction: column; gap: 8px; padding-bottom: calc(env(safe-area-inset-bottom) + 6px); }
 #bm-root .bm-at-head { display: flex; justify-content: space-between; align-items: center; font-size: 17px; }
 #bm-root .bm-at-link { min-height: 44px; padding: 0 4px; border: 0; background: none; color: #c9a45a; font: 500 13px 'Space Grotesk', sans-serif; cursor: pointer; }
@@ -157,7 +160,8 @@
   const fmt = (n) => Math.round(n).toLocaleString('fr-CH').replace(/ |\s/g, ' ');
   const chf = (n) => 'CHF ' + n + '.–';
   const esc = (s) => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
-  const allowed = () => { try { return typeof _sbDevAllowed === 'function' && _sbDevAllowed(); } catch (e) { return false; } };
+  const BM_PUBLIC = false;   // true = Blackmarket ouvert à tous les joueurs (à activer après l'achat réel de contrôle)
+  const allowed = () => { if (BM_PUBLIC) return true; try { return typeof _sbDevAllowed === 'function' && _sbDevAllowed(); } catch (e) { return false; } };
 
   function baseT3() {
     try { const t = SHIP_TIERS.cuirasse[3]; return { atk: t.atk, def: t.def }; } catch (e) { return { atk: 13500, def: 13500 }; }
@@ -205,7 +209,7 @@
     root.querySelector('.bm-cat').innerHTML = `
       <div class="bm-eyebrow">Marché noir · Docks francs</div>
       <h1>BLACKMARKET</h1>
-      <div class="bm-dev">Aperçu réservé à ton compte · paiement en mode test</div>
+      ${BM_PUBLIC ? '' : '<div class="bm-dev">Aperçu réservé à ton compte</div>'}
       <div class="bm-merchant"><div class="bm-face">${face}</div>
         <div class="bm-say">${esc(LINES[line % LINES.length])}<small>PAULINE · REINE DU NOIR</small></div></div>
       ${section('sport')}${section('dread')}${section('arche')}`;
@@ -234,8 +238,9 @@
         <div class="bm-note">${s.cat === 'arche'
           ? `Transport par Arche eXtra-Interstellaire. Tu choisis un secteur, même inconnu : le TAXI perce la trame et te crée un monde dans un système vide, tiré au sort. Tu ne sais où qu'en arrivant. Planète-jardin luxuriante, 72 h de protection, aucune ressource. Un seul largage ; ensuite, il reste dans ta flotte, coque morte. 100 exemplaires numérotés, un par joueur.`
           : `Comparé à un cuirassé T3 construit. Jamais détruit : vaincu, il est mis hors service et répare à quai 24 h minimum. Max ${c.cap} ${c.plural.toLowerCase()} par joueur, tous modèles confondus.`}</div>
-        ${mine && s.cat === 'arche' && taxiFlight() ? `<button class="bm-buy" data-taxiview style="background:#5b3fa0;color:#f1e8ff">Voir la traversée</button><div class="bm-buy-sub">${esc(mineStatus(s.id))}</div>` : mine ? (tx && !tx.used && !taxiFlight() ? `<button class="bm-buy" data-taxi style="background:#5b3fa0;color:#f1e8ff">Larguer le TAXI</button><div class="bm-buy-sub">Une seule fois · à l'aveugle</div>` : `<div class="bm-buy-sub" style="text-align:left;color:#a7b1ba">${esc(mineStatus(s.id))}</div>`) : (s.cat === 'arche' && taxiLeft === 0 ? `<div class="bm-buy-sub">Édition épuisée. Les 100 TAXI ont trouvé preneur.</div>` : `<button class="bm-buy" data-buy="${s.id}">Acheter · ${chf(c.price)}</button>
-        <div class="bm-buy-sub">${owned[s.id] ? `Tu en as déjà ${owned[s.id]} · ` : ''}Paiement par Stripe · mode test</div>`)}
+        ${mine && s.cat === 'arche' && taxiFlight() ? `<button class="bm-buy" data-taxiview style="background:#5b3fa0;color:#f1e8ff">Voir la traversée</button><div class="bm-buy-sub">${esc(mineStatus(s.id))}</div>` : mine ? (tx && !tx.used && !taxiFlight() ? `<button class="bm-buy" data-taxi style="background:#5b3fa0;color:#f1e8ff">Larguer le TAXI</button><div class="bm-buy-sub">Une seule fois · à l'aveugle</div>` : `<div class="bm-buy-sub" style="text-align:left;color:#a7b1ba">${esc(mineStatus(s.id))}</div>`) : (s.cat === 'arche' && taxiLeft === 0 ? `<div class="bm-buy-sub">Édition épuisée. Les 100 TAXI ont trouvé preneur.</div>` : `<label class="bm-consent"><input type="checkbox" data-consent><span>Je veux recevoir ce vaisseau tout de suite et je sais que je perds alors mon droit de rétractation de 14 jours. J'accepte les <a href="https://starbyte.online/cgv.html#achats" target="_blank" rel="noopener">conditions de vente</a>.</span></label>
+        <button class="bm-buy" data-buy="${s.id}" disabled>Acheter · ${chf(c.price)}</button>
+        <div class="bm-buy-sub">${owned[s.id] ? `Tu en as déjà ${owned[s.id]} · ` : ''}Paiement par Stripe · vendu via Link, taxes incluses</div>`)}
       </div>`;
     pane.classList.add('on');
     fitView();
@@ -263,6 +268,13 @@
     root.classList.add('on');
   }
   function close() { if (!root) return; closeShip(); root.classList.remove('on'); }
+
+  // Acheter n'est possible qu'une fois les conditions de vente acceptées
+  document.addEventListener('change', (e) => {
+    const box = e.target; if (!box || !box.matches || !box.matches('#bm-root [data-consent]')) return;
+    const buy = box.closest('.bm-sheet') && box.closest('.bm-sheet').querySelector('[data-buy]');
+    if (buy) buy.disabled = !box.checked;
+  });
 
   document.addEventListener('click', (e) => {
     if (!root || !root.classList.contains('on')) return;
@@ -297,7 +309,7 @@
     el = document.createElement('div'); el.id = 'bm-entry';
     el.style.cssText = 'margin:0 16px 10px;padding:12px 14px;background:linear-gradient(90deg,rgba(200,36,58,.14),rgba(200,36,58,.03));border:1px solid rgba(200,36,58,.35);border-radius:8px;cursor:pointer;display:flex;align-items:center;gap:12px';
     el.innerHTML = '<div style="flex:1;min-width:0"><div style="font-size:13px;color:#e6f0ff;font-weight:600;letter-spacing:.06em">BLACKMARKET</div>' +
-      '<div style="font-size:10px;color:var(--mut);margin-top:2px">Aperçu du catalogue · visible seulement par toi</div></div><div style="color:var(--mut);font-size:14px">›</div>';
+      '<div style="font-size:10px;color:var(--mut);margin-top:2px">' + (BM_PUBLIC ? 'Vaisseaux d\'exception · Pauline, Reine du Noir' : 'Aperçu du catalogue · visible seulement par toi') + '</div></div><div style="color:var(--mut);font-size:14px">›</div>';
     el.addEventListener('click', open);
     const banner = document.getElementById('commerce-banner');
     scroll.insertBefore(el, banner ? banner.nextSibling : scroll.firstChild);
@@ -312,7 +324,7 @@
     const say = (txt, err) => { if (sub) { sub.textContent = txt; sub.classList.toggle('err', !!err); } };
     btn.disabled = true; say('Pauline prépare la facture…');
     try {
-      const [r] = await Promise.all([call('/functions/v1/bm-checkout', { item_id: btn.dataset.buy }), loadOwned()]);
+      const [r] = await Promise.all([call('/functions/v1/bm-checkout', { item_id: btn.dataset.buy, consent: true }), loadOwned()]);
       if (r && r.url) {
         const ids = units.filter(u => u.item === btn.dataset.buy).map(u => u.id);
         try { localStorage.setItem('bm_pending', JSON.stringify({ item: btn.dataset.buy, n: ids.length, ids, at: Date.now() })); } catch (e) {}
@@ -324,8 +336,9 @@
       const m = e.message;
       say(m === 'sold_out' ? 'Édition épuisée : les 100 TAXI sont partis.' : m === 'cap_reached' ? `Plafond atteint : ${e.data && e.data.cap} ${(e.data && e.data.label || '').toLowerCase()} max. « T'en as assez, non ? »`
         : m === 'not_signed_in' ? 'Connecte ton compte (cloud) pour acheter.'
+        : m === 'consent_required' ? 'Coche la case pour accepter les conditions de vente.'
         : m === 'stripe_not_configured' ? 'Clé Stripe absente côté serveur (secret STRIPE_SECRET_KEY).'
-        : 'Paiement indisponible pour le moment (' + m + ').', true);
+        : 'Paiement indisponible pour le moment (' + m + (!BM_PUBLIC && e.data && e.data.detail ? ' : ' + e.data.detail : '') + ').', true);
       btn.disabled = false;
     }
   }
