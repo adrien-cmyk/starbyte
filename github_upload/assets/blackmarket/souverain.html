@@ -97,7 +97,7 @@ import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { GTAOPass } from 'three/addons/postprocessing/GTAOPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
-import { createOrbitSky, forwardFrom } from '../3d/sky/orbitsky.js?v=20261103';   // fond orbital partagé (03/11)
+import { createOrbitSky, forwardFrom } from '../3d/sky/orbitsky.js?v=20261103b';   // fond orbital partagé (03/11)
 
 /* ================================================================== réglages */
 const S = 0.01;                                   // 1 unité = 100 m de scène
@@ -152,7 +152,7 @@ scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
 
 /* ================================================================== fond */
 // Fond orbital partagé (photographie spatiale : planète immense, soleil chaud haut-gauche, étoiles rares) — orienté sur la vue de départ
-const ORBIT_SKY = createOrbitSky(THREE, { forward: forwardFrom([0.55, 0.28, -0.8]) });
+const ORBIT_SKY = createOrbitSky(THREE, { forward: forwardFrom([0.55, 0.28, -0.8]), dim: 1 / renderer.toneMappingExposure });
 scene.add(ORBIT_SKY.mesh);
 function starField(count, radius, size) {
   const g = new THREE.BufferGeometry();
@@ -641,7 +641,7 @@ const bloom = new UnrealBloomPass(new THREE.Vector2(innerWidth / 2, innerHeight 
 composer.addPass(bloom);
 composer.addPass(new OutputPass());
 addEventListener('resize', () => {
-  camera.aspect = innerWidth / innerHeight; fitDistance.cached = 0; controls.maxDistance = fitDistance() * 1.6;
+  camera.aspect = innerWidth / innerHeight; ORBIT_SKY.fit(camera.aspect); fitDistance.cached = 0; controls.maxDistance = fitDistance() * 1.6;
   renderer.setSize(innerWidth, innerHeight); composer.setSize(innerWidth, innerHeight);
   bloom.resolution.set(innerWidth / 2, innerHeight / 2);
 });

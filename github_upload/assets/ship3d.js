@@ -5,7 +5,7 @@
    `ship` (facultatif) : profil d'un autre vaisseau mis à l'échelle de la scène du KV-01 (V m de scène par m réel,
    proue glTF recalée sur z = 600) — tuyères, axe de la bulle, table de section de coque (voir PROFIL_KV01).
 */
-import { createOrbitSky, forwardFrom } from './3d/sky/orbitsky.js?v=20261103';   // fond orbital partagé (planète, soleil haut-gauche)
+import { createOrbitSky, forwardFrom } from './3d/sky/orbitsky.js?v=20261103b';   // fond orbital partagé (planète, soleil haut-gauche)
 // Moteur 3D partagé du jeu (window.SB3D, exposé par planet3d.js) : pas de seconde copie de three.js.
 // MapControls = OrbitControls avec une autre affectation des gestes ; on remet celle d'une orbite.
 function libs() {
@@ -166,7 +166,7 @@ const sky = new THREE.Mesh(new THREE.SphereGeometry(300, 48, 32), new THREE.Shad
     }`
 }));
 // Vue orbitale : fond photographique partagé (planète immense, soleil chaud haut-gauche) ; le ciel procédural ne sert plus qu'au sol
-const ORBIT = !P.ground ? createOrbitSky(THREE, { forward: forwardFrom(P.camDir || [0.55, 0.24, -0.80]) }) : null;
+const ORBIT = !P.ground ? createOrbitSky(THREE, { forward: forwardFrom(P.camDir || [0.55, 0.24, -0.80]), aspect: W() / H() }) : null;
 if (ORBIT) scene.add(ORBIT.mesh); else scene.add(sky);
 if (P.ground) {                                    // bâtiment au sol : crépuscule sur Kerath, régolithe, dalle
   sky.material = new THREE.ShaderMaterial({
@@ -792,7 +792,7 @@ composer.addPass(bloom);
 composer.addPass(new OutputPass());
 
 const ro = new ResizeObserver(() => {
-  camera.aspect = W() / H(); controls.maxDistance = fitDistance() * 1.6;
+  camera.aspect = W() / H(); controls.maxDistance = fitDistance() * 1.6; if (ORBIT) ORBIT.fit(camera.aspect);
   renderer.setSize(W(), H()); composer.setSize(W(), H());
   bloom.resolution.set(W() / 2, H() / 2);
 });
