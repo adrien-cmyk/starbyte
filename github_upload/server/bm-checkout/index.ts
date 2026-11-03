@@ -1,11 +1,13 @@
 // STARBYTE — fonction serveur « bm-checkout » (Blackmarket, v31)
 // Le jeu envoie seulement { item_id } et le jeton de session du joueur.
 // Le prix et le plafond sont lus dans la base (bm_catalog / bm_categories), jamais dans la demande du jeu.
-// Réponse : { url } — la page de paiement Stripe vers laquelle le jeu redirige.
+// Réponse : { client_secret, publishable_key } — le paiement s'affiche DANS le jeu (Embedded Checkout), sans fenêtre Safari.
+//   Sans le secret STRIPE_PUBLISHABLE_KEY : { url }, la page Stripe vers laquelle le jeu redirige.
 // Le joueur doit avoir accepté les CGV et la livraison immédiate (case à cocher) : son accord est gardé dans Stripe.
 // Stripe Managed Payments : Stripe (via Link) est le vendeur officiel, il calcule, déclare et reverse les taxes.
 // Les prix du catalogue sont des prix finaux : les taxes sont incluses dedans (tax_behavior = inclusive).
-// Secret requis (Supabase → Edge Functions → Secrets) : STRIPE_SECRET_KEY (sk_live_… en réel, sk_test_… en test).
+// Secrets (Supabase → Edge Functions → Secrets) : STRIPE_SECRET_KEY (sk_live_… en réel, sk_test_… en test)
+// et STRIPE_PUBLISHABLE_KEY (pk_live_… ou pk_test_…, du même mode que la clé secrète).
 
 import { createClient } from 'npm:@supabase/supabase-js@2';
 
@@ -82,8 +84,15 @@ Deno.serve(async (req) => {
   f.set('line_items[0][price_data][product_data][name]', `${item.name} — Starbyte`);
   f.set('line_items[0][price_data][product_data][description]', `${cat?.label || 'Vaisseau'} du Blackmarket`);
   if (user.email) f.set('customer_email', user.email);   // Stripe envoie lui-même le reçu et la facture
-  f.set('success_url', `${SITE}?bm=ok&item=${encodeURIComponent(item.item_id)}`);
-  f.set('cancel_url', `${SITE}?bm=annule`);
+  const publishableKey = Deno.env.get('STRIPE_PUBLISHABLE_KEY');
+  if (publishableKey) {
+    // redirect_on_completion = never : on ne quitte jamais le jeu (les moyens de paiement à redirection ne sont pas proposés)
+    f.set('ui_mode', 'embedded');
+    f.set('redirect_on_completion', 'never');
+  } else {
+    f.set('success_url', `${SITE}?bm=ok&item=${encodeURIComponent(item.item_id)}`);
+    f.set('cancel_url', `${SITE}?bm=annule`);
+  }
 
   const r = await fetch('https://api.stripe.com/v1/checkout/sessions', {
     method: 'POST',
@@ -91,6 +100,7 @@ Deno.serve(async (req) => {
     body: f,
   });
   const s = await r.json();
-  if (!r.ok || !s.url) return json({ error: 'stripe', detail: s?.error?.message || r.status }, 502);
+  if (!r.ok || !(publishableKey ? s.client_secret : s.url)) return json({ error: 'stripe', detail: s?.error?.message || r.status }, 502);
+  if (publishableKey) return json({ client_secret: s.client_secret, publishable_key: publishableKey, test: !s.livemode });
   return json({ url: s.url, test: !s.livemode });
 });
