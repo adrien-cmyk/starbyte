@@ -1,0 +1,60 @@
+# Tests de confidentialité (voir tools/confidentialite/README.md). Rien n'est modifié sur le site, le jeu ou Supabase.
+# Lancement manuel, chaque lundi matin, et à chaque modification de ces tests.
+name: Audit de confidentialité
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '17 6 * * 1'
+  pull_request:
+    paths:
+      - 'tools/confidentialite/**'
+      - '.github/workflows/audit-confidentialite.yml'
+permissions:
+  contents: read
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            tools/confidentialite
+            site/api
+            github_upload/server/logo-upload
+            github_upload/assets/assistance.js
+          sparse-checkout-cone-mode: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Installer les outils
+        run: |
+          npm i --no-save --no-audit --no-fund playwright esbuild
+          npx playwright install --with-deps chromium
+          php -m | grep -qi curl
+      - name: Données envoyées à Anthropic
+        id: anthropic
+        continue-on-error: true
+        run: node tools/confidentialite/test_anthropic.js
+        env:
+          RAPPORT_DIR: rapports
+      - name: Consentement et Google Analytics
+        id: consentement
+        continue-on-error: true
+        run: node tools/confidentialite/test_consentement.js
+        env:
+          RAPPORT_DIR: rapports
+      - name: Relevé daté
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: releve-confidentialite-${{ github.run_id }}
+          path: rapports/
+          retention-days: 90
+      - name: Résultat
+        if: always()
+        run: |
+          if [ "${{ steps.anthropic.outcome }}" != "success" ] || [ "${{ steps.consentement.outcome }}" != "success" ]; then
+            echo "::error::Au moins un contrôle est en écart : voir le résumé du passage."
+            exit 1
+          fi
