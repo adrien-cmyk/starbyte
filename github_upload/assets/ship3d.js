@@ -42,6 +42,7 @@ const PROFIL_TK07 = {
 const PROFIL_OS01 = {
   V: 2.6, bowGltf: 0, center: true, axisY: 0.6, engineY: 0, engineZ: 0, nozzleZ: 0, targetY: 0.55,
   nozzles: [], plasma: false, planet: true, spin: 0.018, dustSpeed: 0.35, fit: 1.3,
+  lightScale: 0.6, bloom: 0.3, glowScale: 0.5,   // station blanche et jaune : éclairage et bloom réduits (trop éblouissante sous le soleil du fond orbital)
   engineColor: [1.0, 0.62, 0.30], plume: [0xff5a1a, 0xff8a2a, 0xffc070, 0xfff2d8, 0xffc890, 0xffa060],
   gloss: { M_TK_ARMOR_JAUNE: [0.40, 0.08], M_KV_ARMOR_WHITE: [0.40, 0.0], M_KV_ARMOR_RED: [0.28, 0.3], M_KV_GUNMETAL: [0.26, 0.85], M_KV_STRUCT_BLACK: [0.30, 0.55], M_TK_GRAPHITE: [0.30, 0.6], M_SR_VERRIERE: [0.06, 0.4] }, glossEnv: 0.9,
   hull: [[0,0,10,10],[1,0,10,10]],
@@ -284,7 +285,8 @@ const ship = new THREE.Group();
 scene.add(ship);
 // soleil puissant droit devant : le cuirassé fonce dans la lumière
 const SUN_DIR = ORBIT ? ORBIT.sunDir.clone() : new THREE.Vector3(-0.42, 0.03, 0.91).normalize();   // en orbite : le soleil du fond (haut-gauche de la vue)
-const key = new THREE.DirectionalLight(ORBIT ? 0xffd9a8 : 0xfff0dc, ORBIT ? 4.0 : 3.4);
+const LS = P.lightScale || 1;   // atténuation globale de l'éclairage pour les modèles très clairs
+const key = new THREE.DirectionalLight(ORBIT ? 0xffd9a8 : 0xfff0dc, (ORBIT ? 4.0 : 3.4) * LS);
 key.position.copy(SUN_DIR).multiplyScalar(14);
 key.castShadow = true;
 key.shadow.mapSize.set(MOBILE ? 1024 : 2048, MOBILE ? 1024 : 2048);
@@ -297,9 +299,9 @@ if (P.ground) {                                    // soleil bas sur la gauche, 
 }
 scene.add(key);
 const rim = new THREE.DirectionalLight(0x9db8e8, ORBIT ? 0.9 : 1.3); rim.position.set(-9, 4, -10); scene.add(rim);   // contre-jour froid
-const fill = new THREE.DirectionalLight(ORBIT ? 0xd8c8b8 : 0xb8c6e8, ORBIT ? 0.55 : 0.8); fill.position.set(3, 10, -4); scene.add(fill);
-if (ORBIT) { const bounce = new THREE.DirectionalLight(0xa9c4f0, 1.0); bounce.position.set(1, -10, 2); scene.add(bounce); }   // rebond bleuté de la planète et de son atmosphère, par en dessous
-scene.add(new THREE.HemisphereLight(ORBIT ? 0x1a2238 : 0x2c3a58, ORBIT ? 0x2a3a58 : 0x05060a, 0.55));
+const fill = new THREE.DirectionalLight(ORBIT ? 0xd8c8b8 : 0xb8c6e8, (ORBIT ? 0.55 : 0.8) * LS); fill.position.set(3, 10, -4); scene.add(fill);
+if (ORBIT) { const bounce = new THREE.DirectionalLight(0xa9c4f0, 1.0 * LS); bounce.position.set(1, -10, 2); scene.add(bounce); }   // rebond bleuté de la planète et de son atmosphère, par en dessous
+scene.add(new THREE.HemisphereLight(ORBIT ? 0x1a2238 : 0x2c3a58, ORBIT ? 0x2a3a58 : 0x05060a, 0.55 * LS));
 const engineLight = new THREE.PointLight(PL[5], 0, 10, 1.7);
 engineLight.position.set(0, P.engineY, P.engineZ);
 ship.add(engineLight);
@@ -684,8 +686,8 @@ function prepMats(root, engineColor, engineInt) {
       }
       if (mo && mo.engine) { mat.emissive.copy(engineColor); mat.emissiveIntensity = engineInt; mat.color.copy(engineColor); }
       if (mat.name === 'M_KV_GLOW_MOTEUR') { mat.emissive.copy(engineColor); mat.emissiveIntensity = (!P.nozzles.length && P.idleGlow != null) ? P.idleGlow : engineInt; mat.color.copy(engineColor); }   // moteurs coupés (orbite) : braise
-      else if (mat.name === 'M_KV_GLOW_ORANGE') { mat.emissiveIntensity = 2.2; }
-      else if (mat.name === 'M_KV_GLOW_BLUE') { if (P.ground) { mat.emissive = new THREE.Color(0x48c8ff); mat.emissiveIntensity = 1.3; } else mat.emissiveIntensity = 1.8; }
+      else if (mat.name === 'M_KV_GLOW_ORANGE') { mat.emissiveIntensity = 2.2 * (P.glowScale || 1); }
+      else if (mat.name === 'M_KV_GLOW_BLUE') { if (P.ground) { mat.emissive = new THREE.Color(0x48c8ff); mat.emissiveIntensity = 1.3; } else mat.emissiveIntensity = 1.8 * (P.glowScale || 1); }
       else if (mat.name.startsWith('M_KV_NAV_')) { if (!navMats.includes(mat)) navMats.push(mat); }
     }
   });
@@ -787,7 +789,7 @@ composer.addPass(new RenderPass(scene, camera));
 // (pas d'occlusion ambiante en jeu : budget mobile ; les ombres portées font le travail)
 const fxPass = new RenderPass(fxScene, camera); fxPass.clear = false; fxPass.clearDepth = true;
 composer.addPass(fxPass);
-const bloom = new UnrealBloomPass(new THREE.Vector2(W() / 2, H() / 2), 0.7, 0.45, 1.0);
+const bloom = new UnrealBloomPass(new THREE.Vector2(W() / 2, H() / 2), P.bloom != null ? P.bloom : 0.7, 0.45, 1.0);
 composer.addPass(bloom);
 composer.addPass(new OutputPass());
 
