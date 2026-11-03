@@ -39,7 +39,7 @@
     'Tu négocies ? Retourne compter tes cailloux au match-3.',
     "T'as vu l'acier ? Ça, ça se construit pas dans ton petit chantier.",
   ];
-  const VERSION = '20261103l';
+  const VERSION = '20261103m';
   // Serveur (schema_mp_v31_blackmarket.sql + fonctions bm-checkout / bm-webhook)
   const SB = 'https://elupnpdcblztpfywnhjl.supabase.co';
   const KEY = 'sb_publishable_tXGrQIROzH2DwBrny1GcHQ_iKJKoBOQ';
@@ -337,10 +337,12 @@
       // App installée : iOS ouvre Stripe dans une fenêtre à part, qui revient ici SANS la partie du joueur
       // (pas de session dans cette fenêtre). On n'y lance pas le jeu : on dit de fermer la fenêtre.
       if (!token()) { sheetNotice(st === 'ok', item); return; }
-      try { localStorage.removeItem('bm_pending'); } catch (e) {}
-      const msg = st === 'ok' ? `Paiement reçu. ${item ? item.name : 'Ton vaisseau'} est à toi. Pauline : « Fais-en bon usage. »` : 'Achat annulé. Pauline : « Reviens quand t\'auras les moyens. »';
-      const show = (n) => { if (typeof toast === 'function') toast(msg); else if (n < 20) setTimeout(() => show(n + 1), 500); };
-      setTimeout(() => show(0), 2500);
+      if (st !== 'ok') {
+        try { localStorage.removeItem('bm_pending'); } catch (e) {}
+        setTimeout(() => buyPopup('cancel', item), 1200);
+        return;
+      }
+      setTimeout(() => confirmPurchase(item && item.id).catch(() => {}), 1200);
     } catch (e) {}
   })();
   function sheetNotice(ok, item) {
@@ -358,13 +360,77 @@
   async function checkPending() {
     let p = null; try { p = JSON.parse(localStorage.getItem('bm_pending') || 'null'); } catch (e) {}
     if (!p || Date.now() - p.at > 3600e3) { if (p) try { localStorage.removeItem('bm_pending'); } catch (e) {} return; }
+    if (confirming) return;   // la popup d'attente s'en occupe déjà
     await loadOwned();
     if ((owned[p.item] || 0) > p.n) {
       try { localStorage.removeItem('bm_pending'); } catch (e) {}
-      const it = SHIPS.find(x => x.id === p.item);
-      if (typeof toast === 'function') toast(`Paiement reçu. ${it ? it.name : 'Ton vaisseau'} est à toi. Pauline : « Fais-en bon usage. »`);
-      if (root && root.classList.contains('on')) { if (root.querySelector('.bm-ship.on')) openShip(p.item); else renderCatalog(); }
+      purchaseDone(p.item);
     }
+  }
+  // ── Popup de fin d'achat (03/11, Adrien) : « Achat confirmé » une fois le paiement inscrit par le serveur ──
+  // Stripe renvoie le joueur avant que le webhook ait inscrit l'achat : on attend la confirmation (jusqu'à ~45 s).
+  let confirming = false;
+  async function confirmPurchase(itemId) {
+    if (confirming) return; confirming = true;
+    let p = null; try { p = JSON.parse(localStorage.getItem('bm_pending') || 'null'); } catch (e) {}
+    const id = itemId || (p && p.item), before = p && p.item === id ? p.n : null;
+    const it = SHIPS.find(x => x.id === id);
+    const pop = buyPopup('wait', it);
+    try {
+      for (let i = 0; i < 15; i++) {
+        await loadOwned();
+        if (before == null ? (owned[id] || 0) > 0 : (owned[id] || 0) > before) {
+          try { localStorage.removeItem('bm_pending'); } catch (e) {}
+          pop.remove(); purchaseDone(id); return;
+        }
+        await new Promise(r => setTimeout(r, 3000));
+      }
+      pop.remove(); buyPopup('late', it);   // bm_pending reste : checkPending confirmera au prochain retour dans le jeu
+    } finally { confirming = false; }
+  }
+  function purchaseDone(id) {
+    const it = SHIPS.find(x => x.id === id);
+    if (root && root.classList.contains('on')) { if (root.querySelector('.bm-ship.on')) openShip(id, true); else renderCatalog(); }
+    buyPopup('ok', it);
+  }
+  function buyPopup(kind, it) {
+    const old = document.getElementById('bm-buy-pop'); if (old) old.remove();
+    const c = it ? CATS[it.cat] : null;
+    const mine = it ? units.filter(u => u.item === it.id) : [];
+    const last = mine[mine.length - 1];
+    const edition = it && it.cat === 'arche' && last && last.ed ? `TAXI n° ${String(last.ed).padStart(3, '0')} / 100` : '';
+    const T = {
+      ok:     { eyebrow: 'Blackmarket · achat confirmé', title: 'Achat confirmé', color: '#f1d27a',
+                body: `${it ? `<b>${esc(it.name)}</b> est à toi` : 'Ton vaisseau est à toi'}${c ? ` · ${esc(c.label)}` : ''}${c ? ` · ${chf(c.price).replace(' ', '\u00a0')}` : ''}.${edition ? `<br><span style="font:500 12px 'JetBrains Mono',monospace;letter-spacing:.12em;color:#d9c2ff">${edition}</span>` : ''}<br>Il t'attend dans ta flotte.`,
+                say: it && it.cat === 'arche' ? 'Un seul voyage. Choisis bien où tu le largues.' : 'Fais-en bon usage.' },
+      wait:   { eyebrow: 'Blackmarket · paiement reçu', title: 'Confirmation en cours…', color: '#c9a45a',
+                body: `Stripe a accepté le paiement${it ? ` de <b>${esc(it.name)}</b>` : ''}. Pauline inscrit ton vaisseau au registre, quelques secondes.`, say: 'Deux secondes, je compte les billets.' },
+      late:   { eyebrow: 'Blackmarket · paiement reçu', title: 'Presque fini', color: '#c9a45a',
+                body: `Le paiement est reçu, mais l'inscription${it ? ` de <b>${esc(it.name)}</b>` : ''} prend plus de temps que prévu. Ton vaisseau apparaîtra tout seul d'ici quelques minutes, tu n'as rien à refaire.`, say: 'Le registre traîne. T\'inquiète, il est à toi.' },
+      cancel: { eyebrow: 'Blackmarket', title: 'Achat annulé', color: '#8d98a3',
+                body: 'Rien n\'a été débité.', say: 'Reviens quand t\'auras les moyens.' },
+    }[kind];
+    const d = document.createElement('div'); d.id = 'bm-buy-pop';
+    d.style.cssText = 'position:fixed;inset:0;z-index:2147482000;background:rgba(3,4,6,.78);display:flex;align-items:center;justify-content:center;padding:16px;font-family:"Space Grotesk",system-ui,sans-serif;opacity:0;transition:opacity .25s ease';
+    const art = it && (kind === 'ok' || kind === 'wait') ? `<div style="height:150px;margin:-18px -18px 16px;border-radius:14px 14px 0 0;background:#000 url('${thumb(it.id)}') center/cover;${kind === 'wait' ? 'filter:saturate(.4) brightness(.7)' : ''}"></div>` : '';
+    d.innerHTML = `<div style="width:100%;max-width:360px;background:#0d1114;border:1px solid ${kind === 'ok' ? 'rgba(241,210,122,.5)' : '#262d33'};border-radius:14px;padding:18px;color:#e6edf2;box-shadow:0 20px 60px rgba(0,0,0,.6)">
+      ${art}
+      <div style="font:500 10px 'JetBrains Mono',monospace;letter-spacing:.18em;color:#8d98a3;text-transform:uppercase">${T.eyebrow}</div>
+      <div style="font-size:24px;font-weight:600;margin:6px 0 10px;color:${T.color}">${T.title}</div>
+      <div style="font-size:15px;line-height:1.5;color:#c7d0d8">${T.body}</div>
+      <div style="margin-top:14px;font-size:14px;color:#c9a45a">Pauline : « ${T.say} »</div>
+      ${kind === 'wait' ? '<div style="margin-top:16px;height:3px;border-radius:2px;background:#1c2228;overflow:hidden"><div class="bm-pop-bar" style="height:100%;width:30%;background:#c9a45a;border-radius:2px;animation:bmPopBar 1.2s ease-in-out infinite alternate"></div></div>' :
+        `<div style="display:flex;gap:8px;margin-top:18px">
+          ${kind === 'ok' && it ? '<button data-pop-see style="flex:1;min-height:48px;border:0;border-radius:10px;background:#f1d27a;color:#15110a;font-size:15px;font-weight:600;font-family:inherit">Voir mon vaisseau</button>' : ''}
+          <button data-pop-x style="flex:1;min-height:48px;border:1px solid #2a3138;border-radius:10px;background:transparent;color:#e6edf2;font-size:15px;font-weight:500;font-family:inherit">${kind === 'ok' && it ? 'Plus tard' : 'OK'}</button></div>`}
+    </div><style>@keyframes bmPopBar{from{margin-left:0}to{margin-left:70%}}</style>`;
+    d.addEventListener('click', (e) => {
+      if (e.target.closest('[data-pop-see]')) { d.remove(); try { openOwned(it.id); } catch (er) {} return; }
+      if (e.target.closest('[data-pop-x]') || (e.target === d && kind !== 'wait')) d.remove();
+    });
+    const put = () => { if (!document.body) return setTimeout(put, 50); document.body.appendChild(d); requestAnimationFrame(() => { d.style.opacity = '1'; }); };
+    put();
+    return d;
   }
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') setTimeout(() => checkPending().catch(() => {}), 800); });
   window.addEventListener('focus', () => setTimeout(() => checkPending().catch(() => {}), 800));
