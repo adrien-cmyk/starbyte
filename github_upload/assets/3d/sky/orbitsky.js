@@ -1,13 +1,13 @@
 /* Starbyte — fond orbital partagé de toutes les vues orbitales (03/11, Adrien : photographie spatiale)
    Cubemap 6 × 2048 cuite en Cycles (tools/sky/orbit_bake.py + orbit_post.py dans le dépôt) : planète immense en orbite basse, nuages en relief,
    soleil blanc doré haut-gauche avec halo et rayons, liseré atmosphérique bleu, espace noir aux étoiles rares.
-   Repère cuit : la caméra regarde -Z, le soleil visible est 24° à gauche et 9° au-dessus (l'horizon 35° au-dessous). Chaque vue tourne le ciel autour de Y pour
+   Repère cuit : la caméra regarde -Z, le soleil visible est 12° à gauche et 12° au-dessus (l'horizon 35° au-dessous). Chaque vue tourne le ciel autour de Y pour
    que son axe de départ retrouve ce cadrage, et aligne sa lumière clé sur le soleil (sunDir).
    Les JPEG sont pré-compensés pour l'ACES de three.js (exposition 1) et stockés à mi-échelle (gain 2 dans le shader) : l'image à l'écran est l'image cuite. */
-export const SUN_CANON = [-0.402, 0.156, -0.902];   // soleil visible du fond : 24° à gauche de -Z, 9° au-dessus de l'horizontale cuite
+export const SUN_CANON = [-0.2034, 0.2079, -0.9568];   // soleil visible du fond : 12° à gauche de -Z, 12° au-dessus de l'horizontale cuite
 export const FACES = ['px', 'nx', 'py', 'ny', 'pz', 'nz'];
 export function createOrbitSky(THREE, opts = {}) {
-  const base = opts.base || new URL('./', import.meta.url).href, version = opts.version || '20261103b';   // les JPEG vivent à côté de ce module
+  const base = opts.base || new URL('./', import.meta.url).href, version = opts.version || '20261103c';   // les JPEG vivent à côté de ce module
   const fwd = opts.forward || [0, 0, -1];
   const th = Math.atan2(fwd[0], -fwd[2]);                       // rotation monde → repère cuit (autour de Y)
   // bascule : les caméras des fiches plongent de ~15° vers le vaisseau et l'horizon cuit est 35° sous l'horizontale ; on incline le ciel
@@ -30,6 +30,9 @@ export function createOrbitSky(THREE, opts = {}) {
   mesh.frustumCulled = false; mesh.renderOrder = -100; mesh.name = 'orbitSky';
   const tex = new THREE.CubeTextureLoader().setPath(base).load(FACES.map(f => `orbit_${f}.jpg?v=${version}`), () => { uni.uOn.value = 1; if (opts.onLoad) opts.onLoad(tex); }, undefined, (e) => { console.warn('[OrbitSky]', e); if (opts.onError) opts.onError(e); });
   tex.colorSpace = THREE.SRGBColorSpace; uni.uSky.value = tex;
+  // pas de mipmaps : sur iOS le niveau de détail choisi diverge d'une face à l'autre (faces entières floutées, coutures droites visibles) ;
+  // à 2048 px par face la vue est en agrandissement, le filtrage linéaire suffit
+  tex.generateMipmaps = false; tex.minFilter = THREE.LinearFilter; tex.magFilter = THREE.LinearFilter;
   // position de départ caméra de la vue (direction cible → caméra), pour poser une lumière clé cohérente : sunDir
   function fit(aspect) {
     pitch = pitchFor(aspect) * Math.PI / 180;

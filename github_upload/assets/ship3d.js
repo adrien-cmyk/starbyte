@@ -5,7 +5,7 @@
    `ship` (facultatif) : profil d'un autre vaisseau mis à l'échelle de la scène du KV-01 (V m de scène par m réel,
    proue glTF recalée sur z = 600) — tuyères, axe de la bulle, table de section de coque (voir PROFIL_KV01).
 */
-import { createOrbitSky, forwardFrom } from './3d/sky/orbitsky.js?v=20261103b';   // fond orbital partagé (planète, soleil haut-gauche)
+import { createOrbitSky, forwardFrom } from './3d/sky/orbitsky.js?v=20261103c';   // fond orbital partagé (planète, soleil haut-gauche)
 // Moteur 3D partagé du jeu (window.SB3D, exposé par planet3d.js) : pas de seconde copie de three.js.
 // MapControls = OrbitControls avec une autre affectation des gestes ; on remet celle d'une orbite.
 function libs() {
@@ -284,7 +284,7 @@ const ship = new THREE.Group();
 scene.add(ship);
 // soleil puissant droit devant : le cuirassé fonce dans la lumière
 const SUN_DIR = ORBIT ? ORBIT.sunDir.clone() : new THREE.Vector3(-0.42, 0.03, 0.91).normalize();   // en orbite : le soleil du fond (haut-gauche de la vue)
-const key = new THREE.DirectionalLight(ORBIT ? 0xffe3c2 : 0xfff0dc, ORBIT ? 3.6 : 3.4);
+const key = new THREE.DirectionalLight(ORBIT ? 0xffd9a8 : 0xfff0dc, ORBIT ? 4.0 : 3.4);
 key.position.copy(SUN_DIR).multiplyScalar(14);
 key.castShadow = true;
 key.shadow.mapSize.set(MOBILE ? 1024 : 2048, MOBILE ? 1024 : 2048);
@@ -298,8 +298,8 @@ if (P.ground) {                                    // soleil bas sur la gauche, 
 scene.add(key);
 const rim = new THREE.DirectionalLight(0x9db8e8, ORBIT ? 0.9 : 1.3); rim.position.set(-9, 4, -10); scene.add(rim);   // contre-jour froid
 const fill = new THREE.DirectionalLight(ORBIT ? 0xd8c8b8 : 0xb8c6e8, ORBIT ? 0.55 : 0.8); fill.position.set(3, 10, -4); scene.add(fill);
-if (ORBIT) { const bounce = new THREE.DirectionalLight(0xe8cfae, 0.7); bounce.position.set(1, -10, 2); scene.add(bounce); }   // rebond crème de la planète, par en dessous
-scene.add(new THREE.HemisphereLight(ORBIT ? 0x1a2238 : 0x2c3a58, ORBIT ? 0x3a3024 : 0x05060a, 0.55));
+if (ORBIT) { const bounce = new THREE.DirectionalLight(0xa9c4f0, 1.0); bounce.position.set(1, -10, 2); scene.add(bounce); }   // rebond bleuté de la planète et de son atmosphère, par en dessous
+scene.add(new THREE.HemisphereLight(ORBIT ? 0x1a2238 : 0x2c3a58, ORBIT ? 0x2a3a58 : 0x05060a, 0.55));
 const engineLight = new THREE.PointLight(PL[5], 0, 10, 1.7);
 engineLight.position.set(0, P.engineY, P.engineZ);
 ship.add(engineLight);

@@ -5,9 +5,9 @@ from PIL import Image
 SRC, DST, SIZE = sys.argv[1], sys.argv[2], int(sys.argv[3])
 Q = int(sys.argv[4]) if len(sys.argv) > 4 else 86
 SUN_BAKE = np.array([-0.497, 0.5, -0.709]); SUN_BAKE /= np.linalg.norm(SUN_BAKE)   # lampe de la cuisson (ombres des nuages), 30° au-dessus de l'horizontale
-# soleil visible (halo, rayons, disque) : plus bas, 24° à gauche et 9° au-dessus de l'horizontale, pour qu'il entre dans le cadre en haut à gauche
+# soleil visible (halo, rayons, disque) : plus bas, 12° à gauche et 12° au-dessus de l'horizontale, pour qu'il entre dans le cadre en haut à gauche
 # avec l'horizon dans le bas de l'image (référence). L'écart de 18° entre les deux ne se lit pas sur les nuages vus d'orbite.
-SUN = np.array([-0.402, 0.156, -0.902]); SUN /= np.linalg.norm(SUN)
+SUN = np.array([-0.2034, 0.2079, -0.9568]); SUN /= np.linalg.norm(SUN)   # 12° à gauche, 12° au-dessus : dans le coin haut-gauche du cadre en portrait, à son bord en paysage
 FACE = { 'px': ((1, 0, 0), (0, -1, 0)), 'nx': ((-1, 0, 0), (0, -1, 0)), 'py': ((0, 1, 0), (0, 0, 1)), 'ny': ((0, -1, 0), (0, 0, -1)), 'pz': ((0, 0, 1), (0, -1, 0)), 'nz': ((0, 0, -1), (0, -1, 0)) }
 rng = np.random.default_rng(7)
 # étoiles : directions aléatoires, éclat varié
@@ -44,18 +44,39 @@ for f, (look, up) in FACE.items():
     # planète (sous l'horizon, à ~35° sous l'horizontale : ALT 1400 km) : plus sombre et plus chaude — crème / doré / cuivré, pas de blanc craie
     pm = np.clip((-d[..., 1] - 0.52) / 0.08, 0, 1)[..., None]
     lin = lin * ((1 - pm) * np.array([1.0, 0.95, 0.85])[None, None] + pm * 0.80 * np.array([1.0, 0.90, 0.76])[None, None])
+    # ambiance : la planète vire au doré côté soleil et au bleu-gris à l'opposé (lumière rasante), avant l'atmosphère
+    elev = np.degrees(np.arcsin(np.clip(d[..., 1], -1, 1))); H = -34.95
+    hz = d.copy(); hz[..., 1] = 0; hz /= np.maximum(np.linalg.norm(hz, axis=2, keepdims=True), 1e-6)
+    sh = SUN.copy(); sh[1] = 0; sh /= np.linalg.norm(sh)
+    cs = np.clip(hz @ sh, -1, 1)[..., None]                       # 1 face au soleil, -1 à l'opposé
+    warm = np.clip(cs, 0, 1); cool = np.clip(-cs, 0, 1)
+    tint = (1 - warm) * np.array([1.0, 1.0, 1.0]) + warm * np.array([1.08, 0.96, 0.78])
+    tint = (1 - cool) * tint + cool * np.array([0.78, 0.86, 1.0])
+    lin = lin * ((1 - pm) + pm * tint * (0.78 + 0.42 * warm - 0.18 * cool))
+    # atmosphère (analytique, autour du limbe à -34.95°) : liseré brillant, lueur diffusée au-dessus de l'horizon,
+    # voile bleuté sur la planète vue en rasant ; blanc doré vers le soleil, bleu à l'opposé
+    fsun = (0.5 + 0.5 * warm)
+    rimc_in = (1 - warm) * np.array([0.72, 0.84, 1.0]) + warm * np.array([1.0, 0.92, 0.78])
+    rimc_out = (1 - warm) * np.array([0.40, 0.60, 1.0]) + warm * np.array([0.85, 0.72, 0.60])
+    x = np.maximum(elev - H, 0)[..., None]                       # au-dessus du limbe (espace)
+    rim = fsun * (0.9 * np.exp(-x / 0.35) * rimc_in + 0.40 * np.exp(-x / 1.6) * rimc_out + 0.09 * np.exp(-x / 5.0) * np.array([0.35, 0.55, 1.0]))
+    rim = rim * np.clip((elev - H + 0.15) / 0.3, 0, 1)[..., None]   # pas sous le limbe
+    y = np.maximum(H - elev, 0)[..., None]                       # sous le limbe (planète)
+    haze = fsun * (0.45 * np.exp(-y / 3.5) + 0.08 * np.exp(-y / 14.0)) * pm
+    hazec = (1 - warm) * np.array([0.62, 0.76, 1.0]) + warm * np.array([0.95, 0.88, 0.80])
+    lin = lin * (1 - 0.55 * haze) + haze * hazec + rim
     # soleil : halo chaud large + rayons diffus
     cosang = np.clip(d @ SUN, -1, 1); ang = np.degrees(np.arccos(cosang))
     angb = np.degrees(np.arccos(np.clip(d @ SUN_BAKE, -1, 1)))
     lin[angb < 0.8] = 0.0                                  # on efface le disque cuit (le soleil visible est redessiné plus bas)
-    core = np.clip((0.55 - ang) / 0.15, 0, 1)[..., None]   # disque visible : blanc doré, bord doux
+    core = np.clip((0.7 - ang) / 0.18, 0, 1)[..., None]   # disque visible : blanc doré, bord doux
     lin = lin * (1 - core) + core * np.array([1.0, 0.97, 0.90])[None, None]
     # azimut autour de l'axe du soleil
     e1 = np.cross(SUN, [0, 1, 0]); e1 /= np.linalg.norm(e1); e2 = np.cross(SUN, e1)
     phi = np.arctan2(d @ e2, d @ e1)
-    halo = 1.4 * np.exp(-ang / 1.6) + 0.6 * np.exp(-ang / 6.0) + 0.08 * np.exp(-(ang / 12.0) ** 2) + 0.012 * np.exp(-(ang / 30.0) ** 2)
-    ry = rays(phi) * (0.30 * np.exp(-ang / 16.0)) * np.clip((ang - 1.5) / 4.0, 0, 1)
-    glow = (halo + ry)[..., None] * np.array([1.0, 0.84, 0.62])[None, None]
+    halo = 2.2 * np.exp(-ang / 1.8) + 0.9 * np.exp(-ang / 6.5) + 0.14 * np.exp(-(ang / 13.0) ** 2) + 0.02 * np.exp(-(ang / 32.0) ** 2)
+    ry = rays(phi) * (0.40 * np.exp(-ang / 18.0)) * np.clip((ang - 1.5) / 4.0, 0, 1)
+    glow = (halo + ry)[..., None] * np.array([1.0, 0.82, 0.56])[None, None]
     # le voile atténue derrière la planète ? non : le halo est dans l'optique, il se superpose à tout
     lin = lin + glow
     # étoiles : seulement sur le noir

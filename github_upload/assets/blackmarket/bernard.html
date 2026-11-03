@@ -99,7 +99,7 @@ import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { GTAOPass } from 'three/addons/postprocessing/GTAOPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
-import { createOrbitSky, forwardFrom } from '../3d/sky/orbitsky.js?v=20261103b';   // fond orbital partagé (03/11)
+import { createOrbitSky, forwardFrom } from '../3d/sky/orbitsky.js?v=20261103c';   // fond orbital partagé (03/11)
 
 /* ================================================================== réglages */
 const S = 0.01;                                   // 1 unité = 100 m de scène
@@ -210,7 +210,7 @@ const escorts = [];
 const ship = new THREE.Group();
 scene.add(ship);
 const SUN_DIR = ORBIT_SKY.sunDir.clone();   // le soleil du fond : haut-gauche de la vue de départ
-const key = new THREE.DirectionalLight(0xffe3c2, 3.0);   // blanc doré
+const key = new THREE.DirectionalLight(0xffd9a8, 3.4);   // blanc doré
 key.position.copy(SUN_DIR).multiplyScalar(14);
 key.castShadow = true;
 key.shadow.mapSize.set(2048, 2048);
@@ -220,8 +220,8 @@ key.target = ship;
 scene.add(key);
 const rim = new THREE.DirectionalLight(0x9db8e8, 1.3); rim.position.set(-9, 4, -10); scene.add(rim);
 const fill = new THREE.DirectionalLight(0xb8c6e8, 1.15); fill.position.set(3, 10, -4); scene.add(fill);
-scene.add(new THREE.HemisphereLight(0x1a2238, 0x3a3024, 0.8));
-{ const bounce = new THREE.DirectionalLight(0xe8cfae, 0.6); bounce.position.set(1, -10, 2); scene.add(bounce); }   // rebond crème de la planète, par en dessous
+scene.add(new THREE.HemisphereLight(0x1a2238, 0x2a3a58, 0.8));
+{ const bounce = new THREE.DirectionalLight(0xa9c4f0, 0.9); bounce.position.set(1, -10, 2); scene.add(bounce); }   // rebond bleuté de la planète et de son atmosphère, par en dessous
 const engineLight = new THREE.PointLight(0xff7a2a, 0, 12, 1.6);
 engineLight.position.set(0, 0, (NOZZLE_Z - 40) * S);
 ship.add(engineLight);
