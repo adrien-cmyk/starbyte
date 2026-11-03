@@ -11010,7 +11010,18 @@ function _mpChatErr(e) {
   return code ? MP_CHAT_ERRORS[code] : 'Le registre ne répond pas, réessaie';
 }
 function _esc(s) { return String(s == null ? '' : s).replace(/[&<>"'`]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;', '`': '&#96;' }[c])); }
-function _mpEmbInFor(addr) { return (_mpEmbIn || []).find(o => o.address === addr) || null; }
+function _mpEmbInFor(addr) {
+  // plusieurs vaisseaux du même commandant en orbite chez moi (un tanker ET son vaisseau amiral) : on montre le vaisseau d'exception (03/11)
+  const all = (_mpEmbIn || []).filter(o => o.address === addr);
+  if (!all.length) return null;
+  const BM = window.SBBlackmarket;
+  if (BM && BM.envoyFaceCached) {
+    for (const o of all) if (BM.envoyFaceCached(o.presenceId) === undefined) BM.envoyFace(o.presenceId).then(() => { if (typeof mpEmbassyRefresh === 'function') mpEmbassyRefresh(); }).catch(() => {});
+    const face = all.find(o => BM.envoyFaceCached(o.presenceId)); if (face) return face;
+    const named = all.find(o => BM.shipThumbHtml(o.tanker)); if (named) return named;
+  }
+  return all[0];
+}
 function _mpEmbMine(addr) { return (G.tankerMissions || []).find(x => x.status === 'orbital_relay' && x.mpTarget && x.mpTarget.address === addr) || null; }
 function _mpChatBadge(addr) {
   const u = _mpChatUnread[addr];
