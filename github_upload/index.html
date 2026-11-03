@@ -11283,7 +11283,7 @@ function mpEmbassyMountHero(m, inc, pseudo) {
     if (_emb.hero || document.getElementById('scr-embassy').classList.contains('hidden')) return;
     const base = window.Ship3D.profiles && window.Ship3D.profiles.tk07;
     _emb.hero = window.Ship3D.mount(hero, {
-      url: model.url, shiftY: 0.2,
+      url: model.url, shiftY: 0.2, orbit: true,
       ship: Object.assign({}, base || {}, { planet: true, plasma: false, nozzles: [], dustSpeed: 0.35 }),
       onReady: () => hero.classList.remove('u3d-loading'),
       onError: () => { hero.classList.remove('u3d-loading'); hero.classList.add('u3d-fail'); },
@@ -41053,7 +41053,7 @@ function mountFleetStation3D() {
   hero.classList.add('u3d-loading');
   const start = () => {
     fleetShip3D = { sig, handle: window.Ship3D.mount(hero, {
-      url: model.url, shiftY: 0.2, ship: window.Ship3D.profiles ? window.Ship3D.profiles[model.profile] : undefined, dock,
+      url: model.url, shiftY: 0.2, ship: window.Ship3D.profiles ? window.Ship3D.profiles[model.profile] : undefined, dock, orbit: true,
       onReady: () => hero.classList.remove('u3d-loading'),
       onError: () => { hero.classList.remove('u3d-loading'); hero.classList.add('u3d-fail'); },
     }) };
@@ -41116,7 +41116,7 @@ function mountBuildingShip3D(key, tier) {
   hero.classList.add('u3d-loading');
   const start = () => {
     bdShip3D = { key, handle: window.Ship3D.mount(hero, {
-      url: model.url, shiftY: 0.2, ship: window.Ship3D.profiles ? window.Ship3D.profiles[model.profile] : undefined,
+      url: model.url, shiftY: 0.2, ship: window.Ship3D.profiles ? window.Ship3D.profiles[model.profile] : undefined, orbit: true,
       onReady: () => hero.classList.remove('u3d-loading'),
       onError: () => { hero.classList.remove('u3d-loading'); hero.classList.add('u3d-fail'); },
     }) };
@@ -50127,13 +50127,13 @@ if (G.knownTargets && Array.isArray(G.tankerMissions)) {
 <!-- PARRAINAGE_2410 — inviter des commandants : 5 appareils ouvrent le lien → 2 500 métal, une fois (carte en tête de la cloche) -->
 <script src="assets/invite.js?v=20261025-1350"></script>
 <script src="assets/assistance.js?v=20261026-1900"></script>
-<script type="module" src="assets/ship3d.js?v=20261103-orbit5"></script>
+<script type="module" src="assets/ship3d.js?v=20261103-orbit6"></script>
 <!-- PATCH_1510_MISSIONS — tout ce qui vole, fiche de mission des tankers -->
 <script src="assets/missions.js?v=20261103-amiral4"></script>
 <!-- PATCH_1610_SKILLS — skills des bâtiments : apprendre, découvrir, effets -->
 <script src="assets/skills.js?v=20261021-1130"></script>
 <script src="assets/maj.js?v=20261025-1800"></script>
-<script src="assets/blackmarket.js?v=20261103-orbit7"></script>   <!-- Blackmarket v0 : aperçu du catalogue, réservé au compte d'Adrien -->
+<script src="assets/blackmarket.js?v=20261103-orbit8"></script>   <!-- Blackmarket v0 : aperçu du catalogue, réservé au compte d'Adrien -->
 <!-- PATCH_1510_CROWN — The Drifting Crown en 3D (assets/station3d.js, sur le moteur partagé window.SB3D) -->
 <script type="module" src="assets/station3d.js?v=20261022-1047"></script>
 <!-- FORMATION3D — flotte déployée en orbite, vue de haut en formation (remplace la vue orbite) -->

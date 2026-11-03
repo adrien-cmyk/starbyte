@@ -99,7 +99,6 @@ import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { GTAOPass } from 'three/addons/postprocessing/GTAOPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
-import { createOrbitSky, forwardFrom } from '../3d/sky/orbitsky.js?v=20261103e';   // fond orbital partagé (03/11)
 
 /* ================================================================== réglages */
 const S = 0.01;                                   // 1 unité = 100 m de scène
@@ -156,9 +155,33 @@ const pmrem = new THREE.PMREMGenerator(renderer);
 scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
 
 /* ================================================================== fond discret */
-// Fond orbital partagé (photographie spatiale : planète immense, soleil chaud haut-gauche, étoiles rares) — orienté sur la vue de départ
-const ORBIT_SKY = createOrbitSky(THREE, { forward: forwardFrom([0.55, 0.3, -0.78]), dim: 1 / renderer.toneMappingExposure });
-scene.add(ORBIT_SKY.mesh);
+const sky = new THREE.Mesh(new THREE.SphereGeometry(300, 48, 32), new THREE.ShaderMaterial({
+  side: THREE.BackSide, depthWrite: false,
+  vertexShader: `varying vec3 vDir; void main(){ vDir = normalize(position); gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }`,
+  fragmentShader: `
+    varying vec3 vDir;
+    float h(vec3 p){ p = fract(p*0.3183099+.1); p *= 17.0; return fract(p.x*p.y*p.z*(p.x+p.y+p.z)); }
+    float n(vec3 x){ vec3 i=floor(x), f=fract(x); f=f*f*(3.0-2.0*f);
+      return mix(mix(mix(h(i),h(i+vec3(1,0,0)),f.x),mix(h(i+vec3(0,1,0)),h(i+vec3(1,1,0)),f.x),f.y),
+                 mix(mix(h(i+vec3(0,0,1)),h(i+vec3(1,0,1)),f.x),mix(h(i+vec3(0,1,1)),h(i+vec3(1,1,1)),f.x),f.y),f.z); }
+    float fbm(vec3 p){ float a=.5, s=0.; for(int i=0;i<6;i++){ s+=a*n(p); p=p*2.03+vec3(1.7,9.2,3.1); a*=.5; } return s; }
+    void main(){
+      vec3 d = normalize(vDir);
+      vec3 axis = normalize(vec3(0.55, 0.75, -0.35));
+      float band = exp(-pow(dot(d, axis) * 1.8, 2.0));
+      float neb = band * smoothstep(.32, .82, fbm(d * 3.2));
+      float dust = fbm(d * 6.5 + 4.0);
+      vec3 col = vec3(.004,.007,.016);
+      float hue = fbm(d * 2.1 + 7.0);
+      vec3 pc = mix(vec3(.08,.16,.62), vec3(.38,.10,.62), smoothstep(.35,.7,hue));
+      col += pc * neb * .55;
+      col += mix(vec3(.25,.45,1.0), vec3(.70,.30,1.0), smoothstep(.4,.7,hue)) * pow(neb, 2.4) * .55;
+      col *= 1.0 - .7 * smoothstep(.45, .75, dust) * band;
+      col += vec3(.40,.20,.08) * band * pow(smoothstep(.62,.9, fbm(d*9.0+11.0)), 2.0) * .18;
+      gl_FragColor = vec4(col, 1.0);
+    }`
+}));
+scene.add(sky);
 function starField(count, radius, size) {
   const g = new THREE.BufferGeometry();
   const pos = new Float32Array(count * 3), col = new Float32Array(count * 3);
@@ -174,7 +197,7 @@ function starField(count, radius, size) {
   g.setAttribute('color', new THREE.BufferAttribute(col, 3));
   return new THREE.Points(g, new THREE.PointsMaterial({ size, sizeAttenuation: false, vertexColors: true, depthWrite: false, fog: false }));
 }
-// (étoiles : dans le fond orbital)
+scene.add(starField(3000, 280, 1.2), starField(220, 280, 2.2));
 const DUST_N = 1100, DUST_BOX = 40;
 const dustGeo = new THREE.BufferGeometry();
 const dustPos = new Float32Array(DUST_N * 3);
@@ -206,8 +229,8 @@ const escorts = [];
 /* ================================================================== lumière : soleil de face */
 const ship = new THREE.Group();
 scene.add(ship);
-const SUN_DIR = ORBIT_SKY.sunDir.clone();   // le soleil du fond : haut-gauche de la vue de départ
-const key = new THREE.DirectionalLight(0xffd9a8, 3.4);   // blanc doré
+const SUN_DIR = new THREE.Vector3(-0.42, 0.10, 0.90).normalize();
+const key = new THREE.DirectionalLight(0xfff0dc, 3.0);
 key.position.copy(SUN_DIR).multiplyScalar(14);
 key.castShadow = true;
 key.shadow.mapSize.set(2048, 2048);
@@ -217,8 +240,7 @@ key.target = ship;
 scene.add(key);
 const rim = new THREE.DirectionalLight(0x9db8e8, 1.3); rim.position.set(-9, 4, -10); scene.add(rim);
 const fill = new THREE.DirectionalLight(0xb8c6e8, 0.8); fill.position.set(3, 10, -4); scene.add(fill);
-scene.add(new THREE.HemisphereLight(0x1a2238, 0x2a3a58, 0.55));
-{ const bounce = new THREE.DirectionalLight(0xa9c4f0, 0.9); bounce.position.set(1, -10, 2); scene.add(bounce); }   // rebond bleuté de la planète et de son atmosphère, par en dessous
+scene.add(new THREE.HemisphereLight(0x2c3a58, 0x05060a, 0.55));
 const engineLight = new THREE.PointLight(0x80a8ff, 0, 10, 1.7);
 engineLight.position.set(0, 0, (NOZZLE_Z - 40) * S);
 ship.add(engineLight);
@@ -382,7 +404,6 @@ for (const [size, stops, opacity, sx] of [
   sp.position.copy(sunPos);
   sunGroup.add(sp);
 }
-sunGroup.visible = false;   // halo et rayons : cuits dans le fond orbital
 scene.add(sunGroup);
 
 /* ================================================================== bulle de choc plasma
@@ -944,7 +965,7 @@ controls.enableDamping = true; controls.dampingFactor = 0.08;
 controls.enablePan = false;
 controls.rotateSpeed = 0.55; controls.zoomSpeed = 0.9;
 controls.minDistance = 0.9;
-controls.maxDistance = fitDistance() * (typeof ORBIT !== 'undefined' && ORBIT ? 2.6 : 1.6);   // ambassade (orbit) : on peut reculer bien plus loin
+controls.maxDistance = fitDistance() * 1.6;
 controls.minPolarAngle = Math.PI * 0.10;
 controls.maxPolarAngle = Math.PI * 0.86;
 controls.touches = { ONE: THREE.TOUCH.ROTATE, TWO: THREE.TOUCH.DOLLY_ROTATE };
@@ -971,7 +992,7 @@ const bloom = new UnrealBloomPass(new THREE.Vector2(innerWidth / 2, innerHeight 
 composer.addPass(bloom);
 composer.addPass(new OutputPass());
 addEventListener('resize', () => {
-  camera.aspect = innerWidth / innerHeight; ORBIT_SKY.fit(camera.aspect); fitDistance.cached = 0; controls.maxDistance = fitDistance() * (typeof ORBIT !== 'undefined' && ORBIT ? 2.6 : 1.6);   // ambassade (orbit) : on peut reculer bien plus loin
+  camera.aspect = innerWidth / innerHeight; fitDistance.cached = 0; controls.maxDistance = fitDistance() * 1.6;
   renderer.setSize(innerWidth, innerHeight); composer.setSize(innerWidth, innerHeight);
   bloom.resolution.set(innerWidth / 2, innerHeight / 2);
   ANOM.pts.uniforms.uPix.value = innerHeight * 0.5; ANOM.smoke.m.uniforms.uPix.value = innerHeight * 0.5;

@@ -167,7 +167,8 @@ const sky = new THREE.Mesh(new THREE.SphereGeometry(300, 48, 32), new THREE.Shad
     }`
 }));
 // Vue orbitale : fond photographique partagé (planète immense, soleil chaud haut-gauche) ; le ciel procédural ne sert plus qu'au sol
-const ORBIT = !P.ground ? createOrbitSky(THREE, { forward: forwardFrom(P.camDir || [0.55, 0.24, -0.80]), aspect: W() / H() }) : null;
+// fond : en orbite (opts.orbit — station et flotte à quai, ambassade, tanker en orbite) le panorama planète partagé ; sinon l'espace profond d'origine (unité en vol)
+const ORBIT = (!P.ground && opts.orbit) ? createOrbitSky(THREE, { forward: forwardFrom(P.camDir || [0.55, 0.24, -0.80]), aspect: W() / H() }) : null;
 if (ORBIT) scene.add(ORBIT.mesh); else scene.add(sky);
 if (P.ground) {                                    // bâtiment au sol : crépuscule sur Kerath, régolithe, dalle
   sky.material = new THREE.ShaderMaterial({
