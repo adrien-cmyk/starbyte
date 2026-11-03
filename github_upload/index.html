@@ -11338,8 +11338,13 @@ function _mpSys(coord) { const m = String(coord || '').match(/^[A-Z]-[A-Z]-\d{4}
 function _mpOnline() { return !!(window.SBMP && window.SBMP.ready && window.SBMP.ready()); }
 // Balises posées, telles que le registre doit les connaître (3 au plus)
 function mpBeaconList() {
-  return sbAllProbes().filter(p => p.tier === 'beacon' && p.state === 'deployed' && _mpSys(p.deployedSystem))
-    .slice(0, 21).map(p => ({ local_id: String(p.id), system: _mpSys(p.deployedSystem) }));
+  // ROUTES_V2 (03/11) : une flotte postée voit par elle-même — au registre, elle compte comme une balise sur son système
+  // (règles de visibilité, interceptions et embuscades automatiques inchangées côté serveur). Elles passent en premier.
+  const eyes = ((G.fleet && G.fleet.prepared) || []).filter(f => f.ambush && f.ambush.system && (f.ambush.phase === 'posted' || f.ambush.phase === 'going') && _mpSys(f.ambush.system))
+    .map(f => ({ local_id: 'amb-' + String(f.id).slice(0, 60), system: _mpSys(f.ambush.system) }));
+  const probes = sbAllProbes().filter(p => p.tier === 'beacon' && p.state === 'deployed' && _mpSys(p.deployedSystem))
+    .map(p => ({ local_id: String(p.id), system: _mpSys(p.deployedSystem) }));
+  return eyes.concat(probes).slice(0, 21);
 }
 
 // Coordonnée d'un dock : déterministe (même dock = même système pour tous les joueurs), dans la zone de test
@@ -11799,29 +11804,38 @@ async function mpAmbushStart(fleetId, onlySystems) {   // PATCH_1510_ROUTES_UX :
   if (!armed) { toast('Il faut des frégates ou des cuirassés pour aborder un convoi'); return; }
   if (!_mpOnline()) { toast('Registre hors ligne : réessaie dans un instant'); return; }
   if (!(await mpPeaceGuard('Poster cette flotte en embuscade'))) return;   // PATCH_2410_PACIFIQUE
-  const beacons = mpBeaconList().filter(b => !Array.isArray(onlySystems) || onlySystems.includes(b.system));
-  if (!beacons.length) { toast(Array.isArray(onlySystems) ? 'Pose d\'abord une balise sur un jalon de cette route' : 'Pose d\'abord une balise sur un système (Centre de prospection)'); return; }
+  // ROUTES_V2 (03/11) : on poste sur n'importe quel système d'une route connue (jalons des lignes remontées, routes ouvertes), ou sur une de ses balises
+  const _cand = new Map();
+  for (const b of mpBeaconList()) if (!String(b.local_id).startsWith('amb-')) _cand.set(b.system, { local_id: b.local_id, system: b.system, via: 'ta balise' });
+  try {
+    for (const r of (G.routes || [])) {
+      const chain = r.portSys && window.SBLines && SBLines.knownChain ? SBLines.knownChain(r.portSys) : (Array.isArray(r.chain) ? r.chain : []);
+      for (const x of chain) if (_mpSys(x) && !_cand.has(x)) _cand.set(x, { local_id: null, system: x, via: r.name || 'route connue' });
+    }
+  } catch (e) {}
+  const beacons = [..._cand.values()].filter(b => !Array.isArray(onlySystems) || onlySystems.includes(b.system));
+  if (!beacons.length) { toast(Array.isArray(onlySystems) ? 'Aucun système connu sur cette route' : 'Découvre d\'abord une route (signal d\'antenne + balise) ou pose une balise sur un système'); return; }
   const taken = new Set((G.fleet.prepared || []).filter(x => x.ambush && x.id !== f.id).map(x => x.ambush.system));
   // PATCH_1510_ORDRES — par une route connue (et balisée), la flotte arrive plus vite ; les jalons de lignes sont signalés
   const _trv = (x) => (window.SBLines && SBLines.ambushTravel) ? SBLines.ambushTravel(x, _mpAmbushTravelMs(x)) : { ms: _mpAmbushTravelMs(x), route: null };
   const _lineAt = (x) => { try { return !!(window.SBLines && (SBLines.network().bySys[x] || []).some(o => !o.isPort)); } catch (e) { return false; } };
   const _esc = (x) => String(x == null ? '' : x).replace(/[<>&"]/g, '');
-  const choice = beacons.length === 1 ? beacons[0] : await _mpChoose('Embuscade · choisis ta balise', beacons.map(b => { const tv = _trv(b.system); return {
-    ...b, label: b.system, sub: `${Math.round(tv.ms / 60000)} min${tv.route ? ' par ' + _esc(tv.route.name) : ' de trajet'}${_lineAt(b.system) ? ' · des convois PNJ y passent' : ''}${taken.has(b.system) ? ' · une autre flotte y est déjà' : ''}` }; }));
+  const choice = beacons.length === 1 ? beacons[0] : await _mpChoose('Embuscade · où poster la flotte ?', beacons.map(b => { const tv = _trv(b.system); return {
+    ...b, label: b.system + (b.via ? ' · ' + _esc(b.via) : ''), sub: `${Math.round(tv.ms / 60000)} min${tv.route ? ' par ' + _esc(tv.route.name) : ' de trajet'}${_lineAt(b.system) ? ' · des convois PNJ y passent' : ''}${taken.has(b.system) ? ' · une autre flotte y est déjà' : ''}` }; }));
   if (!choice) return;
   const sys = choice.system;
   const _tr = _trv(sys);
   const travel = _tr.ms;
-  const orders = window.SBLines ? await SBLines.chooseOrders(null) : { mode: 'manual', players: false };
+  const orders = window.SBLines ? await SBLines.chooseOrders(null) : { mode: 'rob_heavy', players: false };
   if (!orders) return;
-  const _ordTxt = window.SBLines ? SBLines.ORDER_MODES[orders.mode].label + (orders.mode === 'manual' ? '' : orders.players ? ' · convois de joueurs compris' : ' · convois PNJ seulement') : '';
+  const _ordTxt = orders.players ? 'convois PNJ et de joueurs' : 'convois PNJ seulement';
   const fuel = computeMissionFuelCost(f, { distanceMult: typeof _carnetDistanceMult === 'function' ? _carnetDistanceMult(sys.split('-')[1]) : 3 });
   if ((G.res.energie.v || 0) < fuel) { toast(`Énergie insuffisante : ${fmt(fuel)} requis`); return; }
   const tankers = ['t1', 't2', 't3'].reduce((s, t) => s + ((f.composition.tanker && f.composition.tanker[t]) || 0), 0);
   const ok = await sbConfirmWarning('Embuscade',
     `Poster <strong>${f.name}</strong> en embuscade sur <strong>${sys}</strong> ?<br><br>Trajet ${Math.round(travel / 60000)} min${_tr.route ? ` par <strong>${_esc(_tr.route.name)}</strong>` : ''} · ${fmt(fuel)} énergie.`
-    + (_ordTxt ? `<br>Ordres : <strong>${_ordTxt}</strong>` : '')
-    + `<br><br>Une fois en place, chaque convoi que ta balise repère peut être <strong>dévalisé</strong> ou <strong>espionné</strong>.`
+    + (_ordTxt ? `<br>Cibles : <strong>${_ordTxt}</strong>` : '')
+    + `<br><br>Une fois en place, elle <strong>dévalise les convois aux cales pleines</strong> qui passent, laisse filer les cales légères et reste cachée devant une escorte plus forte qu'elle.`
     + (tankers ? '' : `<br><br><span style="color:#ffc864">Sans tanker dans la flotte, aucun butin ne pourra être emporté.</span>`)
     + `<br><br><em>Loin de ta planète, cette flotte ne la protège plus.</em>`, 'Partir en embuscade');
   if (!ok) return;
@@ -11832,7 +11846,7 @@ async function mpAmbushStart(fleetId, onlySystems) {   // PATCH_1510_ROUTES_UX :
   f.missionStartedAt = now;
   f.missionEndsAt = null;
   f.missionTargetId = null;
-  f.ambush = { system: sys, beaconId: choice.local_id, phase: 'going', world: G.activeWorld || 'home', departedAt: now, arrivesAt: now + travel, travelMs: travel, hold: {}, mpAmbushId: null,
+  f.ambush = { system: sys, beaconId: choice.local_id || null, phase: 'going', world: G.activeWorld || 'home', departedAt: now, arrivesAt: now + travel, travelMs: travel, hold: {}, mpAmbushId: null,
     orders, routeId: _tr.route ? _tr.route.id : null, routeChain: _tr.route ? _tr.route.chain.slice(0, 14) : null };   // PATCH_1510_ORDRES
   if (typeof startMissionTimerLoop === 'function') startMissionTimerLoop();
   toast(`${f.name} part en embuscade sur ${sys} · ${Math.round(travel / 60000)} min`);
@@ -11846,13 +11860,14 @@ async function mpAmbushRegister(f) {
   try {
     const payload = _mpFleetPayload(f);
     payload.soldiers = { garde: 0, lourd: 0 };
+    try { await window.SBMP.beaconsSync(mpBeaconList()); } catch (e) {}   // ROUTES_V2 : la flotte postée est ses propres yeux au registre
     a.mpAmbushId = await window.SBMP.ambushPost(f.id, f.name, a.system, payload);
     a.blind = false;
     if (window.SBLines && SBLines.pushOrders) { a.ordersSync = false; a.ordersTry = 0; SBLines.pushOrders(f, true); }   // PATCH_1510_ORDRES
     if (typeof saveGame === 'function') saveGame();
   } catch (e) {
-    if (/no_beacon/.test(String(e && e.message)) && !a.blind) { a.blind = true; toast(`${f.name} : plus de balise sur ${a.system}, la flotte attend à l'aveugle`); }
-    else console.warn('[embuscade] inscription :', e && e.message || e);
+    a.blind = false;   // ROUTES_V2 : plus d'« aveugle » ; une inscription refusée est simplement retentée à la prochaine relève
+    console.warn('[embuscade] inscription :', e && e.message || e);
   } finally { _mpAmbushBusy.delete(f.id); }
 }
 // Tick (boucle des missions) : arrivée sur la balise, retour au port. Renvoie true si la flotte est rentrée.
@@ -11886,7 +11901,8 @@ function _mpAmbushPhaseText(f) {
   const now = Date.now();
   if (a.phase === 'going') return `Arrivée dans ${formatMissionTimer(Math.max(0, a.arrivesAt - now))}`;
   if (a.phase === 'returning') return `Retour au port dans ${formatMissionTimer(Math.max(0, a.returnsAt - now))}`;
-  return (a.blind ? 'En place · balise retirée : à l\'aveugle' : 'En place · à l\'affût') + (window.SBLines && SBLines.ordersLabel ? ' · ' + SBLines.ordersLabel(f).replace('Ordres : ', '') : '');   // PATCH_1510_ORDRES
+  const _hold = a.hold && Object.values(a.hold).some(v => v > 0) ? ` · en cale : ${typeof _mpResLine === 'function' ? _mpResLine(a.hold) : ''}` : '';
+  return `En embuscade sur ${a.system} · à l'affût` + (window.SBLines && SBLines.ordersLabel ? ' · ' + SBLines.ordersLabel(f) : '') + _hold;   // ROUTES_V2
 }
 async function mpAmbushRecall(fleetId) {
   const f = (G.fleet.prepared || []).find(x => x.id === fleetId);
@@ -49828,7 +49844,7 @@ if (G.knownTargets && Array.isArray(G.tankerMissions)) {
 <!-- PERF_1310 — mesure des performances chez les joueurs + qualité 3D automatique (assets/perf.js) -->
 <script src="assets/perf.js?v=20261022-2000"></script>
 <!-- PATCH_1410_LIGNES — lignes PNJ à horaire sur les routes cachées (assets/lines.js) -->
-<script src="assets/lines.js?v=20261103-v2"></script>
+<script src="assets/lines.js?v=20261103-v2b"></script>
 <!-- CLOUD — sauvegarde Supabase (source : sb-build/src/cloud.js) -->
 <script type="module" src="assets/cloud.js?v=20261022-1420"></script>
 <!-- MATCH3 — Match-3 V2 (assets/match3.js, source src/match3.js + src/m3core.js) : remplace startM3 -->

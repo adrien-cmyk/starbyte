@@ -902,28 +902,28 @@
   const cnt = (f, type, t) => Math.max(0, (f.composition && f.composition[type] && f.composition[type][t]) || 0);
   const sumRes = (o) => ['metal', 'energie', 'cristal'].reduce((s, k) => s + Math.max(0, Math.floor(Number(o && o[k]) || 0)), 0);
   const resLine = (o) => (typeof _mpResLine === 'function') ? _mpResLine(o) : JSON.stringify(o);
+  // v2 (03/11, Adrien) : plus de menu d'ordres. Une flotte postée dévalise ce qui passe avec les cales pleines, laisse filer les cales
+  // légères et reste cachée devant une escorte plus forte. Une seule question au départ : les convois des autres joueurs aussi ?
+  // (les anciens modes restent lisibles pour les flottes déjà postées ; « manual » devient « cales pleines »)
   function ordersOf(f) {
     const o = f && f.ambush && f.ambush.orders;
-    const mode = (o && ORDER_MODES[o.mode]) ? o.mode : 'manual';
-    return { mode, players: mode !== 'manual' && !!(o && o.players) };
+    const mode = (o && ORDER_MODES[o.mode] && o.mode !== 'manual') ? o.mode : 'rob_heavy';
+    return { mode, players: !!(o && o.players) };
   }
   function ordersLabel(f) {
     const o = ordersOf(f);
-    return o.mode === 'manual' ? 'Ordres : à tes ordres' : `Ordres : ${ORDER_MODES[o.mode].short}${o.players ? ' · joueurs compris' : ' · PNJ seulement'}`;
+    return `${o.mode === 'rob_heavy' ? 'dévalise les cales pleines' : ORDER_MODES[o.mode].short}${o.players ? ' · joueurs compris' : ' · PNJ seulement'}`;
   }
   async function chooseOrders(cur) {
     if (typeof _mpChoose !== 'function') return null;
-    const m = await _mpChoose('Ordres permanents de la flotte', Object.entries(ORDER_MODES).map(([k, v]) => ({ k, label: v.label + (cur && cur.mode === k ? ' · actuel' : ''), sub: v.sub })));
-    if (!m) return null;
-    if (m.k === 'manual') return { mode: 'manual', players: false };
-    // PATCH_2410_PACIFIQUE : aborder des convois, PNJ compris, met fin au statut pacifique (la filature non)
-    if (m.k !== 'spy' && typeof mpPeaceGuard === 'function' && !(await mpPeaceGuard('Ordonner à cette flotte d\'aborder des convois'))) return null;
-    const p = await _mpChoose('Et les convois des autres commandants ?', [
-      { v: false, label: 'Seulement les convois PNJ', sub: 'Un convoi de joueur attend ta décision' },
-      { v: true, label: 'Les convois de joueurs aussi', sub: 'Même quand tu n\'es pas là. Pactes, saison et protections restent respectés' },
+    // PATCH_2410_PACIFIQUE : aborder des convois, PNJ compris, met fin au statut pacifique
+    if (typeof mpPeaceGuard === 'function' && !(await mpPeaceGuard('Poster une flotte qui aborde des convois'))) return null;
+    const p = await _mpChoose('Attaquer aussi les autres joueurs ?', [
+      { v: false, label: 'Non · seulement les convois PNJ' + (cur && !cur.players ? ' · actuel' : ''), sub: 'Marchands, contrebandiers, pèlerins… jamais le tanker d\'un autre commandant' },
+      { v: true, label: 'Oui · les convois de joueurs aussi' + (cur && cur.players ? ' · actuel' : ''), sub: 'Même quand tu n\'es pas là. Pactes, saison et protections restent respectés' },
     ]);
     if (!p) return null;
-    return { mode: m.k, players: p.v };
+    return { mode: 'rob_heavy', players: p.v };
   }
   async function pushOrders(f, force) {
     const a = f && f.ambush;
@@ -1115,7 +1115,7 @@
       const a = f.ambush;
       if (!a || a.phase !== 'posted') continue;
       pushOrders(f);
-      if (a.blind || !seesHere(a.system)) { a.npcAt = now; pushNpc(f); continue; }   // sans balise : à l'aveugle
+      a.blind = false;   // v2 : une flotte postée voit par elle-même (plus besoin de balise sur son système)
       const on = (net.bySys[a.system] || []).filter(o => !o.isPort);
       const from = Math.max(a.npcAt || a.postedAt || now, now - HEAT_MS);
       a.npcAt = now;
@@ -1191,7 +1191,7 @@
   function npcReportCan(r) {
     if (!r || !r.line || r.line.port || r.line.done || r.line.k == null || Date.now() > (r.expiresAt || 0)) return null;
     const f = (typeof _mpPostedFleetAt === 'function') ? _mpPostedFleetAt(r.systemCoord) : null;
-    if (!f || !seesHere(r.systemCoord)) return null;
+    if (!f) return null;   // v2 : la flotte voit par elle-même
     const line = network().byId[r.line.id];
     if (!line) return null;
     const i = line.chain.indexOf(r.systemCoord);
