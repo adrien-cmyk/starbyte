@@ -40990,10 +40990,11 @@ function shipHeroGestures(scrId = 'scr-unit-detail', getHandle = () => unitShip3
 function hasShipyardBuilt() {
   return !!(typeof G !== 'undefined' && G.planet && G.planet.parcels && G.planet.parcels.some(p => p && p.building === 'shipyard' && p.state === 'built'));
 }
+// proportions à quai = formation3d.js × 0,6 (tanker 2,0 / frégate 1,3 / cuirassé 0,22)
 const DOCK_MODELS = {
-  tanker:   { url: 'assets/3d/sb_tk07_lod.glb?v=20261014-1440', engine: [1.0, 0.7, 0.4] },
-  fregate:  { url: 'assets/3d/sb_sr01_lod.glb?v=20261014-1440', engine: [0.5, 0.78, 1.0] },
-  cuirasse: { url: 'assets/3d/sb_kv01_lod.glb?v=20261014-1440', engine: [0.5, 0.78, 1.0] },
+  tanker:   { url: 'assets/3d/sb_tk07_lod.glb?v=20261014-1440', engine: [1.0, 0.7, 0.4], scale: 1.2 },
+  fregate:  { url: 'assets/3d/sb_sr01_lod.glb?v=20261014-1440', engine: [0.5, 0.78, 1.0], scale: 0.78 },
+  cuirasse: { url: 'assets/3d/sb_kv01_lod.glb?v=20261014-1440', engine: [0.5, 0.78, 1.0], scale: 0.132 },
 };
 function fleetStationedCount(k) {
   const c = (G.fleet && G.fleet.stationed && G.fleet.stationed[k]) || {};
@@ -41002,20 +41003,20 @@ function fleetStationedCount(k) {
 function fleetDockList() {
   // Postes à quai, repère glTF de la station, en mètres.
   const out = [];
-  const tankSlots = [[0, -10.5, -190, Math.PI], [187, -20, 0, Math.PI / 2], [-187, -20, 0, -Math.PI / 2], [0, -20, 187, 0]];   // d'abord le quai de la jetée-hangar, puis sous les bras
+  const tankSlots = [[0, -10.5, -190, Math.PI], [187, -22, 0, Math.PI / 2], [-187, -22, 0, -Math.PI / 2], [0, -22, 187, 0]];   // d'abord le quai de la jetée-hangar, puis sous les bras
   for (let i = 0; i < Math.min(4, fleetStationedCount('tanker')); i++) {
     const [x, y, z, r] = tankSlots[i];
     out.push({ ...DOCK_MODELS.tanker, type: 'tanker', pos: [x, y, z], rotY: r });
   }
   // frégates amarrées le long des bras diagonaux (lat : côté du bras, poupe vers l'anneau, proue vers l'extérieur) ;
-  // cuirassé à quai de l'autre côté du bras avant gauche, à échelle de maquette (1 318 m réels : il écraserait la station)
+  // cuirassé à quai de l'autre côté du bras. Échelle de maquette : mêmes proportions entre vaisseaux que la flotte en orbite (formation3d.js ×0,6)
   const berth = (deg, r, lat, y) => { const a = deg * Math.PI / 180; return { pos: [r * Math.cos(a) + lat * Math.sin(a), y, -r * Math.sin(a) + lat * Math.cos(a)], rotY: a + Math.PI / 2 }; };
-  const frigBerths = [[45, 26], [225, 26], [135, -26], [315, -26]];
+  const frigBerths = [[45, 24], [225, 24], [135, -24], [315, -24]];
   for (let i = 0; i < Math.min(4, fleetStationedCount('fregate')); i++) {
     const [deg, lat] = frigBerths[i];
-    out.push({ ...DOCK_MODELS.fregate, type: 'fregate', ...berth(deg, 195, lat, -8) });
+    out.push({ ...DOCK_MODELS.fregate, type: 'fregate', ...berth(deg, 195, lat, -6) });
   }
-  if (fleetStationedCount('cuirasse') > 0) out.push({ ...DOCK_MODELS.cuirasse, type: 'cuirasse', scale: 0.12, ...berth(135, 239, 24.7, -13) });
+  if (fleetStationedCount('cuirasse') > 0) out.push({ ...DOCK_MODELS.cuirasse, type: 'cuirasse', ...berth(135, 247, 26.2, -14) });
   return out;
 }
 let fleetShip3D = null;   // { sig, handle }
