@@ -636,7 +636,7 @@ controls.enableDamping = true; controls.dampingFactor = 0.08;
 controls.enablePan = false;
 controls.rotateSpeed = 0.55; controls.zoomSpeed = 0.9;
 controls.minDistance = 3.7;                       // raser la coque (~70 m du bordé)
-controls.maxDistance = fitDistance() * 1.6;
+controls.maxDistance = fitDistance() * (typeof ORBIT !== 'undefined' && ORBIT ? 2.6 : 1.6);   // ambassade (orbit) : on peut reculer bien plus loin
 controls.minPolarAngle = Math.PI * 0.10;
 controls.maxPolarAngle = Math.PI * 0.86;
 controls.touches = { ONE: THREE.TOUCH.ROTATE, TWO: THREE.TOUCH.DOLLY_ROTATE };
@@ -666,7 +666,7 @@ composer.addPass(new OutputPass());
 if (location.hash.includes('noao')) gtao.enabled = false;
 
 addEventListener('resize', () => {
-  camera.aspect = innerWidth / innerHeight; ORBIT_SKY.fit(camera.aspect); fitDistance.cached = 0; controls.maxDistance = fitDistance() * 1.6;
+  camera.aspect = innerWidth / innerHeight; ORBIT_SKY.fit(camera.aspect); fitDistance.cached = 0; controls.maxDistance = fitDistance() * (typeof ORBIT !== 'undefined' && ORBIT ? 2.6 : 1.6);   // ambassade (orbit) : on peut reculer bien plus loin
   renderer.setSize(innerWidth, innerHeight); composer.setSize(innerWidth, innerHeight);
   bloom.resolution.set(innerWidth / 2, innerHeight / 2);
 });
