@@ -3,6 +3,8 @@
 // Le prix et le plafond sont lus dans la base (bm_catalog / bm_categories), jamais dans la demande du jeu.
 // Réponse : { url } — la page de paiement Stripe vers laquelle le jeu redirige.
 // Le joueur doit avoir accepté les CGV et la livraison immédiate (case à cocher) : son accord est gardé dans Stripe.
+// Stripe Managed Payments : Stripe (via Link) est le vendeur officiel, il calcule, déclare et reverse les taxes.
+// Les prix du catalogue sont des prix finaux : les taxes sont incluses dedans (tax_behavior = inclusive).
 // Secret requis (Supabase → Edge Functions → Secrets) : STRIPE_SECRET_KEY (sk_live_… en réel, sk_test_… en test).
 
 import { createClient } from 'npm:@supabase/supabase-js@2';
@@ -13,6 +15,8 @@ const CORS = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
 const SITE = 'https://play.starbyte.online/';
+const STRIPE_VERSION = '2025-03-31.basil';   // version minimale pour Managed Payments
+const TAX_CODE = 'txcd_10000000';            // General - Electronically Supplied Services
 const CGV_VERSION = '2026-11-03';   // à changer quand la section Achats des CGV change
 
 function json(body: unknown, status = 200) {
@@ -57,6 +61,7 @@ Deno.serve(async (req) => {
   // page de paiement Stripe (API REST, sans dépendance)
   const f = new URLSearchParams();
   f.set('mode', 'payment');
+  f.set('managed_payments[enabled]', 'true');
   f.set('locale', 'fr');
   f.set('client_reference_id', user.id);
   f.set('metadata[user_id]', user.id);
@@ -73,18 +78,17 @@ Deno.serve(async (req) => {
   f.set('line_items[0][quantity]', '1');
   f.set('line_items[0][price_data][currency]', 'chf');
   f.set('line_items[0][price_data][unit_amount]', String(item.price_cents));
+  f.set('line_items[0][price_data][tax_behavior]', 'inclusive');
+  f.set('line_items[0][price_data][product_data][tax_code]', TAX_CODE);
   f.set('line_items[0][price_data][product_data][name]', `${item.name} — Starbyte`);
   f.set('line_items[0][price_data][product_data][description]', `${cat?.label || 'Vaisseau'} du Blackmarket`);
-  if (user.email) {
-    f.set('customer_email', user.email);
-    f.set('payment_intent_data[receipt_email]', user.email);   // reçu de Stripe par email
-  }
+  if (user.email) f.set('customer_email', user.email);   // Stripe envoie lui-même le reçu et la facture
   f.set('success_url', `${SITE}?bm=ok&item=${encodeURIComponent(item.item_id)}`);
   f.set('cancel_url', `${SITE}?bm=annule`);
 
   const r = await fetch('https://api.stripe.com/v1/checkout/sessions', {
     method: 'POST',
-    headers: { Authorization: `Bearer ${stripeKey}`, 'Content-Type': 'application/x-www-form-urlencoded' },
+    headers: { Authorization: `Bearer ${stripeKey}`, 'Content-Type': 'application/x-www-form-urlencoded', 'Stripe-Version': STRIPE_VERSION },
     body: f,
   });
   const s = await r.json();

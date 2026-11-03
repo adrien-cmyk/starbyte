@@ -39,7 +39,7 @@
     'Tu négocies ? Retourne compter tes cailloux au match-3.',
     "T'as vu l'acier ? Ça, ça se construit pas dans ton petit chantier.",
   ];
-  const VERSION = '20261103o';
+  const VERSION = '20261103p';
   // Serveur (schema_mp_v31_blackmarket.sql + fonctions bm-checkout / bm-webhook)
   const SB = 'https://elupnpdcblztpfywnhjl.supabase.co';
   const KEY = 'sb_publishable_tXGrQIROzH2DwBrny1GcHQ_iKJKoBOQ';
@@ -240,7 +240,7 @@
           : `Comparé à un cuirassé T3 construit. Jamais détruit : vaincu, il est mis hors service et répare à quai 24 h minimum. Max ${c.cap} ${c.plural.toLowerCase()} par joueur, tous modèles confondus.`}</div>
         ${mine && s.cat === 'arche' && taxiFlight() ? `<button class="bm-buy" data-taxiview style="background:#5b3fa0;color:#f1e8ff">Voir la traversée</button><div class="bm-buy-sub">${esc(mineStatus(s.id))}</div>` : mine ? (tx && !tx.used && !taxiFlight() ? `<button class="bm-buy" data-taxi style="background:#5b3fa0;color:#f1e8ff">Larguer le TAXI</button><div class="bm-buy-sub">Une seule fois · à l'aveugle</div>` : `<div class="bm-buy-sub" style="text-align:left;color:#a7b1ba">${esc(mineStatus(s.id))}</div>`) : (s.cat === 'arche' && taxiLeft === 0 ? `<div class="bm-buy-sub">Édition épuisée. Les 100 TAXI ont trouvé preneur.</div>` : `<label class="bm-consent"><input type="checkbox" data-consent><span>Je veux recevoir ce vaisseau tout de suite et je sais que je perds alors mon droit de rétractation de 14 jours. J'accepte les <a href="https://starbyte.online/cgv.html#achats" target="_blank" rel="noopener">conditions de vente</a>.</span></label>
         <button class="bm-buy" data-buy="${s.id}" disabled>Acheter · ${chf(c.price)}</button>
-        <div class="bm-buy-sub">${owned[s.id] ? `Tu en as déjà ${owned[s.id]} · ` : ''}Paiement par Stripe</div>`)}
+        <div class="bm-buy-sub">${owned[s.id] ? `Tu en as déjà ${owned[s.id]} · ` : ''}Paiement par Stripe · vendu via Link, taxes incluses</div>`)}
       </div>`;
     pane.classList.add('on');
     fitView();
@@ -338,7 +338,7 @@
         : m === 'not_signed_in' ? 'Connecte ton compte (cloud) pour acheter.'
         : m === 'consent_required' ? 'Coche la case pour accepter les conditions de vente.'
         : m === 'stripe_not_configured' ? 'Clé Stripe absente côté serveur (secret STRIPE_SECRET_KEY).'
-        : 'Paiement indisponible pour le moment (' + m + ').', true);
+        : 'Paiement indisponible pour le moment (' + m + (!BM_PUBLIC && e.data && e.data.detail ? ' : ' + e.data.detail : '') + ').', true);
       btn.disabled = false;
     }
   }

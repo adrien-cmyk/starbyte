@@ -7,7 +7,8 @@
 //  · contestation bancaire → l'achat passe en disputed (vaisseau retiré), et revient en paid si elle se conclut en faveur du vendeur.
 // À déployer SANS vérification JWT (Stripe n'a pas de session Supabase).
 // Secrets requis : STRIPE_SECRET_KEY et STRIPE_WEBHOOK_SECRET (whsec_…).
-// Événements à cocher dans Stripe : checkout.session.completed, charge.refunded, charge.dispute.created, charge.dispute.closed.
+// Événements à cocher dans Stripe : checkout.session.completed, checkout.session.async_payment_succeeded,
+// charge.refunded, charge.dispute.created, charge.dispute.closed.
 
 import { createClient } from 'npm:@supabase/supabase-js@2';
 
@@ -60,7 +61,8 @@ Deno.serve(async (req) => {
   const evt = JSON.parse(payload);
   const admin = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!, { auth: { persistSession: false } });
 
-  if (evt.type === 'checkout.session.completed') {
+  // async_payment_succeeded : moyens de paiement locaux confirmés après coup (Managed Payments les propose selon le pays)
+  if (evt.type === 'checkout.session.completed' || evt.type === 'checkout.session.async_payment_succeeded') {
     const s = evt.data.object;
     if (s.payment_status !== 'paid') return new Response('ignored (unpaid)', { status: 200 });
     const userId = s.metadata?.user_id || s.client_reference_id, itemId = s.metadata?.item_id;
