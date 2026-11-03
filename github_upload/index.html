@@ -47650,8 +47650,12 @@ function sbStationWallPaint(id) {
   const box = document.getElementById('station-wall'); if (!box || box.dataset.station !== id) return;
   const c = _wallCache[id]; if (!c) return;
   const list = document.getElementById('station-wall-list'), form = document.getElementById('station-wall-form');
-  if (list) list.innerHTML = c.err && !c.posts.length ? '<div style="font-size:11px;color:var(--mut);font-style:italic">Le mur n\'est pas joignable pour le moment (registre : ' + c.err.replace(/[<>&"]/g, '') + ').</div>' : sbStationWallList(c);
-  if (form && !document.getElementById('station-wall-input')) form.innerHTML = sbStationWallForm(c);
+  if (list) list.innerHTML = c.err && !c.posts.length
+    ? (/does not exist|PGRST202|Could not find/.test(c.err)
+        ? '<div style="font-size:11px;color:var(--mut);font-style:italic">Le mur n\'est pas encore ouvert : le registre doit être mis à jour (script v40).</div>'
+        : '<div style="font-size:11px;color:var(--mut);font-style:italic">Le mur n\'est pas joignable pour le moment.</div>')
+    : sbStationWallList(c);
+  if (form && !document.getElementById('station-wall-input')) form.innerHTML = c.err && !c.posts.length ? '' : sbStationWallForm(c);
 }
 async function sbStationWallSend() {
   const box = document.getElementById('station-wall'), inp = document.getElementById('station-wall-input');
