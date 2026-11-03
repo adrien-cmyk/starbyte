@@ -41000,20 +41000,22 @@ function fleetStationedCount(k) {
   return (c.t1 || 0) + (c.t2 || 0) + (c.t3 || 0);
 }
 function fleetDockList() {
-  // postes : tankers dans les 4 docks de maintenance, frégates en stationnement au bout des bras diagonaux,
-  // un cuirassé au large (il fait 1 200 m, la station 420 m). Repère glTF de la station, en mètres.
+  // Postes à quai, repère glTF de la station, en mètres.
   const out = [];
   const tankSlots = [[0, -10.5, -190, Math.PI], [187, -20, 0, Math.PI / 2], [-187, -20, 0, -Math.PI / 2], [0, -20, 187, 0]];   // d'abord le quai de la jetée-hangar, puis sous les bras
   for (let i = 0; i < Math.min(4, fleetStationedCount('tanker')); i++) {
     const [x, y, z, r] = tankSlots[i];
     out.push({ ...DOCK_MODELS.tanker, type: 'tanker', pos: [x, y, z], rotY: r });
   }
-  const diag = [45, 225, 135, 315];
+  // frégates amarrées le long des bras diagonaux (lat : côté du bras, poupe vers l'anneau, proue vers l'extérieur) ;
+  // cuirassé à quai de l'autre côté du bras avant gauche, à échelle de maquette (1 318 m réels : il écraserait la station)
+  const berth = (deg, r, lat, y) => { const a = deg * Math.PI / 180; return { pos: [r * Math.cos(a) + lat * Math.sin(a), y, -r * Math.sin(a) + lat * Math.cos(a)], rotY: a + Math.PI / 2 }; };
+  const frigBerths = [[45, 26], [225, 26], [135, -26], [315, -26]];
   for (let i = 0; i < Math.min(4, fleetStationedCount('fregate')); i++) {
-    const a = diag[i] * Math.PI / 180, r = 300;
-    out.push({ ...DOCK_MODELS.fregate, type: 'fregate', pos: [r * Math.cos(a), 24, -r * Math.sin(a)], rotY: a + Math.PI });
+    const [deg, lat] = frigBerths[i];
+    out.push({ ...DOCK_MODELS.fregate, type: 'fregate', ...berth(deg, 195, lat, -8) });
   }
-  if (fleetStationedCount('cuirasse') > 0) out.push({ ...DOCK_MODELS.cuirasse, type: 'cuirasse', pos: [-520, -40, 1250], rotY: -1.25 });   // au large, derrière la station
+  if (fleetStationedCount('cuirasse') > 0) out.push({ ...DOCK_MODELS.cuirasse, type: 'cuirasse', scale: 0.12, ...berth(135, 239, 24.7, -13) });
   return out;
 }
 let fleetShip3D = null;   // { sig, handle }
