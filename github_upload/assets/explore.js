@@ -66,7 +66,15 @@
   }
   const save = () => { try { if (typeof saveGame === 'function') saveGame(); } catch (e) {} };
   const sfx = (n, d) => { try { if (window.SBSfx) SBSfx.play(n, d); } catch (e) {} };
-  const allowed = () => { if (EXPLORE_PUBLIC) return true; try { return typeof _sbDevAllowed === 'function' && _sbDevAllowed(); } catch (e) { return false; } };
+  const PREVIEW_PSEUDOS = ['hadrien', 'pauline'];   // l'aperçu suit Adrien sur ses deux comptes (test et partie organique)
+  const allowed = () => {
+    if (EXPLORE_PUBLIC) return true;
+    try {
+      if (typeof _sbDevAllowed === 'function' && _sbDevAllowed()) return true;
+      const names = [window.SBMP && SBMP.world && SBMP.world.pseudo, typeof G !== 'undefined' && G.profile && (G.profile.pseudo || G.profile.name || G.profile.captainName)];
+      return names.some(n => n && PREVIEW_PSEUDOS.includes(String(n).trim().toLowerCase()));
+    } catch (e) { return false; }
+  };
 
   /* ── textes ── */
   function tr(k, vars) { return window.I18N ? I18N.t(k, vars) : k; }
@@ -81,6 +89,8 @@
       'explore.close': 'Refermer',
       'explore.gain': '+{n} biomasse',
       'explore.first': 'Direction la réserve biologique. Les carottes y sont gratuites aussi.',
+      'explore.preview_on': 'Aperçu Explorer actif : touche la boussole sur la carte',
+      'explore.preview_desert': 'Aperçu Explorer : pas de forêt sur cette colonie, reviens sur ta capitale',
       'explore.summary': { one: '{n} lapin · +{g} biomasse', other: '{n} lapins · +{g} biomasse' },
     });
   }
@@ -1067,12 +1077,14 @@
     #sbx-compass { position:absolute; left:0; top:0; z-index:19; width:58px; padding:0; margin:0; border:0; background:none; cursor:pointer; color:rgba(150,235,255,.95);
       display:flex; flex-direction:column; align-items:center; gap:3px; opacity:0; pointer-events:none; transition:opacity .35s ease; -webkit-tap-highlight-color:transparent; will-change:transform; }
     #sbx-compass.on { opacity:1; pointer-events:auto; }
-    #sbx-compass .disc { position:relative; width:50px; height:50px; border-radius:50%; background:rgba(8,18,26,.26); border:1px solid rgba(130,230,255,.34);
+    #sbx-compass .disc { position:relative; width:50px; height:50px; border-radius:50%; background:rgba(8,18,26,.4); border:1px solid rgba(130,230,255,.6);
       backdrop-filter:blur(2.5px); -webkit-backdrop-filter:blur(2.5px); box-shadow:0 0 16px rgba(90,210,255,.14), inset 0 0 12px rgba(90,210,255,.08); animation:sbxBreathe 3.4s ease-in-out infinite; }
+    #sbx-compass.hello .disc::after { content:''; position:absolute; inset:-1px; border-radius:50%; border:2px solid rgba(150,235,255,.9); animation:sbxHello 1.25s ease-out 3; pointer-events:none; }
+    @keyframes sbxHello { from { transform:scale(1); opacity:.95 } to { transform:scale(2.1); opacity:0 } }
     #sbx-compass:active .disc { transform:scale(.93); }
     #sbx-compass svg { position:absolute; inset:0; width:100%; height:100%; display:block; }
-    #sbx-compass .lab { font:600 8px/1 'Space Grotesk',system-ui,sans-serif; letter-spacing:.2em; text-transform:uppercase; color:rgba(190,240,255,.72); text-shadow:0 1px 3px rgba(0,0,0,.8); }
-    @keyframes sbxBreathe { 0%,100% { opacity:.66 } 50% { opacity:.94 } }
+    #sbx-compass .lab { font:600 9px/1 'Space Grotesk',system-ui,sans-serif; letter-spacing:.16em; text-transform:uppercase; color:rgba(205,245,255,.92); text-shadow:0 1px 3px rgba(0,0,0,.8); }
+    @keyframes sbxBreathe { 0%,100% { opacity:.76 } 50% { opacity:1 } }
     #scr-planet.sbx-on > .w-top, #scr-planet.sbx-on > .w-nav, #scr-planet.sbx-on > .w-center, #scr-planet.sbx-on > .w-card, #scr-planet.sbx-on > .w-pop,
     #scr-planet.sbx-on > .w-sheet, #scr-planet.sbx-on > #sb-radio-btn, #scr-planet.sbx-on .p3d-overlay { display:none !important; }
     body.sbx-on #sb-bringue, body.sbx-on #sb-party, body.sbx-on #sb-devast, body.sbx-on #sb-install { display:none !important; }
@@ -1165,7 +1177,7 @@
     if (!installed || !P.ready || window.__sbCinema) return false;
     const scr = document.getElementById('scr-planet');
     if (!scr || scr.classList.contains('hidden') || !P.host || P.host.offsetParent === null) return false;
-    if (window.SBTuto && SBTuto.active && SBTuto.active()) return false;
+    if (EXPLORE_PUBLIC && window.SBTuto && SBTuto.active && SBTuto.active()) return false;
     if (document.querySelector('.w-card.on, .w-sheet.on, #sb-sheet, #sb-away, #mp-choose, #sb-notif')) return false;
     return true;
   }
@@ -1188,7 +1200,10 @@
     const onscreen = sx > L && sx < Rr && sy > Tp && sy < Bt;
     // dans l'exploration, la boussole ne sert que si on s'est éloigné de la clairière
     const wantShow = active ? (!moving && !onscreen) : !moving;
-    if (wantShow !== CP.show) { CP.show = wantShow; UI.compass.classList.toggle('on', wantShow); }
+    if (wantShow !== CP.show) {
+      CP.show = wantShow; UI.compass.classList.toggle('on', wantShow);
+      if (wantShow && !CP.greeted) { CP.greeted = true; UI.compass.classList.add('hello'); setTimeout(() => UI.compass.classList.remove('hello'), 4000); }
+    }
     if (!wantShow) { CP.x = null; return; }
     let px, py, ang;
     if (onscreen) { px = sx; py = Math.max(Tp, sy - 58); ang = Math.PI / 2; }     // la clairière est à l'écran : la flèche se pose au-dessus
@@ -1299,17 +1314,29 @@
     installed = true;
     return true;
   }
+  // aperçu seulement : une bulle confirme que le code tourne sur ce compte, ou dit pourquoi il ne s'affiche pas
+  let previewSaid = false;
+  function previewSay(key) {
+    if (EXPLORE_PUBLIC || previewSaid) return;
+    const t = setInterval(() => {
+      const scr = document.getElementById('scr-planet');
+      if (previewSaid || !scr || scr.classList.contains('hidden') || typeof toast !== 'function') return;
+      previewSaid = true; clearInterval(t);
+      addTexts(); toast(tr(key));
+    }, 1200);
+  }
   const boot = setInterval(() => {
     try {
       const Pl = window.Planet3D;
       if (!Pl || Pl.failed) return;
       if (!Pl.ready || !window.SB3D || !Pl.scene) return;
-      if (typeof window.sbTerrainVariant === 'function' && window.sbTerrainVariant() !== 'jardin') return;   // v1 : planètes-jardins seulement
+      if (typeof window.sbTerrainVariant === 'function' && window.sbTerrainVariant() !== 'jardin') { if (allowed()) previewSay('explore.preview_desert'); return; }   // v1 : planètes-jardins seulement
       let flora = false; Pl.scene.children.forEach(o => { if (o.name === 'SB_GRID_FLORA') flora = true; });
       if (!flora) return;
       if (!allowed()) return;                 // pour les autres joueurs : rien n'est touché
       clearInterval(boot);
       install();
+      previewSay('explore.preview_on');
     } catch (e) { console.warn('[explore] installation', e); clearInterval(boot); }
   }, 800);
 

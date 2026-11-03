@@ -1,4 +1,4 @@
-// Critères de validation du brief Explorer (41 vérifications). Servir github_upload/ sur localhost:8765, puis : node tools/explore/test_explore.js
+// Critères de validation du brief Explorer. Servir github_upload/ sur localhost:8765, puis : node tools/explore/test_explore.js
 const {open,shot,enterNow,OUT}=require('./lib.js');
 let pass=0,fail=0; const check=(n,c,x)=>{ if(c){pass++;console.log('  ok  ',n);} else {fail++;console.log(' FAIL ',n, x===undefined?'':JSON.stringify(x));} };
 (async()=>{
