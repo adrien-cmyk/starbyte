@@ -23,6 +23,12 @@ function report(titre) {
       fs.writeFileSync(path.join(dir, nomFichier + '.json'), JSON.stringify({ titre, date: new Date().toISOString(), rows }, null, 2));
       if (process.env.GITHUB_STEP_SUMMARY) fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, md);
       console.log(md);
+      // annotations visibles directement sur la page du passage
+      if (process.env.GITHUB_ACTIONS) for (const x of rows) {
+        if (x.statut === 'ok') continue;
+        const clean = (t) => t.replace(/[\r\n:,]/g, ' ');
+        console.log(`::${x.statut === 'ko' ? 'error' : 'warning'} title=${clean(x.controle).slice(0, 120)}::${clean(x.detail || x.controle)}`);
+      }
       const n = rows.filter((r) => r.statut === 'ko').length;
       process.exitCode = n ? 1 : 0;
       return n;
