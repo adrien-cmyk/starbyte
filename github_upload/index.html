@@ -47529,6 +47529,8 @@ function crownShowBar() {
 }
 
 function renderDockScreen() {
+  // 04/11 (Adrien : « le clavier s'ouvre et se referme aussitôt ») : l'écran se redessine toutes les 2 s ; on ne touche à rien pendant qu'on écrit
+  try { const _ae = document.activeElement, _sc = document.getElementById('scr-dock'); if (_ae && _sc && _sc.contains(_ae) && /^(INPUT|TEXTAREA)$/.test(_ae.tagName)) return; } catch (e) {}
   // PATCH_0211_AMBASSADEUR — le bouton nomme ce qui est à quai
   const _rb = document.querySelector('button[onclick="onRecallTankerFromDock()"]');
   if (_rb) { const _dm = (G.tankerMissions || []).find(m => m.id === _activeDockMissionId); _rb.textContent = _dm && _dm.bmEnvoy ? '⌂ RAPPELER ' + _dm.tankerName.toUpperCase() : '⌂ RAPPELER LE TANKER'; }
@@ -47617,6 +47619,7 @@ function renderDockScreen() {
 // Clé = identifiant de présence au dock (mpDockIdForMission) : le même pour tous les tankers amarrés au même endroit.
 // Lecture pour tous ; écriture quand un de mes tankers est amarré ici (le registre le vérifie). Registre : schema_mp_v40_mur_du_bar.sql.
 const _wallCache = {};
+const _wallDraft = {};   // brouillon du mur par station : survit aux redessins de l'écran
 function sbStationWallHtml(mission, dock) {
   const id = mission ? mpDockIdForMission(mission) : null;
   if (!id) return '';
@@ -47645,7 +47648,7 @@ function sbStationWallForm(c) {
   if (!c) return '';
   if (!c.can_post) return '<div style="font-size:11px;color:var(--mut);font-style:italic;margin-top:8px">Pour écrire sur le mur, il faut un tanker amarré ici.</div>';
   return `<div style="display:flex;gap:8px;margin-top:10px">
-    <input id="station-wall-input" maxlength="280" placeholder="Laisser un mot aux commandants de passage…" style="flex:1;min-width:0;padding:10px 12px;border-radius:8px;border:1px solid var(--border);background:rgba(0,0,0,.35);color:#e6f0ff;font:inherit;font-size:13px">
+    <input id="station-wall-input" maxlength="280" enterkeyhint="send" placeholder="Laisser un mot aux commandants de passage…" value="${String(_wallDraft[c.id] || '').replace(/[<>&"]/g, (ch) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;' }[ch]))}" oninput="_wallDraft['${c.id}']=this.value" onkeydown="if(event.key==='Enter'){event.preventDefault();sbStationWallSend()}" style="flex:1;min-width:0;padding:10px 12px;border-radius:8px;border:1px solid var(--border);background:rgba(0,0,0,.35);color:#e6f0ff;font:inherit;font-size:16px">
     <button onclick="sbStationWallSend()" style="padding:10px 14px;border-radius:8px;border:1px solid rgba(255,200,100,.5);background:rgba(255,200,100,.12);color:#ffc864;font:inherit;font-size:11px;letter-spacing:.12em;text-transform:uppercase;cursor:pointer">Publier</button>
   </div>`;
 }
@@ -47655,9 +47658,9 @@ async function sbStationWallLoad(id, force) {
   if (!force && c && Date.now() - (c.at || 0) < 20000) return sbStationWallPaint(id);
   try {
     const r = await window.SBMP._arpc('mp_station_wall', { p_station: id });
-    _wallCache[id] = { posts: (r && r.posts) || [], can_post: !!(r && r.can_post), at: Date.now() };
+    _wallCache[id] = { id, posts: (r && r.posts) || [], can_post: !!(r && r.can_post), at: Date.now() };
   } catch (e) {
-    if (!c) _wallCache[id] = { posts: [], can_post: false, at: Date.now(), err: String(e && e.message || e) };
+    if (!c) _wallCache[id] = { id, posts: [], can_post: false, at: Date.now(), err: String(e && e.message || e) };
     console.warn('[mur du bar]', e && e.message || e);
   }
   sbStationWallPaint(id);
@@ -47681,8 +47684,8 @@ async function sbStationWallSend() {
   inp.disabled = true;
   try {
     const p = await window.SBMP._arpc('mp_station_post', { p_station: id, p_body: body });
-    const c = _wallCache[id] = _wallCache[id] || { posts: [], can_post: true, at: Date.now() };
-    c.posts.unshift(p); c.at = Date.now(); inp.value = '';
+    const c = _wallCache[id] = _wallCache[id] || { id, posts: [], can_post: true, at: Date.now() };
+    c.posts.unshift(p); c.at = Date.now(); inp.value = ''; delete _wallDraft[id];
     sbStationWallPaint(id);
   } catch (e) {
     const m = String(e && e.message || e);
