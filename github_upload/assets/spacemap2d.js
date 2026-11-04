@@ -369,7 +369,15 @@
       const st = (typeof _probeTierStatus === 'function') ? _probeTierStatus('radar') : { ok: false };
       let act = '';
       if (sys && sys.known) {
-        if (st.ok) act = _sigBtn(COL.radar, 'Balayer à nouveau', `SBMap.sweep('${esc(s.key)}')`, `Radar · ${PROBE_TIER_CONFIG.radar.duration}`, true);
+        // 04/11 (retour joueur, A-P-2784) : un système connu peut être hors de portée (révélé par une route, une balise, une info de dock) ;
+        // la carte le pose dans la bande extérieure, à côté de systèmes à portée — on le dit au lieu d'offrir un bouton qui échoue
+        const reach = (st.ok && typeof validateAddressForTier === 'function') ? validateAddressForTier(s.key, 'radar') : { valid: true };
+        if (st.ok && !reach.valid && reach.reason === 'out_of_range') {
+          let gap = '';
+          try { const o = sbOrigin(), r = getMaxRange(G.activeWorld || 'home'); const d = _sectorDistance(o.sector, String(s.key).split('-')[1]); if (r.kind === 'sector_radius') gap = ` · secteur ${String(s.key).split('-')[1]}, à ${d} secteurs (portée ${r.radius})`; } catch (e) {}
+          act = _sigOff('Hors de portée de la Radar' + gap);
+        }
+        else if (st.ok) act = _sigBtn(COL.radar, 'Balayer à nouveau', `SBMap.sweep('${esc(s.key)}')`, `Radar · ${PROBE_TIER_CONFIG.radar.duration}`, true);
         else if (st.build) act = _sigBtn(COL.radar, 'Construire une Radar', `openProbeDetail('radar')`, '', true);
         else act = _sigOff(st.why);
       }
