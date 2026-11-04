@@ -311,7 +311,6 @@
       if (network().ports[cap]) discoverPort(cap, now);
     }
     if (isPort) discoverPort(sys, now);
-    revealLine(line, now, cv.label);   // v2 : un passage vu suffit, la ligne entière entre sur la carte
     // rapport de balise (interceptable seulement pendant la fenêtre de passage)
     if (now - t < WINDOW_MS) {
       if (!Array.isArray(G.beaconReports)) G.beaconReports = [];
@@ -905,25 +904,29 @@
   // v2 (03/11, Adrien) : plus de menu d'ordres. Une flotte postée dévalise ce qui passe avec les cales pleines, laisse filer les cales
   // légères et reste cachée devant une escorte plus forte. Une seule question au départ : les convois des autres joueurs aussi ?
   // (les anciens modes restent lisibles pour les flottes déjà postées ; « manual » devient « cales pleines »)
+  // 04/11 (Adrien, retour de Damien) : les quatre ordres reviennent (« me demander » et « filer » plaisaient) ; la flotte reste sans balise.
   function ordersOf(f) {
     const o = f && f.ambush && f.ambush.orders;
-    const mode = (o && ORDER_MODES[o.mode] && o.mode !== 'manual') ? o.mode : 'rob_heavy';
-    return { mode, players: !!(o && o.players) };
+    const mode = (o && ORDER_MODES[o.mode]) ? o.mode : 'manual';
+    return { mode, players: mode !== 'manual' && !!(o && o.players) };
   }
   function ordersLabel(f) {
     const o = ordersOf(f);
-    return `${o.mode === 'rob_heavy' ? 'dévalise les cales pleines' : ORDER_MODES[o.mode].short}${o.players ? ' · joueurs compris' : ' · PNJ seulement'}`;
+    return o.mode === 'manual' ? 'Ordres : à tes ordres' : `Ordres : ${ORDER_MODES[o.mode].short}${o.players ? ' · joueurs compris' : ' · PNJ seulement'}`;
   }
   async function chooseOrders(cur) {
     if (typeof _mpChoose !== 'function') return null;
-    // PATCH_2410_PACIFIQUE : aborder des convois, PNJ compris, met fin au statut pacifique
-    if (typeof mpPeaceGuard === 'function' && !(await mpPeaceGuard('Poster une flotte qui aborde des convois'))) return null;
+    const m = await _mpChoose('Ordres permanents de la flotte', Object.entries(ORDER_MODES).map(([k, v]) => ({ k, label: v.label + (cur && cur.mode === k ? ' · actuel' : ''), sub: v.sub })));
+    if (!m) return null;
+    if (m.k === 'manual') return { mode: 'manual', players: false };
+    // PATCH_2410_PACIFIQUE : aborder des convois, PNJ compris, met fin au statut pacifique (la filature non)
+    if (m.k !== 'spy' && typeof mpPeaceGuard === 'function' && !(await mpPeaceGuard('Ordonner à cette flotte d\'aborder des convois'))) return null;
     const p = await _mpChoose('Attaquer aussi les autres joueurs ?', [
-      { v: false, label: 'Non · seulement les convois PNJ' + (cur && !cur.players ? ' · actuel' : ''), sub: 'Marchands, contrebandiers, pèlerins… jamais le tanker d\'un autre commandant' },
-      { v: true, label: 'Oui · les convois de joueurs aussi' + (cur && cur.players ? ' · actuel' : ''), sub: 'Même quand tu n\'es pas là. Pactes, saison et protections restent respectés' },
+      { v: false, label: 'Non · seulement les convois PNJ', sub: 'Un convoi de joueur attend ta décision' },
+      { v: true, label: 'Oui · les convois de joueurs aussi', sub: 'Même quand tu n\'es pas là. Pactes, saison et protections restent respectés' },
     ]);
     if (!p) return null;
-    return { mode: 'rob_heavy', players: p.v };
+    return { mode: m.k, players: p.v };
   }
   async function pushOrders(f, force) {
     const a = f && f.ambush;
@@ -1121,10 +1124,12 @@
       a.npcAt = now;
       if (!on.length) continue;
       const o = ordersOf(f);
-      if (o.mode === 'manual') continue;
       let list = [];
       for (const { line, i } of on) for (const ps of passages(line, i, from, now)) list.push({ line, i, ...ps });
       list.sort((x, y) => x.t - y.t);
+      // la flotte voit par elle-même : chaque passage devient un rapport (comme une balise) — « me demander » y propose d'aborder
+      for (const ps of list.slice(-3)) { record({ id: 'amb-' + f.id }, a.system, { ...ps, isPort: false }, now); dirty = true; }
+      if (o.mode === 'manual') continue;
       let skipped = false;
       for (const ps of list.slice(-6)) {
         if (!f.ambush) break;
@@ -1341,7 +1346,7 @@
     G.trafficEchoes[sys] = { lineId: line.id, at: now, fromCard: card.name || null };
     if (!G.mapSeen) G.mapSeen = {};
     G.mapSeen[sys] = now;
-    revealLine(line, now, 'Carte : ' + (card.name || 'carte de route'));   // v2 (03/11) : une carte payée révèle la route entière
+    if (kind === 'singing') discoverPort(line.port, now);   // 04/11 : retour à la gradation d'origine (propre, trouée, morte, chantante)
     if (typeof saveGame === 'function') saveGame();
     if (window.SBMap && SBMap.render) { try { SBMap.render(); } catch (e) {} }
     return { sys, lineId: line.id, kind };
