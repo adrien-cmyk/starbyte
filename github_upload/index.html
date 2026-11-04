@@ -9182,15 +9182,19 @@ function sbSignalRender() {
     : 'position:fixed;left:50%;transform:translateX(-50%);bottom:calc(env(safe-area-inset-bottom, 0px) + 86px);z-index:8990;max-width:92vw;padding:9px 16px;border-radius:20px;background:rgba(40,30,8,.9);border:1px solid rgba(255,200,100,.5);color:#ffe3b0;font-size:12px;letter-spacing:.02em;backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis';
   el.onclick = () => { sbSignalMarkRead(sig.sys); if (typeof openSystemOnMap === 'function') openSystemOnMap(sig.sys); if (typeof toast === 'function') toast(`Pose une balise sur ${sig.sys} : au premier convoi qui passe, elle remonte toute la route jusqu'au lieu caché.`); };
   const ic = typeof icon === 'function' ? icon('satellite', { size: compact ? 12 : 14, color: '#ffc864' }) : '';
+  const _more = Math.max(0, (SBLines.activeSignals ? SBLines.activeSignals().length : 1) - 1);
   el.innerHTML = compact
-    ? `<span style="display:inline-flex;align-items:center;gap:6px">${ic}<span style="font-family:var(--font-mono)">${sig.sys}</span></span>`
+    ? `<span style="display:inline-flex;align-items:center;gap:6px">${ic}<span style="font-family:var(--font-mono)">${sig.sys}</span>${_more ? `<span style="opacity:.7">+${_more}</span>` : ''}</span>`
     : `<span style="display:inline-flex;align-items:center;gap:8px">${ic}<span>Trafic régulier vers <strong style="font-family:var(--font-mono)">${sig.sys}</strong> · <span style="color:#ffc864">pose une balise</span></span></span>`;
 }
 function sbSignalMarkRead(sys) { if (!G._sigRead) G._sigRead = {}; if (!G._sigRead[sys]) { G._sigRead[sys] = Date.now(); if (typeof updateProspectRapportsBadge === 'function') updateProspectRapportsBadge(); } }
-function sbSignalUnread() { const sig = window.SBLines && SBLines.activeSignal ? SBLines.activeSignal() : null; return sig && !(G._sigRead && G._sigRead[sig.sys]) ? 1 : 0; }
+function sbSignalUnread() { const l = window.SBLines && SBLines.activeSignals ? SBLines.activeSignals() : []; return l.filter(sig => !(G._sigRead && G._sigRead[sig.sys])).length; }
 // la carte du signal dans les rapports (onglet Balises)
 function sbSignalReportHtml() {
-  const sig = window.SBLines && SBLines.activeSignal ? SBLines.activeSignal() : null;
+  const list = window.SBLines && SBLines.activeSignals ? SBLines.activeSignals() : [];
+  return list.map(sbSignalCardHtml).join('');
+}
+function sbSignalCardHtml(sig) {
   if (!sig) return '';
   sbSignalMarkRead(sig.sys);
   const ic = typeof icon === 'function' ? icon('satellite', { size: 14, color: '#ffc864' }) : '';
@@ -49988,7 +49992,7 @@ if (G.knownTargets && Array.isArray(G.tankerMissions)) {
 <!-- PERF_1310 — mesure des performances chez les joueurs + qualité 3D automatique (assets/perf.js) -->
 <script src="assets/perf.js?v=20261022-2000"></script>
 <!-- PATCH_1410_LIGNES — lignes PNJ à horaire sur les routes cachées (assets/lines.js) -->
-<script src="assets/lines.js?v=20261104-v3"></script>
+<script src="assets/lines.js?v=20261104-v3b"></script>
 <!-- CLOUD — sauvegarde Supabase (source : sb-build/src/cloud.js) -->
 <script type="module" src="assets/cloud.js?v=20261022-1420"></script>
 <!-- MATCH3 — Match-3 V2 (assets/match3.js, source src/match3.js + src/m3core.js) : remplace startM3 -->

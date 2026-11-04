@@ -352,15 +352,16 @@
     return added || !wasKnown;
   }
   // le signal d'antenne en attente (un seul à la fois) : { sys, lineId, at, home } ou null
-  function activeSignal() {
-    if (typeof G === 'undefined' || !G) return null;
+  // signaux en attente (échos d'antenne sans balise posée dessus), du plus récent au plus ancien
+  function activeSignals() {
+    if (typeof G === 'undefined' || !G) return [];
     state();
     const net = network();
     const beaconSys = new Set((typeof sbAllProbes === 'function' ? sbAllProbes() : (G.probesPool || [])).filter(p => p.tier === 'beacon' && p.state === 'deployed').map(p => sysOf(p.deployedSystem)));
-    const list = Object.entries(G.trafficEchoes).filter(([sys, e]) => !e.fromCard && !e.done && net.byId[e.lineId] && !G.hiddenPorts[net.byId[e.lineId].port] && !beaconSys.has(sys))
-      .sort((a, b) => (b[1].at || 0) - (a[1].at || 0));
-    return list.length ? Object.assign({ sys: list[0][0] }, list[0][1]) : null;
+    return Object.entries(G.trafficEchoes).filter(([sys, e]) => !e.fromCard && !e.done && net.byId[e.lineId] && !G.hiddenPorts[net.byId[e.lineId].port] && !beaconSys.has(sys))
+      .sort((a, b) => (b[1].at || 0) - (a[1].at || 0)).map(([sys, e]) => Object.assign({ sys }, e));
   }
+  function activeSignal() { return activeSignals()[0] || null; }
   function discoverPort(portSys, now) {
     state();
     const p = network().ports[portSys];
@@ -1386,9 +1387,8 @@
     if (!homes.length) return;
     state();
     const echoes = Object.entries(G.trafficEchoes).filter(([, e]) => !e.fromCard);   // les pistes des cartes ne comptent pas
-    // v2 (03/11) : UN seul signal en attente à la fois, affiché en évidence ; le suivant vient 3 h après que le précédent a été traité
-    // (balise posée ou ligne révélée). Plus de blocage silencieux « deux échos attendent ».
-    if (activeSignal()) return;
+    // 04/11 (Adrien) : jusqu'à DEUX signaux en attente en même temps (comme avant) ; un nouvel écho toutes les 3 h au plus
+    if (activeSignals().length >= 2) return;
     const fresh = homes.find(h => !echoes.some(([, e]) => (e.home || myHome()) === h));   // une antenne neuve capte tout de suite
     const last = echoes.reduce((m, [, e]) => Math.max(m, Math.max(e.at || 0, e.done || 0)), 0);
     if (!fresh && echoes.length && now - last < ECHO_EVERY_MS) return;
@@ -1463,7 +1463,7 @@
   setInterval(() => { try { tickEcho(Date.now()); } catch (e) { console.warn('[lignes] écho', e); } }, 20000);
 
   window.SBLines = {
-    beaconToast, network, passages, capOf, convoyOf, tickBeacons, tickEcho, infoFor, knownSystems, discoverPort, revealLine, activeSignal,
+    beaconToast, network, passages, capOf, convoyOf, tickBeacons, tickEcho, infoFor, knownSystems, discoverPort, revealLine, activeSignal, activeSignals,
     activateCard, ensureRoute, knownChain, balisage, balisageChain, routesBalisedBy, noteUser,
     openedRoutes, openedTo, scoutInFlight, scoutLaunch, scoutArrived, forgetOpened, giveRoute, pollGifts,
     dockMarketHtml, sellHere, withdrawOffer, buyOffer, learnRoute, noteRobbery, tickMarket, fetchOffers, sellableRoutes,
