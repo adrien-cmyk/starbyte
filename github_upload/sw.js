@@ -24,6 +24,7 @@ self.addEventListener('fetch', (e) => {
   const url = new URL(req.url);
   if (url.origin !== self.location.origin) return;
   if (url.pathname.endsWith('/sw.js')) return;
+  if (url.pathname.includes('/fronde/')) return;   // Grande Fronde : pages et modules toujours frais (pas de mélange d'anciennes et de nouvelles versions)
   if (req.headers.has('range')) return;   // musique de la radio, vidéos : lecture en flux, pas de cache
   if (isPage(req, url)) {
     e.respondWith((async () => {
