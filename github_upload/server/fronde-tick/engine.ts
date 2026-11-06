@@ -1,6 +1,6 @@
 // STARBYTE — moteur de course de la Grande Fronde, COPIE GÉNÉRÉE par tools/fronde/sync_engine.mjs (dépôt catabyte-starbyte).
 // Ne pas modifier ici : retoucher sandbox/race/engine.js (ou Gravity.js, raceData.js), relancer le script, redéployer fronde-tick.
-// Source : 0dde6fe76e2c9d87 (empreinte des fichiers du moteur)
+// Source : 1913cfe11b23cc2a (empreinte des fichiers du moteur)
 // @ts-nocheck
 const __m = {};
 // ── sandbox/core/Gravity.js ──
@@ -164,10 +164,11 @@ const RACERS = [
 
 // format de la course pilote (brief §5) : 72 h simulées, 3 systèmes, étapes interstellaires entre eux
 const PILOT = {
-  id: 'pilote-1', name: 'Grande Fronde · course pilote', seed: 'fronde-222',   // édition choisie : remontée par une plongée, une surchauffe, arrivée serrée
+  id: 'pilote-1', name: 'Grande Fronde · course pilote', seed: 'fronde-52',    // démo (moteur v2) : lune, ceinture et chocs, éruption, panne, réparation ; 3 racers en 17 min
   legHours: 20.5,                              // durée de référence d'une étape interstellaire
   entryR: 9,                                   // entrée et sortie d'un système à 9 rayons de géante
   nominalHours: 76,                            // durée annoncée d'une édition (la vraie fin reste secrète jusqu'à l'arrivée)
+  v: 2,                                        // version du moteur (Phase 4 : événements de course) ; une édition sans v se rejoue en v1
 };
 
 
@@ -193,6 +194,17 @@ __m.engine = (() => {
 //   runRace({ systems, racers, pilot, plans })      → rejoue des plans déjà connus (révélés par le serveur) ; un racer
 //                                                     dont le plan d'un système manque s'arrête à l'entrée de ce système
 //   digest(result)                                 → empreinte texte des temps de passage (tests de déterminisme)
+//
+// VERSION 2 (Phase 4, « course vivante ») — seulement si pilot.v >= 2 ; une édition sans v (créée avant) se rejoue
+// exactement comme avant. Événements tirés de la graine, décidés par les pilotes, rangés DANS les plans publiés
+// (plan.ev) pour que le rejeu n'ait besoin d'aucun hasard :
+//   · assistance d'une lune (passage près d'une lune avant la périapse) : vitesse de sortie gratuite, risque de débris ;
+//   · raccourci par la ceinture d'astéroïdes (étapes où elle existe : carte publique pilot.hazards) : étape plus
+//     courte, chocs possibles ;
+//   · éruption stellaire (risque annoncé sur la carte ; l'heure reste secrète) : s'abriter (temps perdu) ou foncer
+//     (coque, électronique) ;
+//   · panne de propulsion en étape (plus probable coque abîmée), arrêt de réparation (temps contre intégrité).
+// Chaque événement est aussi un fait de course (tracks[id].happenings) pour la voix off et le fil d'actualité.
 // Positions en repère local du système (géante au centre, plan équatorial XZ). Unités SI.
 const { propagate, sampleAt, hyperbolicApproach } = __m.gravity;
 const { gmOfGiant, sphereGM } = __m.raceData;
@@ -222,6 +234,21 @@ function bodiesOf(sys) {
 function rngOf(str) {
   let h = 2166136261; for (let i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = Math.imul(h, 16777619); }
   return () => { h += 0x6D2B79F5; let t = h; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+}
+// v2 : hasard à 128 bits d'état (cyrb128 → sfc32) : la course dépend de toute la graine, pas de 32 bits
+function rng2(str) {
+  let h1 = 1779033703, h2 = 3144134277, h3 = 1013904242, h4 = 2773480762;
+  for (let i = 0; i < str.length; i++) {
+    const k = str.charCodeAt(i);
+    h1 = h2 ^ Math.imul(h1 ^ k, 597399067); h2 = h3 ^ Math.imul(h2 ^ k, 2869860233);
+    h3 = h4 ^ Math.imul(h3 ^ k, 951274213); h4 = h1 ^ Math.imul(h4 ^ k, 2716044179);
+  }
+  h1 = Math.imul(h3 ^ (h1 >>> 18), 597399067); h2 = Math.imul(h4 ^ (h2 >>> 22), 2869860233);
+  h3 = Math.imul(h1 ^ (h3 >>> 17), 951274213); h4 = Math.imul(h2 ^ (h4 >>> 19), 2716044179);
+  let a = (h1 ^ h2 ^ h3 ^ h4) >>> 0, b = (h2 ^ h1) >>> 0, c = (h3 ^ h1) >>> 0, d = (h4 ^ h1) >>> 0;
+  const next = () => { a >>>= 0; b >>>= 0; c >>>= 0; d >>>= 0; let t = (a + b) | 0; a = b ^ (b >>> 9); b = (c + (c << 3)) | 0; c = (c << 21) | (c >>> 11); d = (d + 1) | 0; t = (t + d) | 0; c = (c + t) | 0; return (t >>> 0) / 4294967296; };
+  for (let i = 0; i < 12; i++) next();
+  return next;
 }
 const clamp = (x, a, b) => Math.min(b, Math.max(a, x));
 const FUEL_PER_DV = 1 / 9000, FUEL_PER_LEG = 0.12;            // part du réservoir par m/s de poussée, par étape
@@ -299,18 +326,73 @@ function passSystem(sys, plan, tStart, entryR = 9) {
   const vOut = Math.sqrt(Math.max(1, ve * ve - 2 * GM / re));
   return { samples, cps, tp: tPer, rp: rm, hit: S.hit || null, tpPlanned: tp, vOut, plan };
 }
+const ENGINE_V = 2;                                           // version la plus récente que ce moteur sait rejouer
 const V_REF = 1.55e4;                                          // vitesse de sortie de référence (étape de legHours)
 
 
 const LABELS = { entry: 'entrée', ring: 'plan des anneaux', periapsis: 'périapse', exit: 'sortie' };
+
+// carte publique des dangers d'une édition (v2) : ceinture d'astéroïdes et risque d'éruption sur chaque étape
+const FLARE_P = { faible: 0.2, moyen: 0.45, 'élevé': 0.75 };
+function hazardsOf(systems, seed) {
+  const R = rng2(`${seed}|dangers`);
+  return { legs: systems.slice(0, -1).map((s, k) => {
+    const belt = R() < 0.7 ? { gain: +(0.03 + R() * 0.03).toFixed(3) } : null, x = R();
+    return { from: s.id, to: systems[k + 1].id, belt, flare: x < 0.35 ? 'faible' : x < 0.75 ? 'moyen' : 'élevé' };
+  }) };
+}
+const MIN = 60;
+// décisions et tirages v2 d'un passage (et de l'étape qui suit) : seulement quand les pilotes décident
+function decideV2(r, sys, k, last, plan, S, sl, ctx) {
+  const R = rng2(`${ctx.seed}|${r.id}|${sys.id}|v2`), ag = plan.ag, ev = {};
+  // assistance d'une lune : les audacieux, s'il y a des lunes, jamais dans le dernier système (l'arrivée est à la périapse)
+  // (la lune la plus proche de la trajectoire, avant la périapse ; trop loin, ou seulement à l'entrée : pas d'assistance)
+  if (!last && sys.moons.length && R() < 0.2 + ag * 0.6) {
+    let best = null; for (const m of sys.moons) { const a = moonApproach(sys, sl.samples, sl.tp, m.id); if (!best || a.d < best.a.d) best = { m, a }; }
+    const u1 = R(), u2 = R(), u3 = R();
+    if (best && best.a.i > 0 && best.a.d < 2.6e8) {
+      const near = clamp(1.45 - best.a.d / 2.2e8, 0.35, 1.2);
+      ev.moon = { id: best.m.id, t: Math.round(Math.min(best.a.t, sl.tpPlanned - 600)), d: Math.round(best.a.d / 1e3), gain: Math.round((260 + u1 * 380) * Math.min(1.4, best.m.r / 1.3e6) * near), dmg: u2 < 0.22 + ag * 0.25 ? +((0.03 + u3 * 0.04) * (r.tough || 1)).toFixed(4) : 0 };
+    }
+  }
+  if (last) return ev;
+  const hz = ctx.hazards.legs[k] || {}, L = {};
+  const integ = S.integrity - (ev.moon ? ev.moon.dmg : 0);
+  // raccourci par la ceinture : audace, retard, coque encore solide
+  if (hz.belt && integ > 0.55 && R() < 0.04 + ag * 0.55 + clamp(ctx.gap / 7200, 0, 0.25)) {
+    const hits = []; let n = R() < 0.35 + (1 - integ) * 0.5 ? (R() < 0.3 ? 2 : 1) : 0;
+    while (n--) hits.push({ f: +(0.3 + R() * 0.35).toFixed(3), dmg: +((0.035 + R() * 0.06) * (r.tough || 1)).toFixed(4) });
+    hits.sort((a, b) => a.f - b.f);
+    L.belt = { gain: hz.belt.gain, hits };
+  }
+  // éruption : une par étape au plus, à la même heure pour tous (fixée par le premier racer qui part sur l'étape)
+  const fl = ctx.flares;
+  if (!(k in fl)) { const Rf = rng2(`${ctx.seed}|eruption|${k}`); fl[k] = Rf() < (FLARE_P[hz.flare] || 0) ? { t: null, u: Rf(), dur: (2 + Rf() * 2.5) * 3600 } : null; }
+  if (fl[k]) L.flare = { prudent: ag < 0.45 || integ < 0.7, u: R() };   // l'issue dépend de l'heure (posée à l'application)
+  // panne de propulsion en étape, plus probable avec une coque abîmée
+  if (R() < 0.06 + (1 - integ) * 0.35) L.failure = { f: +(0.15 + R() * 0.7).toFixed(3), lost: Math.round((15 + R() * 25) * MIN) };
+  // arrêt de réparation : coque très abîmée et pilote raisonnable
+  if (integ < 0.72 && (ag < 0.6 || integ < 0.55)) L.repair = { f: 0.5, lost: Math.round((25 + R() * 25) * MIN), gain: +(0.12 + R() * 0.06).toFixed(3) };
+  ev.leg = L;
+  return ev;
+}
+// instant du passage au plus près d'une lune (avant la périapse), d'après la trajectoire
+function moonApproach(sys, samples, tp, moonId) {
+  const { list } = bodiesOf(sys), i = sys.moons.findIndex((m) => m.id === moonId), b = list[i + 1], o = [0, 0, 0];
+  let best = null;
+  samples.forEach((s, i) => { if (s.t > tp) return; b.pos(s.t, o); const d = Math.hypot(s.p[0] - o[0], s.p[1] - o[1], s.p[2] - o[2]); if (!best || d < best.d) best = { t: s.t, d, i }; });
+  return best || { t: samples[0].t, d: Infinity, i: 0 };
+}
 const planKey = (racerId, sysId) => `${racerId}|${sysId}`;
 
 // plans : { 'racer|système': plan } pour rejouer ; sinon les pilotes décident (et la surchauffe est tirée)
 function runRace({ systems, racers, pilot, plans = null, memo = null }) {
+  const V2 = (pilot.v || 1) >= 2;
+  const hazards = V2 ? (pilot.hazards || (pilot.seed ? hazardsOf(systems, pilot.seed) : null)) : null, flares = {};
   const revealed = [];                                         // [{ racer, sys, t, plan }] dans l'ordre des entrées
   // simulation système par système, tous les racers ensemble : à chaque entrée, les pilotes voient la course
   const tracks = {};
-  const st = Object.fromEntries(racers.map((r) => [r.id, { t: 0, segs: [], fuel: 1, integrity: 1, warpK: 1, events: [{ t: 0, fuel: 1, integrity: 1 }] }]));
+  const st = Object.fromEntries(racers.map((r) => [r.id, { t: 0, segs: [], fuel: 1, integrity: 1, warpK: 1, events: [{ t: 0, fuel: 1, integrity: 1 }], happenings: [] }]));
   systems.forEach((sys, k) => {
     const last = k === systems.length - 1, order = [...racers].sort((a, b) => st[a.id].t - st[b.id].t), t0 = st[order[0].id].t;
     order.forEach((r, rank) => {
@@ -320,7 +402,7 @@ function runRace({ systems, racers, pilot, plans = null, memo = null }) {
         plan = plans[planKey(r.id, sys.id)];
         if (!plan) { S.stopped = true; S.waiting = { sys, t: S.t }; return; }   // entrée connue (fin d'étape), plan pas encore publié
       } else {
-        const R = rngOf(`${pilot.seed}|${r.id}|${sys.id}`);
+        const R = (V2 ? rng2 : rngOf)(`${pilot.seed}|${r.id}|${sys.id}`);
         plan = choosePlan(r, sys, { gap: S.t - t0, rank: rank + 1, n: racers.length, fuel: S.fuel, integrity: S.integrity, last, legsLeft: systems.length - 1 - k }, R);
         // une plongée peut mal tourner : surchauffe → la poussée est coupée à mi-course, la coque prend cher. Plus le
         // passage est rasant et la coque déjà abîmée, plus c'est probable (tirage déterministe de l'édition)
@@ -340,21 +422,76 @@ function runRace({ systems, racers, pilot, plans = null, memo = null }) {
       const rpR = sl.rp / sys.R, ring = sl.cps.find((c) => c.kind === 'ring');
       let dmg = Math.max(0, 1.08 - rpR) * 2.6 + (ring && ring.inRing ? 0.03 + 0.04 * plan.ag : 0) + (plan.failed ? 0.07 : 0);
       dmg *= r.tough || 1;                                    // robustesse de la coque (lourd : encaisse ; sport : fragile)
+      const integ0 = S.integrity;
       S.integrity = Math.max(0.3, S.integrity - dmg); seg.damage = dmg;
       S.events.push({ t: sl.tpPlanned, fuel: S.fuel, integrity: S.integrity });
       S.t = seg.t1;
+      // v2 : événements du passage et de l'étape (décidés ici par les pilotes, ou relus dans le plan publié)
+      let vOut = sl.vOut, ev = null;
+      if (V2) {
+        if (!plans) plan.ev = decideV2(r, sys, k, last, plan, S, sl, { seed: pilot.seed, hazards, flares, gap: S.t - t0 });
+        ev = plan.ev || {};
+        const HP = S.happenings;
+        if (ev.moon) {
+          const m = sys.moons.find((x) => x.id === ev.moon.id), tm = ev.moon.t;
+          vOut += ev.moon.gain;
+          // la lune vient avant la périapse : son état ne compte que ses propres débris (la chauffe de la périapse vient après)
+          const im = Math.max(0.3, integ0 - ev.moon.dmg);
+          HP.push({ t: tm, kind: 'moon', sys: sys.id, prio: 4, data: { moon: m ? m.name.split(' · ')[0] : ev.moon.id, gain: ev.moon.gain, dmg: ev.moon.dmg, d: ev.moon.d, integrity: im } });
+          if (ev.moon.dmg) { S.integrity = Math.max(0.3, S.integrity - ev.moon.dmg); S.events[S.events.length - 1].integrity = S.integrity; S.events.push({ t: tm, fuel: S.fuel + plan.dv * FUEL_PER_DV, integrity: im }); }
+        }
+      }
       if (!last) {
         // étape interstellaire : plus on sort vite, plus elle est courte ; une coque abîmée freine
         S.warpK = 0.8 + 0.2 * S.integrity;
-        const dur = pilot.legHours * H * Math.pow(V_REF / sl.vOut, 0.65) / (r.warp * S.warpK);
-        S.segs.push({ kind: 'leg', from: sys, to: systems[k + 1], t0: S.t, t1: S.t + dur, vOut: sl.vOut });
+        let dur = pilot.legHours * H * Math.pow(V_REF / vOut, 0.65) / (r.warp * S.warpK);
+        const legT0 = S.t, legFuel = S.fuel, L = ev && ev.leg;
+        const marks = [];                                        // [t, dIntégrité, fait] dans l'étape
+        if (L) {
+          const HP = S.happenings, base = dur;
+          if (L.belt) { dur *= 1 - L.belt.gain; HP.push({ t: legT0 + 60, kind: 'belt', sys: systems[k + 1].id, prio: 4, data: { gain: L.belt.gain, saved: base - dur } }); }
+          const pure = dur;                                      // durée de vol, avant les temps perdus
+          if (L.belt) for (const h of L.belt.hits) marks.push([legT0 + h.f * pure, -h.dmg, { kind: 'beltHit', prio: 4, data: { dmg: h.dmg } }]);
+          if (L.failure) marks.push([legT0 + L.failure.f * pure, 0, { kind: 'failure', prio: 4, data: { lost: L.failure.lost } }, L.failure.lost]);
+          if (L.repair) marks.push([legT0 + L.repair.f * pure, L.repair.gain, { kind: 'repair', prio: 3, data: { lost: L.repair.lost, gain: L.repair.gain } }, L.repair.lost]);
+          if (L.flare) {
+            // l'heure de l'éruption : posée par le premier racer parti sur l'étape (pilotes) ; relue dans le plan (rejeu)
+            if (!plans) { const F = flares[k]; if (F.t == null) F.t = legT0 + (0.25 + F.u * 0.9) * pure; L.flare.t = Math.round(F.t); L.flare.dur = Math.round(F.dur); }   // fenêtre jusqu'au-delà de l'étape du premier : le peloton aussi
+            const tf = L.flare.t, f = (tf - legT0) / pure;
+            if (f > 0 && f < 1) {                                // l'éruption tombe pendant son étape
+              const lost = L.flare.prudent ? Math.round((12 + L.flare.u * 18) * MIN) : L.flare.u < 0.3 ? Math.round((30 + L.flare.u * 100) * MIN) : 0;
+              const dmg = L.flare.prudent ? 0 : +((0.03 + L.flare.u * 0.05) * (r.tough || 1)).toFixed(4);
+              marks.push([tf, -dmg, { kind: 'flare', prio: 4, data: { prudent: L.flare.prudent, lost, dmg, dur: L.flare.dur } }, lost, true]);
+            }
+          }
+          // les temps perdus décalent la suite de l'étape (pas l'éruption : même heure pour tous)
+          let shift = 0;
+          const rel = marks.filter((m) => !m[4]).sort((a, b) => a[0] - b[0]), abs = marks.filter((m) => m[4]), seq = [];
+          let prevEnd = legT0;
+          while (rel.length || abs.length) {
+            const take = !abs.length || (rel.length && rel[0][0] + shift <= abs[0][0]) ? rel.shift() : abs.shift();
+            const t = take[4] ? take[0] : take[0] + shift;
+            // une éruption pendant un arrêt (panne, réparation) : seul le temps qui dépasse cet arrêt est perdu en plus
+            if (take[4] && take[3] && t < prevEnd) { take[3] = Math.max(0, Math.round(t + take[3] - prevEnd)); take[2] = { ...take[2], data: { ...take[2].data, lost: take[3] } }; }
+            seq.push([t, take]); shift += take[3] || 0;
+            if (take[3]) prevEnd = Math.max(t, prevEnd) + take[3];
+          }
+          for (const [t, m] of seq) {
+            if (m[1]) { S.integrity = clamp(S.integrity + m[1], 0.3, 1); }
+            S.events.push({ t, fuel: legFuel, integrity: S.integrity });
+            HP.push({ t, sys: systems[k + 1].id, ...m[2], data: { ...m[2].data, integrity: S.integrity } });
+          }
+          dur += shift;
+        }
+        S.segs.push({ kind: 'leg', from: sys, to: systems[k + 1], t0: S.t, t1: S.t + dur, vOut, belt: !!(L && L.belt) });
         S.fuel -= FUEL_PER_LEG; S.events.push({ t: S.t + dur, fuel: S.fuel, integrity: S.integrity });
         S.t += dur;
       }
     });
   });
   for (const r of racers) {
-    const { segs, events } = st[r.id];
+    const { segs, events, happenings } = st[r.id];
+    events.sort((a, b) => a.t - b.t); happenings.sort((a, b) => a.t - b.t);
     // l'arrivée est la périapse du dernier système (« une seule trajectoire parfaite »)
     const lastSys = systems[systems.length - 1], done = segs.some((s) => s.kind === 'system' && s.sys.id === lastSys.id);
     const cps = [];
@@ -368,14 +505,14 @@ function runRace({ systems, racers, pilot, plans = null, memo = null }) {
     // en attente d'un plan : son entrée dans le système suivant est déjà connue (heure d'arrivée de l'étape)
     const w = st[r.id].waiting;
     if (!done && w) cps.push({ kind: 'entry', t: w.t, sys: w.sys.id, label: LABELS.entry + ' · ' + w.sys.name, finish: false, provisional: true });
-    tracks[r.id] = { segs, cps, finish: done ? cps[cps.length - 1].t : Infinity, events, complete: done };
+    tracks[r.id] = { segs, cps, finish: done ? cps[cps.length - 1].t : Infinity, events, happenings, complete: done };
   }
   const fins = racers.map((r) => tracks[r.id].finish);
-  return { tracks, revealed, t1: Math.max(...fins), complete: fins.every(Number.isFinite) };
+  return { tracks, revealed, t1: Math.max(...fins), complete: fins.every(Number.isFinite), hazards };
 }
 
 // plan sérialisable (ce que le serveur publie quand un pilote entre dans un système)
-const planOf = (p) => ({ kind: p.kind, ag: p.ag, vInf: p.vInf, rp: p.rp, dv: p.dv, azOff: p.azOff, inc: p.inc, failed: !!p.failed });
+const planOf = (p) => ({ kind: p.kind, ag: p.ag, vInf: p.vInf, rp: p.rp, dv: p.dv, azOff: p.azOff, inc: p.inc, failed: !!p.failed, ...(p.ev ? { ev: JSON.parse(JSON.stringify(p.ev)) } : {}) });
 const plansMap = (revealed) => Object.fromEntries(revealed.map((x) => [planKey(x.racer, x.sys), x.plan]));
 
 // empreinte des temps de passage (ms) de tous les racers : identique partout où le moteur tourne
@@ -383,11 +520,11 @@ function digest(res) {
   return Object.keys(res.tracks).sort().map((id) => id + ':' + res.tracks[id].cps.map((c) => Math.round(c.t * 1000)).join(',')).join(';');
 }
 
-return { rngOf, clamp, FUEL_PER_DV, choosePlan, PLAN_LABEL, passSystem, V_REF, runRace, planOf, plansMap, digest };
+return { rngOf, rng2, clamp, FUEL_PER_DV, choosePlan, PLAN_LABEL, passSystem, ENGINE_V, V_REF, FLARE_P, hazardsOf, runRace, planOf, plansMap, digest };
 })();
 
-export const { runRace, digest, planOf, plansMap, choosePlan, passSystem, rngOf, PLAN_LABEL, FUEL_PER_DV, FUEL_PER_LEG, V_REF } = __m.engine;
+export const { runRace, digest, planOf, plansMap, choosePlan, passSystem, rngOf, rng2, hazardsOf, FLARE_P, ENGINE_V, PLAN_LABEL, FUEL_PER_DV, FUEL_PER_LEG, V_REF } = __m.engine;
 export const { RACE_SYSTEMS, RACERS, PILOT, gmOfGiant, sphereGM } = __m.raceData;
-export const ENGINE_HASH = '0dde6fe76e2c9d87';
+export const ENGINE_HASH = '1913cfe11b23cc2a';
 // empreintes de référence (sha-256 tronqué de digest(runRace)) calculées par tools/fronde/engine_test.mjs
-export const ENGINE_REF = {"fronde-222":"6b57aaff4e152102","test-2":"56c1729bcd3ea8b6","test-3":"6d77f7d7a05dece1","test-4":"7847fd82cc1c8e3c","test-5":"0f89b7f16d6d00aa"};
+export const ENGINE_REF = {"fronde-222":"6e761f2fe26fc587","test-2":"0e72856e09c27ce4","test-3":"9d717e59d9e4bd4f","test-4":"8656357ca1aa2081","test-5":"5c6893a3d5c9224b"};

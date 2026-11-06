@@ -207,6 +207,11 @@ export class RaceLayer {
     this._hud(true);
   }
   // instant d'arrivée du racer suivi dans ce système (s'il n'y est pas encore)
+  // réalisateur (mode TV) : la vue Suivre sur ce racer, comme si on avait touché « Suivre »
+  tvFollow(id) {
+    const rc = this.c.fleet().find((r) => r.def.id === id && r.inSys); if (!rc) return;
+    this.sel = id; this.c.follow(id); this._view = 'follow'; this._hud(true);
+  }
   _arrival(t) {
     if (!this.sel) return null;
     const seg = this.feed.tracks[this.sel].segs.find((s) => s.kind === 'system' && s.sys.id === this.c.sys().id);
@@ -222,11 +227,12 @@ export class RaceLayer {
         <div id="rh-tele" hidden></div>
         <div id="rh-win" hidden></div>
         <div id="rh-wait" hidden><span></span><button type="button">Aller à son arrivée</button></div>
+        <div id="rh-corr" hidden><span>En voyage interstellaire</span><button type="button">Voir le couloir ›</button></div>
         <div class="rh-clock"><input id="rh-clock" type="range" min="0" step="1" aria-label="Temps de course"><button id="rh-speed" type="button">×200</button></div>
         <div class="rh-views"><button type="button" data-v="overview">Ensemble</button><button type="button" data-v="gates">Portes</button><button type="button" data-v="follow">Suivre</button></div>`;
       for (const b of el.querySelectorAll('.rh-views button')) b.onclick = () => {
         const v = b.dataset.v;
-        if (v === 'follow') { const f = this.c.fleet(), rc = f.find((r) => r.def.id === this.sel && r.inSys) || f.find((r) => r.inSys); if (!rc) return; this.sel = rc.def.id; this.c.follow(rc.def.id); }
+        if (v === 'follow') { const f = this.c.fleet(), rc = f.find((r) => r.def.id === this.sel && r.inSys) || f.find((r) => r.inSys); if (!rc) { if (this.c.corridor && this.feed.racers.some((r) => this.feed.stateAt(r.id, this.c.getTime()).phase === 'leg')) this.c.corridor(); return; } this.sel = rc.def.id; this.c.follow(rc.def.id); }   // personne ici : le couloir
         else this.c.views[v]();
         this._view = v; this._hud(true);
       };
@@ -236,6 +242,7 @@ export class RaceLayer {
       // en direct : la pastille dit « en direct » ou « revoir · −x » ; toucher la pastille en revoir ramène au présent
       el.querySelector('.rh-live').onclick = () => { const L = this.feed.live; if (L && !this.liveLock) { this.c.setTime(L.source.now()); this._hud(true); } };
       el.querySelector('#rh-back').onclick = (e) => { e.preventDefault(); this.c.back(); };
+      el.querySelector('#rh-corr button').onclick = () => { if (this.c.corridor) this.c.corridor(); };
       el.querySelector('#rh-wait button').onclick = () => { const a = this._arrival(this.c.getTime()); if (a) { const id = this.sel; this.c.setTime(a - 300); this.position(a - 300); const rc = this.c.fleet().find((r) => r.def.id === id); if (rc && rc.inSys) this.c.follow(id); this._hud(true); } };
     }
     el.querySelector('#rh-sys').textContent = `${sys.name} · ${sys.address}`;
@@ -245,15 +252,21 @@ export class RaceLayer {
     el.classList.toggle('follow', !!follow); tele.hidden = !follow;
     if (follow) this._tele(tele, t);
     el.querySelector('#rh-time').textContent = hh(t);
+    if (!F.live) { const sp = el.querySelector('#rh-speed'), so = this.c.slowOn && this.c.slowOn(); if (so && sp.textContent !== 'ralenti') sp.textContent = 'ralenti'; else if (!so && sp.textContent === 'ralenti') sp.textContent = '×' + this.speeds[this.speedI]; }
     if (F.live) {
       const lk = !!this.liveLock, now = F.live.source.now(), pill = el.querySelector('.rh-live'), sp = el.querySelector('#rh-speed');
-      const txt = now < 0 ? 'avant le départ' : lk ? 'en direct' : `revoir · −${dur(Math.max(0, now - t))} · direct ›`;
+      const txt = now < 0 ? 'avant le départ' : this.c.slowOn && this.c.slowOn() ? 'ralenti · puis le direct' : lk ? 'en direct' : `revoir · −${dur(Math.max(0, now - t))} · direct ›`;
       if (pill.textContent !== txt) pill.textContent = txt;
       pill.classList.toggle('replay', !lk && now >= 0);
-      const stx = lk ? 'direct' : '×' + this.speeds[this.speedI]; if (sp.textContent !== stx) sp.textContent = stx;
+      const stx = this.c.slowOn && this.c.slowOn() ? 'ralenti' : lk ? 'direct' : '×' + this.speeds[this.speedI]; if (sp.textContent !== stx) sp.textContent = stx;
       sp.disabled = lk;
     }
     // le racer suivi n'est pas encore là : on l'annonce, avec un raccourci vers son arrivée
+    // le racer suivi (ou tout le monde) voyage entre deux systèmes : le couloir le montre (intégré au Télébyte)
+    { const travelling = (id) => F.stateAt(id, t).phase === 'leg';
+      const show = !!this.c.corridor && (this.sel ? travelling(this.sel) : F.racers.some((r) => travelling(r.id)) && !this.c.fleet().some((rc) => rc.inSys));
+      const cb = el.querySelector('#rh-corr'); if (cb.hidden === show) cb.hidden = !show;
+      if (show) { const who = this.sel ? F.racers.find((r) => r.id === this.sel).name : 'La course'; const txt = `${who} : en voyage interstellaire`; const sp = cb.querySelector('span'); if (sp.textContent !== txt) sp.textContent = txt; } }
     const arr = this._arrival(t), w = el.querySelector('#rh-wait');
     w.hidden = !arr;
     if (arr) w.querySelector('span').textContent = `${F.racers.find((r) => r.id === this.sel).name} arrive dans ${dur(arr - t)}`;
