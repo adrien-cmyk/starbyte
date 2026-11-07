@@ -88,9 +88,10 @@
       keep.play().catch(() => {});
     } catch (e) {}
   }
+  const VOICE_ON = false;   // voix off désactivée pour l'instant (sous-titres seuls dans le Télébyte)
   function open() {
     if (overlay) return;
-    primeSpeech();
+    if (VOICE_ON) primeSpeech();
     overlay = document.createElement('div');
     overlay.style.cssText = 'position:fixed;inset:0;z-index:9999;background:#000';
     overlay.innerHTML = '<iframe title="Télébyte — La Grande Fronde" allow="fullscreen" style="position:absolute;inset:0;width:100%;height:100%;border:0"></iframe>' +
