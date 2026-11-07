@@ -4617,6 +4617,18 @@ svg.map {
       <!-- contenu généré -->
     </div>
 
+    <!-- Bloc Grande Fronde (07/11/2026) : la course interstellaire et ses paris, ouverte à tous (Télébyte en
+         superposition, assets/fronde-bridge.js) -->
+    <div class="section-label">Grande Fronde</div>
+    <div class="dash-section-card clickable" id="dash-fronde-block" onclick="if (window.SBFronde) SBFronde.open()">
+      <div class="dash-stat-row"><span class="lbl">Course interstellaire</span><span class="val">4 racers · 72 h</span></div>
+      <div class="dash-stat-row"><span class="lbl">Paris en CG</span><span class="val" style="color:var(--amber)">ouverts 3 jours avant le départ</span></div>
+      <div class="dash-stat-row" style="margin-top:8px;padding-top:8px;border-top:1px solid var(--line)">
+        <span class="lbl" style="letter-spacing:.18em;text-transform:uppercase;font-size:10px">Ouvrir le Télébyte</span>
+        <span class="val" style="color:var(--cyan)">→</span>
+      </div>
+    </div>
+
     <!-- Bloc Commerce (passe Phase 1 Routes Secrètes — 16/05/2026) -->
     <!-- Visible dès qu'on a au moins 1 tanker construit (cohérent avec la logique routes). -->
     <div class="section-label" id="dash-commerce-label" style="display:none">Commerce</div>
@@ -50073,7 +50085,7 @@ if (G.knownTargets && Array.isArray(G.tankerMissions)) {
 <!-- PATCH_0111_PLANS — les plans d'existence : nouveau dessin de la carte (assets/plans.js), chargé AVANT spacemap.js qui l'utilise -->
 <script src="assets/plans.js?v=20261107-0900"></script>
 <script src="assets/spacemap.js?v=20261107-0900"></script>
-<script src="assets/fronde-bridge.js?v=20261105-1"></script>   <!-- GRANDE_FRONDE_0511 : Télébyte, paris (CG ↔ serveur) -->
+<script src="assets/fronde-bridge.js?v=20261107-1"></script>   <!-- GRANDE_FRONDE_0511 : Télébyte, paris (CG ↔ serveur) -->
 <!-- SPACE MAP niveau B — diorama 3D d'un système (assets/system3d.js, source src/system3d.js) -->
 <script type="module" src="assets/system3d.js?v=20261014-1440"></script>
 <!-- SHIP3D — fiches 3D : cuirassé KV-01, frégate SR-01, tanker TK-07, chantier orbital OS-01 (assets/ship3d.js, sur le moteur partagé window.SB3D) -->

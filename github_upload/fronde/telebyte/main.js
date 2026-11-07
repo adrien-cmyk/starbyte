@@ -47,7 +47,7 @@ function enterSystem(sysId) {
     sessionStorage.setItem('fronde.sys', sysId); sessionStorage.setItem('fronde.t', String(t));
     sessionStorage.setItem('fronde.sel', view.sel || ''); sessionStorage.setItem('fronde.back', location.href.split('#')[0]);
   } catch (e) {}
-  location.href = SYSTEM_PAGE + (FEED_Q && (FEED_Q !== 'live' || LIVE) ? '?feed=' + FEED_Q : '') + '#course';
+  location.href = SYSTEM_PAGE + (FEED_Q && (FEED_Q !== 'live' || LIVE) ? (SYSTEM_PAGE.includes('?') ? '&' : '?') + 'feed=' + FEED_Q : '') + '#course';
 }
 // retour depuis la vue système : on reprend l'instant et le racer suivi
 let restore = null;
@@ -149,6 +149,7 @@ if (liveErr) { const b = document.createElement('div'); b.id = 'offline'; b.text
 const setBoard = (min) => { document.body.classList.toggle('board-min', min); $('board-h').setAttribute('aria-expanded', String(!min)); try { localStorage.setItem('fronde.board', min ? 'min' : ''); } catch (e) {} setTimeout(placeSub, 30); };
 $('board-h').onclick = () => setBoard(!document.body.classList.contains('board-min'));
 { let m = false; try { m = localStorage.getItem('fronde.board') === 'min'; } catch (e) {} setBoard(m); }
+$('focus-enter').querySelector('.fo-ic').innerHTML = svg('dive'); $('focus-clear').querySelector('.fo-ic').innerHTML = svg('target');
 $('focus-clear').onclick = () => { cor.close(); view.overview(); };
 $('focus-enter').onclick = () => { const s = feed.stateAt(view.sel, t); if (s.phase === 'leg') return cor.open(null, t, view.sel); dive(s.phase === 'system' || s.phase === 'start' ? s.system : s.phase === 'leg' ? s.legTo : E.systems[E.systems.length - 1].id); };
 $('edition').textContent = E.name;
@@ -157,13 +158,13 @@ $('route').textContent = E.systems.map((s) => s.name).join(' → ');
 /* ── étapes : chaque système, à l'instant où le premier racer y passe la périapse ── */
 function stagesOf() {
   return E.systems.map((sys) => {
-    if (feed.etaPeriapsis) { const e = feed.etaPeriapsis(sys.id); let t0 = Infinity; for (const r of E.racers) for (const sg of feed.tracks[r.id].segs) if (sg.kind === 'system' && sg.sys.id === sys.id) t0 = Math.min(t0, sg.t0); return { sys, tp: e.t, known: e.known, t0: Number.isFinite(t0) ? t0 : e.t - 6.1 * 3600 }; }
+    if (feed.etaPeriapsis) { const e = feed.etaPeriapsis(sys.id); let t0 = Infinity; for (const r of E.racers) for (const sg of feed.tracks[r.id].segs) if (sg.kind === 'system' && sg.sys.id === sys.id) t0 = Math.min(t0, sg.t0); return { sys, tp: e.t, known: e.known, t0: Number.isFinite(t0) ? t0 : e.t - ((E.pilot && E.pilot.entryR) || 9) / 9 * 6.1 * 3600 }; }
     let tp = Infinity, t0 = Infinity;
     for (const r of E.racers) for (const sg of feed.tracks[r.id].segs) if (sg.kind === 'system' && sg.sys.id === sys.id) { tp = Math.min(tp, sg.tp); t0 = Math.min(t0, sg.t0); }
     return { sys, tp, t0, known: true };
   });
 }
-let STAGES = stagesOf();
+let STAGES = stagesOf(), stageSeen = '';
 const stageHtml = () => STAGES.map((s, i) => (i ? `<button type="button" class="leg" data-leg="${i - 1}" aria-label="Couloir ${STAGES[i - 1].sys.name} vers ${s.sys.name}"></button>` : '') + `<button type="button" data-i="${i}" aria-label="Voir le passage à ${s.sys.name}"><b>${s.sys.name}</b><span>${s.known ? '' : '≈ '}${hh(s.tp)}</span></button>`).join('');
 $('stages').innerHTML = stageHtml();
 // flux publié : à chaque plan reçu, étapes et durée de la course se précisent
@@ -215,7 +216,10 @@ function renderClock() {
   setTxt($('time'), hh(t));
   { let cur = 0; STAGES.forEach((s, i) => { if (t >= s.t0) cur = i; }); const lk = cor.legNow(t, null); const inLeg = lk >= 0 && E.racers.every((r) => feed.stateAt(r.id, t).phase !== 'system');
     for (const b of $('stages').querySelectorAll('button[data-i]')) b.classList.toggle('now', !inLeg && +b.dataset.i === cur);
-    for (const b of $('stages').querySelectorAll('button[data-leg]')) b.classList.toggle('now', inLeg && +b.dataset.leg === lk); }
+    for (const b of $('stages').querySelectorAll('button[data-leg]')) b.classList.toggle('now', inLeg && +b.dataset.leg === lk);
+    // dix étapes sur une ligne qui défile : l'étape en cours reste en vue (sans bouger la page)
+    const nb = $('stages').querySelector('button.now'), key = nb ? nb.dataset.i + '/' + nb.dataset.leg : '';
+    if (nb && key !== stageSeen) { stageSeen = key; const st = $('stages'); st.scrollTo({ left: Math.max(0, nb.getBoundingClientRect().left - st.getBoundingClientRect().left + st.scrollLeft - st.clientWidth * 0.3), behavior: "smooth" }); } }
   { const v = String(Math.round(t)); if (slider.value !== v && document.activeElement !== slider) slider.value = v; }
   const ev = feed.nextEvent(t);
   setTxt($('next'), ev ? `${ev.label} · ${racer[ev.racer].name} dans ${dur(ev.t - t)}` : 'course terminée');
@@ -229,7 +233,7 @@ function renderClock() {
     const s = feed.stateAt(view.sel, t);
     setTxt($('focus-tele'), s.phase === 'system' ? `${(s.speed / 1e3).toFixed(1)} km/s · carburant ${Math.round(s.fuel * 100)} % · intégrité ${Math.round(s.integrity * 100)} %`
       : s.phase === 'leg' ? `voyage interstellaire ${Math.round(s.f * 100)} % · carburant ${Math.round(s.fuel * 100)} %` : 'arrivé');
-    setTxt($('focus-enter'), s.phase === 'leg' ? 'Couloir' : 'Vue système');   // en voyage : le bouton ouvre le couloir
+    setTxt($('focus-enter-t'), s.phase === 'leg' ? 'Couloir' : 'Vue système');   // en voyage : le bouton ouvre le couloir
   }
 }
 
@@ -249,7 +253,7 @@ function loop(now) {
   } else if (playing) { t = Math.min(E.t1, t + dt * SPEEDS[speedI]); if (t >= E.t1) { playing = false; $('play').textContent = 'Lecture'; } }
   if (feed.sync) feed.sync(t);                                    // flux publié : plans reçus jusqu'à l'instant affiché
   renderStandings(); renderClock();
-  if (cor.isOpen) cor.update(t, dt, view.sel); else view.update(t, dt);
+  if (in3d) { /* plan 3D à l'écran : le schéma ne se dessine pas */ } else if (cor.isOpen) cor.update(t, dt, view.sel); else view.update(t, dt);
   commentary(t);
 }
 // sous-titres juste au-dessus du classement (en bas sur téléphone) ou du pied de page
@@ -296,7 +300,39 @@ addEventListener('pointerup', touched, { capture: true });
 addEventListener('wheel', (e) => { if (e.isTrusted) dir.userTouched(); }, { capture: true, passive: true });
 const news = mountNews({ E, racer, hh, getTl: () => nar.tl, onReplay: replay });
 // revoir un moment fort : un peu avant, sur le bon racer ; dans la vue système s'il s'est passé dans un système
+// plan 3D d'un dépassement (GDD_PLANS_3D) : joué à vitesse normale, puis retour au schéma juste après le fait
+let p3d = null, in3d = false;
+async function play3d(e) {
+  if (in3d) return true;
+  in3d = true; cor.close(); dir.hold(true);
+  const wasPlaying = playing; playing = false;
+  try {
+    const [{ createPlayer }, { overtakeScript }, { SCRIPTS }] = await Promise.all([import('./plans3d/player.js'), import('./plans3d/overtake.js'), import('./plans3d/events.js')]);
+    p3d = p3d || createPlayer({ racer, dur });
+    // le commentateur, sobre : le plan se comprend sans lui ; une phrase pour lancer, une réaction au moment fort
+    const OPEN = { overtake: 'Revoyons ce dépassement !', flare: 'L\'éruption, revoyons ça.', failure: 'La panne, en images.', beltHit: 'Le choc, regardez.', repair: 'L\'arrêt réparation.', failed: 'La surchauffe, revoyons ça.', moon: 'Le passage au ras de la lune !', finish: 'L\'arrivée !' };
+    nar.aside([['A', OPEN[e.kind] || 'Revoyons ça !']], 60000);
+    const onCue = (c) => { if (c.id === 'passe') nar.aside([['A', pick2(['Ohhh ! Il est passé !', 'Il le passe comme une balle !', 'Et c\'est fait ! Dépassement !'])]], 60000); };
+    const script = e.kind === 'overtake' ? overtakeScript(e, { feed, E, racer }) : SCRIPTS[e.kind](e, { feed, E, racer });
+    const ok = await p3d.play(script, { onCue, audio: audioCtx });
+    if (!ok) return false;
+    if (!(LIVE && following)) { t = Math.min(E.t1, e.t + 60); if (LIVE && t < liveNow() - 1) setFollow(false); }
+    if (e.racer && view.sel !== e.racer) view.select(e.racer);
+    return true;
+  } catch (err) { console.warn('[plans 3D]', err); return false; }
+  finally { in3d = false; playing = wasPlaying; nar.endAside(); dir.hold(false); renderStandings(true); renderClock(); }
+}
+// son des plans 3D : le contexte audio s'ouvre dans le geste du joueur (« Revoir »), sinon iOS le laisse muet
+let audioCtx = null;
+function openAudio() { try { const AC = window.AudioContext || window.webkitAudioContext; if (!AC) return; audioCtx = audioCtx || new AC(); if (audioCtx.state === 'suspended') audioCtx.resume(); } catch (e) { audioCtx = null; } }
+// faits qui ont leur plan 3D (telebyte/plans3d) ; les autres gardent le revoir d'avant (vue système ou couloir)
+const IN3D = new Set(['overtake', 'flare', 'failure', 'beltHit', 'repair', 'failed', 'moon', 'finish']);
+const has3d = (e) => IN3D.has(e.kind) && !!e.racer && (e.kind !== 'overtake' || (e.data && e.data.passed && e.data.passed.length));
 function replay(e) {
+  if (has3d(e)) { openAudio(); play3d(e).then((ok) => { if (!ok) replayFlat(e); }); return; }
+  replayFlat(e);
+}
+function replayFlat(e) {
   const inSys = e.sys && ['plan', 'ring', 'periapsis', 'failed', 'damage', 'finale', 'finish', 'moon'].includes(e.kind);
   const lead = e.kind === 'plan' || e.kind === 'finale' ? 600 : inSys ? 1500 : 900;
   t = Math.max(0, e.t - lead); playing = true;
@@ -322,8 +358,18 @@ for (const ev of ['touchend', 'click', 'keydown']) addEventListener(ev, () => na
 requestAnimationFrame(loop);
 
 // accès de test (captures)
-import('./bets.js').then((m) => m.mountBets({ feed, LIVE, GAME, rpc, tick, racer, E })).catch((e) => console.warn('[fronde] paris', e));
+// les racers : fiche des quatre vaisseaux (modèle 3D et specs) ; avant le départ d'une course en direct, elle s'ouvre
+// d'elle-même une fois par édition (puis le bouton du haut et le lien des paris)
+let racersUI = null;
+const openRacers = (id) => (racersUI ? Promise.resolve(racersUI) : import('./racers.js').then((m) => (racersUI = m.mountRacers({ E, racer })))).then((rc) => rc.open(id)).catch((e) => console.warn('[fronde] racers', e));
+$('racers-btn').innerHTML = svg('ship');
+$('racers-btn').onclick = (e) => { e.stopPropagation(); $('racers-btn').classList.remove('hint'); openRacers(); };
+if (LIVE && liveNow() <= 0) {
+  const k = 'fronde.racers.' + E.id; let seen = false; try { seen = localStorage.getItem(k) === '1'; localStorage.setItem(k, '1'); } catch (e) {}
+  if (!seen) setTimeout(() => openRacers(), 1200); else $('racers-btn').classList.add('hint');
+}
+import('./bets.js').then((m) => m.mountBets({ feed, LIVE, GAME, rpc, tick, racer, E, openRacers })).catch((e) => console.warn('[fronde] paris', e));
 // la vue système suit les nouveaux instantanés pendant qu'on y est
 if (LIVE) feed.onSnap((snap) => { if (sysFrame && frameOk) sysFrame.contentWindow.postMessage({ fronde: 1, type: 'snap', snap }, '*'); });
 
-window.TB = { nar, news, replay, cor, dir, live: () => LIVE && { state: LIVE.snap.state, now: liveNow(), id: E.id }, view, dive: (id) => dive(id), get state() { return { frameOk, inSystem, t, sel: view.sel }; }, set: (x) => { t = x; playing = false; if (feed.sync) feed.sync(t); renderStandings(true); renderClock(); view.update(t, 1); }, select: (id) => view.select(id), feed, ready: true };
+window.TB = { nar, news, replay, openRacers, get racers() { return racersUI; }, cor, dir, get p3d() { return p3d; }, get in3d() { return in3d; }, live: () => LIVE && { state: LIVE.snap.state, now: liveNow(), id: E.id }, view, dive: (id) => dive(id), get state() { return { frameOk, inSystem, t, sel: view.sel }; }, set: (x) => { t = x; playing = false; if (feed.sync) feed.sync(t); renderStandings(true); renderClock(); view.update(t, 1); }, select: (id) => view.select(id), feed, ready: true };

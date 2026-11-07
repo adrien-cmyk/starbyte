@@ -14,7 +14,7 @@
   :root {
     color-scheme: dark;
     --bg: #020306; --ink: #e6eef3; --dim: #8b9aa6; --faint: #5a6873; --line: rgba(200, 214, 224, .16);
-    --panel: rgba(4, 8, 13, .78); --accent: #9fd4ec; --live: #ff5a4f; --amber: #ffd27a;   /* --accent : navigation seulement */
+    --panel: rgba(4, 8, 13, .78); --accent: #9fd4ec; --sb-cyan: #5fffe8; --live: #ff5a4f; --amber: #ffd27a;   /* --accent : navigation seulement */
     --f-ui: 'Space Grotesk', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
     --f-num: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
     --sat: env(safe-area-inset-top, 0px); --sab: env(safe-area-inset-bottom, 0px);
@@ -75,7 +75,14 @@
   #standings .gp { font: 12px var(--f-num); font-variant-numeric: tabular-nums; color: var(--ink); }
   #focus { margin: 8px 14px 4px; padding-top: 8px; border-top: 1px solid var(--line); font-size: 11px; color: var(--dim); }
   #focus b { color: var(--ink); }
-  #focus button { float: right; margin-left: 6px; background: none; border: 1px solid var(--line); color: var(--dim); border-radius: 6px; font: inherit; padding: 1px 7px; cursor: pointer; }
+  /* boutons de navigation du racer suivi : turquoise de l'interface Starbyte (navigation), bien visibles */
+  #focus .fo-act { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-top: 9px; }
+  #focus .fo-act button { display: flex; align-items: center; justify-content: center; gap: 6px; min-height: 36px; padding: 7px 8px; white-space: nowrap; font: 700 12px var(--f-ui); letter-spacing: .02em; color: var(--sb-cyan); background: rgba(95, 255, 232, .08); border: 1px solid rgba(95, 255, 232, .5); border-radius: 9px; cursor: pointer; box-shadow: 0 0 14px rgba(95, 255, 232, .12); transition: background .15s, box-shadow .15s; }
+  #focus .fo-act button#focus-enter { color: #04110f; background: var(--sb-cyan); border-color: var(--sb-cyan); box-shadow: 0 0 16px rgba(95, 255, 232, .35); }
+  #focus .fo-act button:hover, #focus .fo-act button:focus-visible { background: rgba(95, 255, 232, .18); box-shadow: 0 0 18px rgba(95, 255, 232, .3); outline: none; }
+  #focus .fo-act button#focus-enter:hover, #focus .fo-act button#focus-enter:focus-visible { background: #8ffff0; }
+  #focus .fo-act button:active { transform: translateY(1px); }
+  #focus .fo-ic { display: inline-flex; } #focus .fo-ic svg { width: 15px; height: 15px; }
 
   footer { position: fixed; left: 0; right: 0; bottom: 0; padding: 10px max(16px, var(--sar)) calc(var(--sab) + 12px) max(16px, var(--sal)); display: flex; gap: 10px; align-items: center; background: linear-gradient(to top, rgba(2, 3, 6, .9), rgba(2, 3, 6, 0)); }
   footer .track { flex: 1; min-width: 0; } footer [hidden] { display: none; }
@@ -87,7 +94,11 @@
   #next::before { content: "Prochain · "; color: var(--faint); }
 
   /* étapes : un bouton par système, qui saute à l'instant fort (passage du premier racer) et ouvre la vue système */
-  #stages { display: flex; gap: 6px; margin-top: 8px; pointer-events: auto; flex-wrap: wrap; }
+  /* dix étapes : une seule ligne qui défile au doigt (l'étape en cours reste en vue), fondue aux bords */
+  .brand { min-width: 0; }
+  #stages { display: flex; gap: 6px; margin-top: 8px; pointer-events: auto; flex-wrap: nowrap; overflow-x: auto; overscroll-behavior-x: contain; scrollbar-width: none; max-width: min(100%, calc(100vw - 340px)); padding: 1px 18px 1px 0; -webkit-mask-image: linear-gradient(90deg, #000 calc(100% - 22px), transparent); mask-image: linear-gradient(90deg, #000 calc(100% - 22px), transparent); }
+  #stages::-webkit-scrollbar { display: none; }
+  #stages button { flex-shrink: 0; white-space: nowrap; }
   #stages button { font: inherit; font-size: 11px; color: var(--ink); background: var(--panel); border: 1px solid var(--line); border-radius: 999px; padding: 5px 10px 5px 8px; cursor: pointer; display: inline-flex; gap: 6px; align-items: baseline; }
   #stages button b { font-weight: 700; letter-spacing: .12em; text-transform: uppercase; font-size: 10px; }
   #stages button span { font: 10px var(--f-num); color: var(--dim); }
@@ -143,6 +154,7 @@
   #bets .bt-msg { color: var(--ink); } #bets .bt-pay b { color: #7fe08a; } #bets code { font: 10px var(--f-num); }
   /* voix off et fil d'actualité (Phase 4) */
   .tb-hz { position: absolute; left: 0; top: 0; translate: -50% -50%; pointer-events: none; font: 9px var(--f-num); color: var(--faint); white-space: nowrap; line-height: 1.35; text-align: left; padding: 2px 6px; border-radius: 4px; background: rgba(2, 3, 6, .55); }
+  .tb-hz.far { visibility: hidden; }
   .tb-hz em { font-style: normal; color: #cdb999; } .tb-hz em.fl { color: #ffb070; } .tb-hz b { font-weight: 400; color: var(--dim); }
   .tb-hz.on { color: #ffd27a; border: 1px solid rgba(255, 154, 64, .6); } .tb-hz.on b::after { content: ' · en cours !'; color: #ffd27a; } .tb-hz.on { translate: -50% -50%; }
   #corridor { position: fixed; z-index: 29; left: max(10px, var(--sal)); right: max(10px, var(--sar)); top: calc(var(--sat) + 152px); bottom: var(--corr-b, 300px); border: 1px solid rgba(255, 201, 160, .3); border-radius: 12px; overflow: hidden; background: rgba(2, 4, 9, .4); }
@@ -168,6 +180,34 @@
   .pill-row { display: inline-flex; align-items: center; gap: 6px; }
   #voice { pointer-events: auto; width: 26px; height: 26px; font-size: 14px; line-height: 1; color: var(--ink); background: var(--panel); border: 1px solid var(--line); border-radius: 50%; padding: 0; cursor: pointer; }
   #voice.off { opacity: .55; }
+  /* les racers (avant la course) : fiche avec le vaisseau en 3D */
+  #racers-btn { pointer-events: auto; width: 26px; height: 26px; color: var(--ink); background: var(--panel); border: 1px solid var(--line); border-radius: 50%; padding: 0; cursor: pointer; }
+  #racers-btn svg.ic { width: 15px; height: 15px; vertical-align: middle; }
+  #racers-btn.hint { border-color: #ffd27a; box-shadow: 0 0 0 3px rgba(255, 210, 122, .25); }
+  #racers { position: fixed; z-index: 48; left: max(12px, var(--sal)); right: max(12px, var(--sar)); top: calc(var(--sat) + 12px); bottom: calc(var(--sab) + 12px); max-width: 520px; margin: 0 auto; display: flex; flex-direction: column; background: rgba(6, 10, 18, .97); border: 1px solid var(--line); border-radius: 14px; overflow: hidden; backdrop-filter: blur(8px); }
+  #racers[hidden] { display: none; }
+  #racers .rc-head { display: flex; justify-content: space-between; align-items: center; padding: 10px 14px 6px; }
+  #racers .rc-head b { font-size: 11px; font-weight: 800; letter-spacing: .26em; text-transform: uppercase; }
+  #racers .rc-x { font: 20px/1 var(--f-ui); color: var(--dim); background: none; border: 0; cursor: pointer; padding: 2px 6px; }
+  #racers .rc-view { position: relative; flex: 1 1 42%; min-height: 180px; }
+  #racers canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  #racers .rc-load { position: absolute; left: 50%; bottom: 10px; translate: -50% 0; font: 10px var(--f-num); color: var(--dim); }
+  #racers .rc-load[hidden] { display: none; }
+  #racers .rc-tabs { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; padding: 8px 10px 0; }
+  #racers .rc-tabs button { font: 600 11px var(--f-ui); color: var(--dim); background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 7px 4px; cursor: pointer; display: flex; gap: 5px; align-items: center; justify-content: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #racers .rc-tabs button i { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--livery); }
+  #racers .rc-tabs button.on { color: var(--ink); border-color: var(--livery); }
+  #racers .rc-card { flex: 0 0 auto; padding: 10px 14px 14px; overflow-y: auto; max-height: 52%; }
+  #racers h3 { margin: 0 0 4px; font-size: 17px; display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; }
+  #racers h3 small { font: 10px var(--f-num); color: var(--dim); letter-spacing: .06em; }
+  #racers h3 em { margin-left: auto; font: normal 700 9px var(--f-ui); letter-spacing: .18em; text-transform: uppercase; color: #05080c; background: var(--livery); border-radius: 999px; padding: 3px 8px; }
+  #racers p { margin: 0 0 10px; color: var(--dim); font-size: 12px; line-height: 1.45; }
+  #racers ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 7px; }
+  #racers li { display: grid; grid-template-columns: 112px auto 1fr; align-items: center; gap: 4px 10px; font-size: 11px; }
+  #racers li b { display: flex; gap: 3px; } #racers li b i { width: 14px; height: 6px; border-radius: 2px; background: rgba(255, 255, 255, .1); } #racers li b i.on { background: var(--livery); }
+  #racers li small { font: 10px var(--f-num); color: var(--faint); text-align: right; }
+  @media (max-width: 400px) { #racers li { grid-template-columns: 96px auto; } #racers li small { grid-column: 1 / -1; text-align: left; margin-top: -3px; } }
+  .bt-racers { font: 600 11px var(--f-ui); color: #ffd27a; background: none; border: 0; padding: 0; cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }
   #tv { pointer-events: auto; width: 26px; height: 26px; font-size: 13px; line-height: 1; background: var(--panel); border: 1px solid var(--line); border-radius: 50%; padding: 0; cursor: pointer; opacity: .55; }
   #tv.on { opacity: 1; border-color: #ffd27a; box-shadow: 0 0 0 1px rgba(255, 210, 122, .3); }
   #lower { position: fixed; z-index: 44; left: max(12px, var(--sal)); top: calc(var(--sat) + 152px); max-width: calc(100% - 24px); font: 12px var(--f-ui); color: var(--ink); background: rgba(6, 10, 18, .9); border: 1px solid rgba(255, 210, 122, .45); border-radius: 8px; padding: 6px 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -203,7 +243,7 @@
   @media (max-width: 720px) {
     #board { left: max(12px, var(--sal)); right: max(12px, var(--sar)); top: auto; bottom: calc(var(--sab) + 74px); width: auto; padding: 6px 0 2px; }
     #board h2 { margin: 0 12px 2px; }
-    #stages { gap: 3px; flex-wrap: nowrap; } #stages button { padding: 4px 6px; gap: 4px; } #stages button span { display: none; }
+    #stages { gap: 3px; flex-wrap: nowrap; max-width: 100%; } #stages button { padding: 4px 6px; gap: 4px; } #stages button span { display: none; }
     #stages button::before { display: none; } #stages button b { letter-spacing: .06em; font-size: 9.5px; }
     #stages button.leg { width: 22px; padding: 4px 0; justify-content: center; } #stages button.leg::before { display: inline; font-size: 10px; }
     .onair { flex-shrink: 0; } .brand { min-width: 0; }
@@ -222,12 +262,12 @@
 <div id="labels"></div>
 <header>
   <div class="brand"><b>TÉLÉ<em>BYTE</em></b><span id="edition">La Grande Fronde</span><small id="route">—</small><nav id="stages" aria-label="Étapes de la course"></nav></div>
-  <div class="onair"><span class="pill-row"><button id="tv" type="button" title="Mode TV : la régie choisit les images" aria-pressed="false">📺</button><button id="voice" type="button" title="Commentaire">🔊</button><span class="pill" id="state">en direct</span></span><span class="t" id="time">00 h 00</span></div>
+  <div class="onair"><span class="pill-row"><button id="racers-btn" type="button" title="Les racers : vaisseaux et specs" aria-label="Les racers"></button><button id="tv" type="button" title="Mode TV : la régie choisit les images" aria-pressed="false">📺</button><button id="voice" type="button" title="Commentaire">🔊</button><span class="pill" id="state">en direct</span></span><span class="t" id="time">00 h 00</span></div>
 </header>
 <aside id="board" aria-label="Classement">
   <h2><button id="board-h" type="button" aria-expanded="true" aria-controls="standings"><span>Classement</span><em id="board-lead"></em><svg viewBox="0 0 12 12" aria-hidden="true"><path d="M2.5 4.5 6 8l3.5-3.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></button></h2>
   <ol id="standings"></ol>
-  <div id="focus" hidden><button id="focus-clear" type="button">Tout le parcours</button><button id="focus-enter" type="button">Vue système</button><b id="focus-name"></b><br><span id="focus-tele"></span></div>
+  <div id="focus" hidden><b id="focus-name"></b><br><span id="focus-tele"></span><div class="fo-act"><button id="focus-enter" type="button"><i class="fo-ic"></i><span id="focus-enter-t">Vue système</span></button><button id="focus-clear" type="button"><i class="fo-ic"></i><span>Tout le parcours</span></button></div></div>
 </aside>
 <section id="bets" hidden role="dialog" aria-label="Paris de la Grande Fronde"><header><b>Paris · vainqueur</b><button id="bets-close" type="button" aria-label="Fermer les paris">×</button></header><div id="bets-body"></div></section>
 <button id="news" type="button" hidden aria-expanded="false" aria-controls="news-list"><span class="nw-k">Dernière minute</span><span class="nw-t"></span><span class="nw-h"></span></button>

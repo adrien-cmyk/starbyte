@@ -1,0 +1,7 @@
+# Grande Fronde : pages et modules revalidés à chaque chargement (ETag), pour ne jamais mélanger d'anciens et de
+# nouveaux fichiers après une mise à jour du moteur de course. Les modèles 3D (.glb.gz) gardent le cache habituel.
+<IfModule mod_headers.c>
+  <FilesMatch "\.(js|mjs|html|json)$">
+    Header set Cache-Control "no-cache"
+  </FilesMatch>
+</IfModule>

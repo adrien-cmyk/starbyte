@@ -346,10 +346,14 @@ function sportCam(dt) {
   const v = new THREE.Vector3(...rc.vel), sp = v.length(); v.normalize();
   const up = new THREE.Vector3(0, 1, 0).applyQuaternion(giant.group.quaternion);
   const side = new THREE.Vector3().crossVectors(v, up).normalize();
-  const dir = v.clone().multiplyScalar(-Math.cos(0.28)).addScaledVector(up, Math.sin(0.28)).addScaledVector(side, 0.32).normalize();
+  const dir = v.clone().multiplyScalar(-Math.cos(0.28)).addScaledVector(up, Math.sin(0.28)).addScaledVector(side, 0.85).normalize();   // trois quarts arrière : la coque et ses panaches de profil
   let yaw = Math.atan2(dir.x, dir.z); const pitch = Math.asin(THREE.MathUtils.clamp(dir.y, -1, 1));
+  // rotation au doigt d'abord (ramenée à un tour), puis on prend le chemin le plus court vers l'angle visé : recaler
+  // avant d'ajouter le geste faisait basculer d'un tour à chaque image près du demi-tour (caméra de trois quarts avant)
+  cam.u.yaw = Math.atan2(Math.sin(cam.u.yaw), Math.cos(cam.u.yaw));
+  yaw += cam.u.yaw;
   while (yaw - cam.goal.yaw > Math.PI) yaw -= 2 * Math.PI; while (yaw - cam.goal.yaw < -Math.PI) yaw += 2 * Math.PI;
-  yaw += cam.u.yaw; const pitchU = THREE.MathUtils.clamp(pitch + cam.u.pitch, -1.45, 1.45);
+  const pitchU = THREE.MathUtils.clamp(pitch + cam.u.pitch, -1.45, 1.45);
   if (!cam.tr) { cam.goal.yaw = yaw; cam.goal.pitch = pitchU; cam.goal.logD += (Math.log(L * 2.2 + 25) + cam.u.logD - cam.goal.logD) * Math.min(1, dt * 1.5); }
   const k = THREE.MathUtils.clamp((sp - 20000) / 40000, 0, 1);
   fovOv = 50 + 12 * k + 6 * rc.throttle; sportFov = true;
@@ -385,7 +389,7 @@ VIEWS['course-portes'] = () => {
 VIEWS['course-portes']._w = true;
 
 /* ── systèmes de la course : bascule (étoile, soleil, reflets, géante, lunes, cibles, vues) ── */
-const STAR_GLOW = { amber: [0.5, 0.3, 0.16], blue: [0.12, 0.3, 0.42], black: [0.08, 0.07, 0.06] };
+const STAR_GLOW = { amber: [0.5, 0.3, 0.16], blue: [0.12, 0.3, 0.42], black: [0.08, 0.07, 0.06], rose: [0.45, 0.24, 0.24], pale: [0.3, 0.36, 0.38], jade: [0.22, 0.32, 0.16], copper: [0.5, 0.24, 0.1], violet: [0.22, 0.16, 0.4], cream: [0.5, 0.42, 0.28], ember: [0.3, 0.1, 0.04] };
 function setSystem(id) {
   const sys = RACE_SYSTEMS.find((x) => x.id === id); if (!sys || sys === curSys) return;
   curSys = sys;
@@ -491,7 +495,7 @@ function step(dt) {
     cam.maxDist = m; if (cam.goal.logD > Math.log(m)) cam.goal.logD = Math.log(m); }
   const sportRc = raceLayer ? sportCam(dt) : null;
   // vue de poursuite : moins d'éclat (panache du racer suivi atténué, bloom plus sélectif) pour que la coque reste lisible
-  if (fleet) for (const r of fleet) r.dim = r === sportRc ? 0.45 : 1;
+  if (fleet) for (const r of fleet) r.dim = r === sportRc ? 0.8 : 1;   // poursuite : panache à peine adouci (teinté, il ne noie plus la coque)
   bloom.strength = sportRc ? 0.16 : 0.55; bloom.threshold = sportRc ? 0.99 : 0.92;
   cam.update(dt);
   if (sportRc && sportRc.throttle > 0.5) { const tt = performance.now() / 1000; camera.rotateX(Math.sin(tt * 37) * 0.0012); camera.rotateY(Math.sin(tt * 29 + 1) * 0.0012); }   // vibration de poussée
@@ -602,6 +606,8 @@ function hud() {
   if (graze && t === graze.target) alt = ' · altitude ' + fmtDist(graze.moon.altitudeAt(cam.pos));
   $('readout').textContent = `${fps.toFixed(0)} i/s · ${lod.budget.name} · ${frameStats.calls} appels · ${(frameStats.tris / 1e3).toFixed(0)} k tri · ${t ? t.label : ''} · distance ${fmtDist(d)}${alt} · ×${timeScale}`;
 }
+// sélecteur : tous les systèmes de course (dix depuis le moteur v3), avec le nom de leur géante
+{ const sel = $('giant'); sel.innerHTML = ''; for (const x of RACE_SYSTEMS) sel.add(new Option(`${x.name} · ${GIANTS[x.giant].name.replace('Géante', 'géante')}`, x.id)); sel.value = curSys.id; }
 $('giant').onchange = (e) => { setSystem(e.target.value); };
 $('view-sel').onchange = (e) => { if (e.target.value === 'zoom') { cam.enabled = false; director.start(1); $('cine').textContent = 'Caméra libre'; return; } if (director.active) { director.stop(); cam.enabled = true; $('cine').textContent = 'Cinématique'; } const v = e.target.value; curTarget = v.startsWith('ring') ? 'rings' : v === 'star' ? 'star' : moonById[v] ? 'moon:' + v : 'giant'; if (!v.startsWith('graze')) graze = null; VIEWS[v](); };
 $('target').onchange = (e) => { curTarget = e.target.value; graze = null;
@@ -614,7 +620,8 @@ $('cine').onclick = () => { if (director.active) { director.stop(); cam.enabled 
 $('shot').onclick = () => { render(); const a = document.createElement('a'); a.download = `fronde_${giantKey}_${Date.now()}.png`; a.href = renderer.domElement.toDataURL('image/png'); a.click(); };
 
 // entrée depuis Télébyte : …/sandbox/index.html#course (système, instant et racer suivis dans sessionStorage)
-if (location.hash.startsWith('#course')) {
+// (après l'évaluation du module : la suite déclare des variables que la vue de course utilise, comme `slow`)
+if (location.hash.startsWith('#course')) queueMicrotask(() => {
   let sys = 'kerath', t = null, sel = null;
   try { sys = sessionStorage.getItem('fronde.sys') || sys; const ts = sessionStorage.getItem('fronde.t'); t = ts ? +ts : null; sel = sessionStorage.getItem('fronde.sel') || null; } catch (e) {}
   if (sys !== curSys.id) setSystem(sys);
@@ -622,7 +629,7 @@ if (location.hash.startsWith('#course')) {
   if (new URLSearchParams(location.search).get('feed') === 'live') {   // repli par changement de page : on relit l'édition
     loadEdition().then((snap) => { if (snap) useSnap(snap); courseView({ t, sel }); }).catch(() => courseView({ t, sel }));
   } else courseView({ t, sel });
-}
+});
 
 // en direct (Phase 3) : le flux de la vue est celui de l'édition du serveur, reconstruit à partir de ses instantanés
 function useSnap(snap) {
@@ -703,6 +710,7 @@ window.RW = {
   frameCount: () => frameN,
   live: () => ({ lock: !!raceLayer.liveLock, t: simT, now: raceLayer.feed.live ? raceLayer.feed.live.source.now() : null, pill: document.querySelector('#race .rh-live')?.textContent, speed: document.querySelector('#rh-speed')?.textContent }),
   camYaw: () => cam.goal.yaw + (cam.chase ? cam.u.yaw : 0),
+  camU: (yaw, pitch = null) => { cam.u.yaw = yaw; if (pitch != null) cam.u.pitch = pitch; },   // essais : la caméra de poursuite tourne comme au doigt
   camDiag: () => ({ tr: !!cam.tr, D: cam.distance, R: giant.R, view: raceLayer._view, chase: cam.chase, maxD: cam.maxDist, dir: director.active }),
   coursePortes: () => VIEWS['course-portes'](), course: (o) => courseView(o || {}), advanceRace: (dt) => { simT += dt; }, raceSelect: (id) => raceLayer.select(id),
   leader: () => { const f = ensureFleet(), rows = raceLayer.feed.standingsAt(simT); const r = rows.find((x) => f.find((rc) => rc.def.id === x.id && rc.inSys)); return r ? r.id : null; },
