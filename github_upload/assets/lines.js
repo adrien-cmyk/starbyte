@@ -1414,7 +1414,7 @@
     if (!G.mapSeen) G.mapSeen = {};
     G.mapSeen[sys] = now;
     if (typeof saveGame === 'function') saveGame();
-    if (typeof toast === 'function') toast(`📡 ${antennaName(home) ? 'L\'antenne de ' + antennaName(home) : 'Ton antenne'} capte un trafic régulier vers ${sys} · pose une balise dessus : elle remontera la route jusqu'au lieu caché`, () => { if (typeof openSystemOnMap === 'function') openSystemOnMap(sys); });
+    if (typeof toast === 'function') toast(`📡 ${antennaName(home) ? 'L\'antenne de ' + antennaName(home) : 'Ton antenne'} capte un nouveau signal · détails dans l'antenne`, () => { if (typeof sbOpenAntenna === 'function') sbOpenAntenna(); else if (typeof openSystemOnMap === 'function') openSystemOnMap(sys); });   // 07/11 : le détail vit dans la fiche de l'antenne
     if (window.SBMap && SBMap.render) { try { SBMap.render(); } catch (e) {} }
     if (typeof sbSignalRender === 'function') { try { sbSignalRender(); } catch (e) {} }
   }
