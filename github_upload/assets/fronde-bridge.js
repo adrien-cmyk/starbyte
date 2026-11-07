@@ -12,7 +12,7 @@
    Intégration (index.html) : <script src="assets/fronde-bridge.js"></script> AVANT le chargement de
    la partie, ajouter 'fronde' à EXTRA_SAVE_KEYS (indispensable : la trace des paris appliqués doit être restaurée
    avec la partie, sinon une synchronisation retirerait une seconde fois les mises), et un bouton qui appelle
-   SBFronde.open() : bouton rond posé ici à côté de la cloche des notifications (l'adresse ?telebyte l'ouvre aussi).
+   SBFronde.open() : bouton rond au drapeau à damier posé ici, au-dessus de la radio (l'adresse ?telebyte l'ouvre aussi).
    Dépend des globals du jeu : G, saveGame. Supabase : mêmes adresse, clé et session que le Blackmarket.
    ═══════════════════════════════════════════════════════════════════════ */
 (function () {
@@ -79,28 +79,30 @@
   function close() { if (!overlay) return; overlay.remove(); overlay = null; sync().catch(() => {}); }
 
   window.SBFronde = { credits, sync, open, close };
-  // entrée pour tous (07/11/2026) : bouton rond à côté de la cloche des notifications, sur l'écran de la planète
-  // (même gabarit que la cloche ; turquoise de navigation). L'adresse ?telebyte l'ouvre aussi.
+  // entrée pour tous (07/11/2026) : bouton rond au drapeau à damier, juste au-dessus de la radio (écran de la planète),
+  // même gabarit qu'elle. L'adresse ?telebyte l'ouvre aussi.
   try {
     const st = document.createElement('style');
-    st.textContent = `.sb-fronde { width:38px; height:38px; padding:7px; color:#5fffe8; background:rgba(95,255,232,.12); border:1px solid rgba(95,255,232,.5);
-        border-radius:50%; position:relative; cursor:pointer; flex:0 0 auto; margin-right:6px; -webkit-tap-highlight-color:transparent; box-shadow:0 0 12px rgba(95,255,232,.18); }
-      .sb-fronde svg { width:100%; height:100%; display:block; }
-      .sb-fronde:active { background:rgba(95,255,232,.24); }`;
+    st.textContent = `#sb-fronde-btn { position:absolute; right:12px; bottom:calc(var(--sab, 0px) + 200px); z-index:20; width:44px; height:44px; padding:9px;
+        border-radius:50%; background:rgba(10,16,24,.66); border:1px solid rgba(95,255,232,.55); color:#5fffe8; cursor:pointer;
+        display:grid; place-items:center; -webkit-tap-highlight-color:transparent; box-shadow:0 0 12px rgba(95,255,232,.2); }
+      #sb-fronde-btn svg { width:100%; height:100%; display:block; }
+      #sb-fronde-btn:active { background:rgba(95,255,232,.2); }`;
     document.head.appendChild(st);
   } catch (e) {}
-  // icône : une trajectoire de fronde autour d'une géante, et le vaisseau qui en sort
-  const ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9.5" cy="13.5" r="4"/><path d="M3 20c6.5-1.5 11-6 13.5-12.5"/><path d="M13.6 5.6l3.1-.9.6 3.2"/><circle cx="19" cy="5" r="1.1" fill="currentColor" stroke="none"/></svg>';
-  const mkBtn = () => { const b = document.createElement('button'); b.className = 'sb-fronde'; b.type = 'button'; b.title = 'La Grande Fronde : la course et ses paris'; b.setAttribute('aria-label', 'Grande Fronde — ouvrir le Télébyte');
-    b.innerHTML = ICON; b.addEventListener('click', (e) => { e.stopPropagation(); open(); }); return b; };
+  // drapeau à damier (arrivée de course) : hampe, contour du drapeau, cases pleines en alternance
+  const ICON = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 2.5v19" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><path d="M7 3.5h13v9H7z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/><path d="M7.00 3.50h3.25v3.00h-3.25z M13.50 3.50h3.25v3.00h-3.25z M10.25 6.50h3.25v3.00h-3.25z M16.75 6.50h3.25v3.00h-3.25z M7.00 9.50h3.25v3.00h-3.25z M13.50 9.50h3.25v3.00h-3.25z" fill="currentColor"/></svg>';
   const placeBtn = () => {
     try {
-      const g = document.querySelector('.w-gear'); if (!g || !g.parentNode || g.parentNode.querySelector('.sb-fronde')) return;
-      const bell = g.parentNode.querySelector('.sb-bell');
-      g.parentNode.insertBefore(mkBtn(), bell || g);
+      if (document.getElementById('sb-fronde-btn')) return;
+      const radio = document.getElementById('sb-radio-btn'); if (!radio || !radio.parentNode) return;   // même conteneur que la radio
+      const b = document.createElement('button'); b.id = 'sb-fronde-btn'; b.type = 'button'; b.title = 'La Grande Fronde : la course et ses paris';
+      b.setAttribute('aria-label', 'Grande Fronde — ouvrir le Télébyte'); b.innerHTML = ICON;
+      b.addEventListener('click', (e) => { e.stopPropagation(); open(); });
+      radio.parentNode.insertBefore(b, radio);
     } catch (e) {}
   };
-  setInterval(placeBtn, 2000); setTimeout(placeBtn, 400);
+  setInterval(placeBtn, 1000); setTimeout(placeBtn, 400);
   if (/[?&]telebyte\b/.test(location.search)) setTimeout(open, 2500);
   // au lancement (après la connexion) puis toutes les 10 minutes : gains versés, paris appliqués
   setTimeout(() => sync().catch(() => {}), 8000);
