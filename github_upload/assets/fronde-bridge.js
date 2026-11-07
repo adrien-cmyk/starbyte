@@ -66,8 +66,31 @@
 
   // Télébyte en superposition, plein écran ; fermé : on resynchronise
   let overlay = null;
+  // voix des commentateurs : sur iPhone, la synthèse vocale d'un cadre reste muette sans toucher dans ce cadre. On
+  // l'autorise ici, dans le geste qui ouvre le Télébyte (le Télébyte parle ensuite par cette page, même origine), et une
+  // piste muette en boucle fait passer la page en mode « lecture », que le bouton silencieux de l'iPhone ne coupe pas.
+  let keep = null;
+  function primeSpeech() {
+    try {
+      const s = window.speechSynthesis; if (!s || typeof SpeechSynthesisUtterance === 'undefined') return;
+      s.cancel(); try { s.resume(); } catch (e) {}
+      const u = new SpeechSynthesisUtterance('Télébyte'); u.lang = 'fr-FR'; u.volume = 0.01; s.speak(u);
+      SBFronde.speechReady = true;
+    } catch (e) {}
+    try {
+      if (!keep) {
+        const n = 4000, b = new Uint8Array(44 + n), d = new DataView(b.buffer), w = (o, t) => { for (let i = 0; i < t.length; i++) b[o + i] = t.charCodeAt(i); };
+        w(0, 'RIFF'); d.setUint32(4, 36 + n, true); w(8, 'WAVEfmt '); d.setUint32(16, 16, true); d.setUint16(20, 1, true); d.setUint16(22, 1, true);
+        d.setUint32(24, 8000, true); d.setUint32(28, 8000, true); d.setUint16(32, 1, true); d.setUint16(34, 8, true); w(36, 'data'); d.setUint32(40, n, true);
+        b.fill(128, 44); let bin = ''; for (const x of b) bin += String.fromCharCode(x);
+        keep = new Audio('data:audio/wav;base64,' + btoa(bin)); keep.loop = true; keep.setAttribute('playsinline', '');
+      }
+      keep.play().catch(() => {});
+    } catch (e) {}
+  }
   function open() {
     if (overlay) return;
+    primeSpeech();
     overlay = document.createElement('div');
     overlay.style.cssText = 'position:fixed;inset:0;z-index:9999;background:#000';
     overlay.innerHTML = '<iframe title="Télébyte — La Grande Fronde" allow="fullscreen" style="position:absolute;inset:0;width:100%;height:100%;border:0"></iframe>' +
@@ -76,9 +99,9 @@
     overlay.querySelector('button').onclick = close;
     document.body.appendChild(overlay);
   }
-  function close() { if (!overlay) return; overlay.remove(); overlay = null; sync().catch(() => {}); }
+  function close() { if (!overlay) return; overlay.remove(); overlay = null; try { window.speechSynthesis && speechSynthesis.cancel(); } catch (e) {} try { if (keep) keep.pause(); } catch (e) {} sync().catch(() => {}); }
 
-  window.SBFronde = { credits, sync, open, close };
+  window.SBFronde = { credits, sync, open, close, speechReady: false };
   // entrée pour tous (07/11/2026) : bouton rond au drapeau à damier, juste au-dessus de la radio (écran de la planète),
   // même gabarit qu'elle. L'adresse ?telebyte l'ouvre aussi.
   try {
