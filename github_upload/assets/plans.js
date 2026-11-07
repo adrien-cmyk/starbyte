@@ -155,7 +155,7 @@
 
     /* ───────────── plan de l'amas : la carte ───────────── */
     const GRID_FS = `
-      uniform float uCell, uLensR, uTime, uLit, uTac; uniform vec2 uLens; varying vec2 vP;
+      uniform float uCell, uLensR, uTime, uLit, uTac; uniform vec2 uLens; uniform vec3 uLitC[4]; varying vec2 vP;
       vec2 hexd(vec2 P, float C) { float H = 0.8660254; float r = P.y / (C * H), q = P.x / C - r * 0.5, s = -q - r;
         float rq = floor(q + .5), rr = floor(r + .5), rs = floor(s + .5); float dq = abs(rq - q), dr = abs(rr - r), ds = abs(rs - s);
         if (dq > dr && dq > ds) rq = -rr - rs; else if (dr > ds) rr = -rq - rs;
@@ -166,12 +166,14 @@
         float home = (1. - smoothstep(uCell * .6, uCell * 2.6, length(vP))) * .55;
         float d = length(vP - uLens) / (uLensR * 2.2);
         float ph = fract(uTime * .18 - d); float ping = smoothstep(.0, .25, ph) * (1. - ph) * lens;
-        float lit = 1. - smoothstep(uLit - uCell * .4, uLit + uCell * .6, length(vP)) * .55;
+        float far = smoothstep(uLit - uCell * .4, uLit + uCell * .6, length(vP));
+        for (int i = 0; i < 4; i++) { if (uLitC[i].z > 0.) far = min(far, smoothstep(uLitC[i].z - uCell * .4, uLitC[i].z + uCell * .6, length(vP - uLitC[i].xy))); }
+        float lit = 1. - far * .55;
         float a = line * max(max(lens * .55 + ping * .5, home), uTac * .5) * lit;
         gl_FragColor = vec4(vec3(.45, .78, 1.) * a, a); }`;
     function makeGrid() {
       const m = new T.ShaderMaterial({ transparent: true, depthWrite: false, blending: T.AdditiveBlending,
-        uniforms: { uCell: { value: 50 * K }, uLensR: { value: 50 * K * 3.6 }, uTime: { value: 0 }, uLens: { value: new T.Vector2() }, uLit: { value: 99999 }, uTac: { value: 0 } },
+        uniforms: { uCell: { value: 50 * K }, uLensR: { value: 50 * K * 3.6 }, uTime: { value: 0 }, uLens: { value: new T.Vector2() }, uLit: { value: 99999 }, uTac: { value: 0 }, uLitC: { value: [new T.Vector3(), new T.Vector3(), new T.Vector3(), new T.Vector3()] } },
         vertexShader: 'varying vec2 vP; void main(){ vec4 w = modelMatrix * vec4(position,1.0); vP = w.xz; gl_Position = projectionMatrix * viewMatrix * w; }', fragmentShader: GRID_FS });
       if (m.extensions) m.extensions.derivatives = true;
       const g = new T.Mesh(new T.PlaneGeometry(9000, 9000), m); g.rotation.x = -Math.PI / 2; g.position.y = -1.5; return g;
@@ -238,6 +240,13 @@
       P.suns = []; P.flights = []; P.legHits = []; P.sysPos = {}; P.routeLines = {};
       const C = P.content, home = st.home;
       const lit = (st.lit || 5) + 0.5; P.grid.material.uniforms.uLit.value = lit * 50 * K;
+      // PATCH_0711_PORTEE_CARTE : la zone éclairée autour de chaque colonie (portée mesurée sur la carte, comme pour viser)
+      { const LC = P.grid.material.uniforms.uLitC.value; LC.forEach(v => v.set(0, 0, 0)); let n = 0;
+        for (const w of (Array.isArray(G.worlds) ? G.worlds : [])) { if (n >= 4 || !w || w.id === 'home' || !w.coord || !window.SBMap || !SBMap.cellOfKey) continue;
+          const ci = SBMap.cellOfKey(sysOf(w.coord)); if (ci == null || !CELLS[ci]) continue;
+          const r = safe(() => getMaxRange(w.id), null); if (!r) continue;
+          const rings = (r.kind === 'universe' || r.kind === 'cluster') ? 30 : SBMap.ringsFor(r.radius);
+          const c = W(ci); LC[n++].set(c.x, c.z, (rings + 0.5) * 50 * K); } }
       // position d'un système : sa case, avec un léger décalage stable (pas une grille rigide)
       const posOf = (k) => {
         if (P.sysPos[k]) return P.sysPos[k];

@@ -7652,6 +7652,15 @@ function _isInRangeFrom(parsed, MY_ADDRESS, wid) {
     return false;
   }
   const dist = _sectorDistance(MY_ADDRESS.sector, targetSector);
+  // PATCH_0711_PORTEE_CARTE (Adrien, 07/11) : ce qui est proche SUR LA CARTE est à portée, même si la lettre de secteur est loin
+  // (« depuis ma colonie, 2 systèmes à côté : trop loin »). La règle des secteurs reste valable : on ne perd aucune cible.
+  if (range.kind === 'sector_radius' && parsed.system && window.SBMap && typeof SBMap.mapDist === 'function') {
+    try {
+      const from = `${MY_ADDRESS.cluster}-${MY_ADDRESS.sector}-${MY_ADDRESS.system}`, to = `${targetCluster}-${targetSector}-${parsed.system}`;
+      const d = SBMap.mapDist(from, to);
+      if (d != null && d <= SBMap.ringsFor(range.radius)) return true;
+    } catch (e) {}
+  }
 
   if (range.kind === 'sector_local') {
     return dist === 0;  // uniquement ton secteur
@@ -50007,8 +50016,8 @@ if (G.knownTargets && Array.isArray(G.tankerMissions)) {
 <script type="module" src="assets/home.js?v=20261025-1410"></script>
 <!-- SPACE MAP v0 — carte du Centre de prospection (assets/spacemap.js, source src/spacemap.js) -->
 <!-- PATCH_0111_PLANS — les plans d'existence : nouveau dessin de la carte (assets/plans.js), chargé AVANT spacemap.js qui l'utilise -->
-<script src="assets/plans.js?v=20261102-0940b"></script>
-<script src="assets/spacemap.js?v=20261104-r1"></script>
+<script src="assets/plans.js?v=20261107-0900"></script>
+<script src="assets/spacemap.js?v=20261107-0900"></script>
 <script src="assets/fronde-bridge.js?v=20261105-1"></script>   <!-- GRANDE_FRONDE_0511 : Télébyte, paris (CG ↔ serveur) -->
 <!-- SPACE MAP niveau B — diorama 3D d'un système (assets/system3d.js, source src/system3d.js) -->
 <script type="module" src="assets/system3d.js?v=20261014-1440"></script>
