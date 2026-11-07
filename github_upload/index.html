@@ -7652,6 +7652,15 @@ function _isInRangeFrom(parsed, MY_ADDRESS, wid) {
     return false;
   }
   const dist = _sectorDistance(MY_ADDRESS.sector, targetSector);
+  // PATCH_0711_PORTEE_CARTE (Adrien, 07/11) : ce qui est proche SUR LA CARTE est à portée, même si la lettre de secteur est loin
+  // (« depuis ma colonie, 2 systèmes à côté : trop loin »). La règle des secteurs reste valable : on ne perd aucune cible.
+  if (range.kind === 'sector_radius' && parsed.system && window.SBMap && typeof SBMap.mapDist === 'function') {
+    try {
+      const from = `${MY_ADDRESS.cluster}-${MY_ADDRESS.sector}-${MY_ADDRESS.system}`, to = `${targetCluster}-${targetSector}-${parsed.system}`;
+      const d = SBMap.mapDist(from, to);
+      if (d != null && d <= SBMap.ringsFor(range.radius)) return true;
+    } catch (e) {}
+  }
 
   if (range.kind === 'sector_local') {
     return dist === 0;  // uniquement ton secteur
@@ -9166,28 +9175,60 @@ setInterval(() => { try { mpRenderIncoming(); } catch (e) {} }, 30000);
 // ROUTES_V2 (03/11) — le signal d'antenne : un seul à la fois, visible sans peser (retour d'Adrien : « je me sens obligé ») —
 // pleine phrase les 90 premières secondes, puis une petite pastille discrète en bas à droite ; il est aussi dans les rapports
 // (onglet Balises, compté dans le badge de Prospection) tant qu'on ne l'a pas regardé.
+// PATCH_0711_ANTENNE_SIGNAUX (07/11, Adrien : « la bulle me gêne, mettons tout ça dans le bâtiment de l'antenne ») :
+// plus de bulle flottante. Les signaux captés vivent dans la fiche de l'antenne (et toujours dans Rapports › Balises).
 function sbSignalRender() {
-  let el = document.getElementById('sb-signal');
-  const scr = typeof getCurrentScreen === 'function' ? getCurrentScreen() : '';
-  const sig = (scr === 'planet' || scr === 'prospect' || scr === 'dashboard') && window.SBLines && SBLines.activeSignal ? SBLines.activeSignal() : null;
-  if (!sig || document.getElementById('mp-incoming')) { if (el) el.remove(); return; }
-  if (!G._sigShown) G._sigShown = {};
-  if (!G._sigShown[sig.sys]) G._sigShown[sig.sys] = Date.now();
-  const compact = Date.now() - G._sigShown[sig.sys] > 90000 || !!(G._sigRead && G._sigRead[sig.sys]);
-  if (!el) {
-    el = document.createElement('div'); el.id = 'sb-signal';
-    document.body.appendChild(el);
-  }
-  el.style.cssText = compact
-    ? 'position:fixed;right:12px;bottom:calc(env(safe-area-inset-bottom, 0px) + 86px);z-index:8990;padding:7px 10px;border-radius:16px;background:rgba(30,24,8,.78);border:1px solid rgba(255,200,100,.35);color:#e8cf9a;font-size:11px;letter-spacing:.02em;backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);cursor:pointer;white-space:nowrap;opacity:.9'
-    : 'position:fixed;left:50%;transform:translateX(-50%);bottom:calc(env(safe-area-inset-bottom, 0px) + 86px);z-index:8990;max-width:92vw;padding:9px 16px;border-radius:20px;background:rgba(40,30,8,.9);border:1px solid rgba(255,200,100,.5);color:#ffe3b0;font-size:12px;letter-spacing:.02em;backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis';
-  el.onclick = () => { sbSignalMarkRead(sig.sys); if (typeof openSystemOnMap === 'function') openSystemOnMap(sig.sys); if (typeof toast === 'function') toast(`Pose une balise sur ${sig.sys} : au premier convoi qui passe, elle remonte toute la route jusqu'au lieu caché.`); };
-  const ic = typeof icon === 'function' ? icon('satellite', { size: compact ? 12 : 14, color: '#ffc864' }) : '';
-  const _more = Math.max(0, (SBLines.activeSignals ? SBLines.activeSignals().length : 1) - 1);
-  el.innerHTML = compact
-    ? `<span style="display:inline-flex;align-items:center;gap:6px">${ic}<span style="font-family:var(--font-mono)">${sig.sys}</span>${_more ? `<span style="opacity:.7">+${_more}</span>` : ''}</span>`
-    : `<span style="display:inline-flex;align-items:center;gap:8px">${ic}<span>Trafic régulier vers <strong style="font-family:var(--font-mono)">${sig.sys}</strong> · <span style="color:#ffc864">pose une balise</span></span></span>`;
+  const el = document.getElementById('sb-signal'); if (el) el.remove();
+  // fiche de l'antenne ouverte : on la rafraîchit si un signal arrive ou part
+  try {
+    const a = window.SBAntenna && SBAntenna.data ? SBAntenna.data() : null;
+    const n = sbSignalsHere().length;
+    if (a && a.built && G.selParcel === a.parcel && sbSignalRender._n !== n && document.querySelector('#planet-info .sb-ant-sig, #planet-info .p3d-sig-name')) SBAntenna.renderCard(a.parcel);
+    sbSignalRender._n = n;
+  } catch (e) {}
 }
+function sbSignalsHere() { return window.SBLines && SBLines.activeSignals ? SBLines.activeSignals() : []; }
+function sbSignalsAntennaHtml() {
+  const list = sbSignalsHere();
+  const ic = typeof icon === 'function' ? icon('satellite', { size: 12, color: '#ffc864' }) : '📡';
+  const rows = list.map(sig => { sbSignalMarkRead(sig.sys); return `
+    <div style="display:flex;align-items:center;gap:10px;padding:9px 10px;margin-top:6px;border-radius:8px;border:1px solid rgba(255,200,100,.32);background:rgba(255,200,100,.07)">
+      <div style="flex:1;min-width:0">
+        <div style="font-family:var(--font-mono);font-size:12px;color:#ffe3b0">${sig.sys}</div>
+        <div style="font-size:11px;color:#c9b88f;line-height:1.35;margin-top:2px">Trafic régulier. Une balise posée ici remonte la route jusqu'au lieu caché.</div>
+      </div>
+      <button onclick="event.stopPropagation();openSystemOnMap('${sig.sys}')" style="flex:none;padding:7px 10px;border-radius:7px;border:1px solid rgba(255,200,100,.5);background:rgba(255,200,100,.12);color:#ffe3b0;font:inherit;font-size:11px;cursor:pointer">Poser une balise ›</button>
+    </div>`; }).join('');
+  return `<div class="sb-ant-sig" style="margin-top:10px">
+    <div style="display:flex;align-items:center;gap:6px;font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:#ffc864">${ic} Signaux captés${list.length ? ' · ' + list.length : ''}</div>
+    ${rows || `<div style="font-size:11px;color:#8f9bb3;margin-top:6px;line-height:1.4">Aucun trafic en attente. L'antenne balaie le ciel : un nouveau signal arrive toutes les quelques heures.</div>`}
+  </div>`;
+}
+function sbOpenAntenna() {
+  try {
+    const a = window.SBAntenna && SBAntenna.data ? SBAntenna.data() : null;
+    if (typeof goto === 'function') goto('planet');
+    if (!a || a.parcel == null) return;
+    const pick = () => { try { if (G.selParcel !== a.parcel || !document.querySelector('#planet-info .sb-ant-sig')) { if (typeof onHexClick === 'function') onHexClick(a.parcel); } if (window.Planet3D && Planet3D.ready) Planet3D.focus(a.parcel); const pi = document.getElementById('planet-info'); if (pi) pi.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); } catch (e) {} };
+    setTimeout(pick, 300); setTimeout(pick, 1100); setTimeout(pick, 2200);   // l'écran planète peut re-sélectionner sa case par défaut juste après l'ouverture
+  } catch (e) {}
+}
+(function sbAntennaCardPatch() {
+  if (!window.SBAntenna || !SBAntenna.renderCard) { setTimeout(sbAntennaCardPatch, 400); return; }
+  if (SBAntenna._sigPatched) return; SBAntenna._sigPatched = true;
+  const orig = SBAntenna.renderCard.bind(SBAntenna);
+  SBAntenna.renderCard = function (i) {
+    orig(i);
+    try {
+      const d = this.data(); if (!d || !d.built) return;
+      const card = document.getElementById('planet-info'); if (!card || card.querySelector('.sb-ant-sig')) return;
+      const cta = card.querySelector('.cta'), box = document.createElement('div'); box.innerHTML = sbSignalsAntennaHtml();
+      const node = box.firstElementChild; if (cta) card.insertBefore(node, cta); else card.appendChild(node);
+      sbSignalRender._n = sbSignalsHere().length;
+      if (typeof updateProspectRapportsBadge === 'function') updateProspectRapportsBadge();
+    } catch (e) {}
+  };
+})();
 function sbSignalMarkRead(sys) { if (!G._sigRead) G._sigRead = {}; if (!G._sigRead[sys]) { G._sigRead[sys] = Date.now(); if (typeof updateProspectRapportsBadge === 'function') updateProspectRapportsBadge(); } }
 function sbSignalUnread() { const l = window.SBLines && SBLines.activeSignals ? SBLines.activeSignals() : []; return l.filter(sig => !(G._sigRead && G._sigRead[sig.sys])).length; }
 // la carte du signal dans les rapports (onglet Balises)
@@ -9485,6 +9526,7 @@ var MP_RAID_ERRORS = {
 // ici, on prévient avant.
 var _mpPeaceOkAt = 0;   // confirmation récente : on ne redemande pas dans la même action
 async function mpPeaceGuard(what) {
+  return true;   // PATCH_0711_SANS_PACIFIQUE (Adrien, 07/11) : le mode pacifique est retiré — plus de statut à perdre, plus de confirmation
   if (typeof G !== 'undefined' && G && G.mpPeaceful === false) return true;
   if (Date.now() - _mpPeaceOkAt < 120000) return true;
   let st = null;
@@ -9501,11 +9543,13 @@ async function mpPeaceGuard(what) {
 }
 // la flotte est partie : le registre l'inscrit (missions PNJ, embuscades : le serveur ne le voit pas encore)
 function mpPeaceRenounce() {
+  return;   // PATCH_0711_SANS_PACIFIQUE
   if (typeof G === 'undefined' || !G || G.mpPeaceful === false) return;
   _mpRpc('mp_peace_renounce', {}).catch(e => console.warn('[pacifique] :', String(e && e.message || e)));
   mpPeaceLost();
 }
 function mpPeaceLost() {
+  return;   // PATCH_0711_SANS_PACIFIQUE
   if (typeof G === 'undefined' || !G || G.mpPeaceful === false) return;
   G.mpPeaceful = false;
   if (typeof saveGame === 'function') saveGame();
@@ -12198,6 +12242,28 @@ function sbNotifRefresh() {
     d.textContent = n > 99 ? '99+' : n;
   });
 }
+// PATCH_0711_CONVERSATIONS (retour d'Adrien, 07/11) : « quand un joueur a un tanker en orbite chez moi et qu'il m'écrit,
+// une fois son message fermé je ne sais pas où le retrouver » → la cloche liste toutes les conversations ouvertes
+function sbConvList() {
+  const by = {};
+  const add = (addr, pseudo, sub) => { if (!addr) return; const e = by[addr] || (by[addr] = { addr, pseudo: '', subs: [], n: 0, at: 0 }); if (pseudo && !e.pseudo) e.pseudo = pseudo; if (sub && !e.subs.includes(sub)) e.subs.push(sub); return e; };
+  try { for (const o of (typeof _mpEmbIn !== 'undefined' ? _mpEmbIn : []) || []) { const e = add(o.address, o.pseudo, 'Son ' + (o.tanker ? 'tanker ' + o.tanker : 'vaisseau') + ' est en orbite chez toi'); if (e) e.at = Math.max(e.at, o.since || 0); } } catch (e) {}
+  try { for (const m of (G.tankerMissions || [])) if (m && m.status === 'orbital_relay' && m.mpTarget && m.mpTarget.address) add(m.mpTarget.address, m.mpTarget.pseudo || m.mpTarget.name, 'Ton tanker ' + (m.tankerName || '') + ' est en orbite chez lui'); } catch (e) {}
+  try { for (const u of Object.values(typeof _mpChatUnread !== 'undefined' ? _mpChatUnread : {})) { const e = add(u.address, u.pseudo, ''); if (e) { e.n = u.n || 0; e.last = u.last; e.at = Math.max(e.at, Date.parse(u.lastAt) || 0); } } } catch (e) {}
+  return Object.values(by).sort((a, b) => (b.n - a.n) || (b.at - a.at));
+}
+function sbConvCard() {
+  const list = sbConvList(); if (!list.length) return '';
+  const esc = (t) => String(t == null ? '' : t).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  return `<div style="margin:0 14px 12px;border:1px solid rgba(95,255,232,.35);border-radius:12px;background:rgba(8,24,28,.6);overflow:hidden">
+    <div style="padding:9px 12px 6px;font-size:10px;letter-spacing:.18em;color:#5fffe8">CONVERSATIONS</div>
+    ${list.map(c => `<button onclick="sbNotifClose();openEmbassy('${esc(c.addr)}')" style="display:flex;align-items:center;gap:10px;width:100%;padding:9px 12px;border:0;border-top:1px solid rgba(255,255,255,.06);background:none;color:#e6f0ff;text-align:left;font:inherit">
+      <span style="font-size:18px">💬</span>
+      <span style="flex:1;min-width:0"><span style="display:block;font-weight:600;font-size:13px">${esc(c.pseudo || c.addr)}</span>
+      <span style="display:block;font-size:11px;color:#9fb2c2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(c.n && c.last ? c.last : (c.subs[0] || 'Canal de discussion'))}</span></span>
+      ${c.n ? `<span style="min-width:18px;height:18px;padding:0 5px;border-radius:9px;background:#ff5a48;color:#fff;font-size:11px;line-height:18px;font-weight:600;text-align:center">${c.n}</span>` : '<span style="color:#5fffe8">›</span>'}
+    </button>`).join('')}</div>`;
+}
 function sbNotifClose() { const o = document.getElementById('sb-notif'); if (o) o.remove(); }
 function sbNotifOpen() {
   sbNotifClose();
@@ -12209,6 +12275,7 @@ function sbNotifOpen() {
     <div class="sbn-head"><div class="sbn-title">NOTIFICATIONS</div>
       ${sbNotifUnread() ? '<button class="sbn-all" onclick="sbNotifReadAll()">Tout marquer comme lu</button>' : ''}
       <button class="sbn-x" onclick="sbNotifClose()" aria-label="Fermer">×</button></div>
+    ${typeof sbConvCard === 'function' ? sbConvCard() : ''}
     ${window.SBAssist ? SBAssist.card() : ''}
     ${window.SBInvite ? SBInvite.card() : ''}
     <div class="sbn-list">${items.length ? items.map(x => `<div class="sbn-it${x.unread ? ' u' : ''}" onclick="sbNotifGo('${x.src}','${String(x.id).replace(/'/g, '')}')">
@@ -36912,7 +36979,7 @@ function _spySummaryHtml(s) {
       ${typeof openEmbassy === 'function' ? `<button onclick="event.stopPropagation();openEmbassy('${_escapeHtml(s.address)}')" style="flex:1;padding:8px;border-radius:7px;border:1px solid rgba(255,255,255,.14);background:transparent;color:var(--text);font:inherit;font-size:11px;cursor:pointer">Ambassade</button>` : ''}
     </div>`;
   return `<div style="margin-bottom:8px"><div style="font-size:17px;font-weight:700;color:#ffb0a8">${_escapeHtml(s.pseudo || '—')}</div>
-    <div style="font-size:11px;color:var(--mut);margin-top:2px">${_escapeHtml(s.planet || 'Monde habité')} · ${_escapeHtml(s.address)}${s.shielded ? ' · <span style="color:#9fd8ff">bouclier débutant</span>' : ''}${s.peaceful ? ' · <span style="color:#9fd8ff">pacifique</span>' : ''}</div>${s.peaceful ? '' : verdict}${acts}</div>`;
+    <div style="font-size:11px;color:var(--mut);margin-top:2px">${_escapeHtml(s.planet || 'Monde habité')} · ${_escapeHtml(s.address)}${s.shielded ? ' · <span style="color:#9fd8ff">bouclier débutant</span>' : ''}${false && s.peaceful ? ' · <span style="color:#9fd8ff">pacifique</span>' : ''}</div>${s.peaceful ? '' : verdict}${acts}</div>`;
 }
 // au démarrage : les relevés restés en suspens (jeu fermé pendant le décodage) se relisent
 setTimeout(() => { for (const r of (typeof G !== 'undefined' && G.probeReports) || []) if (r && r.tier === 'stealth' && r.spy && r.spy.pending) _spyEnrichReport(r, r.spy.coord || r.spy.address || r.targetCoords); }, 4000);
@@ -36928,7 +36995,6 @@ function _spyBlockHtml(r) {
   else body = _spySummaryHtml(s)
     + row('Niveau', '≈ ' + s.level) + row('Défense', '≈ ' + s.defense + ' <span style="color:var(--mut)">(' + precTxt + ')</span>')
     + row('Bouclier débutant', s.shielded ? 'actif' : 'non')
-    + row('Statut', s.peaceful ? '<span style="color:#9fd8ff">pacifique · intouchable</span>' : 'conquérant')   // PATCH_2410_PACIFIQUE
     + row('Dernière activité', s.lastSeen == null ? '<span style="color:var(--mut)">illisible</span>' : (s.lastSeen === 0 ? "aujourd'hui" : 'il y a ' + s.lastSeen + ' j'));
   // ce qu'il manque → ce qu'il faut développer pour mieux espionner
   const next = [];
@@ -49996,7 +50062,7 @@ if (G.knownTargets && Array.isArray(G.tankerMissions)) {
 <!-- PERF_1310 — mesure des performances chez les joueurs + qualité 3D automatique (assets/perf.js) -->
 <script src="assets/perf.js?v=20261022-2000"></script>
 <!-- PATCH_1410_LIGNES — lignes PNJ à horaire sur les routes cachées (assets/lines.js) -->
-<script src="assets/lines.js?v=20261104-v3b"></script>
+<script src="assets/lines.js?v=20261107-ant"></script>
 <!-- CLOUD — sauvegarde Supabase (source : sb-build/src/cloud.js) -->
 <script type="module" src="assets/cloud.js?v=20261022-1420"></script>
 <!-- MATCH3 — Match-3 V2 (assets/match3.js, source src/match3.js + src/m3core.js) : remplace startM3 -->
@@ -50005,8 +50071,8 @@ if (G.knownTargets && Array.isArray(G.tankerMissions)) {
 <script type="module" src="assets/home.js?v=20261025-1410"></script>
 <!-- SPACE MAP v0 — carte du Centre de prospection (assets/spacemap.js, source src/spacemap.js) -->
 <!-- PATCH_0111_PLANS — les plans d'existence : nouveau dessin de la carte (assets/plans.js), chargé AVANT spacemap.js qui l'utilise -->
-<script src="assets/plans.js?v=20261102-0940b"></script>
-<script src="assets/spacemap.js?v=20261104-r1"></script>
+<script src="assets/plans.js?v=20261107-0900"></script>
+<script src="assets/spacemap.js?v=20261107-0900"></script>
 <script src="assets/fronde-bridge.js?v=20261105-1"></script>   <!-- GRANDE_FRONDE_0511 : Télébyte, paris (CG ↔ serveur) -->
 <!-- SPACE MAP niveau B — diorama 3D d'un système (assets/system3d.js, source src/system3d.js) -->
 <script type="module" src="assets/system3d.js?v=20261014-1440"></script>

@@ -651,6 +651,30 @@
   }
 
   // Balayer une case noire : un système inconnu de ce secteur dont la case est CELLE-CI (déterministe)
+  function _cellOfKey(key) {
+    try {
+      if (!key) return null;
+      if (key === mySystemKey()) return 0;
+      const MC = (G.mapCells && G.mapCells.cells) || {};
+      if (MC[key] !== undefined) return MC[key];
+      const { cands, k } = primarySlot(key);   // un système pas encore placé tombera sur sa case de prédilection
+      return cands && cands[k] ? cands[k].idx : null;
+    } catch (e) { return null; }
+  }
+  // une case hors de la zone éclairée autour de ma capitale peut être à portée d'une de mes colonies
+  function _reachFromColonies(idx) {
+    try {
+      const c = CELLS[idx]; if (!c || typeof getMaxRange !== 'function') return false;
+      for (const w of (Array.isArray(G.worlds) ? G.worlds : [])) {
+        if (!w || w.id === 'home' || !w.coord) continue;
+        const ck = String(w.coord).split('-').slice(0, 3).join('-'), ci = _cellOfKey(ck); if (ci == null || !CELLS[ci]) continue;
+        const r = getMaxRange(w.id); if (r.kind === 'universe' || r.kind === 'cluster') return true;
+        if (hexDist(CELLS[ci], c) <= BAND_RINGS[Math.min(3, Math.max(0, r.radius | 0))][1]) return true;
+      }
+    } catch (e) {}
+    return false;
+  }
+
   function pickSystemForCell(c) {
     const sector = sectorOfCell(c), cl = myCluster(), known = knownSet();
     let first = null;
@@ -1748,7 +1772,7 @@
     if (o) { _sel = { kind: o.kind, key: o.key }; refresh(true); return diveTo(idx); }
     const sector = sectorOfCell(c);
     if (c.ring === 1) { _sel = { kind: 'orbit', cell: idx }; return refresh(true); }   // autour de ma planète : mon propre système
-    if (c.ring > st.lit) { _sel = { kind: 'far', sector, cell: idx }; return refresh(true); }
+    if (c.ring > st.lit && !_reachFromColonies(idx)) { _sel = { kind: 'far', sector, cell: idx }; return refresh(true); }
     _sel = { kind: 'dark', sector, sysKey: pickSystemForCell(c), cell: idx };
     refresh(true);
   }
@@ -2686,6 +2710,12 @@
   const API = {
     render, sweep, panelFor, tag, beacon, recallBeacon: recallBeaconFromMap, showFlight,
     openRoute, selectRoute, showRoute, routeAvoid, routeUnavoid, routeColor, routeRename, routeDelete, sendOnRoute, postOnRoute, postHere, scout, sendOnOpened, giveOpened, forgetOpened, fleetOnRoute,
+    // PATCH_0711_PORTEE_CARTE (Adrien, 07/11) : la portée se mesure AUSSI sur la carte, depuis la case de la planète d'où part la sonde
+    // (les systèmes voisins sur la carte peuvent être à plusieurs lettres de secteur l'un de l'autre). Rien ne bouge sur la carte.
+    cellOfKey(key) { return _cellOfKey(key); },
+    mapDist(a, b) { const ia = _cellOfKey(a), ib = _cellOfKey(b); if (ia == null || ib == null || !CELLS[ia] || !CELLS[ib]) return null; return hexDist(CELLS[ia], CELLS[ib]); },
+    ringsFor(radius) { return BAND_RINGS[Math.min(3, Math.max(0, radius | 0))][1]; },
+    reachCell(idx) { return _reachFromColonies(idx); },
     planFor(destKey) { try { return planFrom(_state || collect(), destKey); } catch (e) { return null; } },
     _layout() { return collect(); },   // diagnostic (tests)
     select(kind, key) {
