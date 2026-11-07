@@ -9485,6 +9485,7 @@ var MP_RAID_ERRORS = {
 // ici, on prévient avant.
 var _mpPeaceOkAt = 0;   // confirmation récente : on ne redemande pas dans la même action
 async function mpPeaceGuard(what) {
+  return true;   // PATCH_0711_SANS_PACIFIQUE (Adrien, 07/11) : le mode pacifique est retiré — plus de statut à perdre, plus de confirmation
   if (typeof G !== 'undefined' && G && G.mpPeaceful === false) return true;
   if (Date.now() - _mpPeaceOkAt < 120000) return true;
   let st = null;
@@ -9501,11 +9502,13 @@ async function mpPeaceGuard(what) {
 }
 // la flotte est partie : le registre l'inscrit (missions PNJ, embuscades : le serveur ne le voit pas encore)
 function mpPeaceRenounce() {
+  return;   // PATCH_0711_SANS_PACIFIQUE
   if (typeof G === 'undefined' || !G || G.mpPeaceful === false) return;
   _mpRpc('mp_peace_renounce', {}).catch(e => console.warn('[pacifique] :', String(e && e.message || e)));
   mpPeaceLost();
 }
 function mpPeaceLost() {
+  return;   // PATCH_0711_SANS_PACIFIQUE
   if (typeof G === 'undefined' || !G || G.mpPeaceful === false) return;
   G.mpPeaceful = false;
   if (typeof saveGame === 'function') saveGame();
@@ -36912,7 +36915,7 @@ function _spySummaryHtml(s) {
       ${typeof openEmbassy === 'function' ? `<button onclick="event.stopPropagation();openEmbassy('${_escapeHtml(s.address)}')" style="flex:1;padding:8px;border-radius:7px;border:1px solid rgba(255,255,255,.14);background:transparent;color:var(--text);font:inherit;font-size:11px;cursor:pointer">Ambassade</button>` : ''}
     </div>`;
   return `<div style="margin-bottom:8px"><div style="font-size:17px;font-weight:700;color:#ffb0a8">${_escapeHtml(s.pseudo || '—')}</div>
-    <div style="font-size:11px;color:var(--mut);margin-top:2px">${_escapeHtml(s.planet || 'Monde habité')} · ${_escapeHtml(s.address)}${s.shielded ? ' · <span style="color:#9fd8ff">bouclier débutant</span>' : ''}${s.peaceful ? ' · <span style="color:#9fd8ff">pacifique</span>' : ''}</div>${s.peaceful ? '' : verdict}${acts}</div>`;
+    <div style="font-size:11px;color:var(--mut);margin-top:2px">${_escapeHtml(s.planet || 'Monde habité')} · ${_escapeHtml(s.address)}${s.shielded ? ' · <span style="color:#9fd8ff">bouclier débutant</span>' : ''}${false && s.peaceful ? ' · <span style="color:#9fd8ff">pacifique</span>' : ''}</div>${s.peaceful ? '' : verdict}${acts}</div>`;
 }
 // au démarrage : les relevés restés en suspens (jeu fermé pendant le décodage) se relisent
 setTimeout(() => { for (const r of (typeof G !== 'undefined' && G.probeReports) || []) if (r && r.tier === 'stealth' && r.spy && r.spy.pending) _spyEnrichReport(r, r.spy.coord || r.spy.address || r.targetCoords); }, 4000);
@@ -36928,7 +36931,6 @@ function _spyBlockHtml(r) {
   else body = _spySummaryHtml(s)
     + row('Niveau', '≈ ' + s.level) + row('Défense', '≈ ' + s.defense + ' <span style="color:var(--mut)">(' + precTxt + ')</span>')
     + row('Bouclier débutant', s.shielded ? 'actif' : 'non')
-    + row('Statut', s.peaceful ? '<span style="color:#9fd8ff">pacifique · intouchable</span>' : 'conquérant')   // PATCH_2410_PACIFIQUE
     + row('Dernière activité', s.lastSeen == null ? '<span style="color:var(--mut)">illisible</span>' : (s.lastSeen === 0 ? "aujourd'hui" : 'il y a ' + s.lastSeen + ' j'));
   // ce qu'il manque → ce qu'il faut développer pour mieux espionner
   const next = [];
