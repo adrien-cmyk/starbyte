@@ -9,7 +9,8 @@
    l'objectif en cours via window.SBAntenna.goal().
    ═══════════════════════════════════════════════════════════════════════════ */
 
-import { Board, COLS, ROWS, N, DIRS, step, neighbors, areNeighbors, SESSION, SECONDARY_POOL, RES_TYPES } from './m3core.js';
+import { COLS, ROWS, N, DIRS, step, neighbors, areNeighbors, SESSION, RES_TYPES } from './m3core.js';
+import { THEMES, createSession, applyMove, accountStep, finishMove, decide, finish as sessionFinish, report as sessionReport } from './m3session.js';
 import { Board3D, canUse3D } from './m3view3d.js';
 
 // Le vocabulaire « Secours » (__m3V / __m3VO / __m3Sec) est dans src/m3secours_vocab.js, ajouté en tête du bundle par le build (voir BUILD.md).
@@ -32,11 +33,7 @@ const OBSTACLE_TEXT = {
 };
 
 // Pondération par contexte de session (bâtiment) : ressource dominante / secondaire
-const THEMES = {
-  Extraction: { dom: 'metal', sec: 'biomass', label: 'Mine · métal dominant' },
-  'Énergie':  { dom: 'energie', sec: 'cristal', label: 'Centrale · énergie dominante' },
-  Recherche:  { dom: 'cristal', sec: 'biomass', label: 'Laboratoire · cristal dominant' },
-};
+// THEMES vit dans m3session.js (partagé avec le serveur)
 
 function info(key) {
   try { const t = tileInfo(key); if (t) return t; } catch (e) { /* hors jeu */ }
@@ -48,6 +45,65 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const say = (m) => { if (typeof toast === 'function') toast(m); };
 
 /* ─────────────────────────────── Session ─────────────────────────────── */
+
+
+/* ─────────────── SERVEUR_0811 — graines serveur et rapport de partie (Temps A du GDD « match-3 serveur ») ───────────────
+   · Graines : le jeu garde un lot de graines fournies par le serveur (m3_seed_batch) ; chaque partie en consomme une.
+     Lot vide et hors-ligne → graine tirée sur place, marquée « client » (le serveur le saura).
+   · Rapport : en fin de partie, la session (graine, coups, choix, crédit annoncé) part au serveur (m3_report). Hors-ligne,
+     elle attend dans une file locale et part à la reconnexion. Le serveur rejoue et compare ; en jeu, rien ne change. */
+const M3_SEEDS_KEY = 'sb_m3_seeds', M3_QUEUE_KEY = 'sb_m3_queue', M3_SEEDS_LOW = 6, M3_QUEUE_MAX = 60;
+const m3LS = { get(k, d) { try { return JSON.parse(localStorage.getItem(k) || 'null') ?? d; } catch (e) { return d; } }, set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} } };
+const m3Rpc = (fn, args) => (typeof window._mpRpc === 'function' ? window._mpRpc(fn, args) : Promise.reject(new Error('no_rpc')));
+let m3Refilling = false, m3Flushing = false;
+function m3TakeSeed() {
+  const pool = m3LS.get(M3_SEEDS_KEY, []).filter((x) => Number.isFinite(x));
+  let value, src;
+  if (pool.length) { value = pool.shift() >>> 0; src = 'server'; m3LS.set(M3_SEEDS_KEY, pool); }
+  else { const a = new Uint32Array(1); (window.crypto || {}).getRandomValues ? crypto.getRandomValues(a) : (a[0] = Math.floor(Math.random() * 4294967296)); value = a[0] >>> 0; src = 'client'; }
+  if (pool.length < M3_SEEDS_LOW) m3RefillSeeds();
+  return { value, src };
+}
+async function m3RefillSeeds() {
+  if (m3Refilling) return; m3Refilling = true;
+  try {
+    const rows = await m3Rpc('m3_seed_batch', {});
+    const pool = m3LS.get(M3_SEEDS_KEY, []).concat((Array.isArray(rows) ? rows : []).map((r) => (typeof r === 'object' && r ? r.seed : r)).map(Number).filter(Number.isFinite));
+    m3LS.set(M3_SEEDS_KEY, pool.slice(0, 60));
+  } catch (e) { /* hors-ligne ou registre indisponible : on retentera */ }
+  finally { m3Refilling = false; }
+}
+function m3Report(rep) {
+  if (!rep || !rep.seed) return;
+  rep.seed_src = (SBMatch3.s && SBMatch3.s.seedSrc) || 'client';
+  rep.at = Date.now();
+  const q = m3LS.get(M3_QUEUE_KEY, []); q.push(rep); m3LS.set(M3_QUEUE_KEY, q.slice(-M3_QUEUE_MAX));
+  m3Flush();
+}
+async function m3Flush() {
+  if (m3Flushing) return; m3Flushing = true;
+  let sent = 0;
+  try {
+    let q = m3LS.get(M3_QUEUE_KEY, []);
+    while (q.length) {
+      const rep = q[0];
+      try { await m3Rpc('m3_report', { p: rep }); sent++; }
+      catch (e) { const msg = String(e && e.message || e); if (/m3_report_invalid|m3_report_dup/.test(msg)) { /* rapport refusé pour de bon : on l'abandonne */ } else break; }
+      q.shift(); m3LS.set(M3_QUEUE_KEY, q);
+    }
+  } finally { m3Flushing = false; }
+  if (sent) m3AskVerify();
+}
+// Demande au serveur de rejouer les parties en attente du joueur (fonction m3-verify) — informatif au Temps A
+function m3AskVerify() {
+  try {
+    const a = JSON.parse(localStorage.getItem('starbyte_auth') || 'null'), tok = a && (a.access_token || (a.currentSession && a.currentSession.access_token));
+    if (!tok) return;
+    fetch('https://elupnpdcblztpfywnhjl.supabase.co/functions/v1/m3-verify', { method: 'POST', headers: { 'Content-Type': 'application/json', apikey: 'sb_publishable_tXGrQIROzH2DwBrny1GcHQ_iKJKoBOQ', Authorization: 'Bearer ' + tok }, body: '{}' }).catch(() => {});
+  } catch (e) {}
+}
+setTimeout(() => { m3Flush(); if (m3LS.get(M3_SEEDS_KEY, []).length < M3_SEEDS_LOW) m3RefillSeeds(); }, 4000);
+window.addEventListener('online', () => m3Flush());
 
 const SBMatch3 = {
   s: null,          // état de la session en cours
@@ -63,32 +119,13 @@ const SBMatch3 = {
       this.apply();                                                              // session terminée non validée : on encaisse
     }
     context = context || 'Terraformation';
-    const theme = THEMES[context];
     const remine = context === 'Re-mining' ? (parcel.remineCount || 0) : 0;
-
-    const weights = {};
-    if (theme) { weights[theme.dom] = 25 * 2; weights[theme.sec] = 20 * 1.4; }
-    weights.rock = 5 + remine * 2;
-    const bonus = theme ? 1.25 : context === 'Re-mining' ? Math.min(1.6, 1 + 0.15 * (remine + 1)) : 1;
-
-    const pool = [...SECONDARY_POOL];
-    const secondaries = [];
-    while (secondaries.length < 2 && pool.length) {
-      const k = Math.floor(Math.random() * pool.length);
-      const def = pool.splice(k, 1)[0];
-      const label = def.id === 'rocks' && OBSTACLE_LABEL[context] ? OBSTACLE_LABEL[context] : def.label;
-      secondaries.push({ ...def, label, have: 0, done: false });
-    }
-
-    this.s = {
-      parcelIdx, context, theme, bonus, remine,
-      board: new Board({ weights, rocks: Math.min(10, 3 + remine * 2) }),
-      movesLeft: SESSION.moves, movesUsed: 0, bonusGiven: 0,
-      gains: {}, total: 0, tier: 0,
-      stats: { rocksBroken: 0, cascades: 0, maxCascade: 0, charges: 0, cores: 0, cristal: 0, artefact: 0 },
-      secondaries, choiceShown: false, ended: false, busy: false,
-      sel: null, lastInput: performance.now(),
-    };
+    // SERVEUR_0811 (Temps A) : la partie est entièrement déterminée par sa graine et ses coups ; le serveur la rejoue
+    const seed = m3TakeSeed();
+    this.s = createSession({ seed: seed.value, context, remine, parcelIdx,
+      labelFor: (def, ctx) => (def.id === 'rocks' && OBSTACLE_LABEL[ctx] ? OBSTACLE_LABEL[ctx] : null) });
+    this.s.seedSrc = seed.src;
+    this.s.sel = null; this.s.lastInput = performance.now();
     this._mount();
     if (typeof goto === 'function') goto('m3');
     this.use3d = false;
@@ -572,25 +609,26 @@ const SBMatch3 = {
       return;
     }
     window.SBSfx && SBSfx.play('swap');   // SFX_2410
-    const steps = board.play(a, b, { bonus: s.bonus });
-    s.movesLeft--; s.movesUsed++;
+    const mv = applyMove(s, a, b, { account: false });   // SERVEUR_0811 : le coup est joué et journalisé par la session
+    const steps = mv.steps;
     this._renderHud();
     swapTo(spA, b); swapTo(spB, a);
     await this.until(() => this._idle());
 
-    for (const st of steps) await this._animateStep(st);
-    const depth = steps.length - 1;
-    s.stats.maxCascade = Math.max(s.stats.maxCascade, depth);
-    // coups bonus (§16.2)
-    if (depth >= 3) this._bonusMove('CASCADE ×' + depth);
-    if (steps.some((x) => x.created.some((c) => c.tile.special === 'core'))) this._bonusMove('NOYAU FORGÉ');
-    this._checkTiers();
-    this._checkSecondaries();
+    for (const st of steps) { accountStep(s, st); await this._animateStep(st); }
+    const f = finishMove(s, steps, mv.events);   // coups bonus (§16.2), paliers, objectifs, remélange
+    for (const ev of mv.events) {
+      if (ev.type === 'bonus') { window.SBSfx && SBSfx.play('bonus', 0.25); this._float(`+1 COUP · ${ev.why}`, 'bonus'); }   // SFX_2410
+      else if (ev.type === 'tier') {
+        this._float(ev.tier === 3 ? 'VEINE PROFONDE OUVERTE' : `PALIER ${TIER_ROMAN[ev.tier - 1]} ATTEINT`, 'tier');
+        window.SBSfx && SBSfx.play(ev.tier === 3 ? 'tier3' : 'tier', 0.15);   // SFX_2410
+        if (this.use3d) this.view3d.wave(ev.tier === 3 ? 0xb58cff : 0xffd27a);
+      } else if (ev.type === 'secondary') this._float('OBJECTIF SECONDAIRE ATTEINT', 'sec');
+    }
 
-    if (!board.hasMove()) {
+    if (f.reshuffled) {
       this._float('RÉORGANISATION GÉOLOGIQUE', 'dim');
       await sleep(500);
-      board.reshuffle();
       this.sprites.forEach((sp) => { sp.swap = { x0: sp.x, y0: sp.y, t: 0, d: 0.35 }; });
       this._syncSprites(false);
       this.sprites.forEach((sp) => { if (!sp.swap) sp.swap = { x0: sp.x, y0: sp.y, t: 0, d: 0.35 }; });
@@ -599,20 +637,14 @@ const SBMatch3 = {
     s.busy = false;
     this._renderHud();
 
-    if (s.tier >= 1 && !s.choiceShown && s.movesLeft > 0) { s.choiceShown = true; this._showChoice(); return; }
-    if (s.movesLeft <= 0) { await sleep(350); this.finish('moves'); }
+    if (f.offerChoice) { this._showChoice(); return; }
+    if (f.exhausted) { await sleep(350); this.finish('moves'); }
   },
 
   async _animateStep(st) {
     const s = this.s;
     window.SBSfx && SBSfx.m3Step(st);   // SFX_2410
-    // gains et statistiques
-    Object.entries(st.gains).forEach(([k, v]) => { s.gains[k] = (s.gains[k] || 0) + v; s.total += v; });
-    s.stats.rocksBroken += st.rocksBroken.length;
-    s.stats.cristal += st.gains.cristal || 0;
-    s.stats.artefact += st.removed.filter((r) => r.tile.type === 'artefact').length;
-    if (st.cascade >= 1) s.stats.cascades++;
-    st.created.forEach((c) => { if (c.tile.special === 'core') s.stats.cores++; else s.stats.charges++; });
+    // gains et statistiques : comptés par la session (accountStep) avant l'animation
 
     if (st.cascade >= 1) this._float(CASCADE_LABEL[Math.min(st.cascade, 4)], 'cascade');
     st.created.forEach((c) => this._float(c.tile.special === 'core' ? 'NOYAU INSTABLE' : 'CHARGE DE FORAGE', 'special'));
@@ -675,32 +707,7 @@ const SBMatch3 = {
     await sleep(60);
   },
 
-  _bonusMove(why) {
-    const s = this.s;
-    if (s.bonusGiven >= SESSION.bonusCap) return;
-    s.bonusGiven++; window.SBSfx && SBSfx.play('bonus', 0.25); s.movesLeft++;   // SFX_2410
-    this._float(`+1 COUP · ${why}`, 'bonus');
-  },
-
-  _checkTiers() {
-    const s = this.s;
-    while (s.tier < 3 && s.total >= SESSION.tiers[s.tier]) {
-      s.tier++;
-      const label = s.tier === 3 ? 'VEINE PROFONDE OUVERTE' : `PALIER ${TIER_ROMAN[s.tier - 1]} ATTEINT`;
-      this._float(label, 'tier');
-      window.SBSfx && SBSfx.play(s.tier === 3 ? 'tier3' : 'tier', 0.15);   // SFX_2410
-      if (this.use3d) this.view3d.wave(s.tier === 3 ? 0xb58cff : 0xffd27a);
-      if (s.tier >= 2) this._bonusMove(`PALIER ${TIER_ROMAN[s.tier - 1]}`);
-    }
-  },
-
-  _checkSecondaries() {
-    const s = this.s;
-    s.secondaries.forEach((o) => {
-      o.have = Math.floor(s.stats[o.stat] || 0);
-      if (!o.done && o.have >= o.n) { o.done = true; this._float('OBJECTIF SECONDAIRE ATTEINT', 'sec'); }
-    });
-  },
+  // _bonusMove / _checkTiers / _checkSecondaries : règles déplacées dans m3session.js (finishMove), l'interface n'affiche plus que les événements
 
   // Instabilité informative (§19) : 0 → palier I stable, puis monte jusqu'au-delà du palier III
   instability() {
@@ -811,14 +818,14 @@ const SBMatch3 = {
         <button class="btn-ghost" data-a="extract">Extraire maintenant</button>
         <button class="btn-primary" data-a="go">Continuer le forage</button>
       </div>`);
-    p.querySelector('[data-a="extract"]').onclick = () => { this._closePanel(); this.finish('extract'); };
-    p.querySelector('[data-a="go"]').onclick = () => { this._closePanel(); this._float('FORAGE PROLONGÉ', 'dim'); };
+    p.querySelector('[data-a="extract"]').onclick = () => { this._closePanel(); decide(s, 'extract'); this.finish('extract'); };
+    p.querySelector('[data-a="go"]').onclick = () => { this._closePanel(); decide(s, 'go'); this._float('FORAGE PROLONGÉ', 'dim'); };
   },
 
   async _exitPressed() {
     const s = this.s;
     if (!s || s.ended || s.busy) return;
-    if (s.tier >= 1) { this.finish('extract'); return; }
+    if (s.tier >= 1) { decide(s, 'extract'); this.finish('extract'); return; }
     const ok = typeof sbConfirm === 'function' ? await sbConfirm(__m3VO({
       title: 'Quitter l\'exploitation ?',
       body: s.context === 'Antenne'
@@ -828,25 +835,17 @@ const SBMatch3 = {
         : 'Tu gardes tout ce que tu as extrait, mais sans le palier I la parcelle ne sera pas conquise.',
       confirmLabel: 'Quitter', cancelLabel: 'Continuer',
     })) : true;
-    if (ok) this.finish('quit');
+    if (ok) { decide(s, 'quit'); this.finish('quit'); }
   },
 
   finish(reason) {
     const s = this.s;
     if (!s || s.ended) return;
-    s.ended = true;
     if (reason !== 'quit') window.SBSfx && SBSfx.play('finish', 0.2);   // SFX_2410
-    this._checkSecondaries();
-    const secDone = s.secondaries.filter((o) => o.done).length;
-    const mult = 1 + 0.1 * secDone;
-    const credit = {};
-    this._resOrder().forEach((k) => { const v = (s.gains[k] || 0) * mult; if (v >= 0.5) credit[k] = Math.round(v); });
-    // PATCH_1910_SKILLS_M3 — les skills de forage majorent le crédit ; on garde la part due au skill pour l'afficher
-    const _skx = {};
-    if (window.SBSkills && SBSkills.m3Mult) Object.keys(credit).forEach((k) => { const _b = credit[k]; credit[k] = Math.round(_b * SBSkills.m3Mult(k)); if (credit[k] > _b) _skx[k] = credit[k] - _b; });
-    const rendement = Math.round(s.total * mult / SESSION.tiers[2] * 100);
-    const success = s.tier >= 1;
-    s.result = { credit, rendement, success, reason };
+    // SERVEUR_0811 : le crédit est calculé par la session (m3session.finish), skills de forage compris (PATCH_1910_SKILLS_M3)
+    const R = sessionFinish(s, reason, (k) => (window.SBSkills && SBSkills.m3Mult ? SBSkills.m3Mult(k) : 1));
+    const { credit, rendement, success, secDone } = R, _skx = R.skillExtra;
+    m3Report(sessionReport(s));   // rapport au serveur (file hors-ligne), il rejoue et compare
     const parcelLine = this._parcelOutcomeText(success);
     const goalLine = s.context === 'Antenne' ? '' : this._goalAfterText(credit);
     // AUDIT_1110 — on encaisse tout de suite : une app fermée sur l'écran de résultat ne perd plus rien

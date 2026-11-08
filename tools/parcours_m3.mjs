@@ -32,13 +32,26 @@ const r = await p.evaluate(async () => {
     await sleep(30);
   }
   await sleep(500);
-  const s = M.s; const res = s && s.result; const back = document.querySelector('[data-a="back"]'); if (back) back.click();
+  const s = M.s; const res = s && s.result;
+  const rep = s ? { seed: s.seed, seedSrc: s.seedSrc, context: s.context, remine: s.remine, parcel: s.parcelIdx, log: s.log, reason: res && res.reason, base: res && res.base, skill: res && res.skillMults, claimed: res && res.credit } : null;
+  const back = document.querySelector('[data-a="back"]'); if (back) back.click();
   await sleep(300);
   const after = { metal: G.res.metal.v, energie: G.res.energie.v, cristal: G.res.cristal.v };
-  return { moves: n, ended: !!(s && s.ended), reason: res && res.reason, tier: s && s.tier, total: s && Math.floor(s.total), credit: res && res.credit, before, after, last: log.slice(-3), parcel: G.planet.parcels[idx].state, successCount: G.planet.parcels[idx].successCount || 0 };
+  return { moves: n, ended: !!(s && s.ended), reason: res && res.reason, tier: s && s.tier, total: s && Math.floor(s.total), credit: res && res.credit, before, after, last: log.slice(-3), parcel: G.planet.parcels[idx].state, successCount: G.planet.parcels[idx].successCount || 0, rep, queue: JSON.parse(localStorage.getItem('sb_m3_queue') || '[]').length };
 });
 await b.close(); srv.kill();
-const ok = r.ended && errs.length === 0 && r.moves > 0;
+// SERVEUR_0811 : le rejeu pur (src/m3session.js) doit retrouver exactement le crédit de base de l'interface
+let replayOk = null, replayInfo = '';
+if (r.rep && r.rep.seed) {
+  try {
+    const M3 = await import(path.join(here, '..', 'src', 'm3session.js'));
+    const rr = M3.replay(r.rep);
+    replayOk = !rr.error && JSON.stringify(rr.result.base) === JSON.stringify(r.rep.base) && rr.result.tier === r.tier;
+    replayInfo = rr.error ? `erreur ${rr.error}` : `rejeu base ${JSON.stringify(rr.result.base)} (palier ${rr.result.tier}, ${rr.moves} coups, fin ${rr.reason})`;
+  } catch (e) { replayOk = false; replayInfo = 'rejeu impossible : ' + e.message; }
+}
+const ok = r.ended && errs.length === 0 && r.moves > 0 && replayOk !== false;
 console.log(`Match-3 ${ok ? 'OK' : 'ÉCHEC'} (${DIR}) · ${r.moves} coups · fin « ${r.reason} » · palier ${r.tier} · total ${r.total} · crédit ${JSON.stringify(r.credit)} · stocks ${JSON.stringify(r.before)} → ${JSON.stringify(r.after)} · parcelle ${r.parcel} ×${r.successCount}`);
+if (r.rep) console.log(`  journal : graine ${r.rep.seed} (${r.rep.seedSrc}) · ${r.rep.log.length} événements · annoncé base ${JSON.stringify(r.rep.base)} · ${replayInfo} · ${replayOk ? 'IDENTIQUE' : 'ÉCART'} · file d'envoi : ${r.queue}`);
 if (errs.length) console.log('  EXCEPTIONS :', errs.slice(0, 5));
 process.exit(ok ? 0 : 1);

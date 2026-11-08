@@ -1,5 +1,6 @@
 #!/bin/bash
-# Construit les modules minifiés du jeu à partir de src/ (esbuild). Usage : tools/build-modules.sh [match3]
+# Construit les modules du jeu à partir de src/. Usage : tools/build-modules.sh [match3|m3-verify]
+#   m3-verify → copie src/m3core.js et src/m3session.js dans server/m3-verify/ (fonction Edge, à redéployer ensuite)
 #   match3 → github_upload/assets/match3.js  = src/m3secours_vocab.js (tel quel) + bundle esbuild de src/match3.js
 #            (qui importe src/m3core.js, le moteur pur, et src/m3view3d.js, le plateau 3D).
 # Après un build : node tools/parcours_m3.mjs (session complète) puis node tools/parcours.mjs, et pousser.
@@ -14,5 +15,8 @@ case "$what" in
     npx esbuild src/match3.js --bundle --format=esm --minify --target=es2020,safari15 --legal-comments=none --outfile=/tmp/sb_match3.bundle.js
     { cat src/m3secours_vocab.js; echo; cat /tmp/sb_match3.bundle.js; } > github_upload/assets/match3.js
     echo "assets/match3.js : $(wc -c < github_upload/assets/match3.js) octets" ;;
-  *) echo "module inconnu : $what (disponible : match3)"; exit 1 ;;
+  m3-verify)
+    cp src/m3core.js src/m3session.js github_upload/server/m3-verify/
+    echo "server/m3-verify : m3core.js et m3session.js recopiés depuis src/ (à redéployer)" ;;
+  *) echo "module inconnu : $what (disponible : match3, m3-verify)"; exit 1 ;;
 esac

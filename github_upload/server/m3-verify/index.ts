@@ -1,0 +1,74 @@
+// STARBYTE — fonction serveur « m3-verify » (match-3 serveur-autoritaire, Temps A — GDD du 08/11/2026)
+// Rejoue les parties de match-3 déclarées par le joueur connecté (table m3_sessions, remplies par m3_report) avec le
+// moteur du jeu (m3core.js + m3session.js, copies exactes de src/) et compare au crédit annoncé.
+// Temps A : informatif. Un écart est journalisé (mp_anomalies, kind 'm3_mismatch'), rien ne change en jeu.
+//   POST {}                    → { verified: n, mismatches: n }    (parties en attente du joueur connecté, 20 max)
+//   POST { action: 'selftest' } → rejoue une partie témoin et renvoie son crédit (vérifie que le moteur tourne ici)
+// Fichiers à déployer ensemble : index.ts, m3core.js, m3session.js (copies générées par tools/build-modules.sh m3-verify).
+
+import { createClient } from 'npm:@supabase/supabase-js@2';
+import { replay, createSession, applyMove, finish } from './m3session.js';
+
+const CORS = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+  'Access-Control-Allow-Methods': 'POST, OPTIONS',
+};
+const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { ...CORS, 'Content-Type': 'application/json' } });
+const same = (a: unknown, b: unknown) => JSON.stringify(norm(a)) === JSON.stringify(norm(b));
+function norm(o: any) { const r: Record<string, number> = {}; for (const k of Object.keys(o || {}).sort()) { const v = Number(o[k]); if (v) r[k] = v; } return r; }
+
+function selftest() {
+  // partie témoin : graine fixe, premier coup possible à chaque fois, « continuer » au palier
+  const s: any = createSession({ seed: 20261108, context: 'Extraction', remine: 0 });
+  let n = 0;
+  while (!s.ended && n < 60) {
+    const mv = s.board.moves(); if (!mv.length) break;
+    const r: any = applyMove(s, mv[0][0], mv[0][1]); const f = r.finish(); n++;
+    if (f.offerChoice) s.log.push({ k: 'go' });
+    if (f.exhausted) break;
+  }
+  const res: any = finish(s, 'moves', () => 1);
+  const rep = { seed: s.seed, context: s.context, remine: 0, parcel: -1, log: s.log, reason: 'moves', skill: {} };
+  const again: any = replay(rep);
+  return { moves: n, tier: s.tier, base: res.base, replayIdentical: !again.error && same(again.result.base, res.base) };
+}
+
+Deno.serve(async (req) => {
+  if (req.method === 'OPTIONS') return new Response('ok', { headers: CORS });
+  let body: any = {};
+  try { body = await req.json(); } catch (_) { /* corps vide */ }
+  if (body.action === 'selftest') return json(selftest());
+
+  const url = Deno.env.get('SUPABASE_URL')!;
+  const service = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+  const jwt = (req.headers.get('Authorization') || '').replace(/^Bearer\s+/i, '');
+  if (!jwt) return json({ error: 'not_signed_in' }, 401);
+  const admin = createClient(url, service, { auth: { persistSession: false } });
+  const { data: who, error: authErr } = await admin.auth.getUser(jwt);
+  if (authErr || !who?.user) return json({ error: 'not_signed_in' }, 401);
+  const uid = who.user.id;
+
+  const { data: rows, error } = await admin.from('m3_sessions').select('*').eq('user_id', uid).is('verified_at', null).order('id', { ascending: true }).limit(20);
+  if (error) return json({ error: error.message }, 500);
+
+  let verified = 0, mismatches = 0;
+  for (const s of rows || []) {
+    const upd: Record<string, unknown> = { verified_at: new Date().toISOString() };
+    try {
+      const r: any = replay({ seed: Number(s.seed), context: s.context, remine: s.remine, parcel: s.parcel, log: s.log, reason: s.reason, skill: s.skill || {} });
+      if (r.error) { upd.error = r.error; upd.mismatch = true; }
+      else {
+        upd.server_base = r.result.base; upd.server_credit = r.result.credit; upd.server_tier = r.result.tier;
+        upd.mismatch = !same(r.result.base, s.base_claimed) || !same(r.result.credit, s.claimed) || r.result.tier !== s.tier;
+      }
+    } catch (e) { upd.error = String((e as Error)?.message || e).slice(0, 200); upd.mismatch = true; }
+    await admin.from('m3_sessions').update(upd).eq('id', s.id);
+    verified++;
+    if (upd.mismatch) {
+      mismatches++;
+      await admin.from('mp_anomalies').insert({ user_id: uid, pseudo: s.pseudo, kind: 'm3_mismatch', detail: { session: s.id, seed: s.seed, seed_src: s.seed_src, claimed: s.claimed, base_claimed: s.base_claimed, server_base: upd.server_base ?? null, server_credit: upd.server_credit ?? null, tier: s.tier, server_tier: upd.server_tier ?? null, error: upd.error ?? null } }).then(() => {}, () => {});
+    }
+  }
+  return json({ verified, mismatches });
+});
