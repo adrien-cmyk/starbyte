@@ -327,7 +327,10 @@ function validateAddressForTier(addr, tier) {
     return {
       valid: false,
       error: (many ? `Trop loin pour les capteurs de ${(G.planet && G.planet.name) || 'cette planète'}` : 'Trop loin pour les capteurs actuels')
-        + (from ? ` · à portée depuis ${from.name || (from.id === 'home' ? 'la capitale' : 'une autre de tes planètes')} : lance-la depuis là-bas` : ''),
+        // PATCH_0811_PORTEE_COLONIES (08/11) : si aucune de mes planètes n'y arrive, dire ce qui débloque vraiment
+        // la cible (la prochaine colonie, pas un Laboratoire déjà au maximum) — même phrase que les cartes.
+        + (from ? ` · à portée depuis ${from.name || (from.id === 'home' ? 'la capitale' : 'une autre de tes planètes')} : lance-la depuis là-bas`
+           : (typeof sbRangeHint === 'function' ? ' · ' + sbRangeHint(parsed && parsed.sector) : '')),
       parsed,
       reason: 'out_of_range',  // tag interne pour styler le message différemment
       fromWorld: from ? from.id : null,

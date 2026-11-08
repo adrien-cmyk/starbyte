@@ -700,15 +700,49 @@ function _rangeOfLevel(lvl) {
   if (lvl === 'sismic')       return { kind: 'sector_radius', radius: 2 };
   return { kind: 'sector_radius', radius: 1 };
 }
-// 03/11 (Adrien, précision de la décision du 30/10) : une colonie sert à voir PLUS LOIN que la capitale. Depuis sa position,
-// elle porte aussi loin que la meilleure de ses planètes (capitale comprise), plus un secteur. Son propre Laboratoire compte s'il fait mieux.
+// PATCH_0811_PORTEE_COLONIES (Adrien, 08/11) — la portée vient de l'expansion, plus du Laboratoire.
+// Cf. claude/starbyte_GDD_portee_colonies.md. Remplace la règle du 03/11 (« la meilleure planète + 1 secteur »).
+// Toutes les planètes de l'empire partagent le même palier : 3 + nombre de colonies
+// (1 colonie → 4 secteurs, 2 → 5, 3 → 6, 4 → 7, et à 4 colonies on a couvert les 26 lettres de l'amas).
+// Avant la première colonie, c'est le Laboratoire qui décide (1 / 2 / 4 secteurs) ; on prend toujours le
+// meilleur des deux, donc aucune partie existante ne perd de portée (Labo 3 sans colonie reste à 4).
+function sbColonyCount() {
+  if (!Array.isArray(G.worlds)) return 0;
+  return G.worlds.filter(w => w && w.id !== 'home').length;
+}
 function getMaxRange(wid) {
-  const own = _rangeOfLevel(getCartoLevel(wid));
-  if (!wid || wid === 'home' || !Array.isArray(G.worlds) || G.worlds.length < 2) return own;
   const score = (r) => r.kind === 'universe' ? 99 : r.kind === 'cluster' ? 50 : (r.radius || 0);
-  let best = own;
-  for (const w of G.worlds) { if (!w || w.id === wid) continue; const r = _rangeOfLevel(getCartoLevel(w.id)); if (score(r) > score(best)) best = r; }
-  return best.kind === 'sector_radius' ? { kind: 'sector_radius', radius: best.radius + 1 } : best;
+  // les skills de cartographie (cheats, amas entier, multi-amas) priment et restent partagés par l'empire
+  let best = _rangeOfLevel(getCartoLevel(wid));
+  for (const w of (Array.isArray(G.worlds) ? G.worlds : [])) {
+    if (!w || w.id === wid) continue;
+    const r = _rangeOfLevel(getCartoLevel(w.id));
+    if (score(r) > score(best)) best = r;
+  }
+  if (best.kind !== 'sector_radius') return best;
+  const col = sbColonyCount();
+  const own = _rangeOfLevel(getCartoLevel(wid));
+  const radius = Math.max(own.radius || 0, col >= 1 ? 3 + col : 0);
+  return { kind: 'sector_radius', radius };
+}
+// PATCH_0811_PORTEE_COLONIES — ce qu'il faut faire pour atteindre une case hors de portée.
+// Un seul endroit pour le dire : la carte 3D, la carte SVG et la saisie d'adresse lisent cette phrase.
+// Le message doit toujours nommer ce qui débloque RÉELLEMENT la case, jamais un Laboratoire déjà au maximum.
+function sbRangeHint(targetSector) {
+  let col = 0, lt = 0, radius = 0;
+  try { col = sbColonyCount(); } catch (e) {}
+  try { lt = getLaboTierOf(G.activeWorld || 'home'); } catch (e) {}
+  try { const r = getMaxRange(G.activeWorld || 'home'); if (r && r.kind === 'sector_radius') radius = r.radius || 0; else return 'Au-delà de ce que tes capteurs peuvent atteindre aujourd\'hui.'; } catch (e) {}
+  let gap = 0;
+  try { if (targetSector) gap = _sectorDistance(sbOrigin().sector, String(targetSector)); } catch (e) {}
+  const where = gap ? `À ${gap} secteur${gap > 1 ? 's' : ''} d'ici, pour une portée de ${radius}. ` : '';
+  if (col < 1) {
+    if (lt < 2) return where + 'Développe ton Laboratoire au niveau 2 : portée de 2 secteurs autour de la planète.';
+    if (lt < 3) return where + 'Développe ton Laboratoire au niveau 3 : portée de 4 secteurs autour de la planète.';
+    return where + 'Hors de portée, même au Laboratoire 3. Fonde une colonie : chaque colonie étend la vue de tout ton empire.';
+  }
+  if (col < 4) return where + `Ta prochaine colonie porte toutes tes planètes à ${3 + col + 1} secteurs. Pose-la au bord de ta portée pour voir au-delà.`;
+  return where + 'Tu as couvert cet amas. Au-delà, c\'est un autre amas — la cinquième colonie est la première qui peut s\'y poser.';
 }
 // la plus grande portée de mes planètes (carte : zone éclairée)
 function getMaxRangeAny() {

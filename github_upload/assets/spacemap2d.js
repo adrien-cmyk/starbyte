@@ -337,11 +337,9 @@
     }
     const s = _sel;
     if (s.kind === 'far') {
-      // Décision d'Adrien (10/10) : dire comment aller plus loin — c'est le Laboratoire qui étend la portée
-      const lt = (typeof getLaboTier === 'function') ? getLaboTier() : 0;
-      const hint = lt < 1 ? 'Développe un Laboratoire au niveau 2 pour étendre la portée des sondes (2 secteurs autour).'
-        : lt < 2 ? 'Développe ton Laboratoire au niveau 2 : portée de 2 secteurs autour de la planète.'
-        : lt < 3 ? 'Développe ton Laboratoire au niveau 3 : portée de 4 secteurs autour de la planète.'
+      // Décision d'Adrien (10/10) : dire comment aller plus loin.
+      // PATCH_0811_PORTEE_COLONIES (08/11) : même phrase que la carte 3D, via sbRangeHint().
+      const hint = (typeof sbRangeHint === 'function') ? sbRangeHint(s.sector)
         : 'Au-delà de ce que tes capteurs peuvent atteindre aujourd\'hui.';
       return `<div class="sm-panel"><div class="sm-ptitle">Trop loin pour les capteurs actuels</div><div class="sm-psub">Secteur ${esc(s.sector)}</div><div class="sm-psub" style="margin-top:6px;color:#c8d6d2">${hint}</div></div>`;
     }
