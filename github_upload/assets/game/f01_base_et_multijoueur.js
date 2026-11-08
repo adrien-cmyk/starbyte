@@ -1562,11 +1562,19 @@ function _mpWorldSnapshotHome() {
     stocks,
     buildings: built.map(p => ({ key: p.building, lvl: p.lvl || 1, state: p.damaged || p.state === 'damaged' ? 'damaged' : 'built' })),
     fleets: mpFleetRegistry(),   // ANTITRICHE_0811 : les flottes sont publiées au registre, le serveur n'en accepte plus d'autres
+    soldiers: mpSoldierRegistry(),   // ANTITRICHE_0811 (v48) : soldats possédés, pour que le serveur borne la défense publiée
   };
 }
 // ANTITRICHE_0811 — registre des flottes (schéma v46). Avant, un raid envoyait sa flotte en JSON libre que le serveur
 // acceptait telle quelle. Désormais la partie publie TOUTES ses flottes dans worlds.fleets (toutes planètes confondues)
 // et mp_launch_raid va chercher la composition dans ce registre, par id : une seule source, bornée et auditable côté serveur.
+// ANTITRICHE_0811 (v48) — soldats possédés (quantités totales), publiés avec le monde : le serveur s'en sert
+// pour vérifier que la défense déclarée est possible (soldats × défense/unité + bâtiments + flottes).
+function mpSoldierRegistry() {
+  const out = {};
+  for (const [k, u] of Object.entries((G.defense && G.defense.units) || {})) out[k] = Math.max(0, Math.floor((u && u.qty) || 0));
+  return out;
+}
 function mpFleetRegistry() {
   const out = [];
   for (const f of ((G.fleet && G.fleet.prepared) || [])) {
