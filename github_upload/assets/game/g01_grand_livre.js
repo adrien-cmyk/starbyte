@@ -50,6 +50,13 @@ function _sbLedgerWorldOf(R) {
   return G.activeWorld || 'home';
 }
 
+// Ligne explicite à zéro (ressource créditée par une partie mais stock plein) : dit au serveur « rapport arrivé, rien ajouté »
+function sbLedgerZero(k, reason, ref) {
+  if (!ref || !SB_LEDGER_RES.includes(k)) return;
+  const w = String((typeof G !== 'undefined' && G && G.activeWorld) || 'home');
+  const key = w + '|' + k + '|' + reason + '|' + ref;
+  if (!_sbL.pend[key]) { _sbL.pend[key] = { w, k, d: 0, r: reason, ref, at: Date.now() }; _sbL.pendN++; }
+}
 function _sbLedgerDelta(R, k, d) {
   if (!Number.isFinite(d) || !d) return;
   const w = String(_sbLedgerWorldOf(R) || 'home');
@@ -96,7 +103,7 @@ function sbLedgerSnapshot() {
 
 // ── Envoi par lots ──
 function _sbLedgerTakeBatch() {
-  const entries = Object.values(_sbL.pend).filter(e => Math.abs(e.d) >= 0.0005).map(e => ({ w: e.w, k: e.k, d: Math.round(e.d * 1000) / 1000, r: e.r, ref: e.ref, at: e.at }));
+  const entries = Object.values(_sbL.pend).filter(e => Math.abs(e.d) >= 0.0005 || (e.ref && /^m3/.test(e.r))).map(e => ({ w: e.w, k: e.k, d: Math.round(e.d * 1000) / 1000, r: e.r, ref: e.ref, at: e.at }));
   _sbL.pend = {}; _sbL.pendN = 0;
   return { snap: sbLedgerSnapshot(), entries, at: Date.now() };
 }
@@ -196,6 +203,7 @@ function sbLedgerM3Apply(seed, world, credit, reasonTag) {
   sbLedgerReason(reasonTag || 'm3srv', 'seed:' + seed, () => {
     if (typeof sbWithWorld === 'function' && world && world !== (G.activeWorld || 'home')) sbWithWorld(world, run); else run();
   });
+  for (const k of Object.keys(credit || {})) if (!added[k]) { const key = String(world || 'home') + '|' + k + '|' + (reasonTag || 'm3srv') + '|seed:' + seed; if (!_sbL.pend[key]) { _sbL.pend[key] = { w: String(world || 'home'), k, d: 0, r: reasonTag || 'm3srv', ref: 'seed:' + seed, at: Date.now() }; _sbL.pendN++; } }
   sbLedgerM3PendingRemove(seed);
   if (typeof saveGame === 'function') saveGame();
   _sbL.wantFlush = true;
@@ -253,7 +261,7 @@ function sbLedgerBoot() {
 }
 
 window.SBLedger = {
-  reason: sbLedgerReason, flush: sbLedgerFlush, snapshot: sbLedgerSnapshot, watch: sbLedgerWatchAll,
+  reason: sbLedgerReason, zero: sbLedgerZero, flush: sbLedgerFlush, snapshot: sbLedgerSnapshot, watch: sbLedgerWatchAll,
   settings: () => _sbL.settings || _sbLedgerLS(SB_LEDGER_SETTINGS_KEY, null),
   m3CreditOn: () => { const s = _sbL.settings || _sbLedgerLS(SB_LEDGER_SETTINGS_KEY, null); return !!(s && s.m3_credit_on === true); },
   m3ServerCredit: sbLedgerM3ServerCredit, m3PendingAdd: sbLedgerM3PendingAdd, m3PendingRemove: sbLedgerM3PendingRemove, m3Apply: sbLedgerM3Apply,

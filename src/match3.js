@@ -976,7 +976,10 @@ const SBMatch3 = {
       if (r.v < r.max) r.v = Math.min(r.max, r.v + v);   // jamais de baisse si le stock dépassait déjà
       added[k] = Math.max(0, Math.round(r.v - before));
     });
-    if (window.SBLedger && SBLedger.reason) SBLedger.reason(reasonTag || 'm3', 'seed:' + s.seed, run); else run();   // SERVEUR_0811 : motif du grand livre
+    if (window.SBLedger && SBLedger.reason) {   // SERVEUR_0811 : motif du grand livre ; stock plein → ligne à zéro (le serveur saurait sinon pas si le rapport est arrivé)
+      SBLedger.reason(reasonTag || 'm3', 'seed:' + s.seed, run);
+      Object.keys(credit).forEach((k) => { if (!added[k] && SBLedger.zero) SBLedger.zero(k, reasonTag || 'm3', 'seed:' + s.seed); });
+    } else run();
     this._parcelTransition(s);
     if (typeof saveGame === 'function') saveGame();
     return added;
