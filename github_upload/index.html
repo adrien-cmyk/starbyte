@@ -9155,7 +9155,32 @@ function _mpWorldSnapshotHome() {
     defense: Math.max(0, Math.round(typeof totalDefense === 'function' ? totalDefense() : 0)),
     stocks,
     buildings: built.map(p => ({ key: p.building, lvl: p.lvl || 1, state: p.damaged || p.state === 'damaged' ? 'damaged' : 'built' })),
+    fleets: mpFleetRegistry(),   // ANTITRICHE_0811 : les flottes sont publiées au registre, le serveur n'en accepte plus d'autres
   };
+}
+// ANTITRICHE_0811 — registre des flottes (schéma v46). Avant, un raid envoyait sa flotte en JSON libre que le serveur
+// acceptait telle quelle. Désormais la partie publie TOUTES ses flottes dans worlds.fleets (toutes planètes confondues)
+// et mp_launch_raid va chercher la composition dans ce registre, par id : une seule source, bornée et auditable côté serveur.
+function mpFleetRegistry() {
+  const out = [];
+  for (const f of ((G.fleet && G.fleet.prepared) || [])) {
+    if (!f || !f.id) continue;
+    const heroes = {};
+    for (const [k, h] of Object.entries(f.heroes || {})) if (h && h.name) heroes[k] = { name: String(h.name).slice(0, 40), dead: !!h.dead };
+    const premium = Array.isArray(f.premium) ? f.premium.filter(p => p && typeof p.pid === 'string').map(p => ({ pid: p.pid, cat: p.cat, item: p.item })) : [];
+    out.push({
+      id: String(f.id).slice(0, 80),
+      name: String(f.name || '').slice(0, 40),
+      world: String(f.world || 'home').slice(0, 40),
+      status: String(f.status || 'prepared').slice(0, 20),
+      composition: JSON.parse(JSON.stringify(f.composition || {})),
+      soldiers: { garde: (f.soldiers && f.soldiers.garde) || 0, lourd: (f.soldiers && f.soldiers.lourd) || 0 },
+      heroes,
+      premium,
+    });
+    if (out.length >= 12) break;
+  }
+  return out;
 }
 
 // INCOMING_1110 — flottes hostiles en approche : bandeau permanent (tous écrans) jusqu'à l'impact
@@ -9512,13 +9537,21 @@ function _mpFleetPayload(fleet) {
   const heroes = {};
   for (const [k, h] of Object.entries(fleet.heroes || {})) if (h && h.name) heroes[k] = { name: h.name, dead: !!h.dead };
   return {
+    id: fleet.id,   // ANTITRICHE_0811 : le serveur retrouve la flotte au registre par cet id (schéma v46)
     composition: JSON.parse(JSON.stringify(fleet.composition || {})),
     soldiers: { garde: (fleet.soldiers && fleet.soldiers.garde) || 0, lourd: (fleet.soldiers && fleet.soldiers.lourd) || 0 },
     heroes,
   };
 }
+// ANTITRICHE_0811 — avant un raid, le registre doit connaître la flotte telle qu'elle part (la publication
+// ordinaire est différée, après chaque sauvegarde cloud). On publie donc maintenant, puis on lance.
+async function mpPublishFleetsNow() {
+  try { if (window.SBMP && typeof SBMP.publish === 'function') await SBMP.publish(); } catch (e) { console.warn('[registre] publication des flottes :', String(e && e.message || e)); }
+}
 
 var MP_RAID_ERRORS = {
+  fleet_unknown: 'Le registre ne connaît pas encore cette flotte : réessaie dans quelques secondes',   // ANTITRICHE_0811
+  fleet_invalid: 'Cette flotte ne peut pas partir en raid',
   target_shielded: 'Cette planète est sous bouclier protecteur (colonie fondée il y a moins de 72 h, ou raid récent)',
   target_too_weak: 'Ce monde est trop faible pour toi : aucune gloire à le piller',
   raid_already_enroute: 'Une de tes flottes est déjà en route vers ce monde',
@@ -9579,6 +9612,7 @@ async function mpLaunchRaid(fleet, target) {
   let raid;
   _mpLaunching = true;
   try {
+    await mpPublishFleetsNow();   // ANTITRICHE_0811 : le registre lit la flotte chez lui, pas dans l'appel
     raid = await window.SBMP.launchRaid(target.mpAddress, _mpFleetPayload(fleet), fleet.name);
   } catch (e) {
     const code = (String(e && e.message || e).match(/[a-z_]+/g) || []).find(c => MP_RAID_ERRORS[c]);
