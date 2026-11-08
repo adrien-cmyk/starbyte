@@ -56,6 +56,9 @@ jobs:
           lftp -c "source /tmp/rc; cat .htaccess" >> /tmp/ls.txt 2>&1 || true
           echo "::notice title=Racine FTP::$(head -60 /tmp/ls.txt | tr '\n' '|')"
           echo "STOP=1" >> "$GITHUB_ENV"
+      - name: Versions des fichiers (?v= = empreinte du fichier)
+        if: env.SKIP != '1' && env.STOP != '1'
+        run: node tools/versionner.mjs   # 08/11 : plus de ?v= à la main, chaque fichier modifié reçoit une nouvelle adresse
       - name: Calculer ce qui a changé
         if: env.SKIP != '1' && env.STOP != '1'
         run: |
@@ -109,7 +112,7 @@ jobs:
           # le jeu sans ces fichiers = carte 2D de secours et icône « S » générique chez les nouveaux joueurs
           cd github_upload
           KO=0
-          for f in manifest.webmanifest assets/app/apple-touch-icon.png assets/app/icon-192.png $(grep -oE 'assets/[a-z0-9_]+\.js' index.html | sort -u); do
+          for f in manifest.webmanifest assets/app/apple-touch-icon.png assets/app/icon-192.png $(grep -oE 'assets/[a-z0-9_/]+\.js' index.html | sort -u); do
             c=$(curl -s -o /dev/null -m 30 -w '%{http_code}' "https://play.starbyte.online/$f")
             if [ "$c" != "200" ]; then echo "::error title=Fichier absent en ligne::$f → $c"; KO=1; fi
           done
