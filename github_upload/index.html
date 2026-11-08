@@ -10539,7 +10539,8 @@ function mpAllyEmbassyHtml(addr, pseudo) {
 
 // ── PATCH_2110_GARNISON — flotte en garnison chez un allié (elle reste à toi ; tu paies ses pertes) ──
 Object.assign(MP_ALLY_ERRORS, { not_ally: 'Ce commandant n\'est pas (ou plus) dans ton alliance', garrison_full: 'Déjà 3 flottes alliées en garnison chez lui',
-  fleet_invalid: 'Il faut au moins un vaisseau dans la flotte', garrison_unknown: 'Cette garnison n\'existe plus' });
+  fleet_invalid: 'Il faut au moins un vaisseau dans la flotte', garrison_unknown: 'Cette garnison n\'existe plus',
+  fleet_unknown: 'Le registre ne connaît pas encore cette flotte : réessaie dans quelques secondes' });   // ANTITRICHE_0811
 var _mpGarBusy = new Set();
 async function mpGarrisonStart(address) {
   const mem = mpAllyMember(address);
@@ -10570,6 +10571,7 @@ async function mpGarrisonStart(address) {
   if (!(await mpPeaceGuard('Envoyer cette flotte en garnison'))) return;   // PATCH_2410_PACIFIQUE
   _mpGarBusy.add(f.id);
   try {
+    await mpPublishFleetsNow();   // ANTITRICHE_0811 (v47) : la garnison se lit au registre
     const p = _mpFleetPayload(f); p.soldiers = { garde: 0, lourd: 0 };
     const g = await SBMP.garrisonPost(address, f.id, f.name, p, travel);
     mpPeaceRenounce();   // PATCH_2410_PACIFIQUE
@@ -11448,6 +11450,7 @@ var MP_PIRACY_ERRORS = {
   convoy_gone: 'Le convoi est sorti de la zone de ta balise',
   no_ambush: 'Aucune de tes flottes n\'est en embuscade sur ce système',
   no_beacon: 'Il faut une balise posée sur ce système',
+  fleet_unknown: 'Le registre ne connaît pas encore cette flotte : réessaie dans quelques secondes',   // ANTITRICHE_0811
   pact_active: 'Pacte de non-agression avec ce commandant : pas d\'abordage',
   combat_pending: 'Abordage en cours : attends son issue',
   ambush_unknown: 'Cette embuscade n\'existe plus',
@@ -11998,6 +12001,7 @@ async function mpAmbushRegister(f) {
   if (!a || a.phase !== 'posted' || a.mpAmbushId || _mpAmbushBusy.has(f.id) || !_mpOnline()) return;
   _mpAmbushBusy.add(f.id);
   try {
+    await mpPublishFleetsNow();   // ANTITRICHE_0811 (v47) : l'embuscade se lit au registre
     const payload = _mpFleetPayload(f);
     payload.soldiers = { garde: 0, lourd: 0 };
     try { await window.SBMP.beaconsSync(mpBeaconList()); } catch (e) {}   // ROUTES_V2 : la flotte postée est ses propres yeux au registre
