@@ -3,6 +3,7 @@
 -- au Temps A un écart ne fait que journaliser). Rien ne change pour le joueur : le jeu continue d'appliquer son
 -- propre résultat. Le serveur reçoit chaque partie (graine, coups, choix, crédit annoncé), la rejoue avec le même
 -- moteur (fonction Edge m3-verify, dossier server/m3-verify) et journalise les écarts dans mp_anomalies.
+-- BUG corrigé par v51 : la graine passait par _mp_num (plafond 2 000 000 000) — une graine 32 bits va jusqu'à 4 294 967 295.
 -- Nécessite v46 (_mp_anomaly, _mp_num). À coller tel quel dans Supabase → SQL Editor → Run.
 -- Ensuite : déployer la fonction Edge m3-verify (voir server/m3-verify/README.md).
 --
