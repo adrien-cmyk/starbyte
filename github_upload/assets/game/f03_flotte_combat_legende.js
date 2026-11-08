@@ -507,6 +507,7 @@ function renderTargetList(fleet) {
   // 10/10/2026 — Adresses du carnet en premier : c'est la vraie progression
   // (verrouillages Moyenne, joueurs repérés). Les cibles de test restent dessous.
   const carnetTargets = (typeof getCarnetTargets === 'function') ? getCarnetTargets() : [];
+  if (typeof mpRefreshCarnetLevels === 'function') mpRefreshCarnetLevels(carnetTargets);   // NIVEAU_0811
   let html = sectionHead(`Adresses du carnet${carnetTargets.length ? ' · ' + carnetTargets.length : ''}`);
   if (carnetTargets.length === 0) {
     html += `

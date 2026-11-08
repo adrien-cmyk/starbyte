@@ -1855,7 +1855,9 @@ function mergeRealWorlds(sysKey, worlds, opts) {
     const parts = String(w.address).split('-');
     const slot = parseInt(parts[3], 10);
     const coord = `${sysKey}-${String(slot).padStart(2, '0')}`;
-    const lvl = w.level_estimate || 1;
+    // NIVEAU_0811 — un pavillon ou une piste de bar n'apporte pas de niveau : on garde le meilleur niveau déjà connu
+    const _known = sys.planets.find(p => p.coord === coord);
+    const lvl = (w.level_estimate && w.level_estimate > 1) ? w.level_estimate : Math.max(1, (_known && _known.playerLevel) || 0, w.level_estimate || 0);
     const data = {
       coord, cluster, sector, system: parseInt(system, 10), index: slot,
       name: w.planet_name || 'Monde habité',
@@ -2312,7 +2314,7 @@ function mpIngestFlags(rows) {
     });
     if (f.from_address && typeof mergeRealWorlds === 'function') {
       const sysKey = String(f.from_address).split('-').slice(0, 3).join('-');
-      mergeRealWorlds(sysKey, [{ address: f.from_address, pseudo: f.from_pseudo, planet_name: f.from_planet, level_estimate: 1 }], { noReport: true });
+      mergeRealWorlds(sysKey, [{ address: f.from_address, pseudo: f.from_pseudo, planet_name: f.from_planet }], { noReport: true });   // NIVEAU_0811 : niveau inconnu, pas « 1 »
     }
     if (!f.seen) fresh.push(f);
   }
@@ -2994,7 +2996,7 @@ function _mpDiploReport(type, d, key) {
 }
 function _mpMergeSender(address, pseudo) {
   if (!address || typeof mergeRealWorlds !== 'function') return;
-  mergeRealWorlds(String(address).split('-').slice(0, 3).join('-'), [{ address, pseudo, planet_name: null, level_estimate: 1 }], { noReport: true });
+  mergeRealWorlds(String(address).split('-').slice(0, 3).join('-'), [{ address, pseudo, planet_name: null }], { noReport: true });   // NIVEAU_0811 : niveau inconnu, pas « 1 »
 }
 // Créditer une cale acceptée dans MA partie — une seule fois (registre local + drapeau du registre)
 function mpCreditOrbitCargo(o) {
@@ -3817,4 +3819,22 @@ function _mpPirReport(type, d, key) {
     intent: { label: T.sub, icon: '' }, doctrine: { color: T.color }, returnedAt: Date.now(), read: false, piracy: Object.assign({ type }, d) };
   G.reports.unshift(r);
   return r;
+}
+
+// NIVEAU_0811 — niveaux des commandants du carnet : ceux mémorisés à « 1 » (ancien bug des pavillons) sont
+// redemandés au registre (mp_world_card, arrondi à 5 comme une sonde Moyenne), au plus une fois par heure et
+// par monde, puis l'écran se redessine. Sans registre, rien ne change.
+var _mpLevelAskedAt = {};
+function mpRefreshCarnetLevels(targets) {
+  if (!window.SBMP || !SBMP.ready || !SBMP.ready() || !Array.isArray(targets)) return;
+  const now = Date.now();
+  const todo = targets.filter(t => t && t.mp && t.mpAddress && (!t.level || t.level <= 1) && now - (_mpLevelAskedAt[t.mpAddress] || 0) > 3600000).slice(0, 8);
+  if (!todo.length) return;
+  todo.forEach(t => { _mpLevelAskedAt[t.mpAddress] = now; });
+  Promise.all(todo.map(t => SBMP.worldCard(t.mpAddress).then(w => w && w.level_estimate > 1 ? { address: t.mpAddress, pseudo: w.pseudo || t.mpPseudo, planet_name: w.planet_name || null, level_estimate: w.level_estimate, last_seen_days: w.last_seen_days } : null).catch(() => null)))
+    .then(rows => {
+      const got = rows.filter(Boolean);
+      if (!got.length) return;
+      for (const r of got) mergeRealWorlds(String(r.address).split('-').slice(0, 3).join('-'), [r], { noReport: true });
+    });
 }
