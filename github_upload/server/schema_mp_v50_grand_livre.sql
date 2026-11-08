@@ -227,6 +227,7 @@ begin
   return jsonb_build_object('ok', true, 'settled', done, 'world', w);
 end $$;
 revoke all on function public.sb_m3_settle(bigint) from public, anon, authenticated;
+grant execute on function public.sb_m3_settle(bigint) to service_role;   -- m3-verify l'appelle avec la clé de service
 
 -- m3_report : la partie annonce aussi sa planète (colonne world)
 create or replace function public.m3_report(p jsonb) returns bigint

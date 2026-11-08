@@ -75,6 +75,10 @@ Deno.serve(async (req) => {
       await admin.from('mp_anomalies').insert({ user_id: uid, pseudo: s.pseudo, kind: 'm3_mismatch', detail: { session: s.id, seed: s.seed, seed_src: s.seed_src, claimed: s.claimed, base_claimed: s.base_claimed, server_base: upd.server_base ?? null, server_credit: upd.server_credit ?? null, tier: s.tier, server_tier: upd.server_tier ?? null, error: upd.error ?? null } }).then(() => {}, () => {});
     }
   }
+  // Temps B : parties déjà rejouées mais pas encore réglées (règlement refusé ou indisponible à l'époque) — on rattrape
+  const { data: late } = await admin.from('m3_sessions').select('id').eq('user_id', uid).not('verified_at', 'is', null).is('settled_at', null).order('id', { ascending: true }).limit(20);
+  for (const s of late || []) await admin.rpc('sb_m3_settle', { p_session: s.id }).then(() => {}, () => {});
+
   // Le jeu demande le crédit d'une partie précise (Temps B actif : il l'attend avant d'encaisser)
   let session: unknown = null;
   const seed = Number(body.seed);
