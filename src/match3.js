@@ -76,6 +76,7 @@ async function m3RefillSeeds() {
 function m3Report(rep) {
   if (!rep || !rep.seed) return;
   rep.seed_src = (SBMatch3.s && SBMatch3.s.seedSrc) || 'client';
+  rep.world = (typeof G !== 'undefined' && G && G.activeWorld) || 'home';   // Temps B : la planète dont les stocks sont crédités
   rep.at = Date.now();
   const q = m3LS.get(M3_QUEUE_KEY, []); q.push(rep); m3LS.set(M3_QUEUE_KEY, q.slice(-M3_QUEUE_MAX));
   m3Flush();
@@ -848,30 +849,84 @@ const SBMatch3 = {
     m3Report(sessionReport(s));   // rapport au serveur (file hors-ligne), il rejoue et compare
     const parcelLine = this._parcelOutcomeText(success);
     const goalLine = s.context === 'Antenne' ? '' : this._goalAfterText(credit);
+    // SERVEUR_0811 (Temps B, dormant) : interrupteur serveur m3_credit_on → c'est le crédit rejoué par le serveur qui est
+    // encaissé ; le jeu l'attend (8 s). Serveur injoignable : il encaisse son propre calcul, comme avant.
+    const L = window.SBLedger, serverMode = !!(L && L.m3CreditOn && L.m3CreditOn() && navigator.onLine !== false);
     // AUDIT_1110 — on encaisse tout de suite : une app fermée sur l'écran de résultat ne perd plus rien
-    const added = this._commit();
+    const added = serverMode ? {} : this._commit();
+    if (serverMode) this._commitFromServer(s);
     const _sv = s.context === 'Secours' && window.SBAftermath && SBAftermath.onRelief(s.tier);                 // PATCH_2110_SECOURS : la planète dévastée se soigne
     const _v = s.tier >= 3 && window.SBAntenna && SBAntenna.onDeepVein && SBAntenna.onDeepVein();              // ANTENNE_VEINE : l'étape de l'antenne avance
     const _skd = window.SBSkills && SBSkills.m3Discover && SBSkills.m3Discover(s.parcelIdx, s.tier);           // PATCH_1910_SKILLS_M3 : découverte d'un skill
-    const rows = Object.keys(credit).length
-      ? Object.entries(credit).map(([k, v]) => {
-          const t = info(k), a = added[k] || 0;
-          const tag = a < v ? ` <span style="color:#ff9a6a;font-size:10px">${a > 0 ? `+${a} · stock plein` : 'stock plein'}</span>` : '';
-          const _sk = _skx[k] ? `<span class="m3v2-sk">dont +${_skx[k]} · skill ${(SBSkills.m3By ? SBSkills.m3By(k) : []).join(', ')}</span>` : '';   // PATCH_1910_SKILLS_M3
-          return `<div class="m3v2-res"><span>${t.label}</span><b style="color:${t.color}">+${v}</b>${tag}${_sk}</div>`;
-        }).join('')
-      : '<div class="m3v2-ptext">Aucune ressource extraite.</div>';
+    const rows = this._creditRows(credit, added, _skx, serverMode ? 'wait' : 'local');
     const secRows = s.secondaries.map((o) => `<span class="${o.done ? 'done' : ''}">${o.label(o.n)} · ${o.done ? 'atteint' : `${Math.min(o.have, o.n)}/${o.n}`}</span>`).join('');
     const p = this._panel(`
       <div class="m3v2-k">${reason === 'moves' ? 'Coups épuisés' : reason === 'quit' ? 'Exploitation interrompue' : 'Extraction sécurisée'}</div>
       <div class="m3v2-ptitle">Rendement final · ${rendement}%</div>
       <div class="m3v2-ptext">${s.tier ? `Palier ${TIER_ROMAN[s.tier - 1]} · ${SESSION.tierNames[s.tier - 1]}` : 'Palier I non atteint'}${secDone ? ` · prime de précision +${secDone * 10}%` : ''}</div>
-      <div class="m3v2-reslist">${rows}</div>
+      <div class="m3v2-reslist" data-m3-rows>${rows}</div>
       <div class="m3v2-stats">${(OBSTACLE_TEXT[s.context] || {}).stat || 'Roches brisées'} ${s.stats.rocksBroken} · Cascade max ×${s.stats.maxCascade ? [1, 1.2, 1.5, 2, 3][Math.min(s.stats.maxCascade, 4)].toFixed(1) : '1.0'} · Coups joués ${s.movesUsed}</div>
       <div class="m3v2-secres">${secRows}</div>
       <div class="m3v2-ptext">${parcelLine}${goalLine ? '<br>' + goalLine : ''}</div>
       <div class="m3v2-actions"><button class="btn-primary" data-a="back">Retour à la planète</button></div>`);
     p.querySelector('[data-a="back"]').onclick = () => this.apply();
+    this._resultPanel = p;
+  },
+
+  // Lignes de crédit du panneau de fin. mode : 'local' (encaissé par le jeu), 'wait' (on attend le serveur),
+  // 'server' (crédit du serveur encaissé), 'refused' (partie non validée : rien n'est crédité)
+  _creditRows(credit, added, skx, mode) {
+    skx = skx || {};
+    if (mode === 'refused') return '<div class="m3v2-ptext" style="color:#ff9a6a">Partie non validée par le serveur : aucune ressource créditée.</div>';
+    const note = mode === 'wait' ? '<div class="m3v2-ptext m3v2-srv">Vérification par le serveur…</div>' : mode === 'server' ? '<div class="m3v2-ptext m3v2-srv">Crédit validé par le serveur.</div>' : '';
+    if (!Object.keys(credit).length) return note + '<div class="m3v2-ptext">Aucune ressource extraite.</div>';
+    return note + Object.entries(credit).map(([k, v]) => {
+      const t = info(k), a = added[k] || 0;
+      const tag = mode !== 'wait' && a < v ? ` <span style="color:#ff9a6a;font-size:10px">${a > 0 ? `+${a} · stock plein` : 'stock plein'}</span>` : '';
+      const _sk = skx[k] ? `<span class="m3v2-sk">dont +${skx[k]} · skill ${(SBSkills.m3By ? SBSkills.m3By(k) : []).join(', ')}</span>` : '';   // PATCH_1910_SKILLS_M3
+      return `<div class="m3v2-res"><span>${t.label}</span><b style="color:${t.color}">+${v}</b>${tag}${_sk}</div>`;
+    }).join('');
+  },
+
+  // SERVEUR_0811 (Temps B actif) : le crédit encaissé est celui que le serveur a rejoué. Le rapport part tout de suite,
+  // puis on demande le crédit (3 essais, 6 s chacun). Injoignable → calcul du jeu, comme avant. Refusé → rien.
+  // Si le joueur a déjà quitté l'écran (apply), le crédit tombe quand même dans les stocks de la bonne planète.
+  async _commitFromServer(s) {
+    const L = window.SBLedger, seed = s.seed, world = (G && G.activeWorld) || 'home';
+    s.awaitingServer = true;
+    L.m3PendingAdd(seed, world);
+    try { await m3Flush(); } catch (e) {}
+    let r = null;
+    for (let i = 0; i < 3 && !r; i++) { r = await L.m3ServerCredit(seed, 6000); if (!r) await sleep(800); }
+    s.awaitingServer = false;
+    const here = this.s === s && !s.stopped;
+    let mode, credit, added = {};
+    if (r && r.error) { mode = 'refused'; credit = {}; s.committed = true; L.m3PendingRemove(seed); }
+    else if (r) { mode = 'server'; credit = r.credit || {}; }
+    else { mode = 'local'; credit = s.result.credit; }
+    if (mode !== 'refused') {
+      if (here) { added = this._commit(credit, mode === 'server' ? 'm3srv' : 'm3'); L.m3PendingRemove(seed); }
+      else added = this._commitDetached(s, world, credit, mode === 'server' ? 'm3srv' : 'm3');
+    }
+    if (here && this._resultPanel && this._resultPanel.isConnected) {
+      const box = this._resultPanel.querySelector('[data-m3-rows]');
+      if (box) box.innerHTML = this._creditRows(credit, added, mode === 'server' ? {} : s.result.skillExtra, mode);
+    } else if (mode === 'server') {
+      const sum = Object.values(added).reduce((a, b) => a + b, 0);
+      if (sum > 0) say('Match-3 validé par le serveur : +' + sum + ' ressources');
+    }
+  },
+
+  // Crédit et transition de parcelle quand le joueur n'est plus sur l'écran de résultat (planète éventuellement changée)
+  _commitDetached(s, world, credit, reasonTag) {
+    if (s.committed) return {};
+    s.committed = true;
+    const L = window.SBLedger;
+    const added = L.m3Apply(s.seed, world, credit, reasonTag);
+    const run = () => this._parcelTransition(s);
+    try { if (typeof sbWithWorld === 'function' && world !== ((G && G.activeWorld) || 'home')) sbWithWorld(world, run); else run(); } catch (e) {}
+    if (typeof saveGame === 'function') saveGame();
+    return added;
   },
 
   _parcelOutcomeText(success) {
@@ -906,21 +961,31 @@ const SBMatch3 = {
     return `${goal.name} : il manque encore ${missing.map(([k, v]) => `${v} ${info(k).label.toLowerCase()}`).join(' · ')}.`;
   },
 
-  // Crédit des ressources et transition de la parcelle (§21, §24) — une seule fois par session
-  _commit() {
+  // Crédit des ressources et transition de la parcelle (§21, §24) — une seule fois par session.
+  // creditOverride : crédit imposé (celui du serveur, Temps B) ; reasonTag : motif pour le grand livre ('m3' | 'm3srv')
+  _commit(creditOverride, reasonTag) {
     const s = this.s;
     const added = {};
     if (!s || !s.result || s.committed) return added;
     s.committed = true;
-    const { credit, success } = s.result;
-    Object.entries(credit).forEach(([k, v]) => {
-      const r = G.res[k];
-      if (!r) return;
+    const credit = creditOverride || s.result.credit;
+    const run = () => Object.entries(credit).forEach(([k, v]) => {
+      const r = G.res[k]; v = Math.round(Number(v) || 0);
+      if (!r || v <= 0) return;
       const before = r.v;
       if (r.v < r.max) r.v = Math.min(r.max, r.v + v);   // jamais de baisse si le stock dépassait déjà
       added[k] = Math.max(0, Math.round(r.v - before));
     });
+    if (window.SBLedger && SBLedger.reason) SBLedger.reason(reasonTag || 'm3', 'seed:' + s.seed, run); else run();   // SERVEUR_0811 : motif du grand livre
+    this._parcelTransition(s);
+    if (typeof saveGame === 'function') saveGame();
+    return added;
+  },
+
+  _parcelTransition(s) {
+    const { success } = s.result;
     const p = G.planet.parcels[s.parcelIdx];
+    if (!p) return;
     if (success && s.context === 'Réparation') {
       if (p.damaged && typeof mpRepairParcel === 'function') mpRepairParcel(s.parcelIdx, { free: true });
     } else if (success && s.context !== 'Antenne') {   // ANTENNE_VEINE : l'antenne ne conquiert pas la parcelle
@@ -937,15 +1002,13 @@ const SBMatch3 = {
         } else p.sub = `Gisement re-miné ${p.remineCount}× · conquêtes : ${p.successCount}`;
       }
     }
-    if (typeof saveGame === 'function') saveGame();
-    return added;
   },
 
   // Retour à la carte (les gains sont déjà encaissés par _commit)
   apply() {
     const s = this.s;
     if (!s || !s.result) return;
-    this._commit();
+    if (!s.awaitingServer) this._commit();   // SERVEUR_0811 : en attente du serveur, le crédit tombera à la réponse
     s.stopped = true;
     if (this.view3d) this.view3d.clear();
     this._closePanel();
@@ -959,7 +1022,7 @@ const SBMatch3 = {
 /* ─────────────────────────────── Styles ─────────────────────────────── */
 
 const css = document.createElement('style');
-css.textContent = `.m3v2-res{flex-wrap:wrap}.m3v2-sk{display:block;width:100%;font-size:10px;color:#7ed080;margin-top:2px;text-align:right}
+css.textContent = `.m3v2-srv{font-size:10px;color:#7ec8ff;margin-bottom:4px}.m3v2-res{flex-wrap:wrap}.m3v2-sk{display:block;width:100%;font-size:10px;color:#7ed080;margin-top:2px;text-align:right}
   .m3v2 { padding-bottom: 8px; }
   .m3v2-head { text-align:center; padding: calc(var(--sat, 0px) + 18px) 16px 6px; }
   .m3v2-title { font-size:22px; font-weight:700; letter-spacing:.2em; color:#e6f0f4; }

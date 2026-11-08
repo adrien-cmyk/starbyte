@@ -1,8 +1,11 @@
-// STARBYTE — fonction serveur « m3-verify » (match-3 serveur-autoritaire, Temps A — GDD du 08/11/2026)
+// STARBYTE — fonction serveur « m3-verify » (match-3 serveur-autoritaire — GDD du 08/11/2026)
 // Rejoue les parties de match-3 déclarées par le joueur connecté (table m3_sessions, remplies par m3_report) avec le
 // moteur du jeu (m3core.js + m3session.js, copies exactes de src/) et compare au crédit annoncé.
-// Temps A : informatif. Un écart est journalisé (mp_anomalies, kind 'm3_mismatch'), rien ne change en jeu.
-//   POST {}                    → { verified: n, mismatches: n }    (parties en attente du joueur connecté, 20 max)
+// Temps A : un écart est journalisé (mp_anomalies, kind 'm3_mismatch'), rien ne change en jeu.
+// Temps B (v50) : chaque partie rejouée est RÉGLÉE dans le grand livre serveur (sb_m3_settle) — le solde serveur
+// reçoit le crédit rejoué, pas le crédit annoncé. Quand l'interrupteur m3_credit_on est à true, le jeu attend ce crédit.
+//   POST {}                     → { verified: n, mismatches: n }    (parties en attente du joueur connecté, 20 max)
+//   POST { seed: 123 }          → idem, plus session: { id, verified, credit, mismatch, error, settled } pour cette graine
 //   POST { action: 'selftest' } → rejoue une partie témoin et renvoie son crédit (vérifie que le moteur tourne ici)
 // Fichiers à déployer ensemble : index.ts, m3core.js, m3session.js (copies générées par tools/build-modules.sh m3-verify).
 
@@ -65,10 +68,19 @@ Deno.serve(async (req) => {
     } catch (e) { upd.error = String((e as Error)?.message || e).slice(0, 200); upd.mismatch = true; }
     await admin.from('m3_sessions').update(upd).eq('id', s.id);
     verified++;
+    // Temps B : règlement dans le grand livre serveur (fonction SQL idempotente ; absente avant v50 → ignoré)
+    await admin.rpc('sb_m3_settle', { p_session: s.id }).then(() => {}, () => {});
     if (upd.mismatch) {
       mismatches++;
       await admin.from('mp_anomalies').insert({ user_id: uid, pseudo: s.pseudo, kind: 'm3_mismatch', detail: { session: s.id, seed: s.seed, seed_src: s.seed_src, claimed: s.claimed, base_claimed: s.base_claimed, server_base: upd.server_base ?? null, server_credit: upd.server_credit ?? null, tier: s.tier, server_tier: upd.server_tier ?? null, error: upd.error ?? null } }).then(() => {}, () => {});
     }
   }
-  return json({ verified, mismatches });
+  // Le jeu demande le crédit d'une partie précise (Temps B actif : il l'attend avant d'encaisser)
+  let session: unknown = null;
+  const seed = Number(body.seed);
+  if (Number.isFinite(seed) && seed > 0) {
+    const { data: row } = await admin.from('m3_sessions').select('id, verified_at, server_credit, mismatch, error, settled').eq('user_id', uid).eq('seed', seed).order('id', { ascending: false }).limit(1).maybeSingle();
+    if (row) session = { id: row.id, verified: !!row.verified_at, credit: row.server_credit || {}, mismatch: !!row.mismatch, error: row.error || null, settled: row.settled ?? null };
+  }
+  return json({ verified, mismatches, session });
 });

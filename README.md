@@ -18,7 +18,9 @@ script en ligne de 2,5 Mo) est dans `github_upload/assets/game/` :
 
 - `f01…f09_*.js` — toutes les déclarations de fonctions, dans l'ordre d'origine (f01 commence par les noms
   `var` de premier niveau, pré-déclarés comme le faisait le hoisting du monolithe) ;
-- `d01…d04_*.js` — données, variables et instructions exécutées au chargement, dans l'ordre d'origine.
+- `d01…d04_*.js` — données, variables et instructions exécutées au chargement, dans l'ordre d'origine ;
+- `g01_grand_livre.js` — ajouté après coup (08/11 soir) : grand livre des ressources, Temps B du match-3 serveur,
+  dormant tant que l'interrupteur serveur `sb_settings.m3_credit_on` est à false (`SBLedger.status()` en console).
 
 Scripts classiques (pas de modules) : tout est global comme avant, les `onclick` du HTML fonctionnent tels quels.
 Les modules déjà séparés (`assets/*.js`) ne changent pas. **Toute modification de code se fait dans ces fichiers,
@@ -30,5 +32,13 @@ Outils (`tools/`) :
 - `node tools/versionner.mjs` — réécrit chaque `?v=` d'`index.html` avec l'empreinte du fichier ; le workflow de
   publication le fait tout seul, plus besoin de changer les versions à la main (`--check` pour vérifier).
 - `node tools/decouper.mjs` — le découpage lui-même (relançable sur un `index.html` qui contiendrait encore le gros bloc).
+- `node tools/parcours_m3.mjs` — une partie de match-3 complète en Chromium, rejouée ensuite en Node avec `src/m3session.js`
+  (le crédit doit être identique) et contrôle du grand livre ; `--serveur` simule l'interrupteur ouvert avec un serveur factice.
+- `tools/build-modules.sh match3|m3-verify` — reconstruit `assets/match3.js` depuis `src/`, ou recopie le moteur dans
+  `server/m3-verify/` (à redéployer ensuite). Le match-3 se modifie dans `src/`, jamais dans le bundle.
+
+Serveur (`github_upload/server/`) : scripts SQL numérotés (`schema_mp_vNN_*.sql`, à coller dans Supabase dans l'ordre ;
+`verifier_versions.sql` dit lesquels manquent) et la fonction Edge `m3-verify/`. GDD du chantier serveur :
+`claude/starbyte_GDD_match3_serveur.md` ; audit triche : `claude/starbyte_audit_triche_2026_11_08.md` (Projet Claude).
 
 Référence : `claude/starbyte_plan_notifications_decoupage.md` dans le Projet Claude (mesures et pièges).

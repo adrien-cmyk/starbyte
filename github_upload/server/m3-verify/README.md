@@ -1,8 +1,13 @@
-# m3-verify — rejeu serveur des parties de match-3 (Temps A)
+# m3-verify — rejeu serveur des parties de match-3 (Temps A + B)
 
 Le jeu envoie chaque partie (graine, coups, choix, crédit annoncé) à `m3_report` (SQL v49). Cette fonction rejoue
 les parties en attente du joueur qui l'appelle, avec **le même moteur que le jeu**, et note les écarts dans
 `m3_sessions` et `mp_anomalies` (`m3_mismatch`). Au Temps A rien ne change en jeu : on observe.
+
+Temps B (SQL v50, 08/11 soir) : chaque partie rejouée est aussi **réglée** dans le grand livre serveur (`sb_m3_settle`) :
+le solde serveur du joueur reçoit le crédit rejoué, borné par ce que le jeu dit avoir réellement ajouté. Appelée avec
+`{"seed": 123}`, la fonction renvoie en plus `session` (crédit serveur de cette graine) — c'est ce que le jeu attend
+avant d'encaisser quand l'interrupteur `sb_settings.m3_credit_on` est à `true` (false aujourd'hui : dormant).
 
 ## Fichiers (à déployer ensemble, mêmes noms)
 
@@ -17,7 +22,7 @@ pour que le téléphone et le serveur jouent avec le même code.
 
 ## Déployer
 
-Prérequis : `schema_mp_v49_match3_rapports.sql` exécuté.
+Prérequis : `schema_mp_v49_match3_rapports.sql` puis `schema_mp_v50_grand_livre.sql` exécutés. Redéployer la fonction après v50 (nouvelle version d'index.ts).
 
 - **Tableau de bord Supabase** → Edge Functions → *Deploy a new function* → *Via editor* → nom `m3-verify` → créer les
   trois fichiers ci-dessus (même nom, même contenu) → *Deploy*. Laisser « Verify JWT » activé.

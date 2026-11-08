@@ -31,5 +31,6 @@ select v as script, case when ok then 'oui' else 'NON — à lancer' end as lanc
   ('v46 registre flottes',   exists (select 1 from pg_proc where proname = '_mp_registry_fleet')),
   ('v47 garnisons/embuscades', exists (select 1 from pg_proc where proname = '_mp_registry_fleet_by_id')),
   ('v48 plausibilité mondes', exists (select 1 from pg_proc where proname = '_mp_worlds_plausible')),
-  ('v49 match-3 rapports',   exists (select 1 from pg_proc where proname = 'm3_report'))
+  ('v49 match-3 rapports',   exists (select 1 from pg_proc where proname = 'm3_report')),
+  ('v50 grand livre',        exists (select 1 from pg_proc where proname = 'sb_ledger'))
 ) t(v, ok);
