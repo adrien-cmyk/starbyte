@@ -4044,6 +4044,7 @@ function generateProbeReport(probeName, sector, tier, mode, targetCoords) {
         case 'unstable_field': resolveAsMoving = r < 0.50; break;
         default:               resolveAsMoving = r < 0.50;
       }
+      if (sig.zoneOutcome) resolveAsMoving = sig.zoneOutcome.as === 'moving';   // ZONES_1011 : contenu fixe d'une zone sondée
 
       if (resolveAsMoving) {
         // ─── Résolution MOUVANTE : génère une coord deg°-deg°-letter ───
@@ -4058,6 +4059,7 @@ function generateProbeReport(probeName, sector, tier, mode, targetCoords) {
         if (sig.type === 'metallic_echo') movingType = Math.random() < 0.6 ? 'epave' : 'debris';
         else if (sig.type === 'mineral_dense') movingType = Math.random() < 0.7 ? 'asteroides' : 'cristal';
         else if (sig.type === 'unstable_field') movingType = 'anomalie';
+        if (sig.zoneOutcome && sig.zoneOutcome.kind) movingType = sig.zoneOutcome.kind;   // ZONES_1011
 
         // Construire la cible via le système existant (PROBE_TARGET_CONFIG)
         let movingTarget = null;
@@ -4114,6 +4116,7 @@ function generateProbeReport(probeName, sector, tier, mode, targetCoords) {
         else if (sig.type === 'heat_point') fixedClass = Math.random() < 0.6 ? 'habitable' : 'dead_world';
         else if (sig.type === 'cold_mass') fixedClass = Math.random() < 0.4 ? 'dead_world' : (Math.random() < 0.5 ? 'gas_giant' : 'habitable');
         else if (sig.type === 'unstable_field') fixedClass = 'unknown';
+        if (sig.zoneOutcome && sig.zoneOutcome.fixedClass) fixedClass = sig.zoneOutcome.fixedClass;   // ZONES_1011
 
         // Mettre à jour la signature : résolue fixe (sans adresse encore)
         if (typeof resolveSignatureToFixed === 'function') {
@@ -4411,6 +4414,10 @@ function handleProbeReturn(missionId) {
   if (idx === -1) return;
   const mission = G.probeMissions[idx];
   if (mission.status !== 'in_transit') return;
+
+  // ZONES_1011 — carte par zones (compte de test, assets/zones_test.js) : une Radar envoyée sur une zone
+  // rapporte le contenu fixé de cette zone. Les autres missions ne passent jamais ici (pas de champ zone).
+  if (mission.zone && window.SBZones && typeof SBZones.arrive === 'function') return SBZones.arrive(mission, idx);
 
   // PATCH_1410_ECLAIREUR — Moyenne en éclaireur : elle se consume en traçant le passage, qui devient une route
   if (mission.mode === 'scout' && window.SBLines) {

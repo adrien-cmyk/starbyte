@@ -1,0 +1,275 @@
+/* ═══════════════════════════════════════════════════════════════════════
+   STARBYTE — CARTE PAR ZONES · TEST (10/11/2026)
+   Cf. claude/starbyte_decision_sondage_zone.md (cahier « Prospection par zones », v2.0)
+
+   Réservé au compte de test d'Adrien (Hadrien) : même règle que le panneau de
+   triche (_sbDevAllowed : pseudo au registre ou empreinte de l'email), plus le
+   jeu en local. Pour tout autre joueur, ce fichier ne fait rien d'autre que
+   déclarer la clé de sauvegarde « zoneProspect », qui reste vide.
+
+   Ce que fait le test :
+   → un bouton « Zones · test » dans le Centre de prospection ouvre la nouvelle
+     carte (atlas/index.html) en plein écran, comme le Télébyte ;
+   → « Sonder cette zone » envoie une VRAIE Radar du hangar du monde choisi
+     (G.probesPool), mission rangée dans G.probeMissions comme les autres ;
+   → à l'arrivée, le contenu FIXE de la zone devient de vraies signatures
+     (G.signatures) : la Légère, la Moyenne, les tankers et la colonisation
+     existants font la suite. Une zone sondée l'est pour de bon.
+   Région de test : 30 zones autour des mondes du compte, contenu fixé une fois
+   pour toutes (G.zoneProspect.region), journal des actions pour les mesures.
+   ═══════════════════════════════════════════════════════════════════════ */
+(function () {
+  'use strict';
+  if (window.EXTRA_SAVE_KEYS && EXTRA_SAVE_KEYS.indexOf('zoneProspect') < 0) EXTRA_SAVE_KEYS.push('zoneProspect');
+
+  const PAGE = 'atlas/index.html';
+  const PAGE_V = '265086ac54';   // empreinte de atlas/index.html, écrite par labo/carte-zones/build.py
+  const GRID = 'tac-2';
+  const MIN = 60e3;
+  const allowed = () => { try { return !window.SB_ZONES_OFF && typeof _sbDevAllowed === 'function' && _sbDevAllowed(); } catch (e) { return false; } };
+  let installed = false, overlay = null;
+  const listeners = new Set();
+
+  const zp = () => (G.zoneProspect && G.zoneProspect.v === 1) ? G.zoneProspect : (G.zoneProspect = { v: 1, grid: GRID, region: null, zones: {}, journal: [] });
+  const fmtAddr = (a) => a ? `${a.cluster}-${a.sector}-${String(a.system).padStart(4, '0')}-${String(a.planet == null ? 40 : a.planet).padStart(2, '0')}` : '';
+  const save = () => { try { if (typeof saveGame === 'function') saveGame(); } catch (e) {} };
+  const notify = () => { for (const f of listeners) { try { f(); } catch (e) {} } };
+  function log(kind, data) {
+    const z = zp();
+    z.journal.push(Object.assign({ t: Date.now(), kind }, data || {}));
+    if (z.journal.length > 400) z.journal.splice(0, z.journal.length - 400);
+  }
+
+  /* ── les mondes du compte (capitale + colonies), adresses réelles ── */
+  function worlds() {
+    const out = [];
+    const act = G.activeWorld || 'home';
+    const list = Array.isArray(G.worlds) && G.worlds.length ? G.worlds : [{ id: 'home', kind: 'home' }];
+    for (const w of list) {
+      if (!w) continue;
+      const isHome = w.id === 'home';
+      const coord = isHome ? fmtAddr(typeof MY_ADDRESS !== 'undefined' ? MY_ADDRESS : null) : (w.coord || '');
+      const pl = w.id === act ? G.planet : (w.data && w.data.planet);
+      const name = String((pl && pl.name) || w.name || (isHome ? 'Capitale' : 'Colonie')).toUpperCase();
+      if (/^[A-Z]-[A-Z]-\d{4}-\d{1,2}$/.test(coord)) out.push({ id: w.id, kind: isHome ? 'home' : 'colony', name, coord });
+    }
+    return out;
+  }
+  function inWorld(wid, fn) { return (typeof sbWithWorld === 'function') ? sbWithWorld(wid, fn) : fn(); }
+  function hangar(wid) {
+    return inWorld(wid, () => {
+      const pool = G.probesPool || [], c = (t, s) => pool.filter(p => p.tier === t && (!s || p.state === s)).length;
+      return { radar: c('radar', 'ready'), radarAll: c('radar'), light: c('light', 'ready'), lightAll: c('light'), medium: c('medium', 'ready'), mediumAll: c('medium'),
+        metal: (G.res && G.res.metal && Math.floor(G.res.metal.v)) || 0, tankers: (typeof tankerAvailability === 'function') ? tankerAvailability(null) : 0 };
+    });
+  }
+  function rangeSectors(wid) { try { const r = getMaxRange(wid); return r.kind === 'sector_radius' ? (r.radius || 0) : 26; } catch (e) { return 3; } }
+
+  /* ── l'action suivante d'une signature, en données (la carte affiche ses propres boutons) ── */
+  function sigAction(sig, wid) {
+    if (!sig) return { kind: 'off', label: 'Signature introuvable' };
+    return inWorld(wid, () => {
+      if (!sig.resolved) {
+        const st = _probeTierStatus('light');
+        if (st.ok) return { kind: 'light', label: 'Envoyer une Légère', sub: 'Identifie la signature · 30 min' };
+        if (st.build) return { kind: 'build-light', label: 'Construire une Légère', sub: '200 métal · 50 cristal, au Centre de prospection' };
+        return { kind: 'off', label: st.why || 'Aucune Légère disponible' };
+      }
+      if (sig.resolvedType === 'moving') {
+        const kt = sig.movingCoordKey && G.knownTargets && G.knownTargets[sig.movingCoordKey];
+        if (!kt) return { kind: 'off', label: 'Cible exploitée ou expirée' };
+        if (kt.status === 'engaged') return { kind: 'off', label: 'Tanker en route' };
+        const n = (typeof tankerAvailability === 'function') ? tankerAvailability(null) : 0;
+        return n > 0 ? { kind: 'tanker', label: 'Envoyer un tanker', sub: kt.label || 'Récupérer la cible', key: sig.movingCoordKey }
+          : { kind: 'off', label: 'Aucun tanker disponible', sub: 'Un tanker se construit au Chantier orbital' };
+      }
+      if (!sig.fixedAddress) {
+        const st = _probeTierStatus('medium');
+        if (st.ok) return { kind: 'medium', label: 'Envoyer une Moyenne', sub: 'Fixe l’adresse du corps · 2 à 4 h' };
+        if (st.build) return { kind: 'build-medium', label: 'Construire une Moyenne', sub: '600 métal · 200 cristal · compétence Cartographie' };
+        return { kind: 'off', label: st.why || 'Aucune Moyenne disponible' };
+      }
+      return { kind: 'planet', label: sig.fixedClass === 'habitable' ? 'Ouvrir la planète (coloniser)' : 'Ouvrir la planète', key: sig.fixedAddress };
+    });
+  }
+
+  /* ── état complet pour la carte ── */
+  function state() {
+    const z = zp(), now = Date.now(), ws = worlds();
+    const hang = {}, ranges = {};
+    for (const w of ws) { hang[w.id] = hangar(w.id); ranges[w.id] = rangeSectors(w.id); }
+    const missions = (G.probeMissions || []).filter(m => m && m.zone && m.status === 'in_transit')
+      .map(m => ({ id: m.id, zone: m.zone, world: m.world || 'home', departedAt: m.departedAt, arrivalAt: m.arrivalAt, probeName: m.probeName, sys: m.targetCoords }));
+    const sigs = Object.values(G.signatures || {}).filter(s => s && !s.ignored).map(s => ({
+      id: s.id, system: s.system, type: s.type, typeLabel: s.typeLabel, intensity: s.intensity, resolved: !!s.resolved, resolvedType: s.resolvedType,
+      fixedClass: s.fixedClass, fixedAddress: s.fixedAddress, movingCoordKey: s.movingCoordKey, zone: s.zone || null,
+      target: s.movingCoordKey && G.knownTargets && G.knownTargets[s.movingCoordKey] ? { label: G.knownTargets[s.movingCoordKey].label, status: G.knownTargets[s.movingCoordKey].status } : null,
+    }));
+    return { now, active: G.activeWorld || 'home', worlds: ws, hangars: hang, ranges, zp: JSON.parse(JSON.stringify(z)), missions, sigs };
+  }
+
+  /* ── région de test : écrite une seule fois par la carte (contenu fixe) ── */
+  function saveRegion(region) {
+    const z = zp();
+    if (z.region) return { ok: true, region: z.region, already: true };
+    z.region = region; log('region', { zones: region.zones.length });
+    save(); notify();
+    return { ok: true, region };
+  }
+
+  /* ── lancer une Radar sur une zone ── */
+  function launch(req) {
+    const z = zp(), id = req && req.zone;
+    const zone = z.region && z.region.zones.find(x => x.id === id);
+    if (!zone) return { ok: false, why: 'Cette zone n’est pas dans la région de test.' };
+    const st = z.zones[id];
+    if (st && st.st === 'done') return { ok: false, why: 'Zone déjà sondée.' };
+    const already = (G.probeMissions || []).find(m => m && m.zone === id && m.status === 'in_transit');
+    if (already) return { ok: true, mission: already.id, already: true };   // double pression, rejeu : une seule mission
+    const wid = req.world || 'home';
+    if (!worlds().some(w => w.id === wid)) return { ok: false, why: 'Monde de départ inconnu.' };
+    const range = Math.max(1, +req.range || 1), dist = Math.max(0, +req.dist || 0);
+    if (dist > range) return { ok: false, why: 'Hors de portée depuis ce monde.' };
+    const res = inWorld(wid, () => {
+      const probe = (G.probesPool || []).find(p => p.tier === 'radar' && p.state === 'ready');
+      if (!probe) return { ok: false, why: 'noradar' };
+      const now = Date.now();
+      // décision D4 (proposée) : les bornes actuelles 5–10 min, mais selon la distance 3D
+      const dur = (5 + 5 * Math.min(1, dist / range)) * MIN * (window.SBSkills ? SBSkills.durMult('probes') : 1);
+      const mission = {
+        id: 'pm-' + now + '-' + Math.random().toString(36).slice(2, 6),
+        probeId: probe.id, probeName: (typeof generateProbeName === 'function') ? generateProbeName() : 'Radar',
+        tier: 'radar', mode: 'zone', zone: id, zoneLabel: req.label || id,
+        targetCoords: zone.anchor, sector: zone.anchor, departedAt: now, arrivalAt: now + dur, status: 'in_transit',
+      };
+      probe.state = 'mission';
+      G.probeMissions = G.probeMissions || [];
+      G.probeMissions.push(typeof sbTagWorld === 'function' ? sbTagWorld(mission) : mission);
+      return { ok: true, mission: mission.id, arrivalAt: mission.arrivalAt };
+    });
+    if (!res.ok) return res;
+    z.zones[id] = { st: 'mission', mission: res.mission, world: wid, at: Date.now() };
+    log('launch', { zone: id, world: wid, dist: Math.round(dist), dur: Math.round((res.arrivalAt - Date.now()) / 1000) });
+    save(); notify();
+    try { if (typeof refreshCurrentScreen === 'function') refreshCurrentScreen(); } catch (e) {}
+    return res;
+  }
+
+  /* ── arrivée (appelée par handleProbeReturn pour les missions de zone) ── */
+  function arrive(mission, idx) {
+    const z = zp(), id = mission.zone;
+    const zone = z.region && z.region.zones.find(x => x.id === id);
+    const c = zone && zone.content;
+    const created = [];
+    if (c && c.cat !== 'rien' && c.sys && typeof createSignature === 'function') {
+      const sig = createSignature(c.sys, mission.probeName, { type: c.sigType });
+      if (sig) {
+        sig.zone = id;
+        sig.zoneOutcome = { as: c.as, kind: c.kind || null, fixedClass: c.fixedClass || null };
+        sig.expiresAt = null;   // décision D7 (proposée) : une signature de zone ne périme pas
+        created.push(sig);
+        if (typeof saveSignatures === 'function') saveSignatures();
+      }
+    }
+    const report = {
+      id: 'pr-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6),
+      probeName: mission.probeName, sector: mission.sector, tier: 'radar', targetCoords: mission.targetCoords,
+      systemAddress: created.length ? created[0].system : mission.targetCoords, createdAt: Date.now(), read: false,
+      signatureIds: created.map(s => s.id), signaturesData: created, silent: !created.length,
+      resolutionGain: created.length ? 5 + created.length * 2 : 5,
+      radarSignal: created.length ? { coords: created[0].system, description: `${created.length} signature${created.length > 1 ? 's' : ''} relevée${created.length > 1 ? 's' : ''} dans la zone` } : null,
+      targets: [], zone: id, zoneLabel: mission.zoneLabel || id,
+    };
+    G.probeReports = G.probeReports || [];
+    G.probeReports.unshift(report);
+    if (G.probeReports.length > 50) G.probeReports.length = 50;
+    mission.status = 'returned';
+    G.probeMissions.splice(idx, 1);
+    const pool = G.probesPool || [], pi = pool.findIndex(p => p.id === mission.probeId);
+    if (pi !== -1) pool.splice(pi, 1);   // la Radar brûle à l'arrivée, comme toujours
+    z.zones[id] = { st: 'done', at: Date.now(), world: mission.world || 'home', found: created.map(s => s.id), mission: mission.id };
+    log('arrive', { zone: id, found: created.length, kind: c ? c.kind || c.cat : null });
+    try {
+      if (typeof toast === 'function') toast(created.length
+        ? `${typeof icon === 'function' ? icon('satellite', { size: 12 }) : ''} Zone sondée : 1 signature relevée · ${created[0].typeLabel || ''}`
+        : `${typeof icon === 'function' ? icon('satellite', { size: 12 }) : ''} Zone sondée : silence radio`);
+    } catch (e) {}
+    save(); notify();
+    try { if (typeof refreshCurrentScreen === 'function') refreshCurrentScreen(); } catch (e) {}
+    return report;
+  }
+
+  /* ── actions de suite, exécutées par les fonctions existantes du jeu ── */
+  function act(kind, arg, wid) {
+    wid = wid || G.activeWorld || 'home';
+    log('action', { kind, arg });
+    if (kind === 'light' || kind === 'medium') {
+      const before = (G.probeMissions || []).length;
+      inWorld(wid, () => onSendProbeToSignature(kind, arg));
+      const ok = (G.probeMissions || []).length > before;
+      save(); notify();
+      return { ok, why: ok ? null : 'Envoi refusé par le jeu (voir le message).' };
+    }
+    if (kind === 'tanker') { inWorld(wid, () => onTankerKnownTargetClick(arg)); save(); notify(); return { ok: true }; }
+    if (kind === 'build-radar' || kind === 'build-light' || kind === 'build-medium') {
+      close();
+      if (wid !== (G.activeWorld || 'home') && typeof sbSwitchWorld === 'function') { try { sbSwitchWorld(wid); } catch (e) {} }
+      try { if (typeof goto === 'function') goto('prospect'); } catch (e) {}
+      setTimeout(() => { try { openProbeDetail(kind.split('-')[1]); } catch (e) {} }, 250);
+      return { ok: true };
+    }
+    if (kind === 'planet') { close(); setTimeout(() => { try { openPlanetDetail(arg); } catch (e) {} }, 250); return { ok: true }; }
+    return { ok: false, why: 'Action inconnue' };
+  }
+
+  /* ── ouverture de la carte en plein écran ── */
+  function open() {
+    if (overlay || !allowed()) return;
+    overlay = document.createElement('div');
+    overlay.id = 'sb-zones-overlay';
+    overlay.style.cssText = 'position:fixed;inset:0;z-index:9998;background:#03040c';
+    overlay.innerHTML = '<iframe title="Carte par zones (test)" style="position:absolute;inset:0;width:100%;height:100%;border:0"></iframe>';
+    overlay.querySelector('iframe').src = PAGE + '?v=' + PAGE_V;
+    document.body.appendChild(overlay);
+    log('open', {});
+  }
+  function close() {
+    if (!overlay) return;
+    overlay.remove(); overlay = null;
+    try { if (typeof refreshCurrentScreen === 'function') refreshCurrentScreen(); } catch (e) {}
+  }
+
+  /* ── règles du jeu pour poser le contenu de la région : portée actuelle, emplacement habitable ── */
+  function check(sys, kind) {
+    let radar = false, habitable = false;
+    try { radar = !!validateAddressForTier(sys, 'radar').valid; } catch (e) {}
+    if (kind === 'habitable') { try { habitable = getPlanetSlotsInSystem(sys).some(z => getCelestialTypeForSlot(sys, z) === 'habitable'); } catch (e) {} }
+    return { radar, habitable };
+  }
+
+  window.SBZones = {
+    allowed, open, close, state, saveRegion, launch, arrive, act, check, sigAction: (id, wid) => sigAction((G.signatures || {})[id], wid),
+    onChange(f) { listeners.add(f); return () => listeners.delete(f); },
+    grid: GRID,
+  };
+
+  /* ── bouton d'entrée : Centre de prospection, à côté de « Recentrer » et « Vue d'ensemble » ── */
+  function install() {
+    if (installed || !allowed()) return;
+    const tools = document.querySelector('#scr-prospect .smw-tools');
+    if (!tools) return;
+    installed = true;
+    const st = document.createElement('style');
+    st.textContent = `#sb-zones-btn{position:relative}#sb-zones-btn i{position:absolute;right:-6px;top:-7px;font:600 8px/1 'JetBrains Mono',monospace;letter-spacing:.06em;
+      padding:2px 4px;border-radius:4px;background:#b29aff;color:#0b0c1c;font-style:normal}`;
+    document.head.appendChild(st);
+    const b = document.createElement('button');
+    b.id = 'sb-zones-btn'; b.setAttribute('aria-label', 'Carte par zones (test)'); b.title = 'Carte par zones · test (compte de test seulement)';
+    b.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><path d="M12 3l7.8 4.5v9L12 21l-7.8-4.5v-9z"/><path d="M12 3v18M4.2 7.5L19.8 16.5M19.8 7.5L4.2 16.5" opacity=".45"/></svg><i>TEST</i>';
+    b.onclick = (e) => { e.stopPropagation(); open(); };
+    tools.appendChild(b);
+  }
+  const tick = () => { try { install(); } catch (e) {} };
+  setTimeout(tick, 1500); setInterval(tick, 2000);
+  if (/[?&]zones\b/.test(location.search)) { const t = setInterval(() => { if (allowed() && typeof G !== 'undefined' && G.planet) { clearInterval(t); open(); } }, 1000); }
+})();
