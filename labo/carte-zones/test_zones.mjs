@@ -207,6 +207,32 @@ const ui = await F.evaluate(async () => { const i = document.getElementById('zj-
 await F.evaluate(() => STARBYTE_ZONES.peekStop());
 rec('LECT-UI', ui.input && ui.on && ui.ws === 6, `champ « Voir la partie d’un commandant » présent ${ui.input}, lecture ouverte ${ui.on} (${ui.ws} mondes)`);
 
+// ═══ 4. « Télécharger cette carte » : un fichier HTML autonome, qui s'ouvre sans le jeu ni le serveur ═══
+await F.evaluate(async () => { await STARBYTE_ZONES.peekStart('Panzerstorm'); }); await sleep(1500);
+await F.evaluate(() => document.getElementById('zj-sh-back').click()); await sleep(300);
+const dlP = p.waitForEvent('download', { timeout: 15000 }).catch(() => null);
+const exBtn = await F.evaluate(() => { const b = document.querySelector('#zj-sh-foot [data-a="export"]'); if (!b) return false; b.click(); return true; });
+const dl = await dlP; const EXP = path.join(SHOTS, 'export_panzerstorm.html'); let expName = null;
+if (dl) { expName = dl.suggestedFilename(); await dl.saveAs(EXP); }
+const { size: expSize } = dl ? await stat(EXP) : { size: 0 };
+rec('EXPORT', exBtn && !!dl && /^starbyte-carte-panzerstorm-\d{4}-\d\d-\d\d\.html$/.test(expName || '') && expSize > 500e3, `bouton ${exBtn} → fichier ${expName} (${Math.round(expSize / 1024)} Ko)`);
+if (dl) {
+  const ctxF = await browser.newContext(iphone); const pf = await ctxF.newPage(); const ferr = []; pf.on('pageerror', e => ferr.push(String(e.message || e).slice(0, 200)));
+  await pf.goto('file://' + EXP, { waitUntil: 'load', timeout: 60000 }); await sleep(4000);
+  const fx = await pf.evaluate(() => { const Z = window.STARBYTE_ZONES, zj = Z && Z.zj; return zj ? { peek: !!zj.peek, ws: zj.ws.length, region: zj.snap && zj.snap.zp.region && zj.snap.zp.region.zones.length, close: getComputedStyle(document.getElementById('zj-close')).display,
+    body: document.getElementById('zj-sh-body').innerText.replace(/\s+/g, ' ').slice(0, 260), foot: document.getElementById('zj-sh-foot').innerText.trim(), title: document.title, block: !document.getElementById('zj-block').hidden } : null; });
+  const sameRegion = fx && await F.evaluate(() => JSON.stringify(STARBYTE_ZONES.zj.snap.zp.region.zones.map(z => z.id + z.content.cat))) === await pf.evaluate(() => JSON.stringify(STARBYTE_ZONES.zj.snap.zp.region.zones.map(z => z.id + z.content.cat)));
+  await pf.evaluate(() => { STARBYTE_ZONES.setMode('atlas'); }); await sleep(2500);
+  const fa = await pf.evaluate(() => STARBYTE_ZONES.atlasState().marks.length);
+  await pf.screenshot({ path: path.join(SHOTS, '11_fichier_exporte_atlas.png') });
+  await pf.evaluate(() => { STARBYTE_ZONES.setMode('tac'); }); await sleep(800);
+  await pf.screenshot({ path: path.join(SHOTS, '12_fichier_exporte_tactique.png') });
+  rec('FICHIER', fx && fx.peek && fx.ws === 6 && fx.region === 30 && sameRegion && fx.close === 'none' && !fx.block && /Fichier exporté le/.test(fx.body) && fx.foot === '' && fa > 0 && ferr.length === 0,
+    fx ? `ouvert seul (file://, sans jeu ni serveur) : « ${fx.title} », ${fx.ws} mondes, région ${fx.region} identique à celle du jeu ${sameRegion}, ${fa} marqueurs dans l'Atlas, croix ${fx.close}, aucun bouton d'action « ${fx.foot} » · « ${fx.body.slice(0, 200)} »${ferr.length ? ' · erreurs : ' + ferr.join(' | ') : ''}` : 'page vide');
+  await ctxF.close();
+}
+await F.evaluate(() => STARBYTE_ZONES.peekStop());
+
 rec('ERREURS', errs.length === 0, errs.slice(0, 8).join(' | ') || 'aucune erreur de page');
 await browser.close(); srv.close();
 process.exit(R.every(r => r.ok) ? 0 : 1);

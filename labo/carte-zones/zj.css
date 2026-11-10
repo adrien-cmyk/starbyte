@@ -21,7 +21,7 @@ body.zj-tac #zj-marks{display:none}
 .zj-seg button{min-height:44px;padding:0 16px;border:0;background:none;color:#c9c6e6;font-weight:600;letter-spacing:.04em}
 .zj-seg button.on{background:#b29aff;color:#0b0c1c}
 .zj-pill{min-height:44px;padding:0 14px;border-radius:12px;background:rgba(10,10,26,.86)!important;border-color:#ffffff26!important;color:#bff3e9;font-weight:600}
-.zj-x{margin-left:auto;width:44px;height:44px;border-radius:50%;background:rgba(10,10,26,.86)!important;border-color:#ffffff33!important;font-size:22px;line-height:1}
+#zj-close[hidden]{display:none!important}.zj-x{margin-left:auto;width:44px;height:44px;border-radius:50%;background:rgba(10,10,26,.86)!important;border-color:#ffffff33!important;font-size:22px;line-height:1}
 #zj-depth{position:fixed;z-index:5;top:calc(env(safe-area-inset-top,0px) + 62px);left:50%;transform:translateX(-50%);display:none;align-items:center;gap:6px;padding:3px;border:1px solid #ffffff1f;border-radius:12px;background:rgba(10,10,26,.86);max-width:calc(100% - 24px)}
 body.zj-tac #zj-depth{display:flex}
 #zj-depth button{position:relative;width:40px;height:40px;border-radius:9px;border:0;background:#ffffff0d;color:#d9ccff;font-size:11px}

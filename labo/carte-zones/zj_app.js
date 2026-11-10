@@ -6,7 +6,10 @@
    - profondeur automatique (couche du monde, de l'objet ou de la zone affichés) ;
    - une seule action principale : « Sonder cette zone » (une vraie Radar du hangar) ;
    - la même sélection (zone ou objet + zone) dans l'Atlas et dans la Tactique. */
-const ZH=(()=>{try{return window.parent!==window&&parent.SBZones?parent.SBZones:null}catch(e){return null}})();
+const ZH=(()=>{try{if(window.parent!==window&&parent.SBZones)return parent.SBZones}catch(e){}return window.SB_ZONES_EMBED?zjEmbedShim():null})();
+// fichier HTML exporté (« Télécharger cette carte ») : la partie lue est figée dans la page, rien ne part, rien ne s'écrit
+function zjEmbedShim(){const no=()=>({ok:false,why:'Lecture seule'});return{embed:true,state:()=>null,close(){},check:()=>({radar:false,habitable:false}),onChange:()=>()=>{},
+ sigAction:()=>({kind:'off',label:''}),act:no,launch:no,saveRegion:no}}
 const zj={mode:'tac',cx:0,cz:0,k:0,upp:2.6,sel:null,origin:'home',snap:null,snapT:0,dirty:true,hits:[],chips:[],anim:false,lastDraw:0,
  view:'home',list:null,sheet:mobile?'sum':'full',yp:null,ws:[],objs:[],objsT:0,regionMap:new Map(),block:null,pendingLaunch:null};
 const ZJ_UPP=[.6,9],zjReduce=matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -298,7 +301,7 @@ function zjHomeHtml(){if(zj.peek)return zjPeekHomeHtml();const R=zj.snap&&zj.sna
 function zjChoiceHtml(){let h='<div class="zj-kind">PLUSIEURS LIEUX ICI</div><h3>Lequel ?</h3>';for(const o of zj.list||[])h+='<button class="zj-row" data-a="pick" data-id="'+zjEsc(o.id)+'"><b>'+zjEsc(o.name)+'</b><small>'+zjEsc(o.sub||'')+'</small></button>';return{h,f:''}}
 function zjWorldsHtml(){if(zj.peek){let h='<div class="zj-kind">SES MONDES · '+zjEsc(zj.peek.pseudo.toUpperCase())+'</div><h3>Choisir un monde</h3><p class="zj-muted">Recentre la carte et mesure les distances depuis ce monde. Lecture seule.</p>';
   for(const w of zj.ws)h+='<button class="zj-row'+(w.id===zj.origin?' on':'')+'" data-a="world" data-w="'+zjEsc(w.id)+'"><b>'+zjEsc(w.name)+' · '+(w.kind==='home'?'capitale':'colonie')+(w.unpub?' (pas au registre)':'')+'</b><small>'+zjEsc(w.coord)+' · '+zjEsc(zjAmasOf(w.coord))+'</small></button>';
-  return{h,f:'<button class="zj-second" data-a="peek-off">Revenir à ma partie</button>'}}
+  return{h,f:ZH.embed?'':'<button class="zj-second" data-a="peek-off">Revenir à ma partie</button>'}}
  let h='<div class="zj-kind">MES MONDES</div><h3>Choisir un monde</h3><p class="zj-muted">Recentre la carte et fixe le départ des sondages. Aucun changement de compte.</p>';
  for(const w of zj.ws){const hg=zj.snap.hangars[w.id]||{};h+='<button class="zj-row'+(w.id===zj.origin?' on':'')+'" data-a="world" data-w="'+zjEsc(w.id)+'"><b>'+zjEsc(w.name)+' · '+(w.kind==='home'?'capitale':'colonie')+'</b><small>'+zjEsc(w.coord)+' · '+(hg.radar||0)+' Radar'+((hg.radar||0)>1?'s':'')+' prête'+((hg.radar||0)>1?'s':'')+'</small></button>'}
  if(ZH&&ZH.peek)h+='<div class="zj-find"><div><b>Voir la partie d’un commandant</b><small>Lecture seule : son empire placé sur cette carte, rien n’est modifié chez lui</small></div><div class="zj-peek-f"><input id="zj-peek-in" value="Panzerstorm" maxlength="40" autocomplete="off" autocapitalize="off" spellcheck="false" aria-label="Pseudo du commandant"><button class="zj-act" data-a="peek">Voir</button></div></div>';
@@ -310,6 +313,7 @@ function zjSheet(){if(!zj.snap){return}let r;
 $('zj-sheet').addEventListener('click',e=>{const b=e.target.closest('[data-a]');if(!b)return;const a=b.dataset.a;
  if(a==='peek'){const v=($('zj-peek-in')&&$('zj-peek-in').value||'').trim();if(v){b.disabled=true;zjPeekStart(v).then(()=>{b.disabled=false})}return}
  if(a==='peek-off')return zjPeekStop();
+ if(a==='export')return zjExport();
  if(zj.peek&&(a==='launch'||a==='build-radar'||a==='act'))return toast('Lecture seule : rien ne part depuis la partie d’un autre commandant.');
  if(a==='launch')return zjLaunch(b);
  if(a==='build-radar'){ZH.act('build-radar',null,zj.origin);return}
@@ -353,17 +357,34 @@ function zjApplyHome(){const home=zjHome();if(!home)return false;
 async function zjPeekStart(pseudo){if(!ZH||!ZH.peek)return false;toast('Lecture de la partie de '+pseudo+'…');
  let r;try{r=await ZH.peek(pseudo)}catch(e){r={ok:false,why:String(e&&e.message||e)}}
  if(!r||!r.ok){toast((r&&r.why)||'Lecture impossible.');return false}
- const d=r.data,snap=zjPeekSnap(d);if(!snap.worlds.length){toast('Sa capitale n’a pas d’adresse lisible : rien n’est inventé.');return false}
- zj.peek={pseudo:String(d.pseudo||pseudo),data:d,snap,explored:new Map(),knownN:0,notes:[],amas:new Map(),skipped:0};zjRefresh(true);
- // région simulée : les règles du compte de test, avec sa portée (distance 3D depuis l'un de ses mondes)
+ if(!zjPeekBuild(r.data,null,pseudo)){toast('Sa capitale n’a pas d’adresse lisible : rien n’est inventé.');return false}
+ zjApplyHome();zjOpen('home');zjPrefetch();return true}
+function zjPeekBuild(d,region,pseudo){const snap=zjPeekSnap(d);if(!snap.worlds.length)return false;
+ zj.peek={pseudo:String(d.pseudo||pseudo||'?'),data:d,snap,explored:new Map(),knownN:0,notes:[],amas:new Map(),skipped:0};zjRefresh(true);
+ if(!zjHome()){zj.peek=null;zjRefresh(true);return false}
+ // région simulée : les règles du compte de test, avec sa portée (distance 3D depuis l'un de ses mondes) ; figée dans un fichier exporté
  const chk=(key,kind)=>{const p=zjPosOf(key),inR=!!p&&zj.ws.some(w=>Math.hypot(p[0]-w.p[0],p[1]-w.p[1],p[2]-w.p[2])<=(snap.ranges[w.id]||1)*SECTOR_SIZE);let hab=false;if(kind==='habitable'){try{hab=!!ZH.check(key,'habitable').habitable}catch(e){}}return{radar:inR,habitable:hab}};
- try{snap.zp.region=zjMakeRegion(chk);zj.peek.notes=(snap.zp.region&&snap.zp.region.notes)||[]}catch(e){console.warn('[zones] région simulée',e)}
+ try{snap.zp.region=region||zjMakeRegion(chk);zj.peek.notes=(snap.zp.region&&snap.zp.region.notes)||[]}catch(e){console.warn('[zones] région simulée',e)}
  // zones où il connaît déjà des systèmes : systèmes relevés, rapports, signatures (au plus 30 secteurs calculés)
  const keys=new Set();const sysK=x=>{const m=String(x||'').match(/^([A-Z]+-[A-Z]-\d{4})/);return m?m[1]:null};
  for(const k of d.known_systems||[]){const s=sysK(k);if(s)keys.add(s)}for(const x of d.reports||[]){const s=sysK(x.system);if(s)keys.add(s)}for(const g of snap.sigs){const s=sysK(g.system);if(s)keys.add(s)}
  const secs=new Set();for(const k of keys){const sk=k.split('-').slice(0,2).join('-');if(!secs.has(sk)&&secs.size>=30){zj.peek.skipped++;continue}secs.add(sk);const p=zjPosOf(k);if(!p)continue;const id=zoneOfPoint(p);zj.peek.explored.set(id,(zj.peek.explored.get(id)||0)+1);zj.peek.knownN++}
  try{zj.peek.amas=zjAmasInRange()}catch(e){}
- zjRefresh(true);zjApplyHome();zjOpen('home');return true}
+ zjRefresh(true);return true}
+// « Télécharger cette carte » : la page elle-même + la partie lue, en un seul fichier HTML qui s'ouvre partout (sans compte, sans serveur)
+let zjSrc=null;const ZJ_APP_TAG='<script id="appli'+'cation">';
+function zjPrefetch(){if(zjSrc||!ZH||ZH.embed)return;fetch(location.href).then(r=>r.ok?r.text():null).then(t=>{if(t&&t.indexOf(ZJ_APP_TAG)>0)zjSrc=t}).catch(()=>{})}
+function zjExportName(){const d=new Date(),p=n=>String(n).padStart(2,'0');return'starbyte-carte-'+zj.peek.pseudo.toLowerCase().normalize('NFD').replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'')+'-'+d.getFullYear()+'-'+p(d.getMonth()+1)+'-'+p(d.getDate())+'.html'}
+function zjExportHtml(){const emb={v:1,pseudo:zj.peek.pseudo,data:zj.peek.data,region:zj.peek.snap.zp.region,exportedAt:Date.now()};
+ const inj='<script>window.SB_ZONES_EMBED='+JSON.stringify(emb).replace(/</g,'\\u003c')+'<'+'/script>\n';
+ return zjSrc.replace(ZJ_APP_TAG,()=>inj+ZJ_APP_TAG).replace(/<title>[^<]*<\/title>/,()=>'<title>Starbyte · Carte de '+zjEsc(zj.peek.pseudo)+'</title>')}
+function zjExport(){if(!zj.peek||!ZH||ZH.embed)return;if(!zjSrc){toast('Préparation du fichier… réessayez dans un instant.');zjPrefetch();return}
+ const name=zjExportName(),file=new File([zjExportHtml()],name,{type:'text/html'});
+ // iPhone, iPad : feuille de partage (Enregistrer dans Fichiers, AirDrop, Mail) ; ordinateur : téléchargement direct
+ const touch=mobile||navigator.maxTouchPoints>1;
+ try{if(touch&&navigator.canShare&&navigator.canShare({files:[file]})){navigator.share({files:[file],title:'Carte de '+zj.peek.pseudo}).catch(e=>{if(e&&e.name!=='AbortError')zjDownload(file,name)});return}}catch(e){}
+ zjDownload(file,name)}
+function zjDownload(file,name){const u=URL.createObjectURL(file),a=document.createElement('a');a.href=u;a.download=name;document.body.appendChild(a);a.click();setTimeout(()=>{URL.revokeObjectURL(u);a.remove()},5000);toast('Carte téléchargée : '+name)}
 function zjPeekStop(){if(!zj.peek)return;zj.peek=null;zjRefresh(true);zjApplyHome();zjOpen('home');toast('Retour à votre partie.')}
 function zjPeekZoneHtml(){const id=zj.sel.zone,reg=zj.regionMap.get(id),z=zoneParse(id),e=zjEstimate(id),n=zj.peek.explored.get(id)||0;
  let h='<div class="zj-kind">ZONE '+zjEsc(z.q+' · '+z.r)+' · '+zjEsc(zjCtxShort(z.k))+'</div><h3>'+(reg?'Dans sa région de test':'Hors de sa région de test')+'</h3><dl class="zj-dl">';
@@ -373,7 +394,7 @@ function zjPeekZoneHtml(){const id=zj.sel.zone,reg=zj.regionMap.get(id),z=zonePa
  h+='</dl><p class="zj-muted">Lecture seule. Le contenu prévu n’est montré qu’ici, pour juger la région : dans sa partie, il resterait caché jusqu’au sondage.</p>';return{h,f:''}}
 function zjPeekHomeHtml(){const P=zj.peek,d=P.data,home=zjHome(),cols=zj.ws.filter(w=>w.kind==='colony');
  let h='<div class="zj-kind">PARTIE DE '+zjEsc(P.pseudo.toUpperCase())+' · LECTURE SEULE</div><h3>L’empire de '+zjEsc(P.pseudo)+'</h3>';
- h+='<p class="zj-muted">Sa capitale, ses colonies et ses signatures, placées sur la nouvelle carte'+(d.saved_at?' (sauvegarde du '+zjEsc(zjDate(d.saved_at))+')':'')+'. Rien n’est modifié dans sa partie.</p>';
+ h+='<p class="zj-muted">Sa capitale, ses colonies et ses signatures, placées sur la nouvelle carte'+(d.saved_at?' (sauvegarde du '+zjEsc(zjDate(d.saved_at))+')':'')+'. '+(ZH.embed?'Fichier exporté le '+zjEsc(zjDate(window.SB_ZONES_EMBED.exportedAt))+' : une photo de sa partie, qui ne se met pas à jour.':'Rien n’est modifié dans sa partie.')+'</p>';
  h+='<div class="zj-stats"><div><b>'+zj.ws.length+'</b><small>mondes</small></div><div><b>'+zj.snap.sigs.length+'</b><small>signatures</small></div><div><b>'+P.knownN+'</b><small>systèmes connus</small></div><div><b>'+P.explored.size+'</b><small>zones touchées</small></div></div>';
  if(home&&cols.length){h+='<div class="zj-kind">DEPUIS '+zjEsc(home.name)+' · '+zjEsc(zjAmasOf(home.coord).toUpperCase())+'</div><dl class="zj-dl">';
   for(const w of cols){const dd=Math.hypot(w.p[0]-home.p[0],w.p[1]-home.p[1],w.p[2]-home.p[2]),other=w.coord.split('-')[0]!==home.coord.split('-')[0];
@@ -385,7 +406,7 @@ function zjPeekHomeHtml(){const P=zj.peek,d=P.data,home=zjHome(),cols=zj.ws.filt
  if(P.skipped)h+='<p class="zj-muted">'+P.skipped+' système'+(P.skipped>1?'s':'')+' connu'+(P.skipped>1?'s':'')+' trop loin pour être placé'+(P.skipped>1?'s':'')+' dans cette lecture.</p>';
  if(P.notes.length)h+='<p class="zj-muted">Région simulée : '+P.notes.map(zjEsc).join(' · ')+'</p>';
  h+='<div class="zj-legend"><span><i class="k"></i>Systèmes déjà connus</span><span><i class="h"></i>Sa région de test (simulée)</span><span><i class="s"></i>Signature</span></div>';
- return{h,f:'<button class="zj-second" data-a="peek-off">Revenir à ma partie</button>'}}
+ return{h,f:ZH.embed?'':'<button class="zj-primary" data-a="export">Télécharger cette carte (HTML)</button><button class="zj-second" data-a="peek-off">Revenir à ma partie</button>'}}
 
 /* ── commandes du haut ── */
 $('zj-m-atlas').onclick=()=>zjSetMode('atlas');$('zj-m-tac').onclick=()=>zjSetMode('tac');
@@ -411,9 +432,10 @@ addEventListener('resize',zjResize);
 
 /* ── démarrage : les mondes du compte remplacent les joueurs de démonstration ── */
 function zjBoot(){zjPatterns();zjResize();
+ if(ZH&&ZH.embed){const E=window.SB_ZONES_EMBED;if(!E||!E.data||!zjPeekBuild(E.data,E.region,E.pseudo)){$('zj-block').hidden=false;$('zj-block').querySelector('p').textContent='Ce fichier ne contient pas de partie lisible.';return false}$('zj-close').hidden=true}
  if(!ZH){$('zj-block').hidden=false;$('zj-block').querySelector('p').textContent='Cette carte s’ouvre depuis le jeu, avec le compte de test (Centre de prospection, bouton « Zones · test »).';return false}
  zjRefresh(true);const home=zjHome();if(!home){$('zj-block').hidden=false;$('zj-block').querySelector('p').textContent='Aucune adresse de monde valide dans la partie : la carte ne peut pas se placer. Rien n’est inventé.';return false}
- players.length=0;players.push({name:'Moi',world:home.name,sector:home.s,index:home.i,spot:home.spot,color:'#80e6d3',point:null});
+ players.length=0;players.push({name:zj.peek?zj.peek.pseudo:'Moi',world:home.name,sector:home.s,index:home.i,spot:home.spot,color:'#80e6d3',point:null});
  for(let j=0;j<3;j++)HOME_SECTOR[j]=home.s[j];target.set(home.p[0],home.p[1],home.p[2]);
  known.clear();for(const w of zj.ws)known.add(sysKey(w.s,w.i));for(const g of zj.snap.sigs)known.add(g.system);
  zj.origin=home.id;zj.cx=home.p[0];zj.cz=home.p[2];zj.k=tacLayerOf(home.p[1]);zj.upp=mobile?2.6:2.2;
@@ -424,7 +446,7 @@ function zjBoot(){zjPatterns();zjResize();
  return true}
 const zjBooted=zjBoot();
 {const m=location.search.match(/[?&]peek=([^&]+)/);if(zjBooted&&m)setTimeout(()=>zjPeekStart(decodeURIComponent(m[1]).slice(0,40)),600)}
-window.STARBYTE_ZONES={zj,refresh:zjRefresh,peekStart:zjPeekStart,selectObj:zjSelectObj,peekStop:zjPeekStop,amas:()=>zjAmasInRange(),draw:()=>zjDraw(),tap:zjTap,pick:zjPick,setMode:zjSetMode,selectZone:zjSelectZone,objects:zjObjects,estimate:zjEstimate,
+window.STARBYTE_ZONES={zj,refresh:zjRefresh,exportHtml:()=>zjSrc?zjExportHtml():null,exportName:()=>zjExportName(),prefetch:zjPrefetch,peekStart:zjPeekStart,selectObj:zjSelectObj,peekStop:zjPeekStop,amas:()=>zjAmasInRange(),draw:()=>zjDraw(),tap:zjTap,pick:zjPick,setMode:zjSetMode,selectZone:zjSelectZone,objects:zjObjects,estimate:zjEstimate,
  cellOf:tacCellOf,center:tacCellCenter,layerOf:tacLayerOf,zoneOfPoint,zoneParse,sx:X=>(X-zj.cx)/zj.upp+innerWidth/2,sy:Z=>(Z-zj.cz)/zj.upp+innerHeight/2,load:zjLoad,
  atlasFocus:(p,d)=>{target.set(p[0],p[1],p[2]);distance=wantedDistance=d||500;travel=null;rebase();updateStreaming(true)},atlasTap:(x,y)=>pick(x,y),
  atlasState:()=>({sel:zj.sel,target:[target.x,target.y,target.z],mesh:!!zjZoneMesh,marks:[...zjMarkEls.values()].map(e=>{const r=e.getBoundingClientRect();return{t:e.textContent,x:r.x,y:r.y,w:r.width,h:r.height}})})};
