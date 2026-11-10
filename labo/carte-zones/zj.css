@@ -65,3 +65,4 @@ body.zj-tac #zj-depth{display:flex}
  #zj-sheet[data-state=sum]{height:min(44vh,380px)}
  #zj-sheet[data-state=full]{height:calc(100% - 120px)}
 }
+#zj-nojs{position:fixed;inset:0;z-index:40;display:grid;place-items:center;padding:28px;background:#03040c;color:#ece8ff;text-align:center;font-size:16px;line-height:1.45}#zj-nojs b{font-size:20px}#zj-nojs p{color:#c9c6e6;max-width:30em;margin:12px auto 0}.zj-js #zj-nojs{display:none}
