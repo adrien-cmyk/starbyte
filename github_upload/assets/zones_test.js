@@ -17,16 +17,55 @@
      existants font la suite. Une zone sondée l'est pour de bon.
    Région de test : 30 zones autour des mondes du compte, contenu fixé une fois
    pour toutes (G.zoneProspect.region), journal des actions pour les mesures.
+   → « Mes mondes › Voir la partie d'un commandant » (ou ?zones=Panzerstorm) : la partie d'un autre
+     joueur en LECTURE SEULE sur la même carte (fonction serveur dev_player_map, v53).
    ═══════════════════════════════════════════════════════════════════════ */
 (function () {
   'use strict';
   if (window.EXTRA_SAVE_KEYS && EXTRA_SAVE_KEYS.indexOf('zoneProspect') < 0) EXTRA_SAVE_KEYS.push('zoneProspect');
 
   const PAGE = 'atlas/index.html';
-  const PAGE_V = '265086ac54';   // empreinte de atlas/index.html, écrite par labo/carte-zones/build.py
+  const PAGE_V = '485b619065';   // empreinte de atlas/index.html, écrite par labo/carte-zones/build.py
   const GRID = 'tac-2';
   const MIN = 60e3;
-  const allowed = () => { try { return !window.SB_ZONES_OFF && typeof _sbDevAllowed === 'function' && _sbDevAllowed(); } catch (e) { return false; } };
+  const SB = 'https://elupnpdcblztpfywnhjl.supabase.co';
+  const KEY = 'sb_publishable_tXGrQIROzH2DwBrny1GcHQ_iKJKoBOQ';   // clé publique (faite pour être dans le client)
+
+  /* ── qui voit le test (10/11 soir : Adrien ne voyait pas le bouton sur son iPhone, compte Hadrien) ──
+     Plusieurs preuves indépendantes, la première qui répond suffit : la règle du panneau de triche, le pseudo au
+     registre, l'empreinte de l'email (relue ici, y compris un email lié pas encore confirmé),
+     et la capitale du compte de test (A-O-2178, OPUS-ONE). Aucune ne contient l'adresse email en clair. */
+  const DEV_NAMES = ['hadrien'];
+  const DEV_SYSTEMS = ['A-O-2178'];
+  let mailOk = false, mailSeen = '';
+  (function mailCheck() {
+    try {
+      const u = window.SBCloud && SBCloud.user;
+      const m = u && String(u.email || u.new_email || (u.user_metadata && u.user_metadata.email) || '').trim().toLowerCase();
+      if (m && m !== mailSeen && window.crypto && crypto.subtle && typeof SB_DEV_EMAIL_SHA === 'string') {
+        mailSeen = m;
+        crypto.subtle.digest('SHA-256', new TextEncoder().encode(m)).then(b => {
+          mailOk = [...new Uint8Array(b)].map(x => x.toString(16).padStart(2, '0')).join('') === SB_DEV_EMAIL_SHA;
+        }).catch(() => {});
+      }
+    } catch (e) {}
+    if (!mailOk) setTimeout(mailCheck, 3000);
+  })();
+  function why() {
+    if (window.SB_ZONES_OFF) return null;
+    try { if (typeof _sbDevAllowed === 'function' && _sbDevAllowed()) return 'triche'; } catch (e) {}
+    // le pseudo du registre seulement (unique) : un nom de capitaine se choisit librement dans la partie
+    try { const n = window.SBMP && SBMP.world && SBMP.world.pseudo; if (n && DEV_NAMES.includes(String(n).trim().toLowerCase())) return 'pseudo'; } catch (e) {}
+    if (mailOk) return 'email';
+    try {
+      const sys = (a) => a ? `${a.cluster}-${a.sector}-${String(a.system).padStart(4, '0')}` : '';
+      const reg = window.SBMP && SBMP.world && SBMP.world.address;
+      if (typeof MY_ADDRESS !== 'undefined' && DEV_SYSTEMS.includes(sys(MY_ADDRESS))) return 'capitale';
+      if (reg && DEV_SYSTEMS.some(s => String(reg).indexOf(s + '-') === 0)) return 'capitale';
+    } catch (e) {}
+    return null;
+  }
+  const allowed = () => !!why();
   let installed = false, overlay = null;
   const listeners = new Set();
 
@@ -223,13 +262,14 @@
   }
 
   /* ── ouverture de la carte en plein écran ── */
-  function open() {
+  function open(opt) {
     if (overlay || !allowed()) return;
+    const pk = opt && opt.peek ? '&peek=' + encodeURIComponent(String(opt.peek).slice(0, 40)) : '';
     overlay = document.createElement('div');
     overlay.id = 'sb-zones-overlay';
     overlay.style.cssText = 'position:fixed;inset:0;z-index:9998;background:#03040c';
     overlay.innerHTML = '<iframe title="Carte par zones (test)" style="position:absolute;inset:0;width:100%;height:100%;border:0"></iframe>';
-    overlay.querySelector('iframe').src = PAGE + '?v=' + PAGE_V;
+    overlay.querySelector('iframe').src = PAGE + '?v=' + PAGE_V + pk;
     document.body.appendChild(overlay);
     log('open', {});
   }
@@ -247,8 +287,44 @@
     return { radar, habitable };
   }
 
+  /* ── lecture seule de la partie d'un autre commandant (v53, dev_player_map : compte de test seulement) ── */
+  function token() {
+    try { const a = JSON.parse(localStorage.getItem('starbyte_auth') || 'null'); return a && (a.access_token || (a.currentSession && a.currentSession.access_token)); } catch (e) { return null; }
+  }
+  async function rpc(fn, args) {
+    if (window.SB_ZONES_FAKE) return window.SB_ZONES_FAKE(fn, args);   // essais hors ligne
+    if (typeof window._sbRpc === 'function') {
+      const { data, error } = await window._sbRpc(fn, args);
+      if (error) throw new Error(error.message || 'rpc');
+      return data;
+    }
+    const tok = token(); if (!tok) throw new Error('not_signed_in');
+    const r = await fetch(SB + '/rest/v1/rpc/' + fn, { method: 'POST', headers: { 'Content-Type': 'application/json', apikey: KEY, Authorization: 'Bearer ' + tok }, body: JSON.stringify(args || {}) });
+    let j = null; try { j = await r.json(); } catch (e) {}
+    if (!r.ok) throw new Error((j && (j.message || j.error)) || ('http_' + r.status));
+    return j;
+  }
+  async function peek(pseudo) {
+    if (!allowed()) return { ok: false, why: 'Réservé au compte de test.' };
+    let d;
+    try { d = await rpc('dev_player_map', { p_pseudo: String(pseudo || '').slice(0, 40) }); }
+    catch (e) {
+      const m = String(e && e.message || e);
+      if (/dev_player_map|function|schema cache|404/i.test(m) && !/dev_only/.test(m)) return { ok: false, why: 'Le serveur ne connaît pas encore cette lecture : colle server/schema_mp_v53_dev_lecture_partie.sql dans Supabase → SQL Editor → Run.' };
+      if (/dev_only/.test(m)) return { ok: false, why: 'Le serveur refuse : réservé au compte de test.' };
+      if (/not_signed_in/.test(m)) return { ok: false, why: 'Pas de session en ligne sur cet appareil.' };
+      return { ok: false, why: 'Lecture impossible : ' + m.slice(0, 120) };
+    }
+    if (!d || !d.ok) {
+      if (d && d.why === 'unknown_pseudo') return { ok: false, why: 'Aucun commandant « ' + pseudo + ' » au registre' + (d.candidates && d.candidates.length ? ' · proches : ' + d.candidates.join(', ') : '') + '.' };
+      return { ok: false, why: 'Rien à lire.' };
+    }
+    log('peek', { pseudo: d.pseudo });
+    return { ok: true, data: d };
+  }
+
   window.SBZones = {
-    allowed, open, close, state, saveRegion, launch, arrive, act, check, sigAction: (id, wid) => sigAction((G.signatures || {})[id], wid),
+    allowed, why, open, close, state, saveRegion, launch, arrive, act, check, peek, sigAction: (id, wid) => sigAction((G.signatures || {})[id], wid),
     onChange(f) { listeners.add(f); return () => listeners.delete(f); },
     grid: GRID,
   };
@@ -271,5 +347,20 @@
   }
   const tick = () => { try { install(); } catch (e) {} };
   setTimeout(tick, 1500); setInterval(tick, 2000);
-  if (/[?&]zones\b/.test(location.search)) { const t = setInterval(() => { if (allowed() && typeof G !== 'undefined' && G.planet) { clearInterval(t); open(); } }, 1000); }
+  // ?zones ouvre la carte ; ?zones=Panzerstorm l'ouvre sur la partie de ce commandant. Sans accès au bout de 20 s, on dit pourquoi.
+  const qz = location.search.match(/[?&]zones(?:=([^&]*))?/);
+  if (qz) {
+    let n = 0;
+    const t = setInterval(() => {
+      n++;
+      if (allowed() && typeof G !== 'undefined' && G.planet) { clearInterval(t); open(qz[1] ? { peek: decodeURIComponent(qz[1]) } : null); return; }
+      if (n === 20) {
+        clearInterval(t);
+        let p = '—', c = '—';
+        try { p = (window.SBMP && SBMP.world && SBMP.world.pseudo) || '—'; } catch (e) {}
+        try { c = fmtAddr(MY_ADDRESS); } catch (e) {}
+        try { toast(`Carte par zones : accès refusé · pseudo ${String(p).replace(/[<>&"]/g, '')} · capitale ${c} · session ${window.SBCloud && SBCloud.user ? (SBCloud.user.email || SBCloud.user.new_email ? 'avec email' : 'sans email') : 'absente'}`); } catch (e) {}
+      }
+    }, 1000);
+  }
 })();

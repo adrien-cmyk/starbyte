@@ -35,5 +35,6 @@ select v as script, case when ok then 'oui' else 'NON — à lancer' end as lanc
   ('v50 grand livre',        exists (select 1 from pg_proc where proname = 'sb_ledger')),
   ('v50b règlement service', has_function_privilege('service_role', 'public.sb_m3_settle(bigint)', 'execute')),
   ('v51 graine 32 bits',     exists (select 1 from pg_proc where proname = 'm3_report' and prosrc like '%4294967295%')),
-  ('v52 stock plein',        exists (select 1 from pg_proc where proname = 'sb_m3_settle' and prosrc like '%has_client%'))
+  ('v52 stock plein',        exists (select 1 from pg_proc where proname = 'sb_m3_settle' and prosrc like '%has_client%')),
+  ('v53 lecture partie (test)', exists (select 1 from pg_proc where proname = 'dev_player_map'))
 ) t(v, ok);

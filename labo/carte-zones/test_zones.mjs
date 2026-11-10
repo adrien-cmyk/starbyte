@@ -44,7 +44,12 @@ async function newGame(p, url, planet) {
       radar: { before: pool, after: G.probesPool.filter(x => x.tier === 'radar').length, report: rep && rep.tier === 'radar' && !rep.zone } };
   });
   rec('JOUEUR', !r.allowed && !r.btn && !r.overlay && !r.saved && r.gz && r.radar.report && r.radar.after === r.radar.before - 1,
-    `compte ordinaire : accès ${r.allowed}, bouton ${r.btn}, carte ouverte par ?zones ${r.overlay}, clé dans la sauvegarde ${r.saved} ; une Radar normale part et revient par le chemin habituel (${r.radar.before} → ${r.radar.after} Radars, rapport classique ${r.radar.report})`);
+    `compte ordinaire (capitaine nommé « Hadrien » dans la partie) : accès ${r.allowed}, bouton ${r.btn}, carte ouverte par ?zones ${r.overlay}, clé dans la sauvegarde ${r.saved} ; une Radar normale part et revient par le chemin habituel (${r.radar.before} → ${r.radar.after} Radars, rapport classique ${r.radar.report})`);
+  // 10/11 soir : la capitale du compte de test (A-O-2178) suffit, même sans pseudo ni email lisibles sur l'appareil
+  const g = await p.evaluate(async () => { MY_ADDRESS.cluster = 'A'; MY_ADDRESS.sector = 'O'; MY_ADDRESS.system = 2178; goto('prospect'); await new Promise(r => setTimeout(r, 2600));
+    const b = document.getElementById('sb-zones-btn'); return { why: SBZones.why(), btn: !!b, vis: !!(b && b.offsetParent), tools: [...document.querySelectorAll('#scr-prospect .smw-tools button')].filter(x => x.offsetParent).map(x => x.id || x.className || x.dataset.a) }; });
+  rec('CAPITALE', g.why === 'capitale' && g.btn && g.vis, `hors localhost, capitale A-O-2178 : accès « ${g.why} », bouton visible ${g.vis} (outils visibles : ${g.tools.join(', ')})`);
+  await p.screenshot({ path: path.join(SHOTS, '0_bouton_test.png') });
   await ctx.close();
 }
 
@@ -151,6 +156,56 @@ await p.evaluate(() => SBZones.open()); F = await frameReady(); await sleep(2500
 const re2 = await F.evaluate((id) => { STARBYTE_ZONES.selectZone(id); return document.getElementById('zj-sh-body').innerText.replace(/\s+/g, ' ').slice(0, 80); }, target.id);
 rec('RECHARGE2', /Sondée/.test(re2), `la carte rouverte montre la zone : « ${re2} »`);
 await p.screenshot({ path: path.join(SHOTS, '8_apres_rechargement.png') });
+
+// ═══ 3. Lecture d'une autre partie (v53 simulée : même forme que dev_player_map) ═══
+const mineState = () => p.evaluate(() => JSON.stringify({ region: G.zoneProspect.region, zones: G.zoneProspect.zones, pm: G.probeMissions.map(m => m.id), sig: Object.keys(G.signatures).sort(), radars: G.probesPool.length }));
+const before3 = await mineState();
+const nf = await p.evaluate(async () => { window.SB_ZONES_FAKE = async () => { throw new Error('Could not find the function public.dev_player_map(p_pseudo) in the schema cache'); }; const r = await SBZones.peek('Panzerstorm'); return r.why; });
+rec('V53-ABS', /schema_mp_v53/.test(nf), `serveur sans v53 : « ${nf} »`);
+await p.evaluate(() => {
+  const A = (c, s, n, pl) => `${c}-${s}-${String(n).padStart(4, '0')}` + (pl ? '-' + String(pl).padStart(2, '0') : '');
+  window.SB_ZONES_FAKE = async (fn, args) => {
+    if (fn !== 'dev_player_map') throw new Error('rpc inconnu');
+    if (String(args.p_pseudo).toLowerCase() !== 'panzerstorm') return { ok: false, why: 'unknown_pseudo', candidates: ['Panzerstorm'] };
+    const sig = (id, sys, extra) => Object.assign({ id, system: sys, type: 'heat_point', typeLabel: 'Point chaud', intensity: 'faible', resolved: false }, extra || {});
+    return { ok: true, pseudo: 'Panzerstorm', planet_name: 'NÉRÉIDE', address: A('A', 'K', 6184, 12), level: 9, saved_at: new Date(Date.now() - 3600e3).toISOString(),
+      colonies: [{ address: A('A', 'K', 6301, 5), name: 'Brèche' }, { address: A('A', 'L', 420, 7), name: 'Ostra' }, { address: A('A', 'J', 3001, 3), name: 'Halde' }, { address: A('A', 'M', 1500, 9), name: 'Kern' }],
+      save_worlds: [{ id: 'home', kind: 'home' }, { id: 'col-9', kind: 'colony', name: 'Vigie', coord: A('A', 'L', 777, 2) }],
+      signatures: [sig('SIG-PZ1', A('A', 'K', 6190)), sig('SIG-PZ2', A('A', 'K', 6100), { resolved: true, resolvedType: 'moving', movingCoordKey: 'A-K-6100#1' }), sig('SIG-PZ3', A('A', 'L', 430), { resolved: true, resolvedType: 'fixed', fixedClass: 'habitable', fixedAddress: A('A', 'L', 430, 4) }), sig('SIG-PZ4', A('A', 'K', 6000), { ignored: true })],
+      known_targets: [{ key: 'A-K-6100#1', label: 'Champ d’astéroïdes', status: 'available' }],
+      known_systems: [A('A', 'K', 6184), A('A', 'K', 6185), A('A', 'K', 6190), A('A', 'K', 6200), A('A', 'L', 420), A('A', 'L', 430), A('A', 'J', 3001)],
+      reports: [{ tier: 'radar', system: A('A', 'K', 6250), at: Date.now() - 864e5 }], missions: [{ tier: 'light', status: 'in_transit' }], arks: [{ coord: A('A', 'N', 10, 1), name: 'Arche' }] };
+  };
+});
+await p.evaluate(() => { SBZones.close(); SBZones.open({ peek: 'Panzerstorm' }); }); F = await frameReady();
+let pk = null; for (let i = 0; i < 40 && !(pk && pk.on); i++) { await sleep(500); pk = await F.evaluate(() => { const zj = STARBYTE_ZONES.zj; return { on: !!zj.peek }; }); }
+await sleep(1500);
+pk = await F.evaluate(() => { const zj = STARBYTE_ZONES.zj, P = zj.peek, R = zj.snap.zp.region; return { on: !!P, ws: zj.ws.map(w => w.kind[0] + ':' + w.name), sigs: zj.snap.sigs.length, explored: P && P.explored.size, known: P && P.knownN, region: R && R.zones.length,
+  cats: R && R.zones.reduce((a, z) => (a[z.content.cat] = (a[z.content.cat] || 0) + 1, a), {}), amas: P && P.amas.size, head: document.querySelector('.zj-test').textContent, pill: document.getElementById('zj-worlds').textContent,
+  body: document.getElementById('zj-sh-body').innerText.replace(/\s+/g, ' '), foot: document.getElementById('zj-sh-foot').innerText.replace(/\s+/g, ' ') }; });
+rec('LECTURE', pk.on && pk.ws.length === 6 && pk.ws[0] === 'h:NÉRÉIDE' && pk.sigs === 3 && pk.explored > 0 && pk.region === 30 && /L’empire de Panzerstorm/.test(pk.body) && /Revenir à ma partie/.test(pk.foot) && /PANZERSTORM/.test(pk.head) && pk.pill === 'Ses mondes',
+  `${pk.ws.join(', ')} · ${pk.sigs} signatures (l'ignorée écartée) · ${pk.known} systèmes connus sur ${pk.explored} zones · région simulée ${pk.region} ${JSON.stringify(pk.cats)} · amas touchés par la portée ${pk.amas} · « ${pk.body.slice(0, 900)} »`);
+await p.screenshot({ path: path.join(SHOTS, '9_panzerstorm_tactique.png') });
+// une zone de sa région : contenu prévu montré, aucun bouton d'envoi
+const pz = await F.evaluate(() => { const Z = STARBYTE_ZONES, R = Z.zj.snap.zp.region, z = R.zones.find(z => z.content.cat === 'choix') || R.zones[1]; Z.selectZone(z.id); return { body: document.getElementById('zj-sh-body').innerText.replace(/\s+/g, ' '), launch: !!document.querySelector('#zj-sh-foot [data-a="launch"]'), kind: z.content.kind }; });
+const sigView = await F.evaluate(() => { const o = STARBYTE_ZONES.objects().find(o => o.type === 'sig'); STARBYTE_ZONES.selectObj(o);
+  return { body: document.getElementById('zj-sh-body').innerText.replace(/\s+/g, ' '), foot: document.getElementById('zj-sh-foot').innerText.replace(/\s+/g, ' '), act: !!document.querySelector('#zj-sh-foot [data-a="act"]') }; });
+rec('LECT-SEULE', !pz.launch && /Contenu prévu/.test(pz.body) && !sigView.act, `zone de sa région : « ${pz.body.slice(0, 170)} » (bouton Sonder ${pz.launch}) · signature : « ${sigView.foot.slice(0, 80)} » (bouton d'action ${sigView.act})`);
+await F.evaluate(() => { STARBYTE_ZONES.setMode('atlas'); const w = STARBYTE_ZONES.zj.ws[0]; STARBYTE_ZONES.atlasFocus(w.p, 5200); }); await sleep(3500);
+const pa = await F.evaluate(() => STARBYTE_ZONES.atlasState().marks.map(m => m.t));
+rec('LECT-ATLAS', pa.some(t => /Sa capitale · NÉRÉIDE/.test(t)) || pa.some(t => /lieux/.test(t)), `Atlas sur son empire : ${pa.slice(0, 8).join(' | ')}`);
+await p.screenshot({ path: path.join(SHOTS, '10_panzerstorm_atlas.png') });
+// retour à ma partie, et rien n'a bougé dans la mienne
+await F.evaluate(() => { STARBYTE_ZONES.setMode('tac'); STARBYTE_ZONES.peekStop(); }); await sleep(600);
+const mine = await F.evaluate(() => ({ on: !!STARBYTE_ZONES.zj.peek, ws: STARBYTE_ZONES.zj.ws.map(w => w.name), head: document.querySelector('.zj-test').textContent }));
+const after3 = await mineState();
+const same = after3 === before3, diff = same ? '' : Object.keys(JSON.parse(before3)).filter(k => JSON.stringify(JSON.parse(before3)[k]) !== JSON.stringify(JSON.parse(after3)[k])).join(', ');
+rec('LECT-RETOUR', !mine.on && mine.ws.includes('OPUS-ONE') && /HADRIEN/.test(mine.head) && same, `retour : ${mine.ws.join(', ')} · « ${mine.head} » · ma partie inchangée (région, zones, sondes, signatures) ${same}${diff ? ' · diffère : ' + diff : ''}`);
+// par l'interface : Mes mondes › Voir la partie d'un commandant
+await F.evaluate(() => document.getElementById('zj-worlds').click()); await sleep(300);
+const ui = await F.evaluate(async () => { const i = document.getElementById('zj-peek-in'); if (!i) return { input: false }; i.value = 'panzerstorm'; document.querySelector('#zj-sh-body [data-a="peek"]').click(); for (let k = 0; k < 30 && !STARBYTE_ZONES.zj.peek; k++) await new Promise(r => setTimeout(r, 200)); return { input: true, on: !!STARBYTE_ZONES.zj.peek, ws: STARBYTE_ZONES.zj.ws.length }; });
+await F.evaluate(() => STARBYTE_ZONES.peekStop());
+rec('LECT-UI', ui.input && ui.on && ui.ws === 6, `champ « Voir la partie d’un commandant » présent ${ui.input}, lecture ouverte ${ui.on} (${ui.ws} mondes)`);
 
 rec('ERREURS', errs.length === 0, errs.slice(0, 8).join(' | ') || 'aucune erreur de page');
 await browser.close(); srv.close();
