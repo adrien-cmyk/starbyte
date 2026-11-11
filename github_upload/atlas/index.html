@@ -103,6 +103,7 @@ body.zj-tac #zj-depth{display:flex}
 .zj-steps li{margin:4px 0}
 .zj-steps small{display:block;color:#9d97c4;font-size:11px}
 .zj-muted.zj-small{font-size:11px;color:#8a86ab}
+.zj-cor small .zj-min{display:inline;color:#ffcf96;font-weight:600}
 
 </style>
 </head>
@@ -1223,7 +1224,7 @@ document.addEventListener('visibilitychange',()=>{if(!document.hidden){zjRefresh
    E3 : consommation proportionnelle à la longueur, dans la ressource réelle de la mission : le carburant pour un tanker.
    Toutes ces valeurs sont des réglages d'essai, affichés comme tels. Rien n'est lancé ni écrit ; les missions en vol
    gardent leurs horaires. Aucune alerte n'est inventée : le contournement est un exemple nommé comme tel. */
-const ZJ_COR={v:12,k:2.5,season:25,kFuel:.35,Lref:2400,fuel:{1:50,2:150,3:400}};   // Lref : trajet moyen mesuré d'une capitale à un port franc (A-O-2178 : médiane 2 520 u)
+const ZJ_COR={v:12,k:2.5,season:25,kFuel:.35,Lref:2400,Lmin:1200,fuel:{1:50,2:150,3:400}};   // Lmin (11/11, minimum par mission) : une mission compte au moins 1 200 u de vol libre   // Lref : trajet moyen mesuré d'une capitale à un port franc (A-O-2178 : médiane 2 520 u)
 const zjD3=(a,b)=>Math.hypot(a[0]-b[0],a[1]-b[1],a[2]-b[2]);
 function zjCorGraph(){if(zj.cor.g)return zj.cor.g;if(typeof navReady==='undefined'||!navReady)return null;const B=[navBase.x,navBase.y,navBase.z],Wd=v=>[v.x+B[0],v.y+B[1],v.z+B[2]],nodes={},edges=[],cors=[];
  for(const n of NET.nodes)nodes[n.id]={id:n.id,type:n.type,name:n.name,key:n.key,p:navPoint(n.key)};
@@ -1250,7 +1251,8 @@ function zjCorSteps(pl){const out=[];for(const l of pl.legs){const last=out[out.
  else out.push({type:l.type,cor:l.edge&&l.edge.cor,name:l.edge?l.edge.name:'Vol libre',cls:l.edge&&l.edge.cls,from:l.a,to:l.b,len:l.len,min:l.min,n:l.type==='cor'?1:0})}return out}
 const zjMin=m=>{m=Math.max(0,m);if(m<1)return Math.round(m*60)+' s';if(m<60)return(m<10?m.toFixed(1).replace('.',','):Math.round(m))+' min';const h=Math.floor(m/60),r=Math.round(m%60);return h+' h '+String(r).padStart(2,'0')};
 // devis d'essai d'un itinéraire pour ce tanker : durée de la saison de test, durée « saison normale », carburant aller-retour
-function zjCorQuote(pl,ctx){return{test:pl.min/ZJ_COR.season,norm:pl.min,fuel:Math.round(ctx.fuel*pl.fu/ZJ_COR.Lref)}}
+// minimum par mission (décision du 11/11) : au moins le temps et le carburant de Lmin u de vol libre, quel que soit le trajet
+function zjCorQuote(pl,ctx){const C=ZJ_COR,mn=C.Lmin/C.v,norm=Math.max(pl.min,mn),fu=Math.max(pl.fu,C.Lmin);return{test:norm/C.season,norm,fuel:Math.round(ctx.fuel*fu/C.Lref),floorT:pl.min<mn,floorF:pl.fu<C.Lmin}}
 // contexte : un vrai tanker en vol (départ, destination, catégorie, carburant payé) ou un port depuis le monde de départ
 function zjCorCtxTravel(tr){if(!tr||!tr.ok||tr.pts.length<2)return null;const w=zj.ws.find(x=>x.coord===tr.from),dP=tr.pts[tr.pts.length-1],tier=Math.max(1,Math.min(3,parseInt(String(tr.tier||1).replace(/\D/g,''),10)||1));
  return{src:'travel',id:tr.id,O:{id:'@O',name:w?w.name:tr.from,key:tr.from,p:tr.pts[0]},D:{id:'@D',name:tr.toLabel||tr.to,key:tr.to,p:dP},tier,fuel:tr.fuel!=null?tr.fuel:ZJ_COR.fuel[tier],paid:tr.fuel,veh:tr.envoy?tr.envoy.name||'vaisseau d’exception':'tanker T'+tier,tr}}
@@ -1262,7 +1264,8 @@ function zjCorCompare(ctx){if(!ctx||!zjCorGraph())return false;zj.cor.ctx=ctx;co
   // contournement : exemple, aucun tronçon n'est signalé dans la partie ; on écarte le tronçon le plus long de l'itinéraire rapide
   const worst=fast.legs.filter(l=>l.type==='cor').sort((a,b)=>b.len-a.len)[0],alt=worst&&zjCorPlan(O,D,{direct:false,avoid:new Set([worst.edge.id])});
   if(alt&&alt.nCor&&alt.sig!==fast.sig&&alt.sig!==direct.sig)out.push({k:'tour',name:'Contournement (exemple)',pl:alt,avoid:worst})}
- const best=out.reduce((a,b)=>b.pl.min<a.pl.min?b:a);for(const x of out){x.q=zjCorQuote(x.pl,ctx);x.best=x===best&&(x.k==='libre'||x.pl.min<direct.min*.95)}
+ for(const x of out)x.q=zjCorQuote(x.pl,ctx);const dq=out[0].q,best=out.reduce((a,b)=>b.q.test<a.q.test?b:a);   // devis avec le minimum : un corridor qui ne fait rien gagner n'est pas « plus rapide »
+ for(const x of out)x.best=x===best&&(x.k==='libre'||x.q.test<dq.test*.95)
  zj.cor.plans=out;zj.cor.pick=out.indexOf(best);zj.cor.on=true;zjCorSelBuild();return true}
 function zjCorPickPlan(i){if(!zj.cor.plans||!zj.cor.plans[i])return;zj.cor.pick=i;zjCorSelBuild();zjCorFit();zjSheet()}
 function zjCorFit(){const x=zj.cor.plans&&zj.cor.plans[zj.cor.pick];if(!x)return;const P=x.pl.pts,c=[0,1,2].map(j=>(Math.min(...P.map(q=>q[j]))+Math.max(...P.map(q=>q[j])))/2),R=Math.max(60,...P.map(q=>zjD3(q,c)));
@@ -1300,7 +1303,7 @@ function zjCorName(id){const g=zjCorGraph(),n=zjCorNode(g,id);return n?(n.type==
 function zjCorHtml(){const C=zj.cor,ctx=C.ctx;if(!ctx||!C.plans)return{h:'<p class="zj-muted">Aucune comparaison en cours.</p>',f:''};
  let h='<div class="zj-kind">ITINÉRAIRES · PRÉVISUALISATION D’ESSAI</div><h3>'+zjEsc(ctx.O.name)+' → '+zjEsc(ctx.D.name)+'</h3>';
  h+='<p class="zj-muted">'+zjEsc(ctx.veh.charAt(0).toUpperCase()+ctx.veh.slice(1))+(ctx.src==='travel'?' de la mission en cours':' depuis '+zjEsc(ctx.O.name))+'. Rien n’est lancé, la mission garde ses horaires.</p>';
- C.plans.forEach((x,i)=>{h+='<button class="zj-row zj-cor'+(i===C.pick?' on':'')+'" data-a="cor-pick" data-i="'+i+'"><b>'+zjEsc(x.name)+(x.best?' <em class="zj-best">'+(x.k==='libre'?'le plus court ici':'plus rapide')+'</em>':'')+'</b><small>'+zjMin(x.q.test)+' en saison de test <span class="zj-dim">('+zjMin(x.q.norm)+' en saison normale)</span> · '+zjFmt(x.q.fuel)+' carburant · '+zjFmt(x.pl.len)+' u · '+(x.pl.nCor?x.pl.nCor+' tronçon'+(x.pl.nCor>1?'s':''):'aucun tronçon')+'</small></button>'});
+ C.plans.forEach((x,i)=>{h+='<button class="zj-row zj-cor'+(i===C.pick?' on':'')+'" data-a="cor-pick" data-i="'+i+'"><b>'+zjEsc(x.name)+(x.best?' <em class="zj-best">'+(x.k==='libre'?'le plus court ici':'plus rapide')+'</em>':'')+'</b><small>'+zjMin(x.q.test)+' en saison de test <span class="zj-dim">('+zjMin(x.q.norm)+' en saison normale)</span> · '+zjFmt(x.q.fuel)+' carburant · '+zjFmt(x.pl.len)+' u · '+(x.pl.nCor?x.pl.nCor+' tronçon'+(x.pl.nCor>1?'s':''):'aucun tronçon')+(x.q.floorT||x.q.floorF?' · <b class="zj-min">minimum par mission</b>':'')+'</small></button>'});
  if(!C.plans.some(x=>x.k==='cor'))h+='<p class="zj-muted">Aucun corridor ne raccourcit ce trajet : le vol libre direct reste la seule option utile.</p>';
  else if(C.plans[0].best)h+='<p class="zj-muted">Ici, rejoindre le réseau coûte plus de temps qu’il n’en fait gagner : aucun avantage n’est prêté au corridor.</p>';
  const x=C.plans[C.pick],tour=C.plans.find(p=>p.k==='tour');
@@ -1309,7 +1312,7 @@ function zjCorHtml(){const C=zj.cor,ctx=C.ctx;if(!ctx||!C.plans)return{h:'<p cla
  h+='</ol>';
  if(tour)h+='<p class="zj-muted">Contournement : <b>exemple</b>. Aucun tronçon n’est signalé dans ta partie ; il montre l’itinéraire si « '+zjEsc(zjCorName(tour.avoid.a))+' → '+zjEsc(zjCorName(tour.avoid.b))+' » ('+zjEsc(tour.avoid.edge.name)+') l’était.</p>';
  if(ctx.src==='travel'){const tr=ctx.tr,ph=(tr.phases||[])[0],real=ph&&ph.t1&&ph.t0?(ph.t1-ph.t0)/60000:null;h+='<p class="zj-muted">Mission réelle : vol direct, '+zjFmt(tr.L)+' u'+(real?', '+zjMin(real)+' (durée tirée au hasard en phase de test, sans lien avec la distance)':'')+(ctx.paid!=null?', '+zjFmt(ctx.paid)+' carburant payés au départ, quel que soit le trajet':'')+'.</p>'}
- h+='<p class="zj-muted zj-small">Valeurs d’essai (décisions E1 à E3) : '+ZJ_COR.v+' u/min en vol libre, ×'+String(ZJ_COR.k).replace('.',',')+' en corridor ; saison de test : durées ÷'+ZJ_COR.season+'. Carburant proportionnel à la longueur, '+Math.round(ZJ_COR.kFuel*100)+' % en corridor, égal au coût d’aujourd’hui ('+zjFmt(ctx.fuel)+') pour '+zjFmt(ZJ_COR.Lref)+' u de vol libre. Longueurs mesurées sur les courbes.</p>';
+ h+='<p class="zj-muted zj-small">Valeurs d’essai (décisions E1 à E3) : '+ZJ_COR.v+' u/min en vol libre, ×'+String(ZJ_COR.k).replace('.',',')+' en corridor ; saison de test : durées ÷'+ZJ_COR.season+'. Carburant proportionnel à la longueur, '+Math.round(ZJ_COR.kFuel*100)+' % en corridor, égal au coût d’aujourd’hui ('+zjFmt(ctx.fuel)+') pour '+zjFmt(ZJ_COR.Lref)+' u de vol libre. Minimum par mission : '+zjMin(ZJ_COR.Lmin/ZJ_COR.v/ZJ_COR.season)+' et '+zjFmt(Math.round(ctx.fuel*ZJ_COR.Lmin/ZJ_COR.Lref))+' de carburant (l’équivalent de '+zjFmt(ZJ_COR.Lmin)+' u). Longueurs mesurées sur les courbes.</p>';
  const f='<button class="zj-primary" data-a="cor-fit">Voir l’itinéraire</button>'+'<button class="zj-second" data-a="cor-back">'+(ctx.src==='travel'?'Revenir à la mission':'Revenir au port')+'</button>'+'<button class="zj-second" data-a="cor-off">Masquer le réseau</button>';
  return{h,f}}
 function zjCorNetHtml(){const g=zjCorGraph();if(!g)return'';return'<p class="zj-muted">Réseau candidat (GDD navigation § 4) : '+g.cors.length+' corridors, '+g.edges.length+' tronçons, '+zjFmt(g.len)+' u mesurés sur les courbes ('+zjFmt(g.chord)+' u en cordes). Valeurs d’essai ; rien n’est branché au jeu.</p>'}

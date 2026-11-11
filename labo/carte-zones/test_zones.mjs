@@ -302,8 +302,8 @@ const cT = await F.evaluate(() => ({ s: STARBYTE_ZONES.corState(), body: documen
 const sameTk2 = await p.evaluate(j => { const m = G.tankerMissions.find(x => x.id === JSON.parse(j).id); return JSON.stringify(m) === j; }, tk.json);
 const dT = cT.s.plans && cT.s.plans[0], fT = cT.s.plans && cT.s.plans.find(x => x.k === 'cor');
 await p.screenshot({ path: path.join(SHOTS, '15b_tanker_itineraires.png') });
-rec('COR-02', cmpBtn && dT && dT.k === 'libre' && (fT ? (fT.min < dT.min * .95) === fT.best && (dT.best === !fT.best) : dT.best) && sameTk2 && /Mission réelle : vol direct/.test(cT.body),
-  `tanker ${tk.name} (trajet court) : ${cT.s.plans.map(x => x.name + ' ' + x.len.toFixed(0) + ' u, ' + x.test.toFixed(1) + ' min d’essai, ' + x.fuel + ' carburant' + (x.best ? ' [retenu]' : '')).join(' · ')} · aucun avantage imposé au corridor ; mission du jeu inchangée ${sameTk2}`);
+rec('COR-02', cmpBtn && dT && dT.k === 'libre' && (fT ? (fT.test < dT.test * .95) === fT.best && (dT.best === !fT.best) : dT.best) && Math.abs(dT.test - Math.max(dT.min, cT.par.Lmin / cT.par.v) / cT.par.season) < 1e-9 && dT.fuel === Math.round(cT.s.ctx.fuel * Math.max(dT.fu, cT.par.Lmin) / cT.par.Lref) && /minimum par mission/.test(cT.body) && sameTk2 && /Mission réelle : vol direct/.test(cT.body),
+  `tanker ${tk.name} (trajet court) : ${cT.s.plans.map(x => x.name + ' ' + x.len.toFixed(0) + ' u, ' + x.test.toFixed(1) + ' min d’essai, ' + x.fuel + ' carburant' + (x.best ? ' [retenu]' : '')).join(' · ')} (sans minimum : ${(dT.min / cT.par.season).toFixed(1)} min, ${Math.round(cT.s.ctx.fuel * dT.fu / cT.par.Lref)} carburant ; minimum par mission ${(cT.par.Lmin / cT.par.v / cT.par.season).toFixed(1)} min) · aucun avantage imposé au corridor ; mission du jeu inchangée ${sameTk2}`);
 await F.evaluate(() => document.querySelector('#zj-sh-foot [data-a="cor-back"]').click()); await sleep(600);
 rec('FOLLOW-T', fit.F.susp && fit.d > fit.L * .4, `Voir le trajet : vue de ${fit.d.toFixed(0)} u pour un tracé de ${fit.L.toFixed(0)} u, suivi suspendu (la mission continue)`);
 // arrière-plan : au retour, la position se recale sur les horaires de la partie
@@ -346,7 +346,7 @@ const cor = await F.evaluate(async () => { const S = STARBYTE_ZONES, out = [], k
   return { out, net: S.corState().net, par: S.corParams() }; });
 let c3 = true, c4 = true, c5 = true, c3n = 0, wins = 0, ex = null;
 for (const r of cor.out) { const d = r.plans[0]; for (const x of r.plans) {
-  const sumL = x.legs.reduce((a, l) => a + l.len, 0), sumM = x.legs.reduce((a, l) => a + l.min, 0); if (Math.abs(sumL - x.len) > .01 || Math.abs(sumM - x.min) > 1e-6 || Math.abs(x.test - x.min / cor.par.season) > 1e-6) c3 = false;   // un seul devis : toutes les phases comptées
+  const sumL = x.legs.reduce((a, l) => a + l.len, 0), sumM = x.legs.reduce((a, l) => a + l.min, 0); if (Math.abs(sumL - x.len) > .01 || Math.abs(sumM - x.min) > 1e-6 || Math.abs(x.test - Math.max(x.min, cor.par.Lmin / cor.par.v) / cor.par.season) > 1e-6) c3 = false;   // un seul devis : toutes les phases comptées
   for (let i = 1; i < x.legs.length; i++) { const a = x.legs[i - 1], b = x.legs[i]; if (a.b !== b.a || Math.hypot(a.p1[0] - b.p0[0], a.p1[1] - b.p0[1], a.p1[2] - b.p0[2]) > .01) c5 = false; }   // les phases s'enchaînent sur des nœuds officiels
   if (x.k === 'cor') { c3n++; const L0 = x.legs[0], Ln = x.legs[x.legs.length - 1]; if (L0.t !== 'free' && L0.a !== '@O') c3 = false; if (Ln.t !== 'free' && Math.hypot(Ln.p1[0] - r.D[0], Ln.p1[1] - r.D[1], Ln.p1[2] - r.D[2]) > .01) c3 = false; if (x.min < d.min) wins++; if (!ex) ex = { k: r.k, x, d }; }
   for (const l of x.legs) if (l.t === 'cor' && !(l.len >= Math.hypot(l.p1[0] - l.p0[0], l.p1[1] - l.p0[1], l.p1[2] - l.p0[2]) - 1e-6)) c4 = false; } }
