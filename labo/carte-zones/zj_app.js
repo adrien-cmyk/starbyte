@@ -21,11 +21,11 @@ function zjClock(t){const d=new Date(t);return d.getHours()+' h '+String(d.getMi
 
 /* ── données du jeu ── */
 function zjParseAddr(coord){const m=String(coord||'').match(/^([A-Z]+)-([A-Z])-(\d{4})(?:-(\d{1,2}))?$/);if(!m)return null;let s;try{s=sectorFromAddress(m[1],m[2])}catch(e){return null}
- return{s,i:+m[3]-1,spot:m[4]?+m[4]-1:39,key:m[1]+'-'+m[2]+'-'+m[3]}}
+ return{s,i:+m[3]-1,spot:m[4]?+m[4]-1:null,key:m[1]+'-'+m[2]+'-'+m[3]}}
 function zjRefresh(force){if(!ZH)return;const now=performance.now();if(!force&&now-zj.snapT<3500)return;zj.snapT=now;
  if(zj.peek)zj.snap=zj.peek.snap;else try{zj.snap=ZH.state()}catch(e){console.warn('[zones] état',e);return}
  zj.ws=zj.snap.worlds.map(w=>{const a=zjParseAddr(w.coord);return a?{...w,...a}:null}).filter(Boolean);
- for(const w of zj.ws){const o=tacSecData(w.s,true);const sp=localSpotOffset(w.spot);w.p=[o.pos[w.i*3]+sp[0],o.pos[w.i*3+1]+sp[1],o.pos[w.i*3+2]+sp[2]];w.zone=zoneOfPoint(w.p)}
+ for(const w of zj.ws){const o=tacSecData(w.s,true);const sp=w.spot==null?[0,0,0]:localSpotOffset(w.spot);w.p=[o.pos[w.i*3]+sp[0],o.pos[w.i*3+1]+sp[1],o.pos[w.i*3+2]+sp[2]];w.zone=zoneOfPoint(w.p)}
  if(!zj.ws.some(w=>w.id===zj.origin))zj.origin=(zj.ws[0]||{}).id||'home';
  zj.regionMap=new Map();const R=zj.snap.zp&&zj.snap.zp.region;if(R)for(const z of R.zones)zj.regionMap.set(z.id,z);
  zj.objsT=0;zj.dirty=true;if(zj.view!=='choix')zjSheet()}
@@ -200,10 +200,10 @@ function zjTap(px,py){const r=zjPick(px,py);
  const[wx,wz]=zjW(px,py),[q,rr]=tacCellOf(wx,wz);zjSelectZone(zoneId(q,rr,zj.k))}
 function zjCenterOn(p,force){if(zj.mode!=='tac')return;const ins=zjInsets(),W=innerWidth,H=innerHeight,X=(p[0]-zj.cx)/zj.upp+W/2,Y=(p[2]-zj.cz)/zj.upp+H/2,pad=Math.min(60,TAC_R/zj.upp);
  if(!force&&X>ins.left+pad&&X<ins.right-pad&&Y>ins.top+pad&&Y<ins.bottom-pad)return;const tx=(ins.left+ins.right)/2,ty=(ins.top+ins.bottom)/2;zj.cx=p[0]-(tx-W/2)*zj.upp;zj.cz=p[2]-(ty-H/2)*zj.upp;zj.dirty=true}
-function zjSelectZone(id,fromCode){zj.sel={type:'zone',zone:id};const z=zoneParse(id);zj.sel.p=zoneCenter(z.q,z.r,z.k);if(zj.mode==='tac'&&z.k!==zj.k)zj.k=z.k;zj.dirty=true;zjMarkAtlasSel();zjOpen('zone');
+function zjSelectZone(id,fromCode){zj.sel={type:'zone',zone:id};if(zj.mode==='atlas'){zjObsDispose();zj.pres.level='zone';zj.pres.zone=id;zj.pres.hold=false}const z=zoneParse(id);zj.sel.p=zoneCenter(z.q,z.r,z.k);if(zj.mode==='tac'&&z.k!==zj.k)zj.k=z.k;zj.dirty=true;zjMarkAtlasSel();zjOpen('zone');
  if(zj.mode==='tac')zjCenterOn(zj.sel.p,false);else if(fromCode)flyTo(vector(zj.sel.p),Math.max(420,Math.min(1400,distance)))}
-function zjSelectObj(o){zj.sel={type:o.type,id:o.id,p:o.p,zone:o.zone,name:o.name};zj.dirty=true;zjMarkAtlasSel();zjOpen('obj');zjCenterOn(o.p,false)}
-function zjFocus(o){zj.k=tacLayerOf(o.p[1]);if(o.type==='world')zj.origin=o.w.id;zjSelectObj(o);zjCenterOn(o.p,true)}
+function zjSelectObj(o){zj.sel={type:o.type,id:o.id,p:o.p,zone:o.zone,name:o.name,key:o.key};zj.dirty=true;zjMarkAtlasSel();zjOpen('obj');if(zj.mode==='atlas')zjObserve(o);else zjCenterOn(o.p,false)}
+function zjFocus(o){zj.k=tacLayerOf(o.p[1]);zjSelectObj(o);zjCenterOn(o.p,true)}
 
 /* ── gestes de la tactique ── */
 const zjPtr=new Map();let zjG=null;
@@ -228,37 +228,148 @@ function zjDepthUI(){const R=zj.snap&&zj.snap.zp&&zj.snap.zp.region;let up=0,dn=
 /* ══ ATLAS : marqueurs des objets importants (icône et nom = même cible), volume de la zone ══ */
 const zjMarks=$('zj-marks');let zjMarkEls=new Map(),zjZoneMesh=null;
 function zjAtlasMarks(){if(zj.mode!=='atlas'){if(zjMarkEls.size){zjMarks.innerHTML='';zjMarkEls.clear()}return}
- const w=innerWidth,h=innerHeight,pts=[];
- for(const o of zjObjects()){const v=new T.Vector3(o.p[0],o.p[1],o.p[2]),q=toLocal(v).project(camera),dist=v.distanceTo(target);
-  if(!(q.z>-1&&q.z<1&&Math.abs(q.x)<1&&Math.abs(q.y)<1)||dist>(o.type==='world'||(zj.sel&&zj.sel.id===o.id)?9000:3200))continue;pts.push({o,x:(q.x*.5+.5)*w,y:(-q.y*.5+.5)*h})}
- // objets qui se recouvrent : un seul marqueur, qui ouvre une courte liste
- const groups=[];for(const p of pts.sort((a,b)=>(a.o.type==='world'?0:1)-(b.o.type==='world'?0:1))){const g=groups.find(g=>Math.hypot(g.x-p.x,g.y-p.y)<28);if(g)g.items.push(p.o);else groups.push({x:p.x,y:p.y,items:[p.o]})}
+ // 1. filtre de contexte selon la présentation, 2. regroupement et budget de libellés (§ 7.5)
+ const w=innerWidth,h=innerHeight,L=zj.pres.level,selId=zj.sel&&zj.sel.type!=='zone'?zj.sel.id:null,close=L==='object'||L==='system',pts=[];
+ let pool=zjObjects();
+ if(L==='object')pool=pool.filter(o=>o.id===selId);
+ else if(L==='system')pool=pool.filter(o=>o.id===selId||(zjObs&&o.key===zjObs.key));
+ else if(L==='zone')pool=pool.filter(o=>o.zone===zj.pres.zone||o.type==='world');
+ const right=new T.Vector3().setFromMatrixColumn(camera.matrixWorld,0);
+ const ins=zjInsets();
+ for(const o of pool){const v=new T.Vector3(o.p[0],o.p[1],o.p[2]),q=toLocal(v).project(camera),dist=v.distanceTo(target);
+  if(!(q.z>-1&&q.z<1&&Math.abs(q.x)<1.05&&Math.abs(q.y)<1.05))continue;
+  {const sx=(q.x*.5+.5)*w,sy=(-q.y*.5+.5)*h;if(o.id!==selId&&(sy<ins.top-4||sy>ins.bottom+4||sx>ins.right+20||sx<ins.left-20))continue}
+  if(L==='neighbourhood'&&dist>(o.type==='world'||o.id===selId?9000:3200))continue;
+  const pt={o,x:(q.x*.5+.5)*w,y:(-q.y*.5+.5)*h,sel:o.id===selId,dim:L==='zone'&&o.zone!==zj.pres.zone};
+  // en gros plan, le nom se place sous le modèle (un seul libellé, nom et adresse complète)
+  if(close&&zjObs&&(o.id===zjObs.id||zjObs.others.some(a=>a.id===o.id))){const R=o.id===zjObs.id?zjObs.R:ZJ_OBJ_R.world*.9,e=toLocal(v.clone().addScaledVector(right,R)).project(camera),rp=Math.abs((e.x-q.x)*.5*w);pt.y+=rp+14;pt.solo=true}
+  pts.push(pt)}
+ if(L==='system'&&zjObs&&zjObs.star){const v=vector(zjObs.anchor),q=toLocal(v).project(camera);if(q.z>-1&&q.z<1){const sx=(q.x*.5+.5)*w,sy=(-q.y*.5+.5)*h;let n=0;
+  if(zjObs.star.visible)pts.push({o:{type:'star',id:'star:'+zjObs.key,name:'Étoile · '+zjObs.key},x:sx,y:sy+26,solo:true,decor:true}),n++;
+  for(const p of pts)if(!p.solo&&p.o.id!==selId&&Math.hypot(p.o.p[0]-zjObs.anchor[0],p.o.p[1]-zjObs.anchor[1],p.o.p[2]-zjObs.anchor[2])<.5){p.x=sx;p.y=sy+26+n*30;p.solo=true;n++}}}
+ const sp=pts.find(p=>p.sel);if(sp&&!close)for(const p of pts)if(p!==sp&&!p.solo&&Math.hypot(p.x-sp.x,p.y-sp.y)<30)p.hide=true;
+ for(let i=pts.length-1;i>=0;i--)if(pts[i].hide)pts.splice(i,1);
+ const rank=p=>p.sel?0:p.o.type==='world'?1:p.o.type==='station'?2:p.o.type==='star'?3:4;pts.sort((a,b)=>rank(a)-rank(b));
+ // la cible sélectionnée n'est jamais absorbée dans un groupe « n lieux »
+ const groups=[];for(const p of pts){const g=!p.sel&&!p.solo&&groups.find(g=>!g.sel&&!g.solo&&Math.hypot(g.x-p.x,g.y-p.y)<28);if(g)g.items.push(p.o);else groups.push({x:p.x,y:p.y,items:[p.o],sel:p.sel,solo:p.solo,dim:p.dim,decor:p.decor})}
+ const budget=L==='object'?1:L==='system'?4:L==='zone'?6:(mobile?8:14);let named=0;const placed=[];
  const keep=new Set();
- for(const g of groups){const key=g.items.map(o=>o.id).sort().join('|');keep.add(key);let el=zjMarkEls.get(key);
-  if(!el){el=document.createElement('button');el.className='zj-mark';const o=g.items[0];
-   el.classList.add('t-'+(g.items.length>1?'many':o.type));
-   el.innerHTML='<i></i><b>'+zjEsc(g.items.length>1?g.items.length+' lieux':(o.type==='world'?zjMine(o.w.kind)+' · '+o.name:o.name))+'</b>';
-   el.addEventListener('pointerdown',e=>e.stopPropagation());el.addEventListener('pointerup',e=>e.stopPropagation());
-   el.addEventListener('click',e=>{e.stopPropagation();if(g.items.length>1){zj.list=g.items.slice();zjOpen('choix')}else zjSelectObj(g.items[0])});
+ for(const g of groups){const o=g.items[0],many=g.items.length>1,lab=g.sel||named<budget;if(lab)named++;
+  const key=L+'|'+(g.solo?'s|':'')+g.items.map(o=>o.id).sort().join('|');keep.add(key);let el=zjMarkEls.get(key);
+  if(!el){el=document.createElement('button');el.className='zj-mark';el.classList.add('t-'+(many?'many':o.type));if(g.solo)el.classList.add('solo');if(g.decor){el.classList.add('decor');el.tabIndex=-1}
+   const full=g.solo&&o.type!=='star'?(o.type==='world'?o.w.coord:o.key):'';
+   el.innerHTML='<i></i><b>'+zjEsc(many?g.items.length+' lieux':(o.type==='world'&&!g.solo?zjMine(o.w.kind)+' · '+o.name:o.name))+(full?' <small>· '+zjEsc(full)+'</small>':'')+'</b>';
+   if(!g.decor){el.addEventListener('pointerdown',e=>e.stopPropagation());el.addEventListener('pointerup',e=>e.stopPropagation());
+    el.addEventListener('click',e=>{e.stopPropagation();if(g.items.length>1){zj.list=g.items.slice();zjOpen('choix')}else if(zj.sel&&zj.sel.id===g.items[0].id)zjOpen('obj');else zjSelectObj(g.items[0])})}
    zjMarks.appendChild(el);zjMarkEls.set(key,el)}
-  // un libellé ne passe jamais sous les commandes de droite : il bascule à gauche de son icône
-  const wd=el.offsetWidth||0,left=g.x+wd-22>innerWidth-62;el.classList.toggle('left',left);
-  el.style.transform='translate('+Math.round(left?g.x-wd+44:g.x)+'px,'+Math.round(g.y)+'px)';el.classList.toggle('sel',!!(zj.sel&&g.items.some(o=>o.id===zj.sel.id)))}
+  el.classList.toggle('nolab',!lab);el.classList.toggle('dim',!!g.dim);
+  const wd=el.offsetWidth||0;let x=g.x;
+  if(g.solo){x=Math.max(8,Math.min(innerWidth-70-wd,g.x-wd/2));el.classList.remove('left');const ht=el.offsetHeight||30;
+   for(let k=0;k<6;k++){const hit=placed.find(r=>x<r.x+r.w+4&&x+wd+4>r.x&&g.y<r.y+r.h+3&&g.y+ht+3>r.y);if(!hit)break;g.y=hit.y+hit.h+4}placed.push({x,y:g.y,w:wd,h:ht})}
+  else{const roomR=innerWidth-62-(g.x-22),roomL=g.x+22-4,left=wd>roomR&&roomL>roomR;el.classList.toggle('left',left);if(left)x=g.x-wd+44}
+  el.style.transform='translate('+Math.round(x)+'px,'+Math.round(g.y)+'px)';el.classList.toggle('sel',!!g.sel)}
  for(const[k,el]of zjMarkEls)if(!keep.has(k)){el.remove();zjMarkEls.delete(k)}}
 function zjMarkAtlasSel(){if(zjZoneMesh){scene.remove(zjZoneMesh);disposeObject(zjZoneMesh);zjZoneMesh=null}
- const id=zj.sel&&zj.sel.zone;const z=id&&zoneParse(id);if(!z)return;const[cx,cz]=tacCellCenter(z.q,z.r),[a,b]=tacLayerY(z.k),pts=[];
+ const id=zj.sel&&zj.sel.type==='zone'&&zj.sel.zone;const z=id&&zoneParse(id);if(!z)return;const[cx,cz]=tacCellCenter(z.q,z.r),[a,b]=tacLayerY(z.k),pts=[];
  for(let i=0;i<6;i++){const p0=ZJ_HEX[i],p1=ZJ_HEX[(i+1)%6];for(const y of [a,b])pts.push(cx+p0[0],y,cz+p0[1],cx+p1[0],y,cz+p1[1]);pts.push(cx+p0[0],a,cz+p0[1],cx+p0[0],b,cz+p0[1])}
  const g=new T.BufferGeometry();g.setAttribute('position',new T.Float32BufferAttribute(pts,3));
  zjZoneMesh=new T.LineSegments(g,new T.LineBasicMaterial({color:0xffffff,transparent:true,opacity:.85,depthWrite:false}));zjZoneMesh.userData.global=true;zjZoneMesh.renderOrder=5;scene.add(zjZoneMesh)}
-function zjAtlasTap(){if(zj.sel){zj.sel=null;zjMarkAtlasSel();zj.dirty=true;zjOpen('home')}}
+function zjAtlasTap(x,y){const L=zj.pres.level;
+ if(zjObs&&x!=null&&(L==='object'||L==='system')){raycaster.setFromCamera(new T.Vector2(x/innerWidth*2-1,-y/innerHeight*2+1),camera);const h=raycaster.intersectObjects(zjObs.pick,true)[0];
+  if(h){let m=h.object;while(m&&!m.userData.zjId)m=m.parent;const id=m&&m.userData.zjId;if(id===zjObs.id)return zjOpen('obj');const o=id&&zjObjects().find(a=>a.id===id);if(o)return zjSelectObj(o)}}
+ if(L==='object'||L==='system'||L==='zone')return;   // gros plan ou volume : le vide ne fait rien
+ if(zj.sel){zj.sel=null;zjMarkAtlasSel();zj.dirty=true;zjOpen('home')}}
+
+/* ══ OBSERVER (cahier « Observer une planète, son système et son voisinage », 11 nov.) ══
+   Deux états distincts : ce qui est sélectionné (zj.sel) et la façon de le présenter dans l'Atlas (zj.pres).
+   Monde, port ou signature : gros plan de l'objet (Objet) ; au dézoom, son système (Système), puis le Voisinage.
+   Une zone : son volume. Le modèle 3D est une présentation : il ne déplace rien dans les données, ne change ni
+   l'origine des sondages ni les distances de jeu, et son apparence est un aperçu générique stable (graine = adresse). */
+const ZJ_OBJ_R={world:1.2,station:1.15,sig:.75};
+zj.pres={level:'neighbourhood',zone:null,back:null,hold:false};
+let zjObs=null;const zjTexCache=new Map();
+function zjHashStr(t){let h=2166136261;for(let i=0;i<t.length;i++){h^=t.charCodeAt(i);h=Math.imul(h,16777619)}return h>>>0}
+function zjGenericTex(seed){const r=randomOf(seed%2147483647||1),c=document.createElement('canvas');c.width=256;c.height=128;const x=c.getContext('2d'),img=x.createImageData(256,128),ox=r()*90+3,oy=r()*90+7,oz=r()*90+11;
+ for(let y=0;y<128;y++)for(let i=0;i<256;i++){const a=i/256*Math.PI*2,b=y/128*Math.PI,sy=Math.cos(b),sx=Math.sin(b)*Math.cos(a),sz=Math.sin(b)*Math.sin(a),n=fbm3(sx*2.4+ox,sy*2.4+oy,sz*2.4+oz),v=70+n*78,j=(y*256+i)*4;
+  img.data[j]=v*.86;img.data[j+1]=v*.9;img.data[j+2]=v*1.07;img.data[j+3]=255}
+ x.putImageData(img,0,0);const t=new T.CanvasTexture(c);t.encoding=T.sRGBEncoding;return t}
+function zjTex(seed){let t=zjTexCache.get(seed);if(t){zjTexCache.delete(seed);zjTexCache.set(seed,t);return t}t=zjGenericTex(seed);zjTexCache.set(seed,t);return t}
+function zjTexTrim(){const use=zjObs?zjObs.tex:new Set();for(const k of [...zjTexCache.keys()]){if(zjTexCache.size<=8)break;if(!use.has(k)){zjTexCache.get(k).dispose();zjTexCache.delete(k)}}}
+// ancre globale du système (position commune) ; la position de l'objet en vient, décalée de son spot s'il en a un
+function zjObjAnchor(o){if(o.type==='world'){const d=tacSecData(o.w.s,true);return[d.pos[o.w.i*3],d.pos[o.w.i*3+1],d.pos[o.w.i*3+2]]}return o.p.slice()}
+// distance de caméra pour qu'une sphère de rayon R occupe la fraction f de la largeur utile (§ 9.1)
+function zjFrameDist(R,f){const ins=zjInsets(),tv=Math.tan(camera.fov*Math.PI/360),th=tv*innerWidth/innerHeight,rw=Math.max(.2,(ins.right-ins.left)/innerWidth),rh=Math.max(.2,(ins.bottom-ins.top)/innerHeight);
+ const a=Math.min(Math.atan(f*rw*th),Math.atan(Math.min(.8,f*1.5)*rh*tv));return R/Math.sin(a)}
+function zjPlanetMesh(w,R,tex){const k=zjHashStr(w.coord);tex.add(k);const mat=new T.MeshStandardMaterial({map:zjTex(k),roughness:.9,metalness:0});mat.userData.shared=true;
+ const m=new T.Mesh(new T.SphereGeometry(R,40,28),mat);m.add(new T.Mesh(new T.SphereGeometry(R*1.07,28,18),new T.MeshBasicMaterial({color:0xaab4dd,transparent:true,opacity:.07,side:T.BackSide,blending:T.AdditiveBlending,depthWrite:false})));return m}
+function zjObsDispose(){if(!zjObs)return;scene.remove(zjObs.group);zjObs.group.traverse(a=>{if(a.geometry)a.geometry.dispose();if(a.material)for(const m of [].concat(a.material)){if(m.map&&!m.userData.shared)m.map.dispose();m.dispose()}});zjObs=null}
+function zjObsBuild(o){zjObsDispose();const anchor=zjObjAnchor(o),R=ZJ_OBJ_R[o.type]||1,g=new T.Group(),rel=p=>[p[0]-anchor[0],p[1]-anchor[1],p[2]-anchor[2]],tex=new Set(),pick=[],others=[];
+ g.add(new T.AmbientLight(0xa9b6ee,.17));const sun=new T.PointLight(0xffe2c4,2.1,0,0);g.add(sun);
+ const atAnchor=Math.hypot(...rel(o.p))<4;let star=null;
+ if(!atAnchor){star=new T.Mesh(new T.SphereGeometry(1.25,28,18),new T.MeshBasicMaterial({color:0xffd9aa,transparent:true,opacity:0}));star.add(new T.Mesh(new T.SphereGeometry(1.9,24,16),new T.MeshBasicMaterial({color:0xffc09b,transparent:true,opacity:0,blending:T.AdditiveBlending,depthWrite:false})));star.visible=false;g.add(star)}
+ else sun.position.set(-9,6,7);   // rattaché au système sans spot : lumière de présentation, aucun spot inventé
+ let main;
+ if(o.type==='world')main=zjPlanetMesh(o.w,R,tex);
+ else if(o.type==='station'){main=new T.Group();const mat=new T.MeshStandardMaterial({color:0xffcf96,roughness:.5,metalness:.4});main.add(new T.Mesh(new T.TorusGeometry(R,R*.16,12,44),mat));const core=new T.Mesh(new T.CylinderGeometry(R*.22,R*.22,R*1.6,16),mat.clone());core.rotation.x=Math.PI/2;main.add(core);main.rotation.x=.9}
+ else{main=new T.Mesh(new T.OctahedronGeometry(R,0),new T.MeshBasicMaterial({color:0xf2f0ff,wireframe:true}));main.add(new T.Mesh(new T.SphereGeometry(R*1.45,20,14),new T.MeshBasicMaterial({color:0xb29aff,transparent:true,opacity:.07,blending:T.AdditiveBlending,depthWrite:false})))}
+ main.position.set(...rel(o.p));main.userData.zjId=o.id;g.add(main);pick.push(main);
+ // autres objets connus du même système (même identifiant de système, pas un rayon) : visibles au niveau Système
+ const local=zjObjects().filter(x=>x.id!==o.id&&x.key===o.key);
+ for(const x of local)if(x.type==='world'){const m=zjPlanetMesh(x.w,ZJ_OBJ_R.world*.9,tex);m.position.set(...rel(x.p));m.userData.zjId=x.id;m.visible=false;g.add(m);pick.push(m);others.push({id:x.id,mesh:m})}
+ scene.add(g);const sysR=Math.max(6,...[o,...local].map(x=>Math.hypot(...rel(x.p))))+3;
+ zjObs={id:o.id,type:o.type,key:o.key,addr:o.type==='world'?o.w.coord:o.key,group:g,anchor,p:o.p.slice(),R,star,main,others,pick,sysR,tex,dObj:0,dSys:0,built:performance.now()};
+ zjObsDistances();zjTexTrim();return zjObs}
+function zjObsDistances(){if(!zjObs)return;const old=zjObs.dObj;zjObs.dObj=zjFrameDist(zjObs.R*1.1,mobile?.42:.34);if(old&&zj.pres.level==='object'&&Math.abs(wantedDistance-old)<old*.06)wantedDistance=zjObs.dObj;zjObs.dSys=Math.max(zjObs.dObj*3.4,zjFrameDist(zjObs.sysR,.8))}
+// observer : la cible devient le sujet de l'Atlas ; rien n'est lancé, rien n'est écrit
+function zjObserve(o,opt){opt=opt||{};if(!o)return;const P=zj.pres;
+ if(zj.mode==='atlas'&&!opt.fromTac&&(P.level==='neighbourhood'||P.level==='zone'))P.back={t:[target.x,target.y,target.z],d:Math.max(wantedDistance,300),yaw:wantedYaw,pitch:wantedPitch};
+ else if(!P.back||opt.fromTac)P.back={t:o.p.slice(),d:900,yaw:wantedYaw,pitch:.55};
+ zjMarkAtlasSel();zjObsBuild(o);P.level='object';P.zone=o.zone;P.hold=false;
+ if(zjReduce){travel=null;target.set(o.p[0],o.p[1],o.p[2]);distance=wantedDistance=zjObs.dObj}
+ else{flyTo(vector(o.p),zjObs.dObj);if(opt.fromTac)distance=Math.min(distance,420)}
+ // orientation : l'étoile éclaire la face vue de trois quarts et, au dézoom, apparaît à côté de l'objet (jamais devant)
+ if(zjObs.star){const dx=zjObs.anchor[0]-o.p[0],dz=zjObs.anchor[2]-o.p[2];let y=Math.atan2(dx,dz)+.9;while(y-wantedYaw>Math.PI)y-=2*Math.PI;while(wantedYaw-y>Math.PI)y+=2*Math.PI;wantedYaw=y;if(zjReduce)yaw=y}
+ wantedPitch=.3;rebase();zj.dirty=true;zjSheet()}
+function zjBackNeighbourhood(){const b=zj.pres.back;zj.pres.level='neighbourhood';zj.pres.hold=true;
+ if(b){flyTo(vector(b.t),Math.max(b.d,zjObs?zjObs.dSys*3:600));wantedYaw=b.yaw;wantedPitch=b.pitch}else flyTo(target.clone(),900);zj.dirty=true;zjSheet()}
+// niveau de présentation selon la distance et la place de la cible, avec des seuils d'entrée et de sortie distincts
+function zjPresUpdate(){if(zj.mode!=='atlas')return;const P=zj.pres,before=P.level;
+ if(!zj.sel)P.level='neighbourhood';
+ else if(zj.sel.type==='zone'){const z=zoneParse(zj.sel.zone),c=z&&zoneCenter(z.q,z.r,z.k);P.level=c&&target.distanceTo(vector(c))<450?'zone':'neighbourhood';P.zone=zj.sel.zone}   // une zone quittée en vue libre rend les repères
+ else if(zjObs&&zjObs.id===zj.sel.id){const dT=target.distanceTo(vector(zjObs.p)),near=target.distanceTo(vector(zjObs.anchor))<zjObs.sysR*2.2,onObj=dT<zjObs.R*2;
+  if(P.hold){if(wantedDistance>=zjObs.dSys*2.4&&distance>=zjObs.dSys*2.2||!near)P.hold=false;P.level='neighbourhood'}
+  else if(!near)P.level='neighbourhood';
+  else if(P.level==='object'){if(distance>zjObs.dObj*3.2||dT>zjObs.R*3)P.level='system'}
+  else if(P.level==='system'){if(distance>zjObs.dSys*2.4)P.level='neighbourhood';else if(onObj&&distance<zjObs.dObj*2.2)P.level='object'}
+  else if(distance<zjObs.dSys*1.6)P.level=onObj&&distance<zjObs.dObj*2.2?'object':'system'}
+ else P.level='neighbourhood';
+ if(P.level!==before){zj.dirty=true;if(zj.view==='obj'||zj.view==='home')zjSheet()}}
+function zjObsFrame(){if(!zjObs)return;const g=zjObs.group;g.position.set(zjObs.anchor[0]-origin.x,zjObs.anchor[1]-origin.y,zjObs.anchor[2]-origin.z);g.visible=zj.mode==='atlas';if(!g.visible)return;
+ // l'étoile et les autres objets du système apparaissent progressivement en quittant le gros plan
+ // fonctions continues de la distance (aucun saut au changement de niveau) ; au cadrage de référence, tout vaut 0
+ const cl=v=>Math.max(0,Math.min(1,v)),f=cl((distance-zjObs.dObj*1.8)/(zjObs.dObj*1.6));zjObs.f=cl((distance-zjObs.dObj*1.6)/(zjObs.dObj*2.5));
+ if(zjObs.star){zjObs.star.visible=f>.01;zjObs.star.material.opacity=f;zjObs.star.children[0].material.opacity=.14*f}
+ for(const a of zjObs.others)a.mesh.visible=f>.3;
+ if(zjObs.type==='world')zjObs.main.rotation.y+=.0012;else zjObs.main.rotation.y+=.004}
+const zjLookV=new T.Vector3();
+function zjLook(){zjLookV.set(0,0,0);if(zj.mode==='atlas'&&zjObs&&zjObs.star&&zjObs.f>0)zjLookV.set(zjObs.anchor[0]-zjObs.p[0],zjObs.anchor[1]-zjObs.p[1],zjObs.anchor[2]-zjObs.p[2]).multiplyScalar(.5*zjObs.f);return zjLookV}
+const zjMinD=()=>zj.mode==='atlas'&&zjObs&&(zj.pres.level==='object'||zj.pres.level==='system')?zjObs.R*1.7:14;
+const zjNoPan=()=>zj.mode==='atlas'&&zj.pres.level==='object';
+function zjObsLabel(o){if(o.type==='station')return'Observer le port';if(o.type==='sig')return'Observer la signature';
+ return zj.peek?(o.w.kind==='home'?'Observer sa capitale':'Observer sa colonie'):(o.w.kind==='home'?'Observer ma planète':'Observer ma colonie')}
 
 /* ── changement de mode : la sélection et sa profondeur sont conservées ── */
 function zjSetMode(m){if(m===zj.mode)return;
  if(m==='atlas'){const p=zj.sel&&zj.sel.p?zj.sel.p:[zj.cx,(tacLayerY(zj.k)[0]+tacLayerY(zj.k)[1])/2,zj.cz];zj.mode='atlas';document.body.classList.remove('zj-tac');zjSceneVisible(true);travel=null;
   target.set(p[0],p[1],p[2]);const d=Math.max(160,Math.min(6000,zj.upp*innerHeight/(2*Math.tan(camera.fov*Math.PI/360))));distance=wantedDistance=Math.min(d,1500);
-  if(zj.yp){wantedYaw=zj.yp.yaw;wantedPitch=zj.yp.pitch}else{wantedPitch=.55}rebase();updateStreaming(true)}
+  if(zj.yp){wantedYaw=zj.yp.yaw;wantedPitch=zj.yp.pitch}else{wantedPitch=.55}rebase();updateStreaming(true);
+  const so=zj.sel&&zj.sel.type!=='zone'?zjObjects().find(x=>x.id===zj.sel.id):null;
+  if(so)zjObserve(so,{fromTac:true});
+  else if(zj.sel&&zj.sel.type==='zone'){zj.pres.level='zone';zj.pres.zone=zj.sel.zone;distance=wantedDistance=Math.min(1500,zjFrameDist(175,.62))}
+  else zj.pres.level='neighbourhood'}
  else{zj.yp={yaw:wantedYaw,pitch:wantedPitch};zj.mode='tac';document.body.classList.add('zj-tac');if(focused)closeSystem();zjSceneVisible(false);travel=null;
-  const p=zj.sel&&zj.sel.p?zj.sel.p:[target.x,target.y,target.z];zj.cx=p[0];zj.cz=p[2];zj.k=tacLayerOf(p[1]);
+  zjObsDispose();zj.pres={level:'neighbourhood',zone:null,back:null,hold:false};
+  const p=zj.sel&&zj.sel.p?zj.sel.p:[target.x,target.y,target.z],zs=zj.sel&&zoneParse(zj.sel.zone);zj.cx=p[0];zj.cz=p[2];zj.k=zs?zs.k:tacLayerOf(p[1]);
   const h=Math.tan(camera.fov*Math.PI/360)*2*distance/innerHeight;zj.upp=Math.max(1.6,Math.min(4,h))}
  $('zj-m-atlas').classList.toggle('on',zj.mode==='atlas');$('zj-m-tac').classList.toggle('on',zj.mode==='tac');zjMarkAtlasSel();zj.dirty=true;zjSheet()}
 
@@ -288,22 +399,27 @@ const zjCtxShort=k=>{const d=k-zjHomeK();return d===0?(zj.peek?'niveau de sa cap
 function zjActBtn(a,arg,wid){if(!a||a.kind==='off')return'<span class="zj-off">'+zjEsc(a?a.label:'')+(a&&a.sub?'<small>'+zjEsc(a.sub)+'</small>':'')+'</span>';
  const x=a.kind==='tanker'||a.kind==='planet'?a.key:arg;return'<button class="zj-act" data-a="act" data-k="'+a.kind+'" data-x="'+zjEsc(x)+'" data-w="'+zjEsc(wid||zj.origin)+'">'+zjEsc(a.label)+(a.sub?'<small>'+zjEsc(a.sub)+'</small>':'')+'</button>'}
 function zjObjHtml(){const o=zjObjects().find(x=>x.id===zj.sel.id);if(!o)return{h:'<p class="zj-muted">Objet introuvable.</p>',f:''};const z=zoneParse(o.zone);
- let h='<div class="zj-kind">'+({world:zj.peek?'SON MONDE':'MON MONDE',station:'PORT FRANC',sig:'SIGNATURE'}[o.type]||'LIEU')+'</div><h3>'+zjEsc(o.name)+'</h3><dl class="zj-dl"><dt>Adresse</dt><dd>'+zjEsc(o.type==='world'?o.w.coord:o.key)+'</dd>'+(o.type==='world'?'<dt>Amas</dt><dd>'+zjEsc(zjAmasOf(o.w.coord))+'</dd>':'')+'<dt>Zone</dt><dd>'+zjEsc(z.q+' · '+z.r+' · '+zjCtxShort(z.k))+(zj.regionMap.has(o.zone)?' <small>· région de test</small>':'')+'</dd></dl>',f='';
+ let h='<div class="zj-kind">'+({world:zj.peek?'SON MONDE':'MON MONDE',station:'PORT FRANC',sig:'SIGNATURE'}[o.type]||'LIEU')+'</div><h3>'+zjEsc(o.name)+'</h3><dl class="zj-dl"><dt>Adresse</dt><dd>'+zjEsc(o.type==='world'?o.w.coord:o.key)+'</dd>'+(o.type==='world'?'<dt>Système</dt><dd>'+zjEsc(o.key)+(o.w.spot!=null?' <small>· spot '+String(o.w.spot+1).padStart(2,'0')+'</small>':' <small>· spot inconnu</small>')+'</dd><dt>Amas</dt><dd>'+zjEsc(zjAmasOf(o.w.coord))+'</dd>':'')+'<dt>Zone</dt><dd>'+zjEsc(z.q+' · '+z.r+' · '+zjCtxShort(z.k))+(zj.regionMap.has(o.zone)?' <small>· région de test</small>':'')+'</dd></dl>',f='';
  if(o.type==='world'&&zj.peek){const hm=zjHome(),dd=Math.hypot(o.p[0]-hm.p[0],o.p[1]-hm.p[1],o.p[2]-hm.p[2]);if(o.w.kind!=='home')h=h.replace(/<\/dl>$/,'<dt>Capitale</dt><dd>'+zjFmt(dd)+' u <small>· '+zjSecTxt(dd)+'</small></dd></dl>');
-  f=o.w.id===zj.origin?'<p class="zj-muted">Les distances et la portée sont mesurées depuis ce monde.</p>':'<button class="zj-primary" data-a="origin" data-w="'+zjEsc(o.w.id)+'">Mesurer depuis '+zjEsc(o.name)+'</button>'}
- else if(o.type==='world'){f=o.w.id===zj.origin?'<p class="zj-muted">Les sondages partent de ce monde.</p>':'<button class="zj-primary" data-a="origin" data-w="'+zjEsc(o.w.id)+'">Lancer les sondages depuis '+zjEsc(o.name)+'</button>'}
+  f=o.w.id===zj.origin?'<p class="zj-muted">Les distances et la portée sont mesurées depuis ce monde.</p>':'<button class="zj-second" data-a="origin" data-w="'+zjEsc(o.w.id)+'">Mesurer depuis ce monde</button>'}
+ else if(o.type==='world'){f=o.w.id===zj.origin?'<p class="zj-muted">Les sondages partent de ce monde.</p>':'<button class="zj-second" data-a="origin" data-w="'+zjEsc(o.w.id)+'">Lancer les sondages depuis '+zjEsc(o.name)+'</button>'}
  if(o.type==='sig')f=zj.peek?'<span class="zj-off">'+zjEsc(zjSigState(o.g))+'</span>':zjActBtn(ZH.sigAction(o.g.id,zj.origin),o.g.id,zj.origin);
+ // observer : un gros plan dans l'Atlas, sans mission, sans changer le départ des sondages
+ const obsHere=zj.mode==='atlas'&&zjObs&&zjObs.id===o.id&&zj.pres.level!=='neighbourhood';
+ if(obsHere){h+=o.type==='sig'?(o.g.resolved?'':'<p class="zj-muted">Signature non identifiée : la vue rapprochée n’en révèle pas la nature.</p>'):'<p class="zj-muted">Aperçu générique : l’apparence réelle '+(o.type==='world'?'de ce monde':'de ce port')+' n’est pas encore transmise à la carte. Nom, adresse et position sont exacts.</p>';
+  f='<button class="zj-primary" data-a="back-n">Retour au voisinage</button>'+f}
+ else{const ob='<button class="'+(o.type==='sig'&&!zj.peek?'zj-second':'zj-primary')+'" data-a="observe" data-id="'+zjEsc(o.id)+'">'+zjObsLabel(o)+'</button>';f=o.type==='sig'&&!zj.peek?f+ob:ob+f}
  f+='<button class="zj-second" data-a="zone" data-z="'+zjEsc(o.zone)+'">Voir sa zone</button>';return{h,f}}
 function zjHomeHtml(){if(zj.peek)return zjPeekHomeHtml();const R=zj.snap&&zj.snap.zp&&zj.snap.zp.region,zs=zj.snap?zj.snap.zp.zones:{},done=Object.values(zs).filter(z=>z.st==='done'),finds=done.reduce((a,z)=>a+(z.found||[]).length,0),miss=zj.snap?zj.snap.missions.length:0,w=zjWorld(zj.origin),hg=w&&zj.snap.hangars[w.id];
  let h='<div class="zj-kind">PROSPECTION PAR ZONES · TEST</div><h3>Touchez une zone voisine</h3><p class="zj-muted">Les zones hachurées forment la région de test. Une zone se sonde avec une seule Radar, quel que soit le nombre d’étoiles qu’elle contient.</p>';
  if(R)h+='<div class="zj-stats"><div><b>'+done.length+'/'+R.zones.length+'</b><small>zones sondées</small></div><div><b>'+finds+'</b><small>signaux</small></div><div><b>'+miss+'</b><small>en vol</small></div><div><b>'+(hg?hg.radar:0)+'</b><small>Radars à '+zjEsc(w?w.name:'')+'</small></div></div>';
  h+='<div class="zj-legend"><span><i class="h"></i>Non sondée</span><span><i class="m"></i>En mission</span><span><i class="d"></i>Sondée</span><span><i class="s"></i>Signature</span></div>';return{h,f:''}}
 function zjChoiceHtml(){let h='<div class="zj-kind">PLUSIEURS LIEUX ICI</div><h3>Lequel ?</h3>';for(const o of zj.list||[])h+='<button class="zj-row" data-a="pick" data-id="'+zjEsc(o.id)+'"><b>'+zjEsc(o.name)+'</b><small>'+zjEsc(o.sub||'')+'</small></button>';return{h,f:''}}
-function zjWorldsHtml(){if(zj.peek){let h='<div class="zj-kind">SES MONDES · '+zjEsc(zj.peek.pseudo.toUpperCase())+'</div><h3>Choisir un monde</h3><p class="zj-muted">Recentre la carte et mesure les distances depuis ce monde. Lecture seule.</p>';
-  for(const w of zj.ws)h+='<button class="zj-row'+(w.id===zj.origin?' on':'')+'" data-a="world" data-w="'+zjEsc(w.id)+'"><b>'+zjEsc(w.name)+' · '+(w.kind==='home'?'capitale':'colonie')+(w.unpub?' (pas au registre)':'')+'</b><small>'+zjEsc(w.coord)+' · '+zjEsc(zjAmasOf(w.coord))+'</small></button>';
+function zjWorldsHtml(){if(zj.peek){let h='<div class="zj-kind">SES MONDES · '+zjEsc(zj.peek.pseudo.toUpperCase())+'</div><h3>Observer un monde</h3><p class="zj-muted">Choisis un monde pour le voir de près. Les distances restent mesurées depuis '+zjEsc((zjWorld(zj.origin)||{}).name||'')+'. Lecture seule.</p>';
+  for(const w of zj.ws)h+='<button class="zj-row'+(w.id===zj.origin?' on':'')+'" data-a="world" data-w="'+zjEsc(w.id)+'"><b>'+zjEsc(w.name)+' · '+(w.kind==='home'?'capitale':'colonie')+(w.unpub?' (pas au registre)':'')+'</b><small>'+zjEsc(w.coord)+' · '+zjEsc(zjAmasOf(w.coord))+(w.id===zj.origin?' · mesures depuis ce monde':'')+'</small></button>';
   return{h,f:ZH.embed?'':'<button class="zj-second" data-a="peek-off">Revenir à ma partie</button>'}}
- let h='<div class="zj-kind">MES MONDES</div><h3>Choisir un monde</h3><p class="zj-muted">Recentre la carte et fixe le départ des sondages. Aucun changement de compte.</p>';
- for(const w of zj.ws){const hg=zj.snap.hangars[w.id]||{};h+='<button class="zj-row'+(w.id===zj.origin?' on':'')+'" data-a="world" data-w="'+zjEsc(w.id)+'"><b>'+zjEsc(w.name)+' · '+(w.kind==='home'?'capitale':'colonie')+'</b><small>'+zjEsc(w.coord)+' · '+(hg.radar||0)+' Radar'+((hg.radar||0)>1?'s':'')+' prête'+((hg.radar||0)>1?'s':'')+'</small></button>'}
+ let h='<div class="zj-kind">MES MONDES</div><h3>Observer un monde</h3><p class="zj-muted">Choisis un monde pour le voir de près. Le départ des sondages ne change que par son bouton « Lancer les sondages depuis… ».</p>';
+ for(const w of zj.ws){const hg=zj.snap.hangars[w.id]||{};h+='<button class="zj-row'+(w.id===zj.origin?' on':'')+'" data-a="world" data-w="'+zjEsc(w.id)+'"><b>'+zjEsc(w.name)+' · '+(w.kind==='home'?'capitale':'colonie')+'</b><small>'+zjEsc(w.coord)+' · '+(hg.radar||0)+' Radar'+((hg.radar||0)>1?'s':'')+' prête'+((hg.radar||0)>1?'s':'')+(w.id===zj.origin?' · départ des sondages':'')+'</small></button>'}
  if(ZH&&ZH.peek)h+='<div class="zj-find"><div><b>Voir la partie d’un commandant</b><small>Lecture seule : son empire placé sur cette carte, rien n’est modifié chez lui</small></div><div class="zj-peek-f"><input id="zj-peek-in" value="Panzerstorm" maxlength="40" autocomplete="off" autocapitalize="off" spellcheck="false" aria-label="Pseudo du commandant"><button class="zj-act" data-a="peek">Voir</button></div></div>';
  return{h,f:''}}
 function zjSheet(){if(!zj.snap){return}let r;
@@ -318,7 +434,10 @@ $('zj-sheet').addEventListener('click',e=>{const b=e.target.closest('[data-a]');
  if(a==='launch')return zjLaunch(b);
  if(a==='build-radar'){ZH.act('build-radar',null,zj.origin);return}
  if(a==='act'){if(b.disabled)return;b.disabled=true;const res=ZH.act(b.dataset.k,b.dataset.x,b.dataset.w);if(res&&res.why)toast(res.why);zjRefresh(true);return}
- if(a==='origin'||a==='world'){zj.origin=b.dataset.w;const w=zjWorld(zj.origin);if(a==='world'){zj.k=tacLayerOf(w.p[1]);if(zj.mode==='atlas'){flyTo(vector(w.p),900)}}toast('Départ des sondages : '+w.name);zj.dirty=true;zjOpen('home');if(a==='world')zjCenterOn(w.p,true);zjDepthUI();return}
+ if(a==='origin'){zj.origin=b.dataset.w;const w=zjWorld(zj.origin);toast((zj.peek?'Mesures depuis ':'Départ des sondages : ')+w.name);zj.dirty=true;zjOpen('home');zjDepthUI();return}
+ if(a==='world'){const w=zjWorld(b.dataset.w),o=w&&zjObjects().find(x=>x.id==='world:'+w.id);if(!o)return;if(zj.mode==='tac'){zj.k=tacLayerOf(w.p[1]);zjSelectObj(o);zjCenterOn(w.p,true)}else zjSelectObj(o);zjDepthUI();return}
+ if(a==='observe'){const o=zjObjects().find(x=>x.id===b.dataset.id);if(!o)return;if(!zj.sel||zj.sel.id!==o.id)zj.sel={type:o.type,id:o.id,p:o.p,zone:o.zone,name:o.name,key:o.key};if(zj.mode==='tac')zjSetMode('atlas');else zjObserve(o);return}
+ if(a==='back-n')return zjBackNeighbourhood();
  if(a==='zone')return zjSelectZone(b.dataset.z,true);
  if(a==='pick'){const o=(zj.list||[]).find(x=>x.id===b.dataset.id);if(o)zjSelectObj(o);return}
  if(a==='worlds')return zjOpen('worlds')});
@@ -335,10 +454,10 @@ const zjAmasOf=coord=>{const a=String(coord||'').split('-');return a.length>1?'a
 const zjSecTxt=d=>(d/SECTOR_SIZE).toFixed(1).replace('.',',')+' secteur'+(d>=2*SECTOR_SIZE?'s':'');
 function zjDate(t){const d=new Date(t);return isNaN(d)?'':d.toLocaleDateString('fr-CH',{day:'numeric',month:'long'})+' à '+zjClock(d)}
 function zjSigState(g){if(!g.resolved)return'Non identifiée · une Légère la résoudrait';if(g.resolvedType==='moving')return(g.target&&g.target.status==='engaged'?'Cible mouvante · tanker en route':'Cible mouvante identifiée');if(g.fixedAddress)return'Corps fixé · '+g.fixedAddress;return'Corps orbital · une Moyenne le fixerait'}
-function zjPeekSnap(d){const ws=[{id:'home',kind:'home',name:String(d.planet_name||d.active_name||d.pseudo||'Capitale').toUpperCase(),coord:d.address}];
+function zjPeekSnap(d){const ws=[{id:'w:'+d.address,kind:'home',name:String(d.planet_name||d.active_name||d.pseudo||'Capitale').toUpperCase(),coord:d.address}];
  const names=new Map((d.save_worlds||[]).filter(w=>w&&w.coord).map(w=>[w.coord,w.name]));
- (d.colonies||[]).forEach((c,i)=>{if(c&&c.address)ws.push({id:'c'+i,kind:'colony',name:String(c.name||names.get(c.address)||'Colonie').toUpperCase(),coord:c.address})});
- for(const w of d.save_worlds||[])if(w&&w.kind==='colony'&&w.coord&&!ws.some(x=>x.coord===w.coord))ws.push({id:'s'+ws.length,kind:'colony',name:String(w.name||'Colonie').toUpperCase(),coord:w.coord,unpub:true});
+ (d.colonies||[]).forEach(c=>{if(c&&c.address&&!ws.some(x=>x.coord===c.address))ws.push({id:'w:'+c.address,kind:'colony',name:String(c.name||names.get(c.address)||'Colonie').toUpperCase(),coord:c.address})});
+ for(const w of d.save_worlds||[])if(w&&w.kind==='colony'&&w.coord&&!ws.some(x=>x.coord===w.coord))ws.push({id:'w:'+w.coord,kind:'colony',name:String(w.name||'Colonie').toUpperCase(),coord:w.coord,unpub:true});
  const ncol=ws.length-1,range=ncol>=1?3+ncol:4,ranges={};for(const w of ws)ranges[w.id]=range;   // Laboratoire inconnu : on suppose le Labo 3 (4 secteurs)
  const kt=new Map((d.known_targets||[]).filter(Boolean).map(t=>[t.key,t]));
  const sigs=(d.signatures||[]).filter(g=>g&&g.id&&g.system&&!g.ignored).map(g=>({...g,resolved:!!g.resolved,target:g.movingCoordKey&&kt.has(g.movingCoordKey)?{label:kt.get(g.movingCoordKey).label,status:kt.get(g.movingCoordKey).status}:null}));
@@ -412,16 +531,16 @@ function zjPeekHomeHtml(){const P=zj.peek,d=P.data,home=zjHome(),cols=zj.ws.filt
 $('zj-m-atlas').onclick=()=>zjSetMode('atlas');$('zj-m-tac').onclick=()=>zjSetMode('tac');
 $('zj-worlds').onclick=()=>zjOpen('worlds');$('zj-close').onclick=()=>{try{ZH.close()}catch(e){}};
 $('zj-up').onclick=()=>zjSetLayer(zj.k+1);$('zj-down').onclick=()=>zjSetLayer(zj.k-1);
-$('zj-zin').onclick=()=>{if(zj.mode==='tac')zjZoom(1/1.35);else wantedDistance=Math.max(14,wantedDistance/1.35)};
+$('zj-zin').onclick=()=>{if(zj.mode==='tac')zjZoom(1/1.35);else wantedDistance=Math.max(zjMinD(),wantedDistance/1.35)};
 $('zj-zout').onclick=()=>{if(zj.mode==='tac')zjZoom(1.35);else wantedDistance=Math.min(6500,wantedDistance*1.35)};
-$('zj-home').onclick=()=>{const w=zjWorld(zj.origin);if(!w)return;if(zj.mode==='tac'){zj.k=tacLayerOf(w.p[1]);zj.upp=mobile?2.6:2.2;zjCenterOn(w.p,true)}else flyTo(vector(w.p),900);zjSheet()};
-$('zj-sh-back').onclick=()=>{zj.sel=null;zjMarkAtlasSel();zj.dirty=true;zjOpen('home')};
+$('zj-home').onclick=()=>{if(zj.mode==='atlas'&&zj.sel&&zj.sel.type!=='zone'){const o=zjObjects().find(x=>x.id===zj.sel.id);if(o)return zjObserve(o)}const w=zjWorld(zj.origin);if(!w)return;if(zj.mode==='tac'){zj.k=tacLayerOf(w.p[1]);zj.upp=mobile?2.6:2.2;zjCenterOn(w.p,true)}else flyTo(vector(w.p),900);zjSheet()};
+$('zj-sh-back').onclick=()=>{if(zj.mode==='atlas'&&zj.sel&&zj.pres.level!=='neighbourhood')return zjOpen('home');zj.sel=null;zjMarkAtlasSel();zj.dirty=true;zjOpen('home')};
 $('zj-sh-tog').onclick=()=>zjSheetState(zj.sheet==='full'?'min':zj.sheet==='min'?'sum':'full');
 
 /* ── image par image ── */
-function zjViewOffset(){const sh=$('zj-sheet').getBoundingClientRect(),want=zj.mode==='atlas'&&mobile&&zj.sheet!=='min'?Math.round(Math.max(0,innerHeight-sh.top)/2):0;
- if(want===zj.vo)return;zj.vo=want;if(want)camera.setViewOffset(innerWidth,innerHeight,0,want,innerWidth,innerHeight);else camera.clearViewOffset();camera.updateProjectionMatrix()}
-function zjFrame(){zjRefresh(false);zjViewOffset();for(const g of [navRoot,navSel,navAmb])g.visible=false;
+function zjViewOffset(){let x=0,y=0;if(zj.mode==='atlas'){const ins=zjInsets();x=Math.round(innerWidth/2-(ins.left+ins.right)/2);y=Math.round(innerHeight/2-(ins.top+ins.bottom)/2)}
+ const want=x+','+y;if(want===zj.vo)return;const first=zj.vo!=null;zj.vo=want;if(x||y)camera.setViewOffset(innerWidth,innerHeight,x,y,innerWidth,innerHeight);else camera.clearViewOffset();camera.updateProjectionMatrix();if(first&&zjObs)zjObsDistances()}
+function zjFrame(){zjRefresh(false);zjViewOffset();zjPresUpdate();zjObsFrame();for(const g of [navRoot,navSel,navAmb])g.visible=false;
  if(zjZoneMesh){const z=zoneParse(zj.sel&&zj.sel.zone);if(z)zjZoneMesh.position.set(-origin.x,-origin.y,-origin.z);zjZoneMesh.visible=zj.mode==='atlas'}
  zjAtlasMarks();if(zj.mode!=='tac')return;
  const[a,b]=tacLayerY(zj.k);target.set(zj.cx,(a+b)/2,zj.cz);travel=null;zjLoad();
@@ -446,7 +565,9 @@ function zjBoot(){zjPatterns();zjResize();
  return true}
 const zjBooted=zjBoot();
 {const m=location.search.match(/[?&]peek=([^&]+)/);if(zjBooted&&m)setTimeout(()=>zjPeekStart(decodeURIComponent(m[1]).slice(0,40)),600)}
-window.STARBYTE_ZONES={zj,refresh:zjRefresh,exportHtml:()=>zjSrc?zjExportHtml():null,exportName:()=>zjExportName(),prefetch:zjPrefetch,peekStart:zjPeekStart,selectObj:zjSelectObj,peekStop:zjPeekStop,amas:()=>zjAmasInRange(),draw:()=>zjDraw(),tap:zjTap,pick:zjPick,setMode:zjSetMode,selectZone:zjSelectZone,objects:zjObjects,estimate:zjEstimate,
+window.STARBYTE_ZONES={zj,refresh:zjRefresh,obsTex:()=>{const m=zjObs&&zjObs.main.material,c=m&&m.map&&m.map.image;if(!c)return null;const d=c.getContext('2d').getImageData(0,0,c.width,c.height).data;let h=0;for(let i=0;i<d.length;i+=97)h=(h*31+d[i])>>>0;return h},prism:()=>!!zjZoneMesh,demoSystem:()=>!!systemGroup,panBy:(dx,dy)=>pan(dx,dy),mem:()=>({...renderer.info.memory}),insets:()=>zjInsets(),
+ objScreen:()=>{if(!zjObs)return null;const v=vector(zjObs.p),q=toLocal(v).project(camera),r=new T.Vector3().setFromMatrixColumn(camera.matrixWorld,0),e=toLocal(v.clone().addScaledVector(r,zjObs.R)).project(camera);return{x:(q.x*.5+.5)*innerWidth,y:(-q.y*.5+.5)*innerHeight,rpx:Math.abs(e.x-q.x)*.5*innerWidth}},observe:id=>{const o=zjObjects().find(x=>x.id===id);if(o){zj.sel={type:o.type,id:o.id,p:o.p,zone:o.zone,name:o.name,key:o.key};zjOpen('obj');if(zj.mode==='tac')zjSetMode('atlas');else zjObserve(o)}return!!o},backN:zjBackNeighbourhood,atlasTapAt:(x,y)=>zjAtlasTap(x,y),
+ obs:()=>zjObs&&{id:zjObs.id,addr:zjObs.addr,p:zjObs.p,anchor:zjObs.anchor,R:zjObs.R,dObj:zjObs.dObj,dSys:zjObs.dSys,sysR:zjObs.sysR,others:zjObs.others.map(a=>a.id),star:!!(zjObs.star&&zjObs.star.visible),uuid:zjObs.group.uuid},pres:()=>({...zj.pres,distance,wantedDistance}),texN:()=>zjTexCache.size,minD:()=>zjMinD(),screenOf:p=>{const q=toLocal(vector(p)).project(camera);return{x:(q.x*.5+.5)*innerWidth,y:(-q.y*.5+.5)*innerHeight,z:q.z}},cam:()=>({target:[target.x,target.y,target.z],distance,yaw,pitch}),exportHtml:()=>zjSrc?zjExportHtml():null,exportName:()=>zjExportName(),prefetch:zjPrefetch,peekStart:zjPeekStart,selectObj:zjSelectObj,peekStop:zjPeekStop,amas:()=>zjAmasInRange(),draw:()=>zjDraw(),tap:zjTap,pick:zjPick,setMode:zjSetMode,selectZone:zjSelectZone,objects:zjObjects,estimate:zjEstimate,
  cellOf:tacCellOf,center:tacCellCenter,layerOf:tacLayerOf,zoneOfPoint,zoneParse,sx:X=>(X-zj.cx)/zj.upp+innerWidth/2,sy:Z=>(Z-zj.cz)/zj.upp+innerHeight/2,load:zjLoad,
  atlasFocus:(p,d)=>{target.set(p[0],p[1],p[2]);distance=wantedDistance=d||500;travel=null;rebase();updateStreaming(true)},atlasTap:(x,y)=>pick(x,y),
  atlasState:()=>({sel:zj.sel,target:[target.x,target.y,target.z],mesh:!!zjZoneMesh,marks:[...zjMarkEls.values()].map(e=>{const r=e.getBoundingClientRect();return{t:e.textContent,x:r.x,y:r.y,w:r.width,h:r.height}})})};

@@ -12,7 +12,12 @@ def once(a, b):
 js = open(os.path.join(D, 'zj_grid.js'), encoding='utf-8').read() + '\n' + open(os.path.join(D, 'zj_app.js'), encoding='utf-8').read()
 once("function pick(x,y){", "function pick(x,y){return zjAtlasTap(x,y)}\nfunction pickStar_(x,y){")   # les étoiles ne sont plus des cibles
 once("function updateMarkerLabels(){", "function updateMarkerLabels(){return;")                     # remplacés par les marqueurs de la carte
-once("p.point=star.clone().add(vector(localSpotOffset(39)))", "p.point=star.clone().add(vector(localSpotOffset(p.spot!=null?p.spot:39)))")
+once("p.point=star.clone().add(vector(localSpotOffset(39)))", "p.point=star.clone().add(vector(localSpotOffset(p.spot!=null?p.spot:0)))")
+# observer (11/11) : plus de système de démonstration tiré au hasard à l'approche ; zoom borné par le modèle observé ; pas de glissement en gros plan
+once("if(!focused&&distance<150&&wantedDistance<150&&ready){", "if(false&&!focused&&distance<150&&wantedDistance<150&&ready){")
+s = s.replace(",14,6500)", ",zjMinD(),6500)"); assert s.count("zjMinD(),6500)") == 4
+once("function pan(dx,dy){", "function pan(dx,dy){if(zjNoPan())return;")
+once("const local=toLocal(target),offset=new T.Vector3(", "const local=toLocal(target).add(zjLook()),offset=new T.Vector3(")   # au dézoom, le regard glisse vers le système
 once("function projectLabels(){const w=innerWidth,h=innerHeight;navFrame(w,h);", "function projectLabels(){const w=innerWidth,h=innerHeight;navFrame(w,h);zjFrame();")
 once("toast('Votre planète est au centre. Prenez le large.')", "toast('Touchez une zone voisine pour la sonder.')")
 once("activeKeys.add(keyOf(HOME_SECTOR));requestSector(HOME_SECTOR,true);", js + "\nactiveKeys.add(keyOf(HOME_SECTOR));requestSector(HOME_SECTOR,true);")

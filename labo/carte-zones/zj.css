@@ -66,3 +66,6 @@ body.zj-tac #zj-depth{display:flex}
  #zj-sheet[data-state=full]{height:calc(100% - 120px)}
 }
 #zj-nojs{position:fixed;inset:0;z-index:40;display:grid;place-items:center;padding:28px;background:#03040c;color:#ece8ff;text-align:center;font-size:16px;line-height:1.45}#zj-nojs b{font-size:20px}#zj-nojs p{color:#c9c6e6;max-width:30em;margin:12px auto 0}.zj-js #zj-nojs{display:none}
+.zj-mark.solo{margin:0;padding:0;min-height:30px}.zj-mark.solo i{display:none}.zj-mark.solo b,.zj-mark.solo.sel b{background:rgba(8,9,22,.8);color:#f2f0ff;padding:5px 9px;border:1px solid #ffffff22;text-shadow:none}.zj-mark.solo.sel b small{color:#80e6d3}.zj-mark b small{font:600 9px/1 ui-monospace,monospace;letter-spacing:.04em;opacity:.85;text-transform:none}
+.zj-mark.nolab b{display:none}.zj-mark.dim{opacity:.45}.zj-mark.decor{pointer-events:none;color:#ffdbb7}.zj-mark.decor b{background:none;font-weight:500}
+.reticle{display:none!important}

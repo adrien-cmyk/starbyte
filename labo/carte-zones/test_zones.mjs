@@ -130,20 +130,26 @@ if (st.found) {
   await sleep(600);
   const st2 = await F.evaluate((nm) => { const el = [...document.querySelectorAll('.zj-mark')].find(e => e.textContent.includes(nm.slice(0, 10))); if (!el) return null; const b = el.getBoundingClientRect(), i = el.querySelector('i').getBoundingClientRect(), l = el.querySelector('b').getBoundingClientRect(); return { x: i.x + i.width / 2, y: b.y + b.height / 2, lx: l.x + l.width / 2, vo: STARBYTE_ZONES.zj.vo, under: (document.elementFromPoint(l.x + l.width / 2, b.y + b.height / 2) || {}).id || '' }; }, st.name);
   const moved = st2 ? Math.round(Math.hypot(st2.x - st.x, st2.y - st.y)) : -1;
-  await F.evaluate(() => { STARBYTE_ZONES.zj.sel = null; }); await p.touchscreen.tap(box.x + (st2 || st).lx, box.y + (st2 || st).y); await sleep(400);
+  // 11/11 : le premier toucher approche la station (gros plan) ; son nom, rangé sous le modèle, désigne toujours la même cible
+  await F.evaluate(() => { STARBYTE_ZONES.zj.view = 'home'; }); await p.touchscreen.tap(box.x + (st2 || st).lx, box.y + (st2 || st).y); await sleep(400);
   const b = await F.evaluate(() => STARBYTE_ZONES.zj.sel);
-  stOk = a && a.type === 'station' && b && b.type === 'station'; stNote = `icône → ${a && a.name}, libellé → ${b && b.name} (le marqueur s'est déplacé de ${moved} px après le premier toucher, décalage d'image ${st2 && st2.vo})`;
+  const v2 = await F.evaluate(() => STARBYTE_ZONES.zj.view);
+  stOk = a && a.type === 'station' && b && b.type === 'station' && b.id === a.id && v2 === 'obj'; stNote = `icône → ${a && a.name} (approche : le marqueur devient le nom sous le modèle, ${moved} px plus loin), nom → ${b && b.name}, fiche ${v2}`;
   await p.screenshot({ path: path.join(SHOTS, '6_atlas_station.png') });
 }
 rec('STATION', stOk, `Atlas, station ${st.name} devant les étoiles : ${stNote}`);
+// 11/11 : en gros plan, le vide ne désélectionne plus (cahier « Observer ») ; au voisinage, si
+const closeTap = await F.evaluate(async () => { const S = STARBYTE_ZONES; S.atlasTap(5, 300); const keep = S.zj.sel && S.zj.sel.type; S.backN(); await new Promise(r => setTimeout(r, 2500)); return { keep, lvl: S.pres().level }; });
 const empty = await F.evaluate(() => { STARBYTE_ZONES.atlasTap(5, 300); return STARBYTE_ZONES.zj.sel; });
-rec('VIDE', empty === null, 'Atlas, toucher le vide : désélection, aucune étoile choisie');
+rec('VIDE', empty === null && closeTap.keep === 'station' && closeTap.lvl === 'neighbourhood', `Atlas, toucher le vide : en gros plan la cible reste (${closeTap.keep}) ; après « Retour au voisinage » (${closeTap.lvl}), désélection, aucune étoile choisie`);
 
 // Mes mondes : la colonie, sans changement de compte
 await F.evaluate(() => { STARBYTE_ZONES.setMode('tac'); document.getElementById('zj-worlds').click(); }); await sleep(300);
-const ws = await F.evaluate(() => { const b = [...document.querySelectorAll('#zj-sh-body [data-a="world"]')]; const col = b.find(x => x.textContent.includes('OPUS-SCND')); if (col) col.click(); const zj = STARBYTE_ZONES.zj; return { n: b.length, origin: zj.origin, k: zj.k, ctx: document.getElementById('zj-ctx').textContent }; });
+const ws = await F.evaluate(() => { const b = [...document.querySelectorAll('#zj-sh-body [data-a="world"]')]; const col = b.find(x => x.textContent.includes('OPUS-SCND')); if (col) col.click(); const zj = STARBYTE_ZONES.zj, o0 = zj.origin, sel = zj.sel && zj.sel.name;
+  const ob = document.querySelector('#zj-sh-foot [data-a="origin"]'); if (ob) ob.click();   // 11/11 : observer un monde ne change pas le départ ; son bouton, si
+  return { n: b.length, o0, sel, origin: zj.origin, k: zj.k, ctx: document.getElementById('zj-ctx').textContent }; });
 const wsG = await p.evaluate(() => ({ active: G.activeWorld || 'home', worlds: G.worlds.length }));
-rec('MONDES', ws.n === 2 && ws.origin !== 'home' && wsG.active === 'home' && /OPUS-SCND/.test(ws.ctx), `${ws.n} mondes ; choisir OPUS-SCND recentre (« ${ws.ctx} ») et fixe le départ (${ws.origin}) ; le jeu reste sur ${wsG.active}`);
+rec('MONDES', ws.n === 2 && ws.o0 === 'home' && ws.sel === 'OPUS-SCND' && ws.origin !== 'home' && wsG.active === 'home' && /OPUS-SCND/.test(ws.ctx), `${ws.n} mondes ; choisir OPUS-SCND la sélectionne et recentre (« ${ws.ctx} ») sans changer le départ (${ws.o0}) ; « Lancer les sondages depuis OPUS-SCND » le fixe (${ws.origin}) ; le jeu reste sur ${wsG.active}`);
 await p.screenshot({ path: path.join(SHOTS, '7_colonie.png') });
 
 // rechargement : rien ne se recrée, rien ne se perd

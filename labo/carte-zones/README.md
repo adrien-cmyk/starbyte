@@ -36,6 +36,15 @@ node labo/carte-zones/test_zones.mjs        # jeu en Chromium sans écran, iPhon
 node tools/parcours.mjs                     # parcours habituel du jeu
 ```
 
+## Observer un monde (11/11, cahier « Observer une planète, son système et son voisinage »)
+
+Choisir un monde, un port ou une signature puis passer en Atlas le montre en gros plan (niveau Objet) ; le dézoom
+révèle son système puis le voisinage. Une zone montre son volume. Sélection (`zj.sel`) et présentation (`zj.pres`)
+sont deux états distincts ; observer ne change ni l'origine des sondages ni les données. Le système de démonstration
+de l'atlas (planètes tirées au hasard, grille des 99 spots) n'est plus construit dans la carte par zones.
+Essais : `node labo/carte-zones/test_observer.mjs` (36 contrôles, les quatre mondes de Panzerstorm du cahier).
+Rapport : `claude/starbyte_observer_rapport_2026_11_11.md` (Project).
+
 ## Retirer le test
 
 Supprimer la ligne `zones_test.js` d'`index.html` et le dossier `github_upload/atlas/`. Les quatre lignes `ZONES_1011`
