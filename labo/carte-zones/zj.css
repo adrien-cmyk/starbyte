@@ -69,3 +69,4 @@ body.zj-tac #zj-depth{display:flex}
 .zj-mark.solo{margin:0;padding:0;min-height:30px}.zj-mark.solo i{display:none}.zj-mark.solo b,.zj-mark.solo.sel b{background:rgba(8,9,22,.8);color:#f2f0ff;padding:5px 9px;border:1px solid #ffffff22;text-shadow:none}.zj-mark.solo.sel b small{color:#80e6d3}.zj-mark b small{font:600 9px/1 ui-monospace,monospace;letter-spacing:.04em;opacity:.85;text-transform:none}
 .zj-mark.nolab b{display:none}.zj-mark.dim{opacity:.45}.zj-mark.decor{pointer-events:none;color:#ffdbb7}.zj-mark.decor b{background:none;font-weight:500}
 .reticle{display:none!important}
+.zj-mark.t-travel{color:#9fd3ff}.zj-mark.t-travel i::before{border-radius:2px;width:0;height:0;border:6px solid transparent;border-left:10px solid currentColor;background:none;transform:translateX(3px)}

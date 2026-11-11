@@ -27,6 +27,7 @@ function zjRefresh(force){if(!ZH)return;const now=performance.now();if(!force&&n
  zj.ws=zj.snap.worlds.map(w=>{const a=zjParseAddr(w.coord);return a?{...w,...a}:null}).filter(Boolean);
  for(const w of zj.ws){const o=tacSecData(w.s,true);const sp=w.spot==null?[0,0,0]:localSpotOffset(w.spot);w.p=[o.pos[w.i*3]+sp[0],o.pos[w.i*3+1]+sp[1],o.pos[w.i*3+2]+sp[2]];w.zone=zoneOfPoint(w.p)}
  if(!zj.ws.some(w=>w.id===zj.origin))zj.origin=(zj.ws[0]||{}).id||'home';
+ try{zj.tr=zjTrBuild(zj.snap.travels)}catch(e){console.warn('[zones] missions',e);zj.tr=[]}
  zj.regionMap=new Map();const R=zj.snap.zp&&zj.snap.zp.region;if(R)for(const z of R.zones)zj.regionMap.set(z.id,z);
  zj.objsT=0;zj.dirty=true;if(zj.view!=='choix')zjSheet()}
 const zjWorld=id=>zj.ws.find(w=>w.id===id)||zj.ws[0];
@@ -176,8 +177,19 @@ function zjDraw(){const c=zjCtx,W=innerWidth,H=innerHeight,inv=1/zj.upp,v=zjView
    c.strokeStyle=!g.resolved?'#f2f0ff':g.resolvedType==='moving'?'#ffc864':g.fixedAddress?'#9fe0a0':'#b29aff';c.lineWidth=1.8;c.stroke();if(!g.resolved){c.fillStyle='#f2f0ff';c.font='700 9px system-ui';c.textAlign='center';c.textBaseline='middle';c.fillText('?',X,Y+.5)}
    if(hexPx>=60){c.fillStyle='#ece8ff';c.font='10px system-ui';c.textAlign='left';c.textBaseline='middle';if(labOk(X+11,Y,c.measureText(o.name).width))c.fillText(o.name,X+11,Y)}}
   hits.push({x:X,y:Y,o})}
+ // 9b. missions suivables : tracé projeté de la mission choisie (parcouru plein, restant en tirets), repère orienté touchable
+ {const now=Date.now(),selTr=zj.sel&&zj.sel.type==='travel'?zj.sel.id:null;
+  for(const tr of zj.tr){if(!tr.ok)continue;const st=zjTrState(tr,now),isSel=tr.id===selTr;
+   if(isSel&&tr.pts.length>1){const P=tr.pts,cut=st.along*tr.L;c.save();c.lineWidth=2;c.strokeStyle='rgba(159,211,255,.55)';c.setLineDash([6,5]);c.beginPath();P.forEach((q,j)=>j?c.lineTo(sx(q[0]),sy(q[2])):c.moveTo(sx(q[0]),sy(q[2])));c.stroke();c.setLineDash([]);
+    c.strokeStyle='#d7ecff';c.beginPath();if(st.phase==='back'){c.moveTo(sx(P[P.length-1][0]),sy(P[P.length-1][2]))}else{c.moveTo(sx(P[0][0]),sy(P[0][2]));for(let j=1;j<P.length&&tr.cum[j]<=cut;j++)c.lineTo(sx(P[j][0]),sy(P[j][2]))}c.lineTo(sx(st.p[0]),sy(st.p[2]));c.stroke();
+    for(const q of P.slice(1,-1)){const X=sx(q[0]),Y=sy(q[2]);c.strokeStyle='#9fd3ff';c.lineWidth=1.4;c.strokeRect(X-3,Y-3,6,6)}c.restore()}
+   const o={type:'travel',id:tr.id,name:tr.name,p:st.p};if(!zjInSlice(st.p[1])){if(isSel)ind.push(o);continue}
+   const X=sx(st.p[0]),Y=sy(st.p[2]);if(X<-30||X>W+30||Y<-30||Y>H+30)continue;const a=Math.atan2(st.dir?st.dir[2]:1,st.dir?st.dir[0]:0);
+   c.save();c.translate(X,Y);c.rotate(a);c.beginPath();c.moveTo(9,0);c.lineTo(-6,6);c.lineTo(-3,0);c.lineTo(-6,-6);c.closePath();c.fillStyle=isSel?'#ffffff':'#9fd3ff';c.fill();c.restore();
+   if(isSel||hexPx>=40){c.fillStyle='#cfe9ff';c.font='600 10px system-ui';c.textAlign='left';c.textBaseline='middle';const t=tr.name.toUpperCase()+' · '+(ZJ_TR_KIND[tr.kind]||'');if(labOk(X+12,Y,c.measureText(t).width))c.fillText(t,X+12,Y)}
+   hits.push({x:X,y:Y,o})}}
  // 9. Radars en vol (position issue des horodatages)
- if(zj.snap)for(const m of zj.snap.missions){const p=zjMissionPos(m);if(!p||!zjInSlice(p[1]))continue;const X=sx(p[0]),Y=sy(p[2]);if(X<-10||X>W+10||Y<-10||Y>H+10)continue;zj.anim=!zjReduce||zj.anim;
+ if(zj.snap)for(const m of zj.snap.missions){if(zj.tr.some(t=>t.ok&&t.id==='pr:'+m.id))continue;const p=zjMissionPos(m);if(!p||!zjInSlice(p[1]))continue;const X=sx(p[0]),Y=sy(p[2]);if(X<-10||X>W+10||Y<-10||Y>H+10)continue;zj.anim=!zjReduce||zj.anim;
   c.fillStyle='#e6f0ff';c.beginPath();c.moveTo(X,Y-6);c.lineTo(X+5,Y+4);c.lineTo(X-5,Y+4);c.closePath();c.fill()}
  // 10. halo de l'objet sélectionné
  if(zj.sel&&zj.sel.p&&zj.sel.type!=='zone'&&zjInSlice(zj.sel.p[1])){const X=sx(zj.sel.p[0]),Y=sy(zj.sel.p[2]);c.strokeStyle='#fff';c.lineWidth=1.6;c.beginPath();c.arc(X,Y,14,0,6.283);c.stroke();c.strokeStyle='rgba(255,255,255,.3)';c.beginPath();c.arc(X,Y,21,0,6.283);c.stroke()}
@@ -200,9 +212,9 @@ function zjTap(px,py){const r=zjPick(px,py);
  const[wx,wz]=zjW(px,py),[q,rr]=tacCellOf(wx,wz);zjSelectZone(zoneId(q,rr,zj.k))}
 function zjCenterOn(p,force){if(zj.mode!=='tac')return;const ins=zjInsets(),W=innerWidth,H=innerHeight,X=(p[0]-zj.cx)/zj.upp+W/2,Y=(p[2]-zj.cz)/zj.upp+H/2,pad=Math.min(60,TAC_R/zj.upp);
  if(!force&&X>ins.left+pad&&X<ins.right-pad&&Y>ins.top+pad&&Y<ins.bottom-pad)return;const tx=(ins.left+ins.right)/2,ty=(ins.top+ins.bottom)/2;zj.cx=p[0]-(tx-W/2)*zj.upp;zj.cz=p[2]-(ty-H/2)*zj.upp;zj.dirty=true}
-function zjSelectZone(id,fromCode){zj.sel={type:'zone',zone:id};if(zj.mode==='atlas'){zjObsDispose();zj.pres.level='zone';zj.pres.zone=id;zj.pres.hold=false}const z=zoneParse(id);zj.sel.p=zoneCenter(z.q,z.r,z.k);if(zj.mode==='tac'&&z.k!==zj.k)zj.k=z.k;zj.dirty=true;zjMarkAtlasSel();zjOpen('zone');
+function zjSelectZone(id,fromCode){zj.follow=null;zjTrObsDispose();zj.sel={type:'zone',zone:id};if(zj.mode==='atlas'){zjObsDispose();zj.pres.level='zone';zj.pres.zone=id;zj.pres.hold=false}const z=zoneParse(id);zj.sel.p=zoneCenter(z.q,z.r,z.k);if(zj.mode==='tac'&&z.k!==zj.k)zj.k=z.k;zj.dirty=true;zjMarkAtlasSel();zjOpen('zone');
  if(zj.mode==='tac')zjCenterOn(zj.sel.p,false);else if(fromCode)flyTo(vector(zj.sel.p),Math.max(420,Math.min(1400,distance)))}
-function zjSelectObj(o){zj.sel={type:o.type,id:o.id,p:o.p,zone:o.zone,name:o.name,key:o.key};zj.dirty=true;zjMarkAtlasSel();zjOpen('obj');if(zj.mode==='atlas')zjObserve(o);else zjCenterOn(o.p,false)}
+function zjSelectObj(o){if(o&&o.type==='travel')return zjSelectTravel(o.id);zj.follow=null;zjTrObsDispose();zj.sel={type:o.type,id:o.id,p:o.p,zone:o.zone,name:o.name,key:o.key};zj.dirty=true;zjMarkAtlasSel();zjOpen('obj');if(zj.mode==='atlas')zjObserve(o);else zjCenterOn(o.p,false)}
 function zjFocus(o){zj.k=tacLayerOf(o.p[1]);zjSelectObj(o);zjCenterOn(o.p,true)}
 
 /* ── gestes de la tactique ── */
@@ -213,7 +225,7 @@ zjCv.addEventListener('pointerdown',e=>{zjCv.setPointerCapture(e.pointerId);zjPt
 zjCv.addEventListener('pointermove',e=>{if(!zjPtr.has(e.pointerId)||!zjG)return;const prev=zjPtr.get(e.pointerId);zjPtr.set(e.pointerId,{x:e.clientX,y:e.clientY});
  if(zjPtr.size>=2){const a=[...zjPtr.values()],d=Math.hypot(a[0].x-a[1].x,a[0].y-a[1].y)||1,m=[(a[0].x+a[1].x)/2,(a[0].y+a[1].y)/2],[wx,wz]=zjW(zjG.pm[0],zjG.pm[1]);
   zj.upp=Math.max(ZJ_UPP[0],Math.min(ZJ_UPP[1],zj.upp*zjG.pd/d));zj.cx=wx-(m[0]-innerWidth/2)*zj.upp;zj.cz=wz-(m[1]-innerHeight/2)*zj.upp;zjG.pd=d;zjG.pm=m;zjG.moved=true;zj.dirty=true;return}
- if(Math.hypot(e.clientX-zjG.x,e.clientY-zjG.y)>7)zjG.moved=true;if(!zjG.moved)return;
+ if(Math.hypot(e.clientX-zjG.x,e.clientY-zjG.y)>7)zjG.moved=true;if(!zjG.moved)return;zjOnPan();
  zj.cx-=(e.clientX-prev.x)*zj.upp;zj.cz-=(e.clientY-prev.y)*zj.upp;zj.dirty=true});
 function zjUp(e){if(!zjPtr.has(e.pointerId))return;zjPtr.delete(e.pointerId);if(zjPtr.size||!zjG)return;const g=zjG;zjG=null;if(e.type==='pointercancel'||g.multi)return;if(!g.moved&&performance.now()-g.t<700)zjTap(e.clientX,e.clientY)}
 zjCv.addEventListener('pointerup',zjUp);zjCv.addEventListener('pointercancel',zjUp);
@@ -229,9 +241,9 @@ function zjDepthUI(){const R=zj.snap&&zj.snap.zp&&zj.snap.zp.region;let up=0,dn=
 const zjMarks=$('zj-marks');let zjMarkEls=new Map(),zjZoneMesh=null;
 function zjAtlasMarks(){if(zj.mode!=='atlas'){if(zjMarkEls.size){zjMarks.innerHTML='';zjMarkEls.clear()}return}
  // 1. filtre de contexte selon la présentation, 2. regroupement et budget de libellés (§ 7.5)
- const w=innerWidth,h=innerHeight,L=zj.pres.level,selId=zj.sel&&zj.sel.type!=='zone'?zj.sel.id:null,close=L==='object'||L==='system',pts=[];
+ const w=innerWidth,h=innerHeight,L=zj.pres.level,selId=zj.sel&&zj.sel.type!=='zone'?zj.sel.id:null,close=L==='object'||L==='system'||L==='travel',pts=[];
  let pool=zjObjects();
- if(L==='object')pool=pool.filter(o=>o.id===selId);
+ if(L==='object'||L==='travel')pool=pool.filter(o=>o.id===selId);
  else if(L==='system')pool=pool.filter(o=>o.id===selId||(zjObs&&o.key===zjObs.key));
  else if(L==='zone')pool=pool.filter(o=>o.zone===zj.pres.zone||o.type==='world');
  const right=new T.Vector3().setFromMatrixColumn(camera.matrixWorld,0);
@@ -249,18 +261,25 @@ function zjAtlasMarks(){if(zj.mode!=='atlas'){if(zjMarkEls.size){zjMarks.innerHT
   for(const p of pts)if(!p.solo&&p.o.id!==selId&&Math.hypot(p.o.p[0]-zjObs.anchor[0],p.o.p[1]-zjObs.anchor[1],p.o.p[2]-zjObs.anchor[2])<.5){p.x=sx;p.y=sy+26+n*30;p.solo=true;n++}}}
  const sp=pts.find(p=>p.sel);if(sp&&!close)for(const p of pts)if(p!==sp&&!p.solo&&Math.hypot(p.x-sp.x,p.y-sp.y)<30)p.hide=true;
  for(let i=pts.length-1;i>=0;i--)if(pts[i].hide)pts.splice(i,1);
- const rank=p=>p.sel?0:p.o.type==='world'?1:p.o.type==='station'?2:p.o.type==='star'?3:4;pts.sort((a,b)=>rank(a)-rank(b));
+ // missions : la sélectionnée (nom sous le modèle) ; au voisinage, les autres comme repères de priorité « missions »
+ {const now=Date.now(),selTr=zj.sel&&zj.sel.type==='travel'?zj.sel.id:null;
+  for(const tr of zj.tr){if(!tr.ok)continue;if(L==='travel'?tr.id!==selTr:L!=='neighbourhood')continue;const st=zjTrState(tr,now),v=new T.Vector3(st.p[0],st.p[1],st.p[2]),q=toLocal(v).project(camera);if(!(q.z>-1&&q.z<1&&Math.abs(q.x)<1.05&&Math.abs(q.y)<1.05))continue;
+   const pt={o:{type:'travel',id:tr.id,name:tr.name+' · '+(ZJ_TR_KIND[tr.kind]||'').toLowerCase(),p:st.p,tr},x:(q.x*.5+.5)*w,y:(-q.y*.5+.5)*h,sel:tr.id===selTr};
+   if(pt.sel&&zjTrObs){const r=new T.Vector3().setFromMatrixColumn(camera.matrixWorld,0),e=toLocal(v.clone().addScaledVector(r,1.1)).project(camera);pt.y+=Math.max(14,Math.abs((e.x-q.x)*.5*w)+12);pt.solo=true}
+   pts.push(pt);
+   if(pt.sel)for(const [lab,q3] of [['Départ · ',tr.pts[0]],['Vers · ',tr.pts[tr.pts.length-1]]]){const qq=toLocal(vector(q3)).project(camera);if(qq.z>-1&&qq.z<1&&Math.abs(qq.x)<1&&Math.abs(qq.y)<1)pts.push({o:{type:'star',id:'tr:'+lab+tr.id,name:lab+(lab[0]==='D'?(zj.ws.find(x=>x.coord===tr.from)||{}).name||tr.from:(tr.toLabel||tr.to))},x:(qq.x*.5+.5)*w,y:(-qq.y*.5+.5)*h+16,solo:true,decor:true})}}}
+ const rank=p=>p.sel?0:p.o.type==='world'?1:p.o.type==='station'?2:p.o.type==='travel'?3:p.o.type==='star'?4:5;pts.sort((a,b)=>rank(a)-rank(b));
  // la cible sélectionnée n'est jamais absorbée dans un groupe « n lieux »
  const groups=[];for(const p of pts){const g=!p.sel&&!p.solo&&groups.find(g=>!g.sel&&!g.solo&&Math.hypot(g.x-p.x,g.y-p.y)<28);if(g)g.items.push(p.o);else groups.push({x:p.x,y:p.y,items:[p.o],sel:p.sel,solo:p.solo,dim:p.dim,decor:p.decor})}
- const budget=L==='object'?1:L==='system'?4:L==='zone'?6:(mobile?8:14);let named=0;const placed=[];
+ const budget=L==='object'?1:L==='travel'?3:L==='system'?4:L==='zone'?6:(mobile?8:14);let named=0;const placed=[];
  const keep=new Set();
  for(const g of groups){const o=g.items[0],many=g.items.length>1,lab=g.sel||named<budget;if(lab)named++;
   const key=L+'|'+(g.solo?'s|':'')+g.items.map(o=>o.id).sort().join('|');keep.add(key);let el=zjMarkEls.get(key);
   if(!el){el=document.createElement('button');el.className='zj-mark';el.classList.add('t-'+(many?'many':o.type));if(g.solo)el.classList.add('solo');if(g.decor){el.classList.add('decor');el.tabIndex=-1}
-   const full=g.solo&&o.type!=='star'?(o.type==='world'?o.w.coord:o.key):'';
+   const full=g.solo&&o.type!=='star'?(o.type==='world'?o.w.coord:o.type==='travel'?(o.tr.to?'vers '+o.tr.to:''):o.key):'';
    el.innerHTML='<i></i><b>'+zjEsc(many?g.items.length+' lieux':(o.type==='world'&&!g.solo?zjMine(o.w.kind)+' · '+o.name:o.name))+(full?' <small>· '+zjEsc(full)+'</small>':'')+'</b>';
    if(!g.decor){el.addEventListener('pointerdown',e=>e.stopPropagation());el.addEventListener('pointerup',e=>e.stopPropagation());
-    el.addEventListener('click',e=>{e.stopPropagation();if(g.items.length>1){zj.list=g.items.slice();zjOpen('choix')}else if(zj.sel&&zj.sel.id===g.items[0].id)zjOpen('obj');else zjSelectObj(g.items[0])})}
+    el.addEventListener('click',e=>{e.stopPropagation();if(g.items.length>1){zj.list=g.items.slice();zjOpen('choix')}else if(zj.sel&&zj.sel.id===g.items[0].id)zjOpen(g.items[0].type==='travel'?'travel':'obj');else zjSelectObj(g.items[0])})}
    zjMarks.appendChild(el);zjMarkEls.set(key,el)}
   el.classList.toggle('nolab',!lab);el.classList.toggle('dim',!!g.dim);
   const wd=el.offsetWidth||0;let x=g.x;
@@ -275,6 +294,7 @@ function zjMarkAtlasSel(){if(zjZoneMesh){scene.remove(zjZoneMesh);disposeObject(
  const g=new T.BufferGeometry();g.setAttribute('position',new T.Float32BufferAttribute(pts,3));
  zjZoneMesh=new T.LineSegments(g,new T.LineBasicMaterial({color:0xffffff,transparent:true,opacity:.85,depthWrite:false}));zjZoneMesh.userData.global=true;zjZoneMesh.renderOrder=5;scene.add(zjZoneMesh)}
 function zjAtlasTap(x,y){const L=zj.pres.level;
+ if(L==='travel'){if(zjTrObs&&x!=null){raycaster.setFromCamera(new T.Vector2(x/innerWidth*2-1,-y/innerHeight*2+1),camera);if(raycaster.intersectObject(zjTrObs.veh,true).length)zjOpen('travel')}return}
  if(zjObs&&x!=null&&(L==='object'||L==='system')){raycaster.setFromCamera(new T.Vector2(x/innerWidth*2-1,-y/innerHeight*2+1),camera);const h=raycaster.intersectObjects(zjObs.pick,true)[0];
   if(h){let m=h.object;while(m&&!m.userData.zjId)m=m.parent;const id=m&&m.userData.zjId;if(id===zjObs.id)return zjOpen('obj');const o=id&&zjObjects().find(a=>a.id===id);if(o)return zjSelectObj(o)}}
  if(L==='object'||L==='system'||L==='zone')return;   // gros plan ou volume : le vide ne fait rien
@@ -335,6 +355,7 @@ function zjBackNeighbourhood(){const b=zj.pres.back;zj.pres.level='neighbourhood
 // niveau de présentation selon la distance et la place de la cible, avec des seuils d'entrée et de sortie distincts
 function zjPresUpdate(){if(zj.mode!=='atlas')return;const P=zj.pres,before=P.level;
  if(!zj.sel)P.level='neighbourhood';
+ else if(zj.sel.type==='travel')P.level='travel';
  else if(zj.sel.type==='zone'){const z=zoneParse(zj.sel.zone),c=z&&zoneCenter(z.q,z.r,z.k);P.level=c&&target.distanceTo(vector(c))<450?'zone':'neighbourhood';P.zone=zj.sel.zone}   // une zone quittée en vue libre rend les repères
  else if(zjObs&&zjObs.id===zj.sel.id){const dT=target.distanceTo(vector(zjObs.p)),near=target.distanceTo(vector(zjObs.anchor))<zjObs.sysR*2.2,onObj=dT<zjObs.R*2;
   if(P.hold){if(wantedDistance>=zjObs.dSys*2.4&&distance>=zjObs.dSys*2.2||!near)P.hold=false;P.level='neighbourhood'}
@@ -358,6 +379,88 @@ const zjNoPan=()=>zj.mode==='atlas'&&zj.pres.level==='object';
 function zjObsLabel(o){if(o.type==='station')return'Observer le port';if(o.type==='sig')return'Observer la signature';
  return zj.peek?(o.w.kind==='home'?'Observer sa capitale':'Observer sa colonie'):(o.w.kind==='home'?'Observer ma planète':'Observer ma colonie')}
 
+/* ══ SUIVRE UNE MISSION (cahier « Observer » v1.1, § 18) ══
+   Les missions sont celles de la partie (tankers, sondes, flottes en embuscade, arches), lues sans rien modifier.
+   Leur position est ESTIMÉE à partir des horaires enregistrés : le long des jalons connus d'une ligne, ou en ligne
+   droite pour un vol direct. Le suivi est un état de caméra : l'arrêter libère la caméra, la mission continue.
+   Une partie lue (export, autre commandant) n'en présente aucune : rien n'est inventé. */
+zj.tr=[];zj.follow=null;let zjTrObs=null;
+const ZJ_TR_KIND={tanker:'TANKER',probe:'SONDE',fleet:'FLOTTE',ark:'ARCHE'};
+function zjAddrPos(a){const x=zjParseAddr(a);if(!x)return null;if(x.spot==null)return zjPosOf(x.key);const d=tacSecData(x.s,true),sp=localSpotOffset(x.spot);return[d.pos[x.i*3]+sp[0],d.pos[x.i*3+1]+sp[1],d.pos[x.i*3+2]+sp[2]]}
+function zjTrBuild(list){const out=[];for(const t of list||[]){let pts=[],ok=!!t.from&&!!t.to;
+  if(ok){const w=zj.ws.find(x=>x.coord===t.from);pts.push(w?w.p:zjAddrPos(t.from));for(const v of t.via||[])pts.push(zjAddrPos(v));pts.push(zjAddrPos(t.to));ok=pts.every(Boolean)}
+  const P=ok?pts.filter((q,i)=>!i||Math.hypot(q[0]-pts[i-1][0],q[1]-pts[i-1][1],q[2]-pts[i-1][2])>.01):[],cum=[0];
+  for(let i=1;i<P.length;i++)cum.push(cum[i-1]+Math.hypot(P[i][0]-P[i-1][0],P[i][1]-P[i-1][1],P[i][2]-P[i-1][2]));
+  out.push({...t,pts:P,cum,L:cum[cum.length-1]||0,ok:ok&&P.length>=1})}return out}
+function zjAlong(tr,f){const P=tr.pts;if(P.length<2)return{p:P[0].slice(),dir:[0,0,1]};const d=Math.max(0,Math.min(1,f))*tr.L;let i=1;while(i<P.length-1&&tr.cum[i]<d)i++;
+ const a=P[i-1],b=P[i],seg=tr.cum[i]-tr.cum[i-1]||1,u=Math.max(0,Math.min(1,(d-tr.cum[i-1])/seg)),dir=[b[0]-a[0],b[1]-a[1],b[2]-a[2]];return{p:[a[0]+dir[0]*u,a[1]+dir[1]*u,a[2]+dir[2]*u],dir,seg:i}}
+// phase en cours et position à l'instant t (horaires absolus : rien ne dépend d'un chronomètre local)
+function zjTrState(tr,t){const ph=(tr.phases||[]).filter(q=>q&&q.t0!=null);if(!ph.length)return{phase:'out',f:0,along:0,done:false,p:tr.ok?tr.pts[0].slice():null,dir:[0,0,1],eta:null,end:null};
+ let cur=ph[ph.length-1];for(const q of ph)if(q.t1==null||t<q.t1){cur=q;break}
+ const dur=(cur.t1==null?cur.t0:cur.t1)-cur.t0,f=cur.t1==null?1:dur<=0?1:Math.max(0,Math.min(1,(t-cur.t0)/dur));let along;
+ if(cur.dir==='out')along=f;else if(cur.dir==='stay')along=1;
+ else{const o=ph[0],turn=o.dir==='out'&&cur.t0<o.t1&&o.t1>o.t0?Math.max(0,Math.min(1,(cur.t0-o.t0)/(o.t1-o.t0))):1;along=turn*(1-f)}   // demi-tour en route : le retour part du point atteint
+ const last=ph[ph.length-1],a=tr.ok?zjAlong(tr,along):null;
+ return{phase:cur.dir,f,along,done:last.t1!=null&&t>=last.t1,p:a&&a.p,dir:a&&(cur.dir==='back'?a.dir.map(v=>-v):a.dir),eta:cur.t1,end:last.t1}}
+const zjLeft=t=>{const m=Math.round((t-Date.now())/60000);return m>0?(m>=120?'dans '+Math.round(m/60)+' h':'dans '+m+' min'):m===0?'maintenant':'dépassée'};
+const zjTrFind=id=>zj.tr.find(x=>x.id===id);
+function zjTrDest(tr){if(!tr.to)return null;const sys=tr.to.split('-').slice(0,3).join('-');return zjObjects().find(o=>o.type==='world'?o.w.coord===tr.to:o.key===sys)||null}
+function zjSelectTravel(id){const tr=zjTrFind(id);if(!tr)return;if(zj.follow&&zj.follow.id!==id)zj.follow=null;zj.sel={type:'travel',id,name:tr.name};zjObsDispose();zjMarkAtlasSel();zj.dirty=true;
+ if(zj.mode==='atlas'){zj.pres.level='travel';if(tr.ok){zjTrObsBuild(tr);const st=zjTrState(tr,Date.now());flyTo(vector(st.p),Math.max(zjFrameDist(2.4,.45),Math.min(wantedDistance,700)))}}
+ else if(tr.ok){const st=zjTrState(tr,Date.now());zj.k=tacLayerOf(st.p[1]);zjCenterOn(st.p,false);zjDepthUI()}zjOpen('travel')}
+function zjFollow(id){const tr=zjTrFind(id);if(!tr||!tr.ok)return false;zj.sel={type:'travel',id,name:tr.name};zj.follow={id,on:true,susp:false,ended:false,arrived:false,t:performance.now(),engage:performance.now()+(zjReduce?0:950)};
+ if(zj.mode!=='atlas'){zjSetMode('atlas');return true}
+ zjObsDispose();zjMarkAtlasSel();zj.pres.level='travel';zjTrObsBuild(tr);const st=zjTrState(tr,Date.now()),d=zjFrameDist(2.4,mobile?.42:.34);
+ if(zjReduce){travel=null;target.set(st.p[0],st.p[1],st.p[2]);distance=wantedDistance=d}else flyTo(vector(st.p),d);rebase();zj.dirty=true;zjOpen('travel');return true}
+function zjFollowResume(){const F=zj.follow;if(!F)return;F.susp=false;F.on=!F.ended;F.engage=performance.now()+(zjReduce?0:700);const tr=zjTrFind(F.id);if(tr&&tr.ok&&zj.mode==='atlas'){const st=zjTrState(tr,Date.now());if(zjReduce){target.set(st.p[0],st.p[1],st.p[2])}else flyTo(vector(st.p),wantedDistance)}zjSheet()}
+function zjFollowStop(){if(zj.follow){zj.follow.on=false;zj.follow.susp=false;zj.follow.stopped=true}zjSheet()}
+function zjOnPan(){const F=zj.follow;if(F&&F.on&&!F.susp){F.susp=true;zjSheet()}}
+// pincer en suivi : seule la distance change ; si les deux doigts glissent nettement (> 48 px), c'est un déplacement libre
+function zjPinchPan(dx,dy){const F=zj.follow;if(F&&F.on&&!F.susp){const t=performance.now();if(t-(F.pt||0)>400)F.pa=0;F.pt=t;F.pa=(F.pa||0)+Math.hypot(dx,dy);if(F.pa<48)return}pan(dx,dy)}
+// voir le trajet entier : le suivi est suspendu, la mission continue
+function zjTravelFit(){const tr=zjTrFind(zj.sel&&zj.sel.id);if(!tr||!tr.ok)return;if(zj.follow&&zj.follow.on)zj.follow.susp=true;const P=tr.pts,c=[0,1,2].map(j=>(Math.min(...P.map(q=>q[j]))+Math.max(...P.map(q=>q[j])))/2),R=Math.max(40,...P.map(q=>Math.hypot(q[0]-c[0],q[1]-c[1],q[2]-c[2])));
+ if(zj.mode==='atlas'){flyTo(vector(c),Math.min(6400,zjFrameDist(R*1.1,.86)))}else{const ins=zjInsets(),ext=Math.max(...P.map(q=>Math.abs(q[0]-c[0])),...P.map(q=>Math.abs(q[2]-c[2])))*2.3;zj.upp=Math.max(ZJ_UPP[0],Math.min(ZJ_UPP[1],ext/Math.min(ins.right-ins.left,ins.bottom-ins.top)));zjCenterOn(c,true)}zjSheet()}
+function zjTrObsDispose(){if(!zjTrObs)return;scene.remove(zjTrObs.group);zjTrObs.group.traverse(a=>{if(a.geometry)a.geometry.dispose();if(a.material)for(const m of [].concat(a.material))m.dispose()});zjTrObs=null}
+function zjTrObsBuild(tr){zjTrObsDispose();if(!tr.ok)return;const o=tr.pts[0],g=new T.Group(),loc=q=>new T.Vector3(q[0]-o[0],q[1]-o[1],q[2]-o[2]);
+ const path=new T.Line(new T.BufferGeometry().setFromPoints(tr.pts.map(loc)),new T.LineDashedMaterial({color:0x9fd3ff,dashSize:6,gapSize:5,transparent:true,opacity:.55,depthWrite:false}));path.computeLineDistances();g.add(path);
+ const done=new T.Line(new T.BufferGeometry(),new T.LineBasicMaterial({color:0xd7ecff,transparent:true,opacity:.95,depthWrite:false}));g.add(done);
+ for(const q of tr.pts.slice(1,-1)){const n=new T.Mesh(new T.OctahedronGeometry(.9,0),new T.MeshBasicMaterial({color:0x9fd3ff,wireframe:true,transparent:true,opacity:.7}));n.position.copy(loc(q));g.add(n)}   // jalons
+ g.add(new T.AmbientLight(0xb8c4ff,.55));const dl=new T.DirectionalLight(0xffffff,1.1);dl.position.set(4,6,3);g.add(dl);
+ const v=new T.Group(),hull=new T.MeshStandardMaterial({color:tr.kind==='fleet'?0xd9ccff:tr.kind==='probe'?0xf2f0ff:0xffd28a,roughness:.45,metalness:.5});
+ if(tr.kind==='fleet'){for(const [x,z] of [[0,.9],[-.8,-.5],[.8,-.5]]){const c=new T.Mesh(new T.ConeGeometry(.32,1.1,10),hull);c.rotation.x=Math.PI/2;c.position.set(x,0,z);v.add(c)}}
+ else if(tr.kind==='probe'){const c=new T.Mesh(new T.OctahedronGeometry(.45,0),hull);v.add(c)}
+ else{const b=new T.Mesh(new T.CylinderGeometry(.42,.42,1.7,16),hull);b.rotation.x=Math.PI/2;v.add(b);for(const z of [-.85,.85]){const e=new T.Mesh(new T.SphereGeometry(.42,14,10),hull);e.position.z=z;v.add(e)}const n=new T.Mesh(new T.ConeGeometry(.2,.5,10),new T.MeshBasicMaterial({color:0x9fd3ff}));n.rotation.x=-Math.PI/2;n.position.z=-1.35;v.add(n)}   // tanker : coque + tuyère
+ v.userData.zjTr=tr.id;g.add(v);scene.add(g);zjTrObs={id:tr.id,group:g,o,veh:v,done,last:0}}
+const zjZ=new T.Vector3(0,0,1),zjDirV=new T.Vector3();
+function zjTrObsFrame(){if(!zjTrObs)return;const g=zjTrObs.group;g.visible=zj.mode==='atlas';if(!g.visible)return;const tr=zjTrFind(zjTrObs.id);if(!tr){zjTrObsDispose();return}
+ const st=zjTrState(tr,Date.now()),o=zjTrObs.o;g.position.set(o[0]-origin.x,o[1]-origin.y,o[2]-origin.z);zjTrObs.veh.position.set(st.p[0]-o[0],st.p[1]-o[1],st.p[2]-o[2]);
+ if(st.dir){zjDirV.set(st.dir[0],st.dir[1],st.dir[2]);if(zjDirV.lengthSq()>1e-9)zjTrObs.veh.quaternion.setFromUnitVectors(zjZ,zjDirV.normalize().negate())}   // la proue (−z) suit la direction du déplacement
+ const now=performance.now();if(now-zjTrObs.last>250){zjTrObs.last=now;const P=tr.pts,pts=[];if(st.phase==='back'){pts.push(P[P.length-1])}else{let i=0;pts.push(P[0]);while(i+1<P.length&&tr.cum[i+1]<=st.along*tr.L){i++;pts.push(P[i])}}pts.push(st.p);
+  zjTrObs.done.geometry.dispose();zjTrObs.done.geometry=new T.BufferGeometry().setFromPoints(pts.map(q=>new T.Vector3(q[0]-o[0],q[1]-o[1],q[2]-o[2])))}}
+let zjFollowT=0;
+function zjFollowFrame(){const F=zj.follow;if(!F)return;const tr=zjTrFind(F.id);
+ if(!tr){if(!F.ended){F.ended=true;F.on=false;F.endedAt=Date.now();zjSheet()}return}
+ const st=zjTrState(tr,Date.now());if(st.done&&!F.arrived){F.arrived=true;zjSheet()}if(!st.done&&F.arrived){F.arrived=false;zjSheet()}
+ const now=performance.now();zjFollowT=now;if(!F.on||F.susp||!st.p)return;
+ if(zj.mode==='atlas'){if(now<F.engage)return;travel=null;const v=vector(st.p),gap=target.distanceTo(v);   // le mouvement est déjà continu : on colle au véhicule ; seul un saut (reprise, changement d'état) est lissé
+  if(gap<4)target.copy(v);else target.lerp(v,1-Math.exp(-Math.min(.5,(now-(F.lt||now))/1000)*5));F.lt=now}
+ else{if(now-(F.tacT||0)<200)return;F.tacT=now;const H=TAC_GRID.H,k=zj.k,lo=TAC_GRID.Y0+k*H,y=st.p[1];   // la couche ne change que si la mission sort vraiment de la tranche (marge 15 %)
+  if(y<lo-H*.15||y>=lo+H*1.15){zj.k=tacLayerOf(y);zjDepthUI()}zjCenterOn(st.p,true)}}
+function zjTravelHtml(){const tr=zjTrFind(zj.sel.id),F=zj.follow&&zj.follow.id===zj.sel.id?zj.follow:null;
+ if(!tr)return{h:'<div class="zj-kind">MISSION</div><h3>'+zjEsc(zj.sel.name||'Mission')+'</h3><p class="zj-muted">Mission terminée : le jeu l’a retirée de la liste des missions en cours'+(F&&F.endedAt?' ('+zjClock(new Date(F.endedAt))+')':'')+'. Le résultat est dans tes rapports.</p>',f:''};
+ const st=zjTrState(tr,Date.now()),fromW=zj.ws.find(w=>w.coord===tr.from),dest=zjTrDest(tr),PH={out:'Aller',stay:tr.kind==='fleet'?'En embuscade':'À destination',back:'Retour'};
+ let h='<div class="zj-kind">'+(ZJ_TR_KIND[tr.kind]||'MISSION')+(tr.tier?' · '+zjEsc(String(tr.tier).toUpperCase().replace(/^(\d)$/,'T$1')):'')+' · '+zjEsc(tr.statusLabel)+'</div><h3>'+zjEsc(tr.name)+'</h3><dl class="zj-dl">';
+ h+='<dt>Départ</dt><dd>'+zjEsc(fromW?fromW.name:(tr.from||'non enregistré'))+(tr.from?' <small>· '+zjEsc(tr.from)+'</small>':'')+'</dd>';
+ h+='<dt>Vers</dt><dd>'+zjEsc(tr.toLabel||tr.to||'—')+' <small>· '+zjEsc(tr.to||'sans adresse sur la carte')+'</small></dd>';
+ h+='<dt>Phase</dt><dd>'+(st.done?'Arrivée prévue atteinte':PH[st.phase])+(st.phase!=='stay'&&!st.done?' <small>· '+Math.round(st.f*100)+' %</small>':'')+'</dd>';
+ if(st.eta)h+='<dt>'+(st.phase==='stay'?'Reprise':'Arrivée')+'</dt><dd>'+zjClock(new Date(st.eta))+' <small>· '+zjLeft(st.eta)+'</small></dd>';
+ if(tr.ok&&tr.pts.length>1)h+='<dt>Tracé</dt><dd>'+zjFmt(tr.L)+' u <small>· '+(tr.route==='ligne'?(tr.pts.length-2)+' jalons connus de la ligne':'vol direct')+'</small></dd>';
+ h+='</dl><p class="zj-muted">'+(tr.ok?'Horaires de la partie. Position estimée '+(tr.route==='ligne'?'le long des jalons connus':'en ligne droite')+(st.done?' ; le jeu confirmera la suite (retour, rapport).':'.')+' Suivre ne change rien à la mission.':'Position non représentable : '+(tr.from?'la destination n’a pas d’adresse sur la carte':'le monde de départ n’est pas enregistré')+'. Seuls les horaires sont exacts.')+'</p>';
+ let f='';if(tr.ok){if(F&&F.on&&!F.susp)f+='<button class="zj-primary" data-a="follow-stop">Arrêter le suivi</button>';else if(F&&F.susp&&!F.ended)f+='<button class="zj-primary" data-a="follow-resume">Reprendre le suivi</button>';else f+='<button class="zj-primary" data-a="follow" data-id="'+zjEsc(tr.id)+'">Suivre dans l’Atlas</button>';
+  f+='<button class="zj-second" data-a="travel-fit">Voir le trajet</button>';if(dest)f+='<button class="zj-second" data-a="travel-dest">Observer la destination</button>'}
+ return{h,f}}
+function zjTravelRows(){const now=Date.now();let h='';for(const tr of zj.tr){const st=zjTrState(tr,now);h+='<button class="zj-row" data-a="travel" data-id="'+zjEsc(tr.id)+'"><b>'+zjEsc(tr.name)+' · '+zjEsc((ZJ_TR_KIND[tr.kind]||'').toLowerCase())+'</b><small>'+zjEsc(tr.statusLabel)+' · '+zjEsc(tr.toLabel||tr.to||'')+(st.eta?' · '+zjClock(new Date(st.eta)):'')+(tr.ok?'':' · position non représentable')+'</small></button>'}return h}
+
 /* ── changement de mode : la sélection et sa profondeur sont conservées ── */
 function zjSetMode(m){if(m===zj.mode)return;
  if(m==='atlas'){const p=zj.sel&&zj.sel.p?zj.sel.p:[zj.cx,(tacLayerY(zj.k)[0]+tacLayerY(zj.k)[1])/2,zj.cz];zj.mode='atlas';document.body.classList.remove('zj-tac');zjSceneVisible(true);travel=null;
@@ -365,11 +468,14 @@ function zjSetMode(m){if(m===zj.mode)return;
   if(zj.yp){wantedYaw=zj.yp.yaw;wantedPitch=zj.yp.pitch}else{wantedPitch=.55}rebase();updateStreaming(true);
   const so=zj.sel&&zj.sel.type!=='zone'?zjObjects().find(x=>x.id===zj.sel.id):null;
   if(so)zjObserve(so,{fromTac:true});
+  else if(zj.sel&&zj.sel.type==='travel'){const tr=zjTrFind(zj.sel.id);zj.pres.level='travel';if(tr&&tr.ok){zjTrObsBuild(tr);const st=zjTrState(tr,Date.now()),d=zj.follow&&zj.follow.on?zjFrameDist(2.4,mobile?.42:.34):Math.max(zjFrameDist(2.4,.45),Math.min(distance,700));
+   if(zjReduce){travel=null;target.set(st.p[0],st.p[1],st.p[2]);distance=wantedDistance=d}else{flyTo(vector(st.p),d);distance=Math.min(distance,600)}if(zj.follow)zj.follow.engage=performance.now()+(zjReduce?0:950);zjOpen('travel')}}
   else if(zj.sel&&zj.sel.type==='zone'){zj.pres.level='zone';zj.pres.zone=zj.sel.zone;distance=wantedDistance=Math.min(1500,zjFrameDist(175,.62))}
   else zj.pres.level='neighbourhood'}
  else{zj.yp={yaw:wantedYaw,pitch:wantedPitch};zj.mode='tac';document.body.classList.add('zj-tac');if(focused)closeSystem();zjSceneVisible(false);travel=null;
-  zjObsDispose();zj.pres={level:'neighbourhood',zone:null,back:null,hold:false};
-  const p=zj.sel&&zj.sel.p?zj.sel.p:[target.x,target.y,target.z],zs=zj.sel&&zoneParse(zj.sel.zone);zj.cx=p[0];zj.cz=p[2];zj.k=zs?zs.k:tacLayerOf(p[1]);
+  zjObsDispose();zjTrObsDispose();zj.pres={level:'neighbourhood',zone:null,back:null,hold:false};
+  const trs=zj.sel&&zj.sel.type==='travel'&&zjTrFind(zj.sel.id),trp=trs&&trs.ok?zjTrState(trs,Date.now()).p:null;
+  const p=trp||(zj.sel&&zj.sel.p?zj.sel.p:[target.x,target.y,target.z]),zs=zj.sel&&zj.sel.zone&&zoneParse(zj.sel.zone);zj.cx=p[0];zj.cz=p[2];zj.k=zs?zs.k:tacLayerOf(p[1]);
   const h=Math.tan(camera.fov*Math.PI/360)*2*distance/innerHeight;zj.upp=Math.max(1.6,Math.min(4,h))}
  $('zj-m-atlas').classList.toggle('on',zj.mode==='atlas');$('zj-m-tac').classList.toggle('on',zj.mode==='tac');zjMarkAtlasSel();zj.dirty=true;zjSheet()}
 
@@ -420,10 +526,11 @@ function zjWorldsHtml(){if(zj.peek){let h='<div class="zj-kind">SES MONDES · '+
   return{h,f:ZH.embed?'':'<button class="zj-second" data-a="peek-off">Revenir à ma partie</button>'}}
  let h='<div class="zj-kind">MES MONDES</div><h3>Observer un monde</h3><p class="zj-muted">Choisis un monde pour le voir de près. Le départ des sondages ne change que par son bouton « Lancer les sondages depuis… ».</p>';
  for(const w of zj.ws){const hg=zj.snap.hangars[w.id]||{};h+='<button class="zj-row'+(w.id===zj.origin?' on':'')+'" data-a="world" data-w="'+zjEsc(w.id)+'"><b>'+zjEsc(w.name)+' · '+(w.kind==='home'?'capitale':'colonie')+'</b><small>'+zjEsc(w.coord)+' · '+(hg.radar||0)+' Radar'+((hg.radar||0)>1?'s':'')+' prête'+((hg.radar||0)>1?'s':'')+(w.id===zj.origin?' · départ des sondages':'')+'</small></button>'}
+ if(zj.tr.length)h+='<div class="zj-kind" style="margin-top:14px">EN VOL · '+zj.tr.length+'</div>'+zjTravelRows();
  if(ZH&&ZH.peek)h+='<div class="zj-find"><div><b>Voir la partie d’un commandant</b><small>Lecture seule : son empire placé sur cette carte, rien n’est modifié chez lui</small></div><div class="zj-peek-f"><input id="zj-peek-in" value="Panzerstorm" maxlength="40" autocomplete="off" autocapitalize="off" spellcheck="false" aria-label="Pseudo du commandant"><button class="zj-act" data-a="peek">Voir</button></div></div>';
  return{h,f:''}}
 function zjSheet(){if(!zj.snap){return}let r;
- if(zj.view==='zone'&&zj.sel&&zj.sel.type==='zone')r=zjZoneHtml();else if(zj.view==='obj'&&zj.sel&&zj.sel.id)r=zjObjHtml();else if(zj.view==='choix')r=zjChoiceHtml();else if(zj.view==='worlds')r=zjWorldsHtml();else{zj.view='home';r=zjHomeHtml()}
+ if(zj.view==='zone'&&zj.sel&&zj.sel.type==='zone')r=zjZoneHtml();else if(zj.view==='travel'&&zj.sel&&zj.sel.type==='travel')r=zjTravelHtml();else if(zj.view==='obj'&&zj.sel&&zj.sel.id&&zj.sel.type!=='travel')r=zjObjHtml();else if(zj.view==='choix')r=zjChoiceHtml();else if(zj.view==='worlds')r=zjWorldsHtml();else{zj.view='home';r=zjHomeHtml()}
  const ae=document.activeElement;if(ae&&$('zj-sheet').contains(ae)&&ae.tagName==='INPUT')return;
  $('zj-sh-body').innerHTML=r.h;$('zj-sh-foot').innerHTML=r.f||'';$('zj-sheet').querySelector('.zj-test').textContent=zj.peek?'LECTURE · '+zj.peek.pseudo.toUpperCase():'TEST · COMPTE HADRIEN';$('zj-worlds').textContent=zj.peek?'Ses mondes':'Mes mondes';$('zj-sh-back').hidden=zj.view==='home';$('zj-sheet').dataset.state=zj.sheet}
 $('zj-sheet').addEventListener('click',e=>{const b=e.target.closest('[data-a]');if(!b)return;const a=b.dataset.a;
@@ -438,6 +545,12 @@ $('zj-sheet').addEventListener('click',e=>{const b=e.target.closest('[data-a]');
  if(a==='world'){const w=zjWorld(b.dataset.w),o=w&&zjObjects().find(x=>x.id==='world:'+w.id);if(!o)return;if(zj.mode==='tac'){zj.k=tacLayerOf(w.p[1]);zjSelectObj(o);zjCenterOn(w.p,true)}else zjSelectObj(o);zjDepthUI();return}
  if(a==='observe'){const o=zjObjects().find(x=>x.id===b.dataset.id);if(!o)return;if(!zj.sel||zj.sel.id!==o.id)zj.sel={type:o.type,id:o.id,p:o.p,zone:o.zone,name:o.name,key:o.key};if(zj.mode==='tac')zjSetMode('atlas');else zjObserve(o);return}
  if(a==='back-n')return zjBackNeighbourhood();
+ if(a==='travel')return zjSelectTravel(b.dataset.id);
+ if(a==='follow')return zjFollow(b.dataset.id);
+ if(a==='follow-stop')return zjFollowStop();
+ if(a==='follow-resume')return zjFollowResume();
+ if(a==='travel-fit')return zjTravelFit();
+ if(a==='travel-dest'){const tr=zjTrFind(zj.sel&&zj.sel.id),o=tr&&zjTrDest(tr);if(o)zjSelectObj(o);return}
  if(a==='zone')return zjSelectZone(b.dataset.z,true);
  if(a==='pick'){const o=(zj.list||[]).find(x=>x.id===b.dataset.id);if(o)zjSelectObj(o);return}
  if(a==='worlds')return zjOpen('worlds')});
@@ -521,7 +634,7 @@ function zjPeekHomeHtml(){const P=zj.peek,d=P.data,home=zjHome(),cols=zj.ws.filt
  const own=new Set(zj.ws.map(w=>w.coord.split('-')[0])),near=[...P.amas.entries()].filter(([k])=>!own.has(k)).sort((a,b)=>a[1].d-b[1].d)[0];
  if(P.amas.size)h+='<p class="zj-muted"><b>Portée estimée : '+zjEsc(zj.snap.range)+' secteurs, soit '+zjFmt(zj.snap.range*SECTOR_SIZE)+' u</b> (3 + '+cols.length+' colonie'+(cols.length>1?'s':'')+'). Ses mondes sont dans '+own.size+' amas ('+[...own].map(zjEsc).join(', ')+')'+(near?' ; l’amas voisin le plus proche ('+zjEsc(near[0])+') commence à '+zjFmt(near[1].d)+' u de '+zjEsc(near[1].from):'')+'. Transposée telle quelle en 3D, cette portée toucherait '+P.amas.size+' amas : la règle en secteurs est à recalibrer pour cette carte.</p>';
  const arks=(d.arks||[]).length,miss=(d.missions||[]).filter(m=>m&&m.status==='in_transit').length;
- if(arks||miss)h+='<p class="zj-muted">En vol au moment de la sauvegarde : '+[arks?arks+' arche'+(arks>1?'s':'')+' de colonisation':'',miss?miss+' sonde'+(miss>1?'s':''):''].filter(Boolean).join(' et ')+'.</p>';
+ if(arks||miss)h+='<p class="zj-muted">Instantané · en vol au moment de la sauvegarde (non suivi, aucune position inventée) : '+[arks?arks+' arche'+(arks>1?'s':'')+' de colonisation':'',miss?miss+' sonde'+(miss>1?'s':''):''].filter(Boolean).join(' et ')+'.</p>';
  if(P.skipped)h+='<p class="zj-muted">'+P.skipped+' système'+(P.skipped>1?'s':'')+' connu'+(P.skipped>1?'s':'')+' trop loin pour être placé'+(P.skipped>1?'s':'')+' dans cette lecture.</p>';
  if(P.notes.length)h+='<p class="zj-muted">Région simulée : '+P.notes.map(zjEsc).join(' · ')+'</p>';
  h+='<div class="zj-legend"><span><i class="k"></i>Systèmes déjà connus</span><span><i class="h"></i>Sa région de test (simulée)</span><span><i class="s"></i>Signature</span></div>';
@@ -540,7 +653,7 @@ $('zj-sh-tog').onclick=()=>zjSheetState(zj.sheet==='full'?'min':zj.sheet==='min'
 /* ── image par image ── */
 function zjViewOffset(){let x=0,y=0;if(zj.mode==='atlas'){const ins=zjInsets();x=Math.round(innerWidth/2-(ins.left+ins.right)/2);y=Math.round(innerHeight/2-(ins.top+ins.bottom)/2)}
  const want=x+','+y;if(want===zj.vo)return;const first=zj.vo!=null;zj.vo=want;if(x||y)camera.setViewOffset(innerWidth,innerHeight,x,y,innerWidth,innerHeight);else camera.clearViewOffset();camera.updateProjectionMatrix();if(first&&zjObs)zjObsDistances()}
-function zjFrame(){zjRefresh(false);zjViewOffset();zjPresUpdate();zjObsFrame();for(const g of [navRoot,navSel,navAmb])g.visible=false;
+function zjFrame(){zjRefresh(false);zjViewOffset();zjPresUpdate();zjFollowFrame();zjObsFrame();zjTrObsFrame();for(const g of [navRoot,navSel,navAmb])g.visible=false;
  if(zjZoneMesh){const z=zoneParse(zj.sel&&zj.sel.zone);if(z)zjZoneMesh.position.set(-origin.x,-origin.y,-origin.z);zjZoneMesh.visible=zj.mode==='atlas'}
  zjAtlasMarks();if(zj.mode!=='tac')return;
  const[a,b]=tacLayerY(zj.k);target.set(zj.cx,(a+b)/2,zj.cz);travel=null;zjLoad();
@@ -564,8 +677,10 @@ function zjBoot(){zjPatterns();zjResize();
  try{ZH.onChange(()=>zjRefresh(true))}catch(e){}
  return true}
 const zjBooted=zjBoot();
+document.addEventListener('visibilitychange',()=>{if(!document.hidden){zjRefresh(true);zj.dirty=true}});
 {const m=location.search.match(/[?&]peek=([^&]+)/);if(zjBooted&&m)setTimeout(()=>zjPeekStart(decodeURIComponent(m[1]).slice(0,40)),600)}
-window.STARBYTE_ZONES={zj,refresh:zjRefresh,obsTex:()=>{const m=zjObs&&zjObs.main.material,c=m&&m.map&&m.map.image;if(!c)return null;const d=c.getContext('2d').getImageData(0,0,c.width,c.height).data;let h=0;for(let i=0;i<d.length;i+=97)h=(h*31+d[i])>>>0;return h},prism:()=>!!zjZoneMesh,demoSystem:()=>!!systemGroup,panBy:(dx,dy)=>pan(dx,dy),mem:()=>({...renderer.info.memory}),insets:()=>zjInsets(),
+window.STARBYTE_ZONES={zj,refresh:zjRefresh,travels:()=>zj.tr.map(t=>({id:t.id,kind:t.kind,name:t.name,ok:t.ok,from:t.from,to:t.to,L:t.L,n:t.pts.length,route:t.route,status:t.status,phases:t.phases})),trState:id=>{const t=zjTrFind(id);return t&&zjTrState(t,Date.now())},
+ follow:id=>zjFollow(id),followState:()=>zj.follow&&{...zj.follow},followStop:zjFollowStop,followResume:zjFollowResume,travelFit:zjTravelFit,selectTravel:zjSelectTravel,trObs:()=>!!zjTrObs,obsTex:()=>{const m=zjObs&&zjObs.main.material,c=m&&m.map&&m.map.image;if(!c)return null;const d=c.getContext('2d').getImageData(0,0,c.width,c.height).data;let h=0;for(let i=0;i<d.length;i+=97)h=(h*31+d[i])>>>0;return h},prism:()=>!!zjZoneMesh,demoSystem:()=>!!systemGroup,panBy:(dx,dy)=>pan(dx,dy),mem:()=>({...renderer.info.memory}),insets:()=>zjInsets(),
  objScreen:()=>{if(!zjObs)return null;const v=vector(zjObs.p),q=toLocal(v).project(camera),r=new T.Vector3().setFromMatrixColumn(camera.matrixWorld,0),e=toLocal(v.clone().addScaledVector(r,zjObs.R)).project(camera);return{x:(q.x*.5+.5)*innerWidth,y:(-q.y*.5+.5)*innerHeight,rpx:Math.abs(e.x-q.x)*.5*innerWidth}},observe:id=>{const o=zjObjects().find(x=>x.id===id);if(o){zj.sel={type:o.type,id:o.id,p:o.p,zone:o.zone,name:o.name,key:o.key};zjOpen('obj');if(zj.mode==='tac')zjSetMode('atlas');else zjObserve(o)}return!!o},backN:zjBackNeighbourhood,atlasTapAt:(x,y)=>zjAtlasTap(x,y),
  obs:()=>zjObs&&{id:zjObs.id,addr:zjObs.addr,p:zjObs.p,anchor:zjObs.anchor,R:zjObs.R,dObj:zjObs.dObj,dSys:zjObs.dSys,sysR:zjObs.sysR,others:zjObs.others.map(a=>a.id),star:!!(zjObs.star&&zjObs.star.visible),uuid:zjObs.group.uuid},pres:()=>({...zj.pres,distance,wantedDistance}),texN:()=>zjTexCache.size,minD:()=>zjMinD(),screenOf:p=>{const q=toLocal(vector(p)).project(camera);return{x:(q.x*.5+.5)*innerWidth,y:(-q.y*.5+.5)*innerHeight,z:q.z}},cam:()=>({target:[target.x,target.y,target.z],distance,yaw,pitch}),exportHtml:()=>zjSrc?zjExportHtml():null,exportName:()=>zjExportName(),prefetch:zjPrefetch,peekStart:zjPeekStart,selectObj:zjSelectObj,peekStop:zjPeekStop,amas:()=>zjAmasInRange(),draw:()=>zjDraw(),tap:zjTap,pick:zjPick,setMode:zjSetMode,selectZone:zjSelectZone,objects:zjObjects,estimate:zjEstimate,
  cellOf:tacCellOf,center:tacCellCenter,layerOf:tacLayerOf,zoneOfPoint,zoneParse,sx:X=>(X-zj.cx)/zj.upp+innerWidth/2,sy:Z=>(Z-zj.cz)/zj.upp+innerHeight/2,load:zjLoad,

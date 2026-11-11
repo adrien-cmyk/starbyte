@@ -45,6 +45,15 @@ de l'atlas (planètes tirées au hasard, grille des 99 spots) n'est plus constru
 Essais : `node labo/carte-zones/test_observer.mjs` (36 contrôles, les quatre mondes de Panzerstorm du cahier).
 Rapport : `claude/starbyte_observer_rapport_2026_11_11.md` (Project).
 
+## Suivre une mission (11/11, cahier v1.1 § 18)
+
+Mes mondes › « En vol » : tankers, sondes, flottes en embuscade, arches de la partie, lus sans rien modifier
+(`SBZones.state().travels`). Position estimée sur les horaires enregistrés (jalons connus d'une ligne, ou ligne
+droite). « Suivre dans l'Atlas » : la caméra accompagne le véhicule ; orbite et pincement gardent le suivi, un
+déplacement libre le suspend. En Tactique, la couche suit la mission avec une marge de 15 %. Essais : section 5
+de `test_zones.mjs` (FOLLOW-01 à FOLLOW-07, sur un vrai tanker). Décisions pour les corridors :
+`claude/starbyte_suivi_missions_corridors_2026_11_11.md`.
+
 ## Retirer le test
 
 Supprimer la ligne `zones_test.js` d'`index.html` et le dossier `github_upload/atlas/`. Les quatre lignes `ZONES_1011`

@@ -186,11 +186,12 @@ await p.evaluate(() => {
 await p.evaluate(() => { SBZones.close(); SBZones.open({ peek: 'Panzerstorm' }); }); F = await frameReady();
 let pk = null; for (let i = 0; i < 40 && !(pk && pk.on); i++) { await sleep(500); pk = await F.evaluate(() => { const zj = STARBYTE_ZONES.zj; return { on: !!zj.peek }; }); }
 await sleep(1500);
-pk = await F.evaluate(() => { const zj = STARBYTE_ZONES.zj, P = zj.peek, R = zj.snap.zp.region; return { on: !!P, ws: zj.ws.map(w => w.kind[0] + ':' + w.name), sigs: zj.snap.sigs.length, explored: P && P.explored.size, known: P && P.knownN, region: R && R.zones.length,
+pk = await F.evaluate(() => { const zj = STARBYTE_ZONES.zj, P = zj.peek, R = zj.snap.zp.region; return { trN: zj.tr.length, on: !!P, ws: zj.ws.map(w => w.kind[0] + ':' + w.name), sigs: zj.snap.sigs.length, explored: P && P.explored.size, known: P && P.knownN, region: R && R.zones.length,
   cats: R && R.zones.reduce((a, z) => (a[z.content.cat] = (a[z.content.cat] || 0) + 1, a), {}), amas: P && P.amas.size, head: document.querySelector('.zj-test').textContent, pill: document.getElementById('zj-worlds').textContent,
   body: document.getElementById('zj-sh-body').innerText.replace(/\s+/g, ' '), foot: document.getElementById('zj-sh-foot').innerText.replace(/\s+/g, ' ') }; });
 rec('LECTURE', pk.on && pk.ws.length === 6 && pk.ws[0] === 'h:NÉRÉIDE' && pk.sigs === 3 && pk.explored > 0 && pk.region === 30 && /L’empire de Panzerstorm/.test(pk.body) && /Revenir à ma partie/.test(pk.foot) && /PANZERSTORM/.test(pk.head) && pk.pill === 'Ses mondes',
   `${pk.ws.join(', ')} · ${pk.sigs} signatures (l'ignorée écartée) · ${pk.known} systèmes connus sur ${pk.explored} zones · région simulée ${pk.region} ${JSON.stringify(pk.cats)} · amas touchés par la portée ${pk.amas} · « ${pk.body.slice(0, 900)} »`);
+rec('FOLLOW-07', pk.trN === 0 && /Instantané/.test(pk.body), `partie lue : ${pk.trN} mission suivie ; « ${(pk.body.match(/Instantané[^.]*\./) || [''])[0]} »`);
 await p.screenshot({ path: path.join(SHOTS, '9_panzerstorm_tactique.png') });
 // une zone de sa région : contenu prévu montré, aucun bouton d'envoi
 const pz = await F.evaluate(() => { const Z = STARBYTE_ZONES, R = Z.zj.snap.zp.region, z = R.zones.find(z => z.content.cat === 'choix') || R.zones[1]; Z.selectZone(z.id); return { body: document.getElementById('zj-sh-body').innerText.replace(/\s+/g, ' '), launch: !!document.querySelector('#zj-sh-foot [data-a="launch"]'), kind: z.content.kind }; });
@@ -238,6 +239,75 @@ if (dl) {
   await ctxF.close();
 }
 await F.evaluate(() => STARBYTE_ZONES.peekStop());
+
+// ═══ 5. Suivre un vrai tanker (cahier « Observer » v1.1, § 18 et 23) ═══
+// Le tanker part par l'action du jeu (launchTankerToKnownTarget) vers la cible mouvante identifiée plus haut par la Légère.
+await p.evaluate(() => SBZones.close()); await p.evaluate(() => SBZones.open()); F = await frameReady(); await sleep(2500);
+const tk = await p.evaluate(() => { G.fleet.stationed = G.fleet.stationed || {}; G.fleet.stationed.tanker = G.fleet.stationed.tanker || {}; G.fleet.stationed.tanker.t1 = Math.max(1, G.fleet.stationed.tanker.t1 || 0);   // un tanker au hangar (mise en place d'essai)
+  const key = Object.keys(G.knownTargets || {}).find(k => G.knownTargets[k].status !== 'engaged'); const before = (G.tankerMissions || []).length; launchTankerToKnownTarget(key);
+  const m = (G.tankerMissions || [])[before]; return m ? { id: m.id, name: m.tankerName, to: m.targetCoords, dep: m.departedAt, arr: m.arrivalAt, world: m.world, json: JSON.stringify(m) } : { key }; });
+await F.evaluate(() => STARBYTE_ZONES.refresh(true)); await sleep(400);
+const trv = await F.evaluate(id => { const t = STARBYTE_ZONES.travels().find(x => x.id === 'tk:' + id); const w = STARBYTE_ZONES.zj.ws.find(x => x.id === 'home'); return { t, home: w && w.coord }; }, tk.id);
+// cohérence géométrie / horaires : la position estimée avance proportionnellement au temps sur le tracé
+const geo = await F.evaluate(async id => { const S = STARBYTE_ZONES, a = S.trState('tk:' + id), t1 = Date.now(); await new Promise(r => setTimeout(r, 1500)); const b = S.trState('tk:' + id), t2 = Date.now(), tr = S.travels().find(x => x.id === 'tk:' + id), ph = tr.phases[0];
+  const moved = Math.hypot(b.p[0] - a.p[0], b.p[1] - a.p[1], b.p[2] - a.p[2]), expect = tr.L * (t2 - t1) / (ph.t1 - ph.t0); return { moved, expect, L: tr.L, f: b.f, dur: ph.t1 - ph.t0 }; }, tk.id);
+rec('FOLLOW-01', !!trv.t && trv.t.ok && trv.t.from === trv.home && trv.t.to && trv.t.name === tk.name && trv.t.phases[0].t1 === tk.arr && Math.abs(geo.moved - geo.expect) < Math.max(.05, geo.expect * .25),
+  `${tk.name} : départ ${trv.t && trv.t.from} (capitale), vers ${trv.t && trv.t.to}, arrivée ${new Date(tk.arr).toLocaleTimeString('fr-CH')} (horaire du jeu) · tracé ${geo.L.toFixed(0)} u en ${Math.round(geo.dur / 60000)} min : ${geo.moved.toFixed(2)} u parcourus en 1,5 s pour ${geo.expect.toFixed(2)} u attendus`);
+// la fiche puis « Suivre dans l'Atlas »
+await F.evaluate(id => { STARBYTE_ZONES.setMode('tac'); document.getElementById('zj-worlds').click(); }); await sleep(300);
+const row = await F.evaluate(id => { const b = document.querySelector('#zj-sh-body [data-a="travel"][data-id="tk:' + id + '"]'); if (!b) return null; const t = b.innerText; b.click(); return t; }, tk.id); await sleep(400);
+const sheet = await F.evaluate(() => ({ body: document.getElementById('zj-sh-body').innerText.replace(/\s+/g, ' '), foot: document.getElementById('zj-sh-foot').innerText.replace(/\s+/g, ' ') }));
+await p.screenshot({ path: path.join(SHOTS, '13_tanker_tactique.png') });
+await F.evaluate(() => document.querySelector('#zj-sh-foot [data-a="follow"]').click()); await sleep(3200);
+const fol = await F.evaluate(id => { const S = STARBYTE_ZONES, st = S.trState('tk:' + id), c = S.cam(); return { mode: S.zj.mode, lvl: S.pres().level, F: S.followState(), d: Math.hypot(c.target[0] - st.p[0], c.target[1] - st.p[1], c.target[2] - st.p[2]), marks: S.atlasState().marks.map(m => m.t), obs: S.trObs(), prism: S.prism() }; }, tk.id);
+await sleep(2000);
+const fol2 = await F.evaluate(id => { const S = STARBYTE_ZONES, st = S.trState('tk:' + id), c = S.cam(); return { d: Math.hypot(c.target[0] - st.p[0], c.target[1] - st.p[1], c.target[2] - st.p[2]), f: st.f }; }, tk.id);
+rec('FOLLOW-1b', fol.mode === 'atlas' && fol.lvl === 'travel' && fol.F.on && !fol.F.susp && fol.d < .6 && fol2.d < .6 && fol.obs && !fol.prism && fol.marks.length <= 3 && fol.marks.some(t => t.includes(tk.name)),
+  `fiche « ${sheet.body.slice(0, 150)} » · Suivre : Atlas, présentation ${fol.lvl}, caméra à ${fol.d.toFixed(2)} puis ${fol2.d.toFixed(2)} u du tanker (qui avance : ${(fol2.f * 100).toFixed(1)} %), marqueurs « ${fol.marks.join(' | ')} »`);
+await p.screenshot({ path: path.join(SHOTS, '14_tanker_suivi.png') });
+// orbiter et pincer : le suivi reste
+const fr = await F.frameElement(), fb = await fr.boundingBox();
+const d0 = (await F.evaluate(() => STARBYTE_ZONES.pres())).wantedDistance, y0 = (await F.evaluate(() => STARBYTE_ZONES.cam())).yaw;
+await p.mouse.move(fb.x + 120, fb.y + 220); await p.mouse.down(); await p.mouse.move(fb.x + 200, fb.y + 230, { steps: 6 }); await p.mouse.up(); await sleep(300);
+const cdp = await p.context().newCDPSession(p), tp = (a, b) => [{ x: fb.x + a, y: fb.y + 170, id: 1 }, { x: fb.x + b, y: fb.y + 170, id: 2 }];
+await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: tp(130, 250) }); for (const b of [235, 215, 195]) { await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: tp(130, b) }); await sleep(40); }
+await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] }); await sleep(1200);
+const orb = await F.evaluate(() => ({ F: STARBYTE_ZONES.followState(), d: STARBYTE_ZONES.pres().wantedDistance, yaw: STARBYTE_ZONES.cam().yaw }));
+rec('FOLLOW-02', orb.F.on && !orb.F.susp && Math.abs(orb.yaw - y0) > .05 && orb.d > d0 * 1.1, `orbite : angle ${y0.toFixed(2)} → ${orb.yaw.toFixed(2)} ; pincement : distance ${d0.toFixed(1)} → ${orb.d.toFixed(1)} u ; suivi toujours actif`);
+// déplacement libre puis reprise ; l'ordre de mission n'a pas bougé
+await F.evaluate(() => { for (let i = 0; i < 20; i++) STARBYTE_ZONES.panBy(-30, 0); }); await sleep(500);
+const sus = await F.evaluate(id => { const S = STARBYTE_ZONES, st = S.trState('tk:' + id), c = S.cam(); return { F: S.followState(), d: Math.hypot(c.target[0] - st.p[0], c.target[1] - st.p[1], c.target[2] - st.p[2]), foot: document.getElementById('zj-sh-foot').innerText }; }, tk.id);
+await F.evaluate(() => document.querySelector('#zj-sh-foot [data-a="follow-resume"]').click()); await sleep(2600);
+const res = await F.evaluate(id => { const S = STARBYTE_ZONES, st = S.trState('tk:' + id), c = S.cam(); return { F: S.followState(), d: Math.hypot(c.target[0] - st.p[0], c.target[1] - st.p[1], c.target[2] - st.p[2]) }; }, tk.id);
+const sameTk = await p.evaluate(j => { const m = G.tankerMissions.find(x => x.id === JSON.parse(j).id); return JSON.stringify(m) === j; }, tk.json);
+rec('FOLLOW-03', sus.F.susp && sus.d > 5 && /Reprendre le suivi/.test(sus.foot) && !res.F.susp && res.F.on && res.d < .6 && sameTk,
+  `déplacement libre : suivi suspendu (caméra à ${sus.d.toFixed(0)} u du tanker, bouton « Reprendre le suivi ») · reprise : caméra à ${res.d.toFixed(2)} u · mission du jeu identique avant et après : ${sameTk}`);
+// voir le trajet, observer la destination : présentation seulement
+await F.evaluate(() => document.querySelector('#zj-sh-foot [data-a="travel-fit"]').click()); await sleep(1800);
+const fit = await F.evaluate(id => { const S = STARBYTE_ZONES, tr = S.travels().find(x => x.id === 'tk:' + id); return { F: S.followState(), d: S.pres().distance, L: tr.L }; }, tk.id);
+await p.screenshot({ path: path.join(SHOTS, '15_tanker_trajet.png') });
+rec('FOLLOW-T', fit.F.susp && fit.d > fit.L * .4, `Voir le trajet : vue de ${fit.d.toFixed(0)} u pour un tracé de ${fit.L.toFixed(0)} u, suivi suspendu (la mission continue)`);
+// arrière-plan : au retour, la position se recale sur les horaires de la partie
+const bg = await F.evaluate(id => STARBYTE_ZONES.trState('tk:' + id).f, tk.id);
+await p.evaluate(id => { const m = G.tankerMissions.find(x => x.id === id), shift = (m.arrivalAt - m.departedAt) * .4; m.departedAt -= shift; m.arrivalAt -= shift; }, tk.id);   // 40 % du trajet « écoulé » pendant l'absence
+await F.evaluate(() => { document.dispatchEvent(new Event('visibilitychange')); }); await sleep(200);
+const bg2 = await F.evaluate(id => STARBYTE_ZONES.trState('tk:' + id).f, tk.id);
+rec('FOLLOW-04', bg2 - bg > .35, `retour au premier plan : progression ${(bg * 100).toFixed(1)} % → ${(bg2 * 100).toFixed(1)} %, recalculée sur les horaires enregistrés (aucun chronomètre local)`);
+// Tactique à travers les couches : bonne couche, origine inchangée
+await F.evaluate(() => { STARBYTE_ZONES.followResume(); STARBYTE_ZONES.setMode('tac'); }); await sleep(1200);
+const tac = await F.evaluate(id => { const S = STARBYTE_ZONES, st = S.trState('tk:' + id); return { k: S.zj.k, lay: Math.floor(st.p[1] / 200), origin: S.zj.origin, F: S.followState() }; }, tk.id);
+await p.screenshot({ path: path.join(SHOTS, '16_tanker_suivi_tactique.png') });
+rec('FOLLOW-06', tac.F.on && Math.abs(tac.k - tac.lay) <= 1 && tac.origin === 'home', `Tactique en suivi : couche ${tac.k} (le tanker est dans la tranche ${tac.lay}, marge de 15 %), départ des sondages ${tac.origin} inchangé`);
+// arrivée puis fin : l'état vient du jeu
+await p.evaluate(id => { const m = G.tankerMissions.find(x => x.id === id); m.arrivalAt = Date.now() - 1; tickTankerMissions(); }, tk.id);
+await F.evaluate(() => STARBYTE_ZONES.refresh(true)); await sleep(600);
+const arrTk = await F.evaluate(id => { const S = STARBYTE_ZONES, t = S.travels().find(x => x.id === 'tk:' + id), st = t && S.trState('tk:' + id); return { t: t && { status: t.status, n: t.phases.length }, st: st && { phase: st.phase, along: st.along }, body: document.getElementById('zj-sh-body').innerText.replace(/\s+/g, ' ') }; }, tk.id);
+const gst = await p.evaluate(id => { const m = G.tankerMissions.find(x => x.id === id); return m ? m.status : 'retirée'; }, tk.id);
+await p.evaluate(id => { const m = G.tankerMissions.find(x => x.id === id); if (m && m.status === 'returning') { m.returnArrivalAt = Date.now() - 1; tickTankerMissions(); } }, tk.id);
+await F.evaluate(() => STARBYTE_ZONES.refresh(true)); await sleep(800);
+const end = await F.evaluate(() => ({ F: STARBYTE_ZONES.followState(), body: document.getElementById('zj-sh-body').innerText.replace(/\s+/g, ' ') }));
+rec('FOLLOW-05', (arrTk.t ? arrTk.t.status === gst : gst === 'retirée') && (!arrTk.t || arrTk.t.status !== 'returning' || arrTk.st.phase === 'back' && arrTk.st.along > .95) && end.F && end.F.ended && !end.F.on && /Mission terminée/.test(end.body),
+  `arrivée : le jeu passe la mission en « ${gst} »${arrTk.t ? ', la carte suit (phase ' + arrTk.st.phase + ', au point d’arrivée)' : ''} · fin : « ${end.body.slice(0, 110)} », suivi arrêté`);
 
 rec('ERREURS', errs.length === 0, errs.slice(0, 8).join(' | ') || 'aucune erreur de page');
 await browser.close(); srv.close();

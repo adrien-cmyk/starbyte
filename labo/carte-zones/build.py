@@ -16,7 +16,8 @@ once("p.point=star.clone().add(vector(localSpotOffset(39)))", "p.point=star.clon
 # observer (11/11) : plus de système de démonstration tiré au hasard à l'approche ; zoom borné par le modèle observé ; pas de glissement en gros plan
 once("if(!focused&&distance<150&&wantedDistance<150&&ready){", "if(false&&!focused&&distance<150&&wantedDistance<150&&ready){")
 s = s.replace(",14,6500)", ",zjMinD(),6500)"); assert s.count("zjMinD(),6500)") == 4
-once("function pan(dx,dy){", "function pan(dx,dy){if(zjNoPan())return;")
+once("function pan(dx,dy){", "function pan(dx,dy){if(zjNoPan())return;zjOnPan();")
+once("pan(x-pinchState.x,y-pinchState.y)}pinchState={dist:d,x,y};return}", "zjPinchPan(x-pinchState.x,y-pinchState.y)}pinchState={dist:d,x,y};return}")   # pincer en suivi : la distance change, le suivi reste
 once("const local=toLocal(target),offset=new T.Vector3(", "const local=toLocal(target).add(zjLook()),offset=new T.Vector3(")   # au dézoom, le regard glisse vers le système
 once("function projectLabels(){const w=innerWidth,h=innerHeight;navFrame(w,h);", "function projectLabels(){const w=innerWidth,h=innerHeight;navFrame(w,h);zjFrame();")
 once("toast('Votre planète est au centre. Prenez le large.')", "toast('Touchez une zone voisine pour la sonder.')")

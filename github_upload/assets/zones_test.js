@@ -25,7 +25,7 @@
   if (window.EXTRA_SAVE_KEYS && EXTRA_SAVE_KEYS.indexOf('zoneProspect') < 0) EXTRA_SAVE_KEYS.push('zoneProspect');
 
   const PAGE = 'atlas/index.html';
-  const PAGE_V = 'e35974596e';   // empreinte de atlas/index.html, écrite par labo/carte-zones/build.py
+  const PAGE_V = '5f33e09629';   // empreinte de atlas/index.html, écrite par labo/carte-zones/build.py
   const GRID = 'tac-2';
   const MIN = 60e3;
   const SB = 'https://elupnpdcblztpfywnhjl.supabase.co';
@@ -133,6 +133,43 @@
   }
 
   /* ── état complet pour la carte ── */
+  /* ── missions suivables (cahier « Observer » v1.1, § 18) : les horaires de la partie, tels qu'enregistrés ──
+     Les missions de tankers, de sondes, de flottes en embuscade et d'arches sont calculées par le jeu lui-même et
+     sauvegardées (pas par le serveur) ; la carte ne fait que les lire. Aucune n'est modifiée ici. */
+  const ADDR_RE = /([A-Z]+-[A-Z]-\d{4})(?:-(\d{1,2}))?/;
+  const addrOf = (v) => { const m = ADDR_RE.exec(String(v || '')); return m ? (m[2] ? m[1] + '-' + m[2].padStart(2, '0') : m[1]) : null; };
+  function travels() {
+    const out = [], ws = worlds(), coordOf = (id) => { const w = ws.find(x => x.id === (id || 'home')) || ws[0]; return w ? w.coord : null; };
+    const TK = { in_transit: 'En route', exploring: 'En exploration', docked: 'À quai', returning: 'Retour' };
+    for (const m of G.tankerMissions || []) {
+      if (!m || !TK[m.status]) continue;
+      const to = addrOf(m.targetCoords), via = (Array.isArray(m.via) ? m.via : []).map(addrOf).filter(Boolean);
+      const ph = [{ dir: 'out', t0: m.departedAt, t1: m.arrivalAt }];
+      if (m.status === 'docked') ph.push({ dir: 'stay', t0: m.arrivalAt, t1: m.dockStay && m.dockStay.endsAt || null });
+      if (m.status === 'returning') { const t1 = m.returnArrivalAt || m.arrivalAt, t0 = m.returnDepartedAt || m.cancelledAt || Math.max(m.departedAt, t1 - (m.arrivalAt - m.departedAt)); ph.push({ dir: 'back', t0, t1 }); }
+      out.push({ id: 'tk:' + m.id, kind: 'tanker', name: m.tankerName || 'Tanker', tier: m.tier || null, world: m.world || 'home', from: coordOf(m.world), to, via, toLabel: m.targetLabel || m.routeName || '',
+        route: m.kind === 'route_run' ? (via.length ? 'ligne' : 'route') : 'direct', mkind: m.kind || 'cible', status: m.status, statusLabel: TK[m.status], phases: ph });
+    }
+    for (const m of G.probeMissions || []) {
+      if (!m || m.status !== 'in_transit') continue;
+      out.push({ id: 'pr:' + m.id, kind: 'probe', name: m.probeName || 'Sonde', tier: m.tier || null, world: m.world || 'home', from: coordOf(m.world), to: addrOf(m.targetCoords) || (m.zone ? null : null), via: [], toLabel: m.zone ? 'zone ' + m.zone.split(':').slice(1, 3).join(' · ') : String(m.targetCoords || ''),
+        route: 'direct', mkind: m.zone ? 'zone' : (m.tier || 'sonde'), status: m.status, statusLabel: 'En route', phases: [{ dir: 'out', t0: m.departedAt, t1: m.arrivalAt }] });
+    }
+    for (const f of (G.fleet && G.fleet.prepared) || []) {
+      const a = f && f.ambush; if (!a || !a.phase) continue;
+      const ph = [{ dir: 'out', t0: a.departedAt, t1: a.arrivesAt }];
+      if (a.phase !== 'going' && a.phase !== 'returning') ph.push({ dir: 'stay', t0: a.arrivesAt, t1: a.endsAt || a.until || null });
+      if (a.phase === 'returning') ph.push({ dir: 'back', t0: a.returnDepartedAt || a.arrivesAt, t1: a.returnsAt });
+      out.push({ id: 'fl:' + f.id, kind: 'fleet', name: f.name || 'Flotte', world: f.world || 'home', from: coordOf(f.world), to: addrOf(a.system), via: [], toLabel: 'embuscade · ' + (a.system || ''),
+        route: 'direct', mkind: 'embuscade', status: a.phase, statusLabel: { going: 'En route', returning: 'Retour' }[a.phase] || 'En embuscade', phases: ph });
+    }
+    for (const m of G.colonyMissions || []) {   // l'arche n'enregistre pas son monde de départ : pas de position inventée
+      if (!m) continue;
+      out.push({ id: 'ar:' + m.id, kind: 'ark', name: m.name || 'Arche', world: null, from: null, to: addrOf(m.coord), via: [], toLabel: m.name || '', route: 'direct', mkind: 'colonisation', status: 'in_transit', statusLabel: 'En route', phases: [{ dir: 'out', t0: m.departAt, t1: m.arriveAt }] });
+    }
+    return out;
+  }
+
   function state() {
     const z = zp(), now = Date.now(), ws = worlds();
     const hang = {}, ranges = {};
@@ -144,7 +181,8 @@
       fixedClass: s.fixedClass, fixedAddress: s.fixedAddress, movingCoordKey: s.movingCoordKey, zone: s.zone || null,
       target: s.movingCoordKey && G.knownTargets && G.knownTargets[s.movingCoordKey] ? { label: G.knownTargets[s.movingCoordKey].label, status: G.knownTargets[s.movingCoordKey].status } : null,
     }));
-    return { now, active: G.activeWorld || 'home', worlds: ws, hangars: hang, ranges, zp: JSON.parse(JSON.stringify(z)), missions, sigs };
+    let tr = []; try { tr = travels(); } catch (e) { console.warn('[zones] missions', e); }
+    return { now, active: G.activeWorld || 'home', worlds: ws, hangars: hang, ranges, zp: JSON.parse(JSON.stringify(z)), missions, sigs, travels: tr };
   }
 
   /* ── région de test : écrite une seule fois par la carte (contenu fixe) ── */
