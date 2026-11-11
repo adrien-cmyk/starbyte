@@ -49,10 +49,10 @@ jobs:
             . /etc/os-release
             printf 'deb http://azure.archive.ubuntu.com/ubuntu %s main universe\ndeb http://azure.archive.ubuntu.com/ubuntu %s-updates main universe\n' "$VERSION_CODENAME" "$VERSION_CODENAME" > /tmp/miroir.list
             A="-o Dir::Etc::sourcelist=/tmp/miroir.list -o Dir::Etc::sourceparts=- -o APT::Get::List-Cleanup=0"
-            sudo apt-get update -qq $A
-            sudo apt-get install -y -qq $A lftp >/dev/null
+            sudo apt-get update -qq $A || true
+            sudo apt-get install -y -qq $A lftp >/dev/null || true
           fi
-          lftp --version | head -1
+          if command -v lftp >/dev/null; then lftp --version | head -1; else echo "::warning::lftp indisponible : envoi par curl (FTPS), sans contrôle des fichiers absents du serveur."; fi
       - name: Diagnostic (contenu du serveur)
         if: env.SKIP != '1' && inputs.diagnostic
         run: |
@@ -89,13 +89,17 @@ jobs:
           RC
           : > /tmp/remote.manifest
           if [ "${{ inputs.tout }}" != "true" ]; then
-            lftp -c "source /tmp/lftprc; get -O /tmp .deploy-manifest" 2>/dev/null && mv /tmp/.deploy-manifest /tmp/remote.manifest || echo "Pas de liste sur le serveur : envoi complet."
+            if command -v lftp >/dev/null; then
+              lftp -c "source /tmp/lftprc; get -O /tmp .deploy-manifest" 2>/dev/null && mv /tmp/.deploy-manifest /tmp/remote.manifest || echo "Pas de liste sur le serveur : envoi complet."
+            else   # 11/11 : sans lftp, la liste des empreintes par curl (FTPS explicite, certificat vérifié)
+              curl -sS --ssl-reqd --retry 3 -m 60 --user "$FTP_USER:$FTP_PASS" "ftp://$FTP_HOST/.deploy-manifest" -o /tmp/remote.manifest || { : > /tmp/remote.manifest; echo "Pas de liste sur le serveur : envoi complet."; }
+            fi
           fi
           # fichiers dont l'empreinte a changé ou qui sont nouveaux
           awk 'NR==FNR { seen[$2]=$1; next } seen[$2] != $1 { print $2 }' /tmp/remote.manifest /tmp/local.manifest > /tmp/changed
           # 24/10 : la liste du serveur peut mentir (fichiers notés comme envoyés mais absents : script 3D,
           # icônes, manifeste en 404). On liste donc ce qui existe vraiment et on renvoie tout ce qui manque.
-          if lftp -c "source /tmp/lftprc; find ." > /tmp/remote.files 2>/dev/null && [ -s /tmp/remote.files ]; then
+          if command -v lftp >/dev/null && lftp -c "source /tmp/lftprc; find ." > /tmp/remote.files 2>/dev/null && [ -s /tmp/remote.files ]; then
             awk '{ print $2 }' /tmp/local.manifest | grep -vxF -f /tmp/remote.files > /tmp/missing || true
             echo "Fichiers absents du serveur : $(wc -l < /tmp/missing)"
             head -30 /tmp/missing
@@ -114,8 +118,16 @@ jobs:
           set -e
           # index.html en dernier : quand la page change, tous les fichiers qu'elle appelle sont déjà là
           if [ -f /tmp/up/index.html ]; then mv /tmp/up/index.html /tmp/index.html; fi
-          lftp -c "source /tmp/lftprc; mirror -R --parallel=4 --no-perms /tmp/up ."   # « . » sans barre : sinon lftp crée un dossier up/
-          if [ -f /tmp/index.html ]; then lftp -c "source /tmp/lftprc; put -O ./ /tmp/index.html"; fi
+          if command -v lftp >/dev/null; then
+            lftp -c "source /tmp/lftprc; mirror -R --parallel=4 --no-perms /tmp/up ."   # « . » sans barre : sinon lftp crée un dossier up/
+            if [ -f /tmp/index.html ]; then lftp -c "source /tmp/lftprc; put -O ./ /tmp/index.html"; fi
+          else   # 11/11 : sans lftp, envoi fichier par fichier avec curl (FTPS explicite, certificat vérifié, dossiers créés au besoin)
+            cd /tmp/up
+            find . -type f -print0 | while IFS= read -r -d '' f; do
+              curl -sS --ssl-reqd --ftp-create-dirs --retry 3 -m 300 --user "$FTP_USER:$FTP_PASS" -T "$f" "ftp://$FTP_HOST/${f#./}"
+            done
+            if [ -f /tmp/index.html ]; then curl -sS --ssl-reqd --retry 3 -m 120 --user "$FTP_USER:$FTP_PASS" -T /tmp/index.html "ftp://$FTP_HOST/index.html"; fi
+          fi
           echo "Publié."
       - name: Vérifier en ligne les fichiers clés
         if: env.SKIP != '1' && env.STOP != '1'
