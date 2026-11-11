@@ -41,7 +41,18 @@ jobs:
           sparse-checkout-cone-mode: true
       - name: Installer lftp
         if: env.SKIP != '1'
-        run: sudo apt-get install -y -qq lftp >/dev/null
+        # 11/11 : security.ubuntu.com injoignable depuis les machines de GitHub (3 échecs de suite) ;
+        # si l'installation normale échoue, on prend lftp sur le miroir principal d'Ubuntu, seul
+        run: |
+          if ! sudo apt-get install -y -qq lftp >/dev/null; then
+            echo "lftp : dépôt de sécurité injoignable, essai sur le miroir principal"
+            . /etc/os-release
+            printf 'deb http://azure.archive.ubuntu.com/ubuntu %s main universe\ndeb http://azure.archive.ubuntu.com/ubuntu %s-updates main universe\n' "$VERSION_CODENAME" "$VERSION_CODENAME" > /tmp/miroir.list
+            A="-o Dir::Etc::sourcelist=/tmp/miroir.list -o Dir::Etc::sourceparts=- -o APT::Get::List-Cleanup=0"
+            sudo apt-get update -qq $A
+            sudo apt-get install -y -qq $A lftp >/dev/null
+          fi
+          lftp --version | head -1
       - name: Diagnostic (contenu du serveur)
         if: env.SKIP != '1' && inputs.diagnostic
         run: |
