@@ -70,3 +70,11 @@ body.zj-tac #zj-depth{display:flex}
 .zj-mark.nolab b{display:none}.zj-mark.dim{opacity:.45}.zj-mark.decor{pointer-events:none;color:#ffdbb7}.zj-mark.decor b{background:none;font-weight:500}
 .reticle{display:none!important}
 .zj-mark.t-travel{color:#9fd3ff}.zj-mark.t-travel i::before{border-radius:2px;width:0;height:0;border:6px solid transparent;border-left:10px solid currentColor;background:none;transform:translateX(3px)}
+/* corridors (prévisualisation d'essai) : comparaison courte, feuille de route */
+.zj-cor b{display:flex;gap:8px;align-items:baseline;flex-wrap:wrap}
+.zj-best{font-style:normal;font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:#0b0c1c;background:#80e6d3;border-radius:6px;padding:1px 6px}
+.zj-cor .zj-dim{color:#77729b}
+.zj-steps{margin:4px 0 8px;padding-left:20px;color:#dcdaf2;font-size:13px}
+.zj-steps li{margin:4px 0}
+.zj-steps small{display:block;color:#9d97c4;font-size:11px}
+.zj-muted.zj-small{font-size:11px;color:#8a86ab}

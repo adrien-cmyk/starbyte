@@ -679,5 +679,12 @@
         dispose() { dead = true; if (h) h.dispose(); },
       };
     },
+    // CARTE PAR ZONES (11/11) : le catalogue des modèles, lu tel quel par l'atlas (aucune liste en double) ;
+    // len = longueur d'affichage mesurée sur le modèle LOD, roster = l'échantillon que la fiche de flotte dessine
+    catalog() {
+      const ships = {};
+      for (const k of ['cuirasse', 'fregate', 'tanker', 'colonial']) ships[k] = { url: MODELS[k].url, len: DIM[k][1], wid: DIM[k][0] };
+      return { ships, bmUrl: (item) => /^[a-z0-9-]{2,40}$/.test(String(item || '')) ? MODELS[bmRegister(item)].url : null, roster: (fleet) => roster(fleet) };
+    },
   };
 })();

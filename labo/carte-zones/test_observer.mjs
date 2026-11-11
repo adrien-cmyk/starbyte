@@ -151,7 +151,7 @@ const others = await Z(p, async () => { const S = STARBYTE_ZONES, wait = ms => n
   const stn = S.objects().find(o => o.type === 'station'); S.observe(stn.id); await wait(2000); out.st = { lvl: S.pres().level, mark: S.atlasState().marks.map(m => m.t), body: document.getElementById('zj-sh-body').innerText.replace(/\s+/g, ' ').slice(0, 220) };
   const sig = S.objects().find(o => o.type === 'sig' && o.g.id === 'SIG-RS1'); S.observe(sig.id); await wait(2000); out.sig = { lvl: S.pres().level, mark: S.atlasState().marks.map(m => m.t), body: document.getElementById('zj-sh-body').innerText.replace(/\s+/g, ' ') };
   return out; });
-rec('STATION', others.st.lvl === 'object' && others.st.mark.length === 1 && /Aperçu générique/.test(others.st.body), `port observé : ${others.st.lvl} · « ${others.st.mark[0]} » · « ${others.st.body.slice(0, 120)} »`);
+rec('STATION', others.st.lvl === 'object' && others.st.mark.length === 1 && /Fichier exporté : les modèles 3D restent dans le jeu. Silhouette générique, identité exacte/.test(others.st.body), `port observé : ${others.st.lvl} · « ${others.st.mark[0]} » · « ${others.st.body.slice(0, 120)} »`);
 rec('SIGNAT', others.sig.lvl === 'object' && /n’en révèle pas la nature/.test(others.sig.body) && !/Champ|Épave|Cristal|habitable/i.test(others.sig.body), `signature non identifiée en gros plan : « ${others.sig.mark[0]} » · « ${others.sig.body.slice(0, 200)} »`);
 await p.screenshot({ path: path.join(SHOTS, 'obs_7_signature.png') });
 await Z(p, () => { const S = STARBYTE_ZONES; S.setMode('tac'); const R = S.zj.snap.zp.region; S.selectZone(R ? R.zones[0].id : S.zj.ws[0].zone); S.setMode('atlas'); }); await settle(p, 2000);

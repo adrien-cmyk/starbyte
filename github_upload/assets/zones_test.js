@@ -25,7 +25,7 @@
   if (window.EXTRA_SAVE_KEYS && EXTRA_SAVE_KEYS.indexOf('zoneProspect') < 0) EXTRA_SAVE_KEYS.push('zoneProspect');
 
   const PAGE = 'atlas/index.html';
-  const PAGE_V = '5f33e09629';   // empreinte de atlas/index.html, écrite par labo/carte-zones/build.py
+  const PAGE_V = '3a6312facc';   // empreinte de atlas/index.html, écrite par labo/carte-zones/build.py
   const GRID = 'tac-2';
   const MIN = 60e3;
   const SB = 'https://elupnpdcblztpfywnhjl.supabase.co';
@@ -147,7 +147,7 @@
       const ph = [{ dir: 'out', t0: m.departedAt, t1: m.arrivalAt }];
       if (m.status === 'docked') ph.push({ dir: 'stay', t0: m.arrivalAt, t1: m.dockStay && m.dockStay.endsAt || null });
       if (m.status === 'returning') { const t1 = m.returnArrivalAt || m.arrivalAt, t0 = m.returnDepartedAt || m.cancelledAt || Math.max(m.departedAt, t1 - (m.arrivalAt - m.departedAt)); ph.push({ dir: 'back', t0, t1 }); }
-      out.push({ id: 'tk:' + m.id, kind: 'tanker', name: m.tankerName || 'Tanker', tier: m.tier || null, world: m.world || 'home', from: coordOf(m.world), to, via, toLabel: m.targetLabel || m.routeName || '',
+      out.push({ id: 'tk:' + m.id, kind: 'tanker', name: m.tankerName || 'Tanker', tier: m.tier || null, fuel: typeof m.fuelCost === 'number' ? m.fuelCost : null, envoy: m.bmEnvoy && /^[a-z0-9-]{2,40}$/.test(String(m.bmEnvoy.item || '')) ? { item: m.bmEnvoy.item, name: m.bmEnvoy.name || '' } : null, world: m.world || 'home', from: coordOf(m.world), to, via, toLabel: m.targetLabel || m.routeName || '',
         route: m.kind === 'route_run' ? (via.length ? 'ligne' : 'route') : 'direct', mkind: m.kind || 'cible', status: m.status, statusLabel: TK[m.status], phases: ph });
     }
     for (const m of G.probeMissions || []) {
@@ -160,7 +160,9 @@
       const ph = [{ dir: 'out', t0: a.departedAt, t1: a.arrivesAt }];
       if (a.phase !== 'going' && a.phase !== 'returning') ph.push({ dir: 'stay', t0: a.arrivesAt, t1: a.endsAt || a.until || null });
       if (a.phase === 'returning') ph.push({ dir: 'back', t0: a.returnDepartedAt || a.arrivesAt, t1: a.returnsAt });
-      out.push({ id: 'fl:' + f.id, kind: 'fleet', name: f.name || 'Flotte', world: f.world || 'home', from: coordOf(f.world), to: addrOf(a.system), via: [], toLabel: 'embuscade · ' + (a.system || ''),
+      const comp = {}; for (const k of ['cuirasse', 'fregate', 'tanker']) { const c = (f.composition && f.composition[k]) || {}; comp[k] = { t1: c.t1 || 0, t2: c.t2 || 0, t3: c.t3 || 0 }; }   // composition connue : c'est ta flotte
+      const premium = (Array.isArray(f.premium) ? f.premium : []).filter(p => p && /^[a-z0-9-]{2,40}$/.test(String(p.item || ''))).map(p => ({ item: p.item, cat: p.cat || '' }));
+      out.push({ id: 'fl:' + f.id, kind: 'fleet', name: f.name || 'Flotte', comp, premium, world: f.world || 'home', from: coordOf(f.world), to: addrOf(a.system), via: [], toLabel: 'embuscade · ' + (a.system || ''),
         route: 'direct', mkind: 'embuscade', status: a.phase, statusLabel: { going: 'En route', returning: 'Retour' }[a.phase] || 'En embuscade', phases: ph });
     }
     for (const m of G.colonyMissions || []) {   // l'arche n'enregistre pas son monde de départ : pas de position inventée
@@ -361,8 +363,29 @@
     return { ok: true, data: d };
   }
 
+  /* ── catalogue des modèles du jeu (cahier v1.2 § 24.1) : l'atlas ne tient aucune liste à lui ──
+     stations : STATION_UI (modèle, titre) + mpDockSystem (le système de la station, le même pour tous) ;
+     vaisseaux : Formation3D.catalog() (modèles LOD et longueurs d'affichage). Adresses absolues : l'atlas est dans un cadre. */
+  function models() {
+    const abs = (u) => { try { return new URL(u, document.baseURI).href; } catch (e) { return null; } };
+    const stations = [];
+    try {
+      if (typeof STATION_UI === 'object' && STATION_UI) for (const k in STATION_UI) {
+        const u = STATION_UI[k]; if (!u || !u.id || !u.url) continue;
+        let sys = null; try { sys = typeof mpDockSystem === 'function' ? mpDockSystem({ id: u.id }) : null; } catch (e) {}
+        if (sys) stations.push({ sys, dock: u.id, profile: k, title: u.title || '', kicker: u.kicker || '', sub: u.sub || '', url: abs(u.url), code: (u.url.match(/sb_([a-z0-9]+)\.glb/) || [])[1] || '' });
+      }
+    } catch (e) {}
+    let ships = {}, bm = null;
+    try {
+      const c = window.Formation3D && Formation3D.catalog ? Formation3D.catalog() : null;
+      if (c) { for (const k in c.ships) ships[k] = { url: abs(c.ships[k].url), len: c.ships[k].len, wid: c.ships[k].wid, code: (c.ships[k].url.match(/sb_([a-z0-9]+)(?:_lod)?\.glb/) || [])[1] || '' }; bm = (item) => { const u = c.bmUrl(item); return u ? abs(u) : null; }; }
+    } catch (e) {}
+    return { meshopt: abs('assets/meshopt_decoder.module.js'), stations, ships, bmUrl: bm };
+  }
+
   window.SBZones = {
-    allowed, why, open, close, state, saveRegion, launch, arrive, act, check, peek, sigAction: (id, wid) => sigAction((G.signatures || {})[id], wid),
+    allowed, why, open, close, state, saveRegion, launch, arrive, act, check, peek, models, sigAction: (id, wid) => sigAction((G.signatures || {})[id], wid),
     onChange(f) { listeners.add(f); return () => listeners.delete(f); },
     grid: GRID,
   };

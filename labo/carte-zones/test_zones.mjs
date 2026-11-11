@@ -259,12 +259,22 @@ const row = await F.evaluate(id => { const b = document.querySelector('#zj-sh-bo
 const sheet = await F.evaluate(() => ({ body: document.getElementById('zj-sh-body').innerText.replace(/\s+/g, ' '), foot: document.getElementById('zj-sh-foot').innerText.replace(/\s+/g, ' ') }));
 await p.screenshot({ path: path.join(SHOTS, '13_tanker_tactique.png') });
 await F.evaluate(() => document.querySelector('#zj-sh-foot [data-a="follow"]').click()); await sleep(3200);
-const fol = await F.evaluate(id => { const S = STARBYTE_ZONES, st = S.trState('tk:' + id), c = S.cam(); return { mode: S.zj.mode, lvl: S.pres().level, F: S.followState(), d: Math.hypot(c.target[0] - st.p[0], c.target[1] - st.p[1], c.target[2] - st.p[2]), marks: S.atlasState().marks.map(m => m.t), obs: S.trObs(), prism: S.prism() }; }, tk.id);
+const vehD = () => { const S = STARBYTE_ZONES, v = S.vehPos(), c = S.cam(); return v ? Math.hypot(c.target[0] - v[0], c.target[1] - v[1], c.target[2] - v[2]) : 1e9; };
+const fol = await F.evaluate(`(${(id => { const S = STARBYTE_ZONES, st = S.trState('tk:' + id), c = S.cam(); return { mode: S.zj.mode, lvl: S.pres().level, F: S.followState(), dNow: Math.hypot(c.target[0] - st.p[0], c.target[1] - st.p[1], c.target[2] - st.p[2]), marks: S.atlasState().marks.map(m => m.t), obs: S.trObs(), prism: S.prism() }; }).toString()})(${JSON.stringify(tk.id)})`);
+fol.d = await F.evaluate(`(${vehD.toString()})()`);
+for (let i = 0; i < 60; i++) { const m = await F.evaluate(() => STARBYTE_ZONES.modelState()); if (m.tr && m.tr.st !== 'loading') break; await sleep(1000); }   // le modèle se charge pendant le suivi
 await sleep(2000);
-const fol2 = await F.evaluate(id => { const S = STARBYTE_ZONES, st = S.trState('tk:' + id), c = S.cam(); return { d: Math.hypot(c.target[0] - st.p[0], c.target[1] - st.p[1], c.target[2] - st.p[2]), f: st.f }; }, tk.id);
+const fol2 = await F.evaluate(`(${(id => { const S = STARBYTE_ZONES, st = S.trState('tk:' + id), c = S.cam(); return { dNow: Math.hypot(c.target[0] - st.p[0], c.target[1] - st.p[1], c.target[2] - st.p[2]), f: st.f }; }).toString()})(${JSON.stringify(tk.id)})`);
+fol2.d = await F.evaluate(`(${vehD.toString()})()`);
 rec('FOLLOW-1b', fol.mode === 'atlas' && fol.lvl === 'travel' && fol.F.on && !fol.F.susp && fol.d < .6 && fol2.d < .6 && fol.obs && !fol.prism && fol.marks.length <= 3 && fol.marks.some(t => t.includes(tk.name)),
-  `fiche « ${sheet.body.slice(0, 150)} » · Suivre : Atlas, présentation ${fol.lvl}, caméra à ${fol.d.toFixed(2)} puis ${fol2.d.toFixed(2)} u du tanker (qui avance : ${(fol2.f * 100).toFixed(1)} %), marqueurs « ${fol.marks.join(' | ')} »`);
+  `fiche « ${sheet.body.slice(0, 150)} » · Suivre : Atlas, présentation ${fol.lvl}, caméra à ${fol.d.toFixed(2)} puis ${fol2.d.toFixed(2)} u du tanker dessiné (${fol.dNow.toFixed(2)} et ${fol2.dNow.toFixed(2)} u de sa position à l’instant de la mesure, entre deux images) ; il avance : ${(fol2.f * 100).toFixed(1)} %, marqueurs « ${fol.marks.join(' | ')} »`);
 await p.screenshot({ path: path.join(SHOTS, '14_tanker_suivi.png') });
+// § 24.1 : le tanker suivi prend le modèle de son type réel, lu dans le catalogue du jeu (Formation3D : TK-07)
+let mt = null; for (let i = 0; i < 60 && !(mt && mt.tr && mt.tr.st !== 'loading'); i++) { await sleep(1000); mt = await F.evaluate(() => STARBYTE_ZONES.modelState()); }
+const mtSheet = await F.evaluate(() => document.getElementById('zj-sh-body').innerText.replace(/\s+/g, ' '));
+await p.screenshot({ path: path.join(SHOTS, '14b_tanker_modele.png') });
+rec('MODEL-01a', mt.cat && mt.tr && mt.tr.st === 'ok' && mt.tr.n === 1 && /sb_tk07_lod\.glb/.test(mt.tr.urls[0]) && /Modèle du jeu : Tanker · TK-07/.test(mtSheet) && mt.tr.vehVis,
+  `catalogue du jeu lu (${mt.stations.length} stations, vaisseaux ${mt.ships.join('/')}) · tanker suivi : ${mt.tr.st}, ${mt.tr.urls.map(u => u.replace(/^.*\//, '')).join(', ')} · « ${(mtSheet.match(/Modèle du jeu[^.]*\./) || [''])[0]} »`);
 // orbiter et pincer : le suivi reste
 const fr = await F.frameElement(), fb = await fr.boundingBox();
 const d0 = (await F.evaluate(() => STARBYTE_ZONES.pres())).wantedDistance, y0 = (await F.evaluate(() => STARBYTE_ZONES.cam())).yaw;
@@ -278,14 +288,23 @@ rec('FOLLOW-02', orb.F.on && !orb.F.susp && Math.abs(orb.yaw - y0) > .05 && orb.
 await F.evaluate(() => { for (let i = 0; i < 20; i++) STARBYTE_ZONES.panBy(-30, 0); }); await sleep(500);
 const sus = await F.evaluate(id => { const S = STARBYTE_ZONES, st = S.trState('tk:' + id), c = S.cam(); return { F: S.followState(), d: Math.hypot(c.target[0] - st.p[0], c.target[1] - st.p[1], c.target[2] - st.p[2]), foot: document.getElementById('zj-sh-foot').innerText }; }, tk.id);
 await F.evaluate(() => document.querySelector('#zj-sh-foot [data-a="follow-resume"]').click()); await sleep(2600);
-const res = await F.evaluate(id => { const S = STARBYTE_ZONES, st = S.trState('tk:' + id), c = S.cam(); return { F: S.followState(), d: Math.hypot(c.target[0] - st.p[0], c.target[1] - st.p[1], c.target[2] - st.p[2]) }; }, tk.id);
+const res = await F.evaluate(() => { const S = STARBYTE_ZONES, v = S.vehPos(), c = S.cam(); return { F: S.followState(), d: Math.hypot(c.target[0] - v[0], c.target[1] - v[1], c.target[2] - v[2]) }; });
 const sameTk = await p.evaluate(j => { const m = G.tankerMissions.find(x => x.id === JSON.parse(j).id); return JSON.stringify(m) === j; }, tk.json);
 rec('FOLLOW-03', sus.F.susp && sus.d > 5 && /Reprendre le suivi/.test(sus.foot) && !res.F.susp && res.F.on && res.d < .6 && sameTk,
-  `déplacement libre : suivi suspendu (caméra à ${sus.d.toFixed(0)} u du tanker, bouton « Reprendre le suivi ») · reprise : caméra à ${res.d.toFixed(2)} u · mission du jeu identique avant et après : ${sameTk}`);
+  `déplacement libre : suivi suspendu (caméra à ${sus.d.toFixed(0)} u du tanker, bouton « Reprendre le suivi ») · reprise : caméra à ${res.d.toFixed(2)} u du tanker dessiné · mission du jeu identique avant et après : ${sameTk}`);
 // voir le trajet, observer la destination : présentation seulement
 await F.evaluate(() => document.querySelector('#zj-sh-foot [data-a="travel-fit"]').click()); await sleep(1800);
 const fit = await F.evaluate(id => { const S = STARBYTE_ZONES, tr = S.travels().find(x => x.id === 'tk:' + id); return { F: S.followState(), d: S.pres().distance, L: tr.L }; }, tk.id);
 await p.screenshot({ path: path.join(SHOTS, '15_tanker_trajet.png') });
+// étape 3 (§ 22) : comparer les itinéraires de ce vrai tanker sur le réseau candidat ; rien ne change dans la mission
+const cmpBtn = await F.evaluate(() => { const b = document.querySelector('#zj-sh-foot [data-a="cor-tr"]'); if (b) b.click(); return !!b; }); await sleep(1500);
+const cT = await F.evaluate(() => ({ s: STARBYTE_ZONES.corState(), body: document.getElementById('zj-sh-body').innerText.replace(/\s+/g, ' '), par: STARBYTE_ZONES.corParams() }));
+const sameTk2 = await p.evaluate(j => { const m = G.tankerMissions.find(x => x.id === JSON.parse(j).id); return JSON.stringify(m) === j; }, tk.json);
+const dT = cT.s.plans && cT.s.plans[0], fT = cT.s.plans && cT.s.plans.find(x => x.k === 'cor');
+await p.screenshot({ path: path.join(SHOTS, '15b_tanker_itineraires.png') });
+rec('COR-02', cmpBtn && dT && dT.k === 'libre' && (fT ? (fT.min < dT.min * .95) === fT.best && (dT.best === !fT.best) : dT.best) && sameTk2 && /Mission réelle : vol direct/.test(cT.body),
+  `tanker ${tk.name} (trajet court) : ${cT.s.plans.map(x => x.name + ' ' + x.len.toFixed(0) + ' u, ' + x.test.toFixed(1) + ' min d’essai, ' + x.fuel + ' carburant' + (x.best ? ' [retenu]' : '')).join(' · ')} · aucun avantage imposé au corridor ; mission du jeu inchangée ${sameTk2}`);
+await F.evaluate(() => document.querySelector('#zj-sh-foot [data-a="cor-back"]').click()); await sleep(600);
 rec('FOLLOW-T', fit.F.susp && fit.d > fit.L * .4, `Voir le trajet : vue de ${fit.d.toFixed(0)} u pour un tracé de ${fit.L.toFixed(0)} u, suivi suspendu (la mission continue)`);
 // arrière-plan : au retour, la position se recale sur les horaires de la partie
 const bg = await F.evaluate(id => STARBYTE_ZONES.trState('tk:' + id).f, tk.id);
@@ -308,6 +327,63 @@ await F.evaluate(() => STARBYTE_ZONES.refresh(true)); await sleep(800);
 const end = await F.evaluate(() => ({ F: STARBYTE_ZONES.followState(), body: document.getElementById('zj-sh-body').innerText.replace(/\s+/g, ' ') }));
 rec('FOLLOW-05', (arrTk.t ? arrTk.t.status === gst : gst === 'retirée') && (!arrTk.t || arrTk.t.status !== 'returning' || arrTk.st.phase === 'back' && arrTk.st.along > .95) && end.F && end.F.ended && !end.F.on && /Mission terminée/.test(end.body),
   `arrivée : le jeu passe la mission en « ${gst} »${arrTk.t ? ', la carte suit (phase ' + arrTk.st.phase + ', au point d’arrivée)' : ''} · fin : « ${end.body.slice(0, 110)} », suivi arrêté`);
+
+// ═══ 6. Modèles du jeu et corridors (cahier v1.2 §§ 19-20 et 24, étape 3 du § 22) ═══
+await F.evaluate(() => { STARBYTE_ZONES.corToggle(false); STARBYTE_ZONES.setMode('atlas'); }); await sleep(800);
+// une station du réseau : son propre modèle (STATION_UI du jeu, système donné par mpDockSystem)
+const stKey = await F.evaluate(() => { const S = STARBYTE_ZONES, keys = S.objects().filter(o => o.type === 'station').map(o => o.key), pref = ['A-L-8388', 'A-N-1556', 'A-N-8096', 'A-K-4227', 'A-O-8715', 'A-M-3340']; return pref.find(k => keys.includes(k)) || keys[0]; });
+await F.evaluate(k => { const S = STARBYTE_ZONES, o = S.objects().find(o => o.type === 'station' && o.key === k); S.observe(o.id); }, stKey);
+let ms = null; for (let i = 0; i < 90 && !(ms && ms.obs && ms.obs.st !== 'loading'); i++) { await sleep(1000); ms = await F.evaluate(() => STARBYTE_ZONES.modelState()); }
+await sleep(1500);
+const msSheet = await F.evaluate(() => ({ body: document.getElementById('zj-sh-body').innerText.replace(/\s+/g, ' '), code: (STARBYTE_ZONES.modelState().stations || []) }));
+const want = (ms.stations.find(x => x.startsWith(stKey + '=')) || '').split('=')[1];
+await p.screenshot({ path: path.join(SHOTS, '17_station_modele.png') });
+rec('MODEL-01b', ms.obs && ms.obs.st === 'ok' && ms.obs.isModel && ms.obs.meshes > 0 && want && new RegExp('sb_' + want + '\\.glb').test(ms.obs.url) && /Modèle du jeu/.test(msSheet.body),
+  `station ${stKey} observée : modèle ${ms.obs && ms.obs.url && ms.obs.url.replace(/^.*\//, '')} (catalogue : ${want}), ${ms.obs && ms.obs.meshes} maillages · « ${(msSheet.body.match(/Modèle du jeu[^.]*\./) || [''])[0]} »`);
+// comparaison depuis la capitale vers chaque station du réseau : accès, corridor, sortie ; longueurs sur les courbes
+const cor = await F.evaluate(async () => { const S = STARBYTE_ZONES, out = [], keys = ['A-O-8715', 'A-N-8096', 'A-N-1556', 'A-K-4227', 'A-M-3340', 'A-L-8388'];
+  for (const k of keys) { const o = S.objects().find(o => o.type === 'station' && o.key === k); if (!o || !S.corCompare('obj', o.id)) continue; const st = S.corState(); out.push({ k, plans: st.plans, D: o.p }); }
+  return { out, net: S.corState().net, par: S.corParams() }; });
+let c3 = true, c4 = true, c5 = true, c3n = 0, wins = 0, ex = null;
+for (const r of cor.out) { const d = r.plans[0]; for (const x of r.plans) {
+  const sumL = x.legs.reduce((a, l) => a + l.len, 0), sumM = x.legs.reduce((a, l) => a + l.min, 0); if (Math.abs(sumL - x.len) > .01 || Math.abs(sumM - x.min) > 1e-6 || Math.abs(x.test - x.min / cor.par.season) > 1e-6) c3 = false;   // un seul devis : toutes les phases comptées
+  for (let i = 1; i < x.legs.length; i++) { const a = x.legs[i - 1], b = x.legs[i]; if (a.b !== b.a || Math.hypot(a.p1[0] - b.p0[0], a.p1[1] - b.p0[1], a.p1[2] - b.p0[2]) > .01) c5 = false; }   // les phases s'enchaînent sur des nœuds officiels
+  if (x.k === 'cor') { c3n++; const L0 = x.legs[0], Ln = x.legs[x.legs.length - 1]; if (L0.t !== 'free' && L0.a !== '@O') c3 = false; if (Ln.t !== 'free' && Math.hypot(Ln.p1[0] - r.D[0], Ln.p1[1] - r.D[1], Ln.p1[2] - r.D[2]) > .01) c3 = false; if (x.min < d.min) wins++; if (!ex) ex = { k: r.k, x, d }; }
+  for (const l of x.legs) if (l.t === 'cor' && !(l.len >= Math.hypot(l.p1[0] - l.p0[0], l.p1[1] - l.p0[1], l.p1[2] - l.p0[2]) - 1e-6)) c4 = false; } }
+rec('COR-03', c3 && c3n > 0, `${cor.out.length} ports comparés depuis la capitale, ${c3n} itinéraires par corridors : accès en vol libre, corridors, sortie en vol libre (nulle quand le port est sur le réseau), un seul devis (longueur, durée, carburant = somme des phases)${ex ? ' · ex. ' + ex.k + ' : ' + ex.x.legs.map(l => (l.t === 'cor' ? l.e : 'libre') + ' ' + l.len.toFixed(0)).join(' → ') + ' u, ' + ex.x.test.toFixed(1) + ' min d’essai contre ' + ex.d.test.toFixed(1) + ' en direct' : ''}`);
+rec('COR-04', c4 && cor.net && cor.net.len > cor.net.chord, `réseau : ${cor.net.cors} corridors, ${cor.net.edges} tronçons, ${cor.net.len.toFixed(0)} u mesurés sur les courbes (cordes : ${cor.net.chord.toFixed(0)} u) ; chaque tronçon est facturé à sa longueur courbe`);
+rec('COR-05', c5, `les itinéraires ne changent de corridor qu’aux nœuds du réseau (stations, jonctions J1, J2) ; deux tracés qui se croisent ne créent aucune correspondance`);
+// gros plan : le réseau s'efface (aucun retour à l'enchevêtrement)
+await F.evaluate(() => { const S = STARBYTE_ZONES; S.backN(); S.corToggle(true); }); await sleep(2500);
+const vis1 = await F.evaluate(() => { const c = STARBYTE_ZONES.corState(); return c.netVis && c.drawn; });
+await F.evaluate(k => { const S = STARBYTE_ZONES, o = S.objects().find(o => o.type === 'station' && o.key === k); S.observe(o.id); }, stKey); await sleep(2500);
+const vis2 = await F.evaluate(() => ({ v: STARBYTE_ZONES.corState().netVis, lvl: STARBYTE_ZONES.pres().level, marks: STARBYTE_ZONES.atlasState().marks.length }));
+rec('COR-06', vis1 && !vis2.v && vis2.lvl === 'object' && vis2.marks <= 3, `réseau visible au voisinage ${vis1} ; en gros plan sur la station (${vis2.lvl}) : réseau masqué, ${vis2.marks} repère(s)`);
+await F.evaluate(() => STARBYTE_ZONES.backN()); await sleep(2500);
+await p.screenshot({ path: path.join(SHOTS, '18_reseau_atlas.png') });
+await F.evaluate(k => { const S = STARBYTE_ZONES, o = S.objects().find(o => o.type === 'station' && o.key === k); S.setMode('tac'); S.corCompare('obj', o.id); const pl = S.corState().plans, i = pl.findIndex(x => x.k === 'cor'); if (i >= 0) S.corPick(i); else document.querySelector('#zj-sh-foot [data-a="cor-fit"]').click(); }, ex ? ex.k : 'A-M-3340'); await sleep(1800);
+await p.screenshot({ path: path.join(SHOTS, '19_itineraire_tactique.png') });
+// flotte mixte en embuscade (la tienne : composition connue) : un modèle par type présent, effectif complet dans la fiche
+const flId = await p.evaluate(() => { const now = Date.now(), sys = (G.worlds[0] && G.worlds[0].coord || '').split('-').slice(0, 3).join('-');
+  const f = { id: 'fl-test-mixte', name: 'Escadre Mixte', composition: { cuirasse: { t1: 2, t2: 0, t3: 0 }, fregate: { t1: 6, t2: 0, t3: 0 }, tanker: { t1: 3, t2: 0, t3: 0 } }, soldiers: { garde: 0, lourd: 0 }, createdAt: now,
+    ambush: { system: MY_ADDRESS.cluster + '-' + MY_ADDRESS.sector + '-' + String(((MY_ADDRESS.system + 40 - 1000) % 9000) + 1000).padStart(4, '0'), phase: 'going', world: 'home', departedAt: now - 60000, arrivesAt: now + 20 * 60000, travelMs: 21 * 60000, hold: {} } };
+  G.fleet.prepared.push(f); return 'fl:' + f.id; });
+await F.evaluate(() => { STARBYTE_ZONES.refresh(true); STARBYTE_ZONES.corToggle(false); }); await sleep(600);
+await F.evaluate(id => STARBYTE_ZONES.follow(id), flId); await sleep(3500);
+let mf = null; for (let i = 0; i < 90 && !(mf && mf.tr && mf.tr.st !== 'loading'); i++) { await sleep(1000); mf = await F.evaluate(() => STARBYTE_ZONES.modelState()); }
+await sleep(1200); mf = await F.evaluate(() => STARBYTE_ZONES.modelState());
+const mfSheet = await F.evaluate(() => document.getElementById('zj-sh-body').innerText.replace(/\s+/g, ' '));
+await p.screenshot({ path: path.join(SHOTS, '20_flotte_mixte.png') });
+rec('MODEL-02', mf.tr && mf.tr.st === 'ok' && mf.tr.n === 3 && mf.tr.urls.some(u => /kv01/.test(u)) && mf.tr.urls.some(u => /sr01/.test(u)) && mf.tr.urls.some(u => /tk07/.test(u)) && /2 cuirassés · 6 frégates · 3 tankers/.test(mfSheet) && mf.tr.shown === 3,
+  `flotte mixte suivie : ${mf.tr && mf.tr.list.join(', ')} (${mf.tr && mf.tr.shown} dessinés à ${mf.tr && mf.tr.px && mf.tr.px.toFixed(0)} px) · « ${(mfSheet.match(/Effectif[^·]*·[^·]*·[^·]*·[^)]*?au total/) || [''])[0]} »`);
+// dézoom : la tête seule, puis plus rien que le repère de la carte ; la mémoire reste bornée
+await F.evaluate(() => { STARBYTE_ZONES.followStop(); STARBYTE_ZONES.zoomTo(160); }); await sleep(2200);
+const far1 = await F.evaluate(() => ({ m: STARBYTE_ZONES.modelState().tr, marks: STARBYTE_ZONES.atlasState().marks.map(m => m.t) }));
+await F.evaluate(() => { STARBYTE_ZONES.zoomTo(1800); }); await sleep(2200);
+const far2 = await F.evaluate(() => ({ m: STARBYTE_ZONES.modelState().tr, marks: STARBYTE_ZONES.atlasState().marks.map(m => m.t), cache: STARBYTE_ZONES.modelState().cache }));
+rec('MODEL-03', far1.m.shown === 1 && far1.m.vehVis && !far2.m.vehVis && far2.marks.some(t => /Escadre Mixte/.test(t)) && far2.cache.length <= 6,
+  `à ${far1.m.px.toFixed(0)} px : ${far1.m.shown} modèle (la tête) ; à ${far2.m.px.toFixed(1)} px : plus de modèle, repère « Escadre Mixte » sur la carte · ${far2.cache.length} modèles gardés en mémoire (${far2.cache.join(', ')})`);
+await p.evaluate(() => { G.fleet.prepared = G.fleet.prepared.filter(f => f.id !== 'fl-test-mixte'); });
 
 rec('ERREURS', errs.length === 0, errs.slice(0, 8).join(' | ') || 'aucune erreur de page');
 await browser.close(); srv.close();
