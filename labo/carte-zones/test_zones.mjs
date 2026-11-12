@@ -125,6 +125,15 @@ async function newGame(p, url, planet) {
   // étape 2 : poser une balise depuis la fiche d'un système, la voir en route, posée, puis la rappeler (règles et fonctions du jeu)
   await p.evaluate(() => { G.probesPool = G.probesPool || []; if (!G.probesPool.some(x => x.tier === 'beacon' && x.state === 'ready')) G.probesPool.push({ id: 'beacon-test-' + Date.now(), tier: 'beacon', state: 'ready', world: 'home', name: 'Balise d’essai' }); });
   await MF.evaluate(() => STARBYTE_ZONES.refresh(true)); await sleep(500);
+  // hors de portée des capteurs : la carte le dit d'avance, avec la phrase du jeu, au lieu de proposer un envoi refusé au départ
+  const far = await p.evaluate(sys => validateAddressForTier(sys, 'beacon'), ks.sys);
+  await p.evaluate(sys => openOnMap('system', sys), ks.sys); await sleep(2500);
+  const b0 = await MF.evaluate(() => ({ place: !!document.querySelector('#zj-sh-body [data-a="g-bc-place"]'), body: document.getElementById('zj-sh-body').innerText.replace(/\s+/g, ' ') }));
+  // un système à portée, balayé
+  const bsys = await p.evaluate(() => { const A = MY_ADDRESS; for (let d = 1; d < 80; d++) { const n = A.system + d; if (n > 9999) break; const k = A.cluster + '-' + A.sector + '-' + n; if (!validateAddressForTier(k, 'beacon').valid) continue;
+    G.knownSystems = G.knownSystems || {}; G.knownSystems[k] = { cluster: A.cluster, sector: A.sector, system: String(n), planets: generateDiscoveredSystem(A.sector, String(n), A.cluster), discoveredAt: Date.now() - 600e3, isMine: false }; saveGame(); return k; } return null; });
+  ks.sys = bsys || ks.sys;
+  await MF.evaluate(() => STARBYTE_ZONES.refresh(true)); await sleep(600);
   await p.evaluate(sys => openOnMap('system', sys), ks.sys); await sleep(2500);
   const b1 = await MF.evaluate(() => ({ place: !!document.querySelector('#zj-sh-body [data-a="g-bc-place"]'), body: document.getElementById('zj-sh-body').innerText.replace(/\s+/g, ' ') }));
   await MF.evaluate(() => { const b = document.querySelector('#zj-sh-body [data-a="g-bc-place"]'); if (b) b.click(); }); await sleep(1500);
@@ -138,8 +147,8 @@ async function newGame(p, url, planet) {
   await p.screenshot({ path: path.join(SHOTS, '0g_balise_posee.png') });
   await MF.evaluate(() => { const b = document.querySelector('#zj-sh-body [data-a="g-bc-recall"]'); if (b) b.click(); }); await sleep(1500);
   const b5 = await p.evaluate(id => { const b = id && sbAllProbes().find(x => x.id === id); return b ? b.state : null; }, b3);
-  rec('MIG-BALISE', b1.place && b2 && /Balise en route/.test(b2f) && !!b3 && b4.recall && b5 === 'ready',
-    `système ${ks.sys} : « Poser une balise » ${b1.place} → mission du jeu ${b2}, fiche « ${(b2f.match(/Balise en route[^.]*\./) || [''])[0]} » · arrivée : balise ${b3} posée, « Rappeler la balise » ${b4.recall} (« ${(b4.body.match(/BALISE.{0,90}/) || [''])[0]} ») · rappel : balise ${b5}`);
+  rec('MIG-BALISE', (far.valid || (!b0.place && b0.body.includes(far.error))) && b1.place && b2 && /Balise en route/.test(b2f) && !!b3 && b4.recall && b5 === 'ready',
+    `hors de portée (${far.valid ? 'aucun cas' : '« ' + far.error + ' »'}) : bouton ${b0.place}, raison affichée ${!far.valid && b0.body.includes(far.error)} · système ${ks.sys} : « Poser une balise » ${b1.place} → mission du jeu ${b2}, fiche « ${(b2f.match(/Balise en route[^.]*\./) || [''])[0]} » · arrivée : balise ${b3} posée, « Rappeler la balise » ${b4.recall} (« ${(b4.body.match(/BALISE.{0,90}/) || [''])[0]} ») · rappel : balise ${b5}`);
   await p.evaluate(() => goto('planet')); await sleep(1500);
   const m6 = await p.evaluate(() => !!document.getElementById('sb-atlas-wrap'));
   // la marque survit au rechargement (la capitale de l'essai n'est plus lue : c'est la sauvegarde qui fait foi)
@@ -414,10 +423,14 @@ const tac = await F.evaluate(id => { const S = STARBYTE_ZONES, st = S.trState('t
 await p.screenshot({ path: path.join(SHOTS, '16_tanker_suivi_tactique.png') });
 rec('FOLLOW-06', tac.F.on && Math.abs(tac.k - tac.lay) <= 1 && tac.origin === 'home', `Tactique en suivi : couche ${tac.k} (le tanker est dans la tranche ${tac.lay}, marge de 15 %), départ des sondages ${tac.origin} inchangé`);
 // 12/11 (retour d'Adrien) : toucher le tracé de la mission en Tactique garde la mission ; avant, la zone dessous était choisie
-const lineTap = kind => F.evaluate(kind => { const S = STARBYTE_ZONES, zj = S.zj, W = innerWidth, H = innerHeight;
-  for (const l of (zj.lines || []).filter(l => l.o.type === kind)) for (const u of [.5, .3, .7, .15, .85]) { const x = l.x1 + (l.x2 - l.x1) * u, y = l.y1 + (l.y2 - l.y1) * u; if (x < 30 || x > W - 30 || y < 150 || y > H - 260) continue; const pk = S.pick(x, y); if (pk.chip || pk.list.length) continue;
-    const zone = S.zj.sel && S.zj.sel.type; S.tap(x, y); return { x: Math.round(x), y: Math.round(y), before: zone, sel: zj.sel && zj.sel.type, id: zj.sel && zj.sel.id, kind: (document.querySelector('#zj-sh-body .zj-kind') || {}).textContent, n: zj.lines.filter(l => l.o.type === kind).length }; }
-  return { n: (zj.lines || []).filter(l => l.o.type === kind).length }; }, kind);
+const lineTap = kind => F.evaluate(async kind => { const S = STARBYTE_ZONES, zj = S.zj, W = innerWidth, H = innerHeight, mine = () => (zj.lines || []).filter(l => l.o.type === kind);
+  const tryTap = () => { for (const l of mine()) for (const u of [.5, .3, .7, .15, .85, .05, .95]) { const x = l.x1 + (l.x2 - l.x1) * u, y = l.y1 + (l.y2 - l.y1) * u; if (x < 30 || x > W - 30 || y < 150 || y > H - 260) continue; const pk = S.pick(x, y); if (pk.chip || pk.list.length) continue;
+    S.tap(x, y); return { x: Math.round(x), y: Math.round(y), sel: zj.sel && zj.sel.type, id: zj.sel && zj.sel.id, kind: (document.querySelector('#zj-sh-body .zj-kind') || {}).textContent, n: mine().length }; } return null; };
+  let r = tryTap(); if (r) return r;
+  // aucun tracé dans la partie visible de la carte : on le ramène au milieu (comme le ferait un glissé), puis on touche
+  const l = mine()[0]; if (!l) return { n: 0 }; if (zj.follow && zj.follow.on) zj.follow.susp = true;
+  zj.cx += ((l.x1 + l.x2) / 2 - W / 2) * zj.upp; zj.cz += ((l.y1 + l.y2) / 2 - H * .4) * zj.upp; zj.dirty = true; await new Promise(res => setTimeout(res, 900));
+  return tryTap() || { n: mine().length }; }, kind);
 const rt1 = await lineTap('travel'); await sleep(300);
 rec('ROUTE-01', rt1.sel === 'travel' && rt1.id === 'tk:' + tk.id, `tracé de la mission en Tactique (${rt1.n} segments touchables) : toucher (${rt1.x}, ${rt1.y}), loin du repère → fiche ${rt1.sel} ${rt1.id || ''} (« ${rt1.kind || ''} »), pas la zone dessous`);
 // arrivée puis fin : l'état vient du jeu

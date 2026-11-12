@@ -566,6 +566,12 @@
     }
     return { list, going, quota: cfg.quotaMax || 3, cost: { metal: (cfg.cost && cfg.cost.metal) || 300, cristal: (cfg.cost && cfg.cost.cristal) || 100 }, status, posts: (G.tankerMissions || []).filter(m => m && m.kind === 'route_post' && ['in_transit', 'posted'].includes(m.status)).map(m => sysOfAddr(m.targetCoords)).filter(Boolean) };
   }
+  // la balise peut-elle partir du monde choisi vers ce système ? Même contrôle que le lancement du jeu (format, portée du Laboratoire)
+  function beaconCheck(sys, wid) {
+    sys = sysOfAddr(sys); if (!sys || !SYS_RE.test(sys)) return { ok: false, why: 'Système inconnu.' };
+    if (typeof validateAddressForTier !== 'function') return { ok: true };
+    try { const v = inWorld(wid || G.activeWorld || 'home', () => validateAddressForTier(sys, 'beacon')); return v && v.valid ? { ok: true } : { ok: false, why: (v && v.error) || 'Cible refusée.' }; } catch (e) { return { ok: true }; }
+  }
   // les raccourcis du Centre de prospection (Sondes, Missions, Rapports, Carnet, Archives) : leurs icônes et leurs pastilles, lus dans le jeu
   function navState() {
     const out = [];
@@ -618,7 +624,7 @@
   }
 
   window.SBZones = {
-    allowed, why, open, close, state, saveRegion, launch, arrive, act, check, peek, models, migrated, pilot, known, gameAct, showOldMap, showNewMap, embedded: () => !!frameWrap, sigAction: (id, wid) => sigAction((G.signatures || {})[id], wid),
+    allowed, why, open, close, state, saveRegion, launch, arrive, act, check, peek, models, migrated, pilot, known, gameAct, beaconCheck, showOldMap, showNewMap, embedded: () => !!frameWrap, sigAction: (id, wid) => sigAction((G.signatures || {})[id], wid),
     onChange(f) { listeners.add(f); return () => listeners.delete(f); },
     grid: GRID,
   };
