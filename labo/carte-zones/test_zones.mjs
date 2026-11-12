@@ -79,7 +79,35 @@ async function newGame(p, url, planet) {
   await sleep(3500);
   const m5 = await p.evaluate(() => ({ crown: !!document.getElementById('crown-sp'), txt: ((document.getElementById('crown-sp') || {}).innerText || '').replace(/\s+/g, ' ').slice(0, 60) }));
   rec('MIG-PORT', m5.crown && /DRIFTING CROWN/i.test(m5.txt), `« Entrer dans le port » ouvre la station du jeu : « ${m5.txt} »`);
-  await p.evaluate(() => { try { crownSpaceClose(); } catch (e) {} goto('planet'); }); await sleep(1500);
+  // univers ouvert : une zone hors de l'ancienne région de 30 zones, à portée, se sonde ; son contenu ne dépend que de la zone
+  await p.evaluate(() => { try { crownSpaceClose(); } catch (e) {} goto('prospect'); }); await sleep(2500);
+  MF = await frame(); await sleep(800);
+  const oz = await MF.evaluate(() => { const Z = STARBYTE_ZONES, id = Z.openZoneNear(true); if (!id) return null; Z.setMode('tac'); Z.selectZone(id, true); const c1 = Z.zoneContent(id); return { id, c1: JSON.stringify(c1), body: document.getElementById('zj-sh-body').innerText.replace(/\s+/g, ' '), btn: !![...document.querySelectorAll('#zj-sh-foot button')].find(b => /Sonder cette zone/.test(b.textContent)) }; });
+  await p.evaluate(() => { const pool = G.probesPool || []; if (!pool.some(x => x.tier === 'radar' && x.state === 'ready')) pool.push({ id: 'radar-test-' + Date.now(), tier: 'radar', state: 'ready', world: 'home' }); });
+  await sleep(600);
+  await MF.evaluate(() => { const b = [...document.querySelectorAll('#zj-sh-foot button')].find(b => /Sonder cette zone/.test(b.textContent)); if (b) b.click(); });
+  await sleep(1200);
+  const om = await p.evaluate(id => { const m = (G.probeMissions || []).find(x => x.zone === id); const z = G.zoneProspect.zones[id]; if (m) { m.arrivalAt = Date.now() - 1; tickProbes(); } const z2 = G.zoneProspect.zones[id]; return { m: !!m, open: z && z.open && z.open.content, done: z2 && z2.st, found: z2 && (z2.found || []).length, sig: z2 && z2.found && z2.found[0] && G.signatures[z2.found[0]] && G.signatures[z2.found[0]].system }; }, oz && oz.id);
+  const oc = oz && JSON.parse(oz.c1);
+  rec('MIG-OUVERT', oz && !/région de test/.test(oz.body) && oz.btn && om.m && om.done === 'done' && (oc.cat === 'rien' ? om.found === 0 : om.found === 1 && om.sig === oc.sys) && JSON.stringify(om.open) === JSON.stringify(oc.cat === 'rien' ? { cat: 'rien' } : Object.fromEntries(Object.entries(oc).filter(([k]) => k !== 'anchor'))),
+    `zone ${oz && oz.id} (hors des 30 zones de l'essai, à portée) : « Sonder cette zone » ${oz && oz.btn}, aucun « région de test » ; contenu tiré de la zone : ${oz && oz.c1} → mission ${om.m}, arrivée ${om.done}, ${om.found} signature${om.found > 1 ? 's' : ''}${om.sig ? ' sur ' + om.sig : ''}`);
+  // étape 1 : les systèmes balayés et leurs emplacements ; marquer un système
+  const ks = await p.evaluate(() => { const sys = G.zoneProspect.region.zones.find(z => z.anchor && z.cat === 'rien' && z.grp !== 'A0').anchor, m = sys.match(/^([A-Z]+)-([A-Z])-(\d{4})$/);
+    G.knownSystems = G.knownSystems || {}; G.knownSystems[sys] = { cluster: m[1], sector: m[2], system: m[3], planets: generateDiscoveredSystem(m[2], m[3], m[1]), discoveredAt: Date.now() - 3600e3, isMine: false };
+    saveGame(); return { sys, n: G.knownSystems[sys].planets.length }; });
+  await MF.evaluate(() => STARBYTE_ZONES.refresh(true)); await sleep(600);
+  await p.evaluate(sys => openOnMap('system', sys), ks.sys); await sleep(2500);
+  const ky = await MF.evaluate(() => ({ sel: STARBYTE_ZONES.zj.sel && STARBYTE_ZONES.zj.sel.id, rows: [...document.querySelectorAll('#zj-sh-body button[data-k="planet"]')].length, kind: (document.querySelector('#zj-sh-body .zj-kind') || {}).textContent, foot: [...document.querySelectorAll('#zj-sh-foot button')].map(b => b.textContent.trim()) }));
+  await p.screenshot({ path: path.join(SHOTS, '0d_systeme_balaye.png') });
+  await MF.evaluate(() => { const b = [...document.querySelectorAll('#zj-sh-foot button')].find(b => b.textContent.trim() === 'Intéressant'); if (b) b.click(); }); await sleep(900);
+  const kt = await p.evaluate(sys => (G.systemTags || {})[sys] || null, ks.sys);
+  const ky2 = await MF.evaluate(() => (document.querySelector('#zj-sh-body .zj-kind') || {}).textContent);
+  rec('MIG-SYSTEMES', ky.sel === 'sys:' + ks.sys && ky.rows === ks.n && /SYSTÈME BALAYÉ/.test(ky.kind) && kt === 'star' && /INTÉRESSANT/.test(ky2),
+    `système balayé ${ks.sys} : objet de la carte (${ky.sel}), ${ky.rows} emplacement(s) sur ${ks.n} (fiche planète du jeu), actions : ${ky.foot.join(' | ')} · marque « intéressant » posée dans la partie (${kt})`);
+  // ce qui appartenait à l'ancienne carte (légende, puces, aide de plan) ne passe jamais par-dessus la nouvelle
+  const ov = await p.evaluate(() => { const s = document.getElementById('scr-prospect'), out = {}; for (const c of ['pl-legend', 'pl-chip', 'pl-hud', 'pl-xtra']) { const d = document.createElement('div'); d.className = c + ' on'; s.appendChild(d); out[c] = getComputedStyle(d).display; d.remove(); } return out; });
+  rec('MIG-SURCOUCHE', Object.values(ov).every(v => v === 'none'), `éléments de l'ancienne carte sur la nouvelle : ${Object.entries(ov).map(([k, v]) => k + ' ' + v).join(', ')}`);
+  await p.evaluate(() => goto('planet')); await sleep(1500);
   const m6 = await p.evaluate(() => !!document.getElementById('sb-atlas-wrap'));
   // la marque survit au rechargement (la capitale de l'essai n'est plus lue : c'est la sauvegarde qui fait foi)
   await p.reload(); await sleep(6000);

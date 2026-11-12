@@ -104,6 +104,7 @@ body.zj-tac #zj-depth{display:flex}
 .zj-steps small{display:block;color:#9d97c4;font-size:11px}
 .zj-muted.zj-small{font-size:11px;color:#8a86ab}
 .zj-cor small .zj-min{display:inline;color:#ffcf96;font-weight:600}
+.zj-legend i.y{width:8px;height:8px;margin:0 6px 0 3px;border:1.4px solid rgba(214,224,242,.9);border-radius:0;vertical-align:0}
 
 </style>
 </head>
@@ -495,6 +496,8 @@ function zjObjects(){if(performance.now()-zj.objsT<1000&&zj.objs.length)return z
  if(mig){for(const pt of zj.snap.ports||[]){const p=zjPosOf(pt.sys);if(!p)continue;const c=CARNET_ST.find(x=>x.key===pt.sys);out.push({type:'station',id:'st:'+pt.sys,name:pt.name||(c&&c.name)||pt.sys,sub:(pt.label||'Port franc')+' · '+pt.sys,key:pt.sys,p,port:pt})}}   // la connaissance se gagne : seuls les ports découverts dans la partie
  else for(const st of CARNET_ST){const p=zjPosOf(st.key);if(p)out.push({type:'station',id:'st:'+st.key,name:st.name,sub:'Port franc · '+st.key,key:st.key,p})}
  if(zj.snap)for(const g of zj.snap.sigs){const p=zjPosOf(g.system);if(!p)continue;out.push({type:'sig',id:'sig:'+g.id,name:zjSigName(g),sub:g.system,key:g.system,p,g})}
+ if(mig){const tg=zj.snap.tags||{},taken=new Set(out.filter(o=>o.type!=='sig').map(o=>o.key));   // étape 1 : les systèmes balayés, avec leurs emplacements (règle du jeu)
+  for(const k of zj.snap.systems||[]){if(taken.has(k.sys))continue;const p=zjPosOf(k.sys);if(!p)continue;out.push({type:'sys',id:'sys:'+k.sys,name:'Système '+k.sys,sub:(k.planets.length?k.planets.length+' emplacement'+(k.planets.length>1?'s':''):'balayé')+' · '+k.sys,key:k.sys,p,k,tag:tg[k.sys]||null})}}
  for(const o of out)o.zone=zoneOfPoint(o.p);zj.objs=out;zj.objsT=performance.now();return out}
 function zjMissionPos(m){const w=zjWorld(m.world),z=zoneParse(m.zone);if(!w||!z)return null;const c=zoneCenter(z.q,z.r,z.k),now=Date.now(),f=Math.max(0,Math.min(1,(now-m.departedAt)/Math.max(1,m.arrivalAt-m.departedAt)));
  return[w.p[0]+(c[0]-w.p[0])*f,w.p[1]+(c[1]-w.p[1])*f,w.p[2]+(c[2]-w.p[2])*f]}
@@ -540,6 +543,18 @@ function zjMakeRegion(chk){chk=chk||((key,kind)=>ZH.check(key,kind));const home=
  for(const z of zones){delete z.kind;delete z._sys}
  return{grid:TAC_GRID.version,seed,createdAt:Date.now(),home:home.coord,colony:col?col.coord:null,zones,notes}}
 
+/* ── 12/11 : univers ouvert (compte migré). Une zone hors de l'ancienne région reçoit un contenu tiré de son seul identifiant
+   (même zone, même tirage : l'univers est le même pour tous), dans les proportions de la région : rien 40 %, commun 40 %, choix 20 %.
+   Il est posé sur un vrai système du volume ; un corps habitable seulement là où les règles du jeu ont un emplacement habitable. ── */
+const zjOpenCache=new Map();
+function zjZoneContent(id){if(zjOpenCache.has(id))return zjOpenCache.get(id);const z=zoneParse(id);if(!z)return null;const L=tacPrismSystems(z.q,z.r,z.k,true);if(!L)return null;
+ const avoid=new Set([...zj.ws.map(w=>w.key),...CARNET_ST.map(x=>x.key)]),c=zoneCenter(z.q,z.r,z.k),d=x=>Math.hypot(x.p[0]-c[0],x.p[1]-c[1],x.p[2]-c[2]),l=L.filter(x=>!avoid.has(x.key)).sort((a,b)=>d(a)-d(b));
+ const rng=zjRng('univers|'+TAC_GRID.version+'|'+id),r=rng(),r2=rng(),r3=rng(),anchor=(l[0]||L[0]||{}).key||null;let out={cat:'rien',anchor};
+ if(r>=.4&&l.length){const commun=r<.8;let kind=commun?(r2<.5?'asteroides':r2<.75?'cristal':'epave'):(r2<.3?'habitable':['anomalie','debris','sonde_ancienne','cargo'][Math.min(3,Math.floor((r2-.3)/.7*4))]),cand=l;
+  if(kind==='habitable'){cand=l.filter(x=>{try{return ZH.check(x.key,'habitable').habitable}catch(e){return false}});if(!cand.length){kind='debris';cand=l}}
+  const pick=cand[Math.floor(r3*cand.length)];out={cat:commun?'commun':'choix',kind,sys:pick.key,anchor,...ZJ_KINDS[kind]}}
+ zjOpenCache.set(id,out);return out}
+
 /* ── caméra orthographique : la même scène, vue de dessus, sur la tranche active ── */
 const zjCam=new T.OrthographicCamera(-1,1,1,-1,1,400000);zjCam.up.set(0,0,-1);
 const zjRender0=renderer.render.bind(renderer);
@@ -579,7 +594,7 @@ function zjCtxLabel(){const ws=zj.ws.filter(w=>tacLayerOf(w.p[1])===zj.k);if(ws.
  const d=zj.k-zjHomeK(),h=zjHome();return(d>0?'Au-dessus':'Au-dessous')+' de '+(h?h.name:'ma planète')+' · '+Math.abs(d)+' couche'+(Math.abs(d)>1?'s':'')}
 
 /* ══ DESSIN DE LA TACTIQUE ══ */
-function zjDraw(){const c=zjCtx,W=innerWidth,H=innerHeight,inv=1/zj.upp,v=zjView(),[y0,y1]=tacLayerY(zj.k),hexPx=TAC_GRID.S*inv,ins=zjInsets(),hits=[],chips=[],t=performance.now()/1000,now=Date.now();
+function zjDraw(){const mig=zjMig();const c=zjCtx,W=innerWidth,H=innerHeight,inv=1/zj.upp,v=zjView(),[y0,y1]=tacLayerY(zj.k),hexPx=TAC_GRID.S*inv,ins=zjInsets(),hits=[],chips=[],t=performance.now()/1000,now=Date.now();
  const sx=X=>(X-zj.cx)*inv+W/2,sy=Z=>(Z-zj.cz)*inv+H/2,mapOpen=ins.bottom-ins.top>=80;zj.anim=false;
  c.setTransform(zjDpr,0,0,zjDpr,0,0);c.clearRect(0,0,W,H);
  const need=zjNeedSectors(v),SS=SECTOR_SIZE,loadedAt=new Set();for(const s of need)if(tacSecs.has(keyOf(s)))loadedAt.add(s[0]*1e6+s[2]);
@@ -587,8 +602,8 @@ function zjDraw(){const c=zjCtx,W=innerWidth,H=innerHeight,inv=1/zj.upp,v=zjView
  // 1. zones visibles
  const rowH=TAC_GRID.S*TQ3/2,cells=[];
  for(let r=Math.floor((v.z0-TAC_R)/rowH)-1;r<=Math.ceil((v.z1+TAC_R)/rowH)+1;r++){const q0=Math.floor(v.x0/TAC_GRID.S-r/2)-1,q1=Math.ceil(v.x1/TAC_GRID.S-r/2)+1;
-  for(let q=q0;q<=q1;q++){const[cx,cz]=tacCellCenter(q,r),X=sx(cx),Y=sy(cz);if(X<-hexPx||X>W+hexPx||Y<-hexPx||Y>H+hexPx)continue;const id=zoneId(q,r,zj.k),reg=zj.regionMap.get(id);
-   cells.push({q,r,X,Y,cx,cz,id,reg,loaded:cellLoaded(cx,cz),st:reg?zjZoneState(id):null})}}
+  for(let q=q0;q<=q1;q++){const[cx,cz]=tacCellCenter(q,r),X=sx(cx),Y=sy(cz);if(X<-hexPx||X>W+hexPx||Y<-hexPx||Y>H+hexPx)continue;const id=zoneId(q,r,zj.k),rg=zj.regionMap.get(id),st0=(rg||mig)?zjZoneState(id):null,reg=rg||(mig&&st0.st!=='todo'?{open:true}:null);
+   cells.push({q,r,X,Y,cx,cz,id,reg,loaded:cellLoaded(cx,cz),st:reg?st0:null})}}
  // 2. fond : voile sur les étoiles
  c.fillStyle='rgba(3,4,12,.55)';c.fillRect(0,0,W,H);
  // 3. étoiles de la tranche : du décor, jamais une cible
@@ -605,9 +620,9 @@ function zjDraw(){const c=zjCtx,W=innerWidth,H=innerHeight,inv=1/zj.upp,v=zjView
   if(hexPx>=70){c.font='600 9px ui-monospace,SFMono-Regular,monospace';c.textAlign='center';c.textBaseline='middle';c.fillStyle='#bff3e9';for(const e of kn){const n=zj.peek.explored.get(e.id);c.fillText(n+' CONNU'+(n>1?'S':''),e.X,e.Y+TAC_R*inv*.55)}}}}
  // 6. région de test : Non sondée (hachures), En mission (anneau), Sondée (plein + ✓) — motif, symbole et texte
  const reg=cells.filter(e=>e.reg&&e.loaded);
- if(reg.length){zjPatShift(zjHatch,(-zj.cx*inv)%12,(-zj.cz*inv)%12);c.beginPath();for(const e of reg)if(e.st.st==='todo')zjHexPath(c,e.X,e.Y,inv*.96);c.fillStyle=zjHatch;c.fill();
+ if(reg.length){if(!mig){zjPatShift(zjHatch,(-zj.cx*inv)%12,(-zj.cz*inv)%12);c.beginPath();for(const e of reg)if(e.st.st==='todo')zjHexPath(c,e.X,e.Y,inv*.96);c.fillStyle=zjHatch;c.fill()}
   for(const e of reg){const st=e.st.st;c.beginPath();zjHexPath(c,e.X,e.Y,inv*.94);
-   if(st==='todo'){c.strokeStyle='rgba(190,175,255,.55)';c.lineWidth=1.2;c.setLineDash([4,4]);c.stroke();c.setLineDash([])}
+   if(st==='todo'){if(mig)continue;c.strokeStyle='rgba(190,175,255,.55)';c.lineWidth=1.2;c.setLineDash([4,4]);c.stroke();c.setLineDash([])}
    else if(st==='done'){const n=(e.st.z.found||[]).length;c.fillStyle=n?'rgba(255,207,150,.10)':'rgba(225,228,255,.06)';c.fill();c.strokeStyle=n?'rgba(255,207,150,.75)':'rgba(225,228,255,.6)';c.lineWidth=1.4;c.stroke()}
    else{zj.anim=!zjReduce;const p=zjReduce?.5:(t*1.3)%1;c.strokeStyle='#b29aff';c.lineWidth=1.8;c.stroke();c.beginPath();c.arc(e.X,e.Y,Math.max(6,TAC_R*inv*(.2+.45*p)),0,6.283);c.strokeStyle='rgba(205,190,255,'+(.9-.7*p)+')';c.lineWidth=1.5;c.stroke()}
    if(hexPx>=48){c.font='600 10px ui-monospace,SFMono-Regular,monospace';c.textAlign='center';c.textBaseline='middle';const ty=e.Y+TAC_R*inv*.55;
@@ -618,10 +633,13 @@ function zjDraw(){const c=zjCtx,W=innerWidth,H=innerHeight,inv=1/zj.upp,v=zjView
  if(sz&&sz.k===zj.k){const[cx,cz]=tacCellCenter(sz.q,sz.r),X=sx(cx),Y=sy(cz);c.beginPath();zjHexPath(c,X,Y,inv*.98);c.strokeStyle='#ffffff';c.lineWidth=2.6;c.stroke();c.beginPath();zjHexPath(c,X,Y,inv*1.06);c.strokeStyle='rgba(255,255,255,.28)';c.lineWidth=1.2;c.stroke()}
  // 8. objets importants : seules cibles touchables
  const ind=[],labs=[];const labOk=(x,y,w)=>{if(labs.some(r=>x<r[0]+r[2]&&x+w>r[0]&&Math.abs(y-r[1])<13))return false;labs.push([x,y,w]);return true};
- for(const o of zjObjects().slice().sort((a,b)=>(a.type==='world'?0:a.type==='station'?1:2)-(b.type==='world'?0:b.type==='station'?1:2))){if(!zjInSlice(o.p[1])){if(o.type==='world'||(zj.sel&&zj.sel.id===o.id))ind.push(o);continue}
+ const zjOrd=o=>o.type==='world'?0:o.type==='station'?1:o.type==='sig'?2:3;
+ for(const o of zjObjects().slice().sort((a,b)=>zjOrd(a)-zjOrd(b))){if(!zjInSlice(o.p[1])){if(o.type==='world'||(zj.sel&&zj.sel.id===o.id))ind.push(o);continue}
   const X=sx(o.p[0]),Y=sy(o.p[2]);if(X<-30||X>W+30||Y<-30||Y>H+30)continue;
   if(o.type==='world'){c.strokeStyle='#80e6d3';c.lineWidth=2;c.beginPath();c.arc(X,Y,8,0,6.283);c.stroke();c.fillStyle='#80e6d3';c.beginPath();c.arc(X,Y,3,0,6.283);c.fill();c.font='600 10px system-ui';c.textAlign='left';c.textBaseline='middle';const t=zjMine(o.w.kind).toUpperCase()+' · '+o.name;if(labOk(X+12,Y,c.measureText(t).width))c.fillText(t,X+12,Y)}
   else if(o.type==='station'){c.fillStyle='#0b0c1c';c.strokeStyle='#ffcf96';c.lineWidth=2;c.beginPath();c.arc(X,Y,7,0,6.283);c.fill();c.stroke();c.fillStyle='#ffcf96';c.font='600 10px system-ui';c.textAlign='left';c.textBaseline='middle';const t=o.name.toUpperCase();if(labOk(X+12,Y,c.measureText(t).width))c.fillText(t,X+12,Y)}
+  else if(o.type==='sys'){const col=o.tag==='star'?'#ffc864':o.tag==='skip'?'rgba(255,106,90,.8)':'rgba(214,224,242,.9)';c.fillStyle='#0b0c1c';c.fillRect(X-4,Y-4,8,8);c.strokeStyle=col;c.lineWidth=1.4;c.strokeRect(X-3.5,Y-3.5,7,7);
+   if(o.tag==='star'){c.fillStyle=col;c.fillRect(X-1.5,Y-1.5,3,3)}if(hexPx>=70||(zj.sel&&zj.sel.id===o.id)){c.fillStyle=col;c.font='500 9px ui-monospace,SFMono-Regular,monospace';c.textAlign='left';c.textBaseline='middle';if(labOk(X+9,Y,c.measureText(o.key).width))c.fillText(o.key,X+9,Y)}}
   else{const g=o.g,d=7;c.beginPath();c.moveTo(X,Y-d);c.lineTo(X+d,Y);c.lineTo(X,Y+d);c.lineTo(X-d,Y);c.closePath();c.fillStyle='#0b0c1c';c.fill();
    c.strokeStyle=!g.resolved?'#f2f0ff':g.resolvedType==='moving'?'#ffc864':g.fixedAddress?'#9fe0a0':'#b29aff';c.lineWidth=1.8;c.stroke();if(!g.resolved){c.fillStyle='#f2f0ff';c.font='700 9px system-ui';c.textAlign='center';c.textBaseline='middle';c.fillText('?',X,Y+.5)}
    if(hexPx>=60){c.fillStyle='#ece8ff';c.font='10px system-ui';c.textAlign='left';c.textBaseline='middle';if(labOk(X+11,Y,c.measureText(o.name).width))c.fillText(o.name,X+11,Y)}}
@@ -665,7 +683,7 @@ function zjCenterOn(p,force){if(zj.mode!=='tac')return;const ins=zjInsets(),W=in
  if(!force&&X>ins.left+pad&&X<ins.right-pad&&Y>ins.top+pad&&Y<ins.bottom-pad)return;const tx=(ins.left+ins.right)/2,ty=(ins.top+ins.bottom)/2;zj.cx=p[0]-(tx-W/2)*zj.upp;zj.cz=p[2]-(ty-H/2)*zj.upp;zj.dirty=true}
 function zjSelectZone(id,fromCode){zj.follow=null;zjTrObsDispose();zj.sel={type:'zone',zone:id};if(zj.mode==='atlas'){zjObsDispose();zj.pres.level='zone';zj.pres.zone=id;zj.pres.hold=false}const z=zoneParse(id);zj.sel.p=zoneCenter(z.q,z.r,z.k);if(zj.mode==='tac'&&z.k!==zj.k)zj.k=z.k;zj.dirty=true;zjMarkAtlasSel();zjOpen('zone');
  if(zj.mode==='tac')zjCenterOn(zj.sel.p,false);else if(fromCode)flyTo(vector(zj.sel.p),Math.max(420,Math.min(1400,distance)))}
-function zjSelectObj(o){if(o&&o.type==='travel')return zjSelectTravel(o.id);zj.follow=null;zjTrObsDispose();zj.sel={type:o.type,id:o.id,p:o.p,zone:o.zone,name:o.name,key:o.key};zj.dirty=true;zjMarkAtlasSel();zjOpen('obj');if(zj.mode==='atlas')zjObserve(o);else zjCenterOn(o.p,false)}
+function zjSelectObj(o){if(o&&o.type==='travel')return zjSelectTravel(o.id);zj.follow=null;zjTrObsDispose();zj.sel={type:o.type,id:o.id,p:o.p,zone:o.zone,name:o.name,key:o.key};zj.dirty=true;zjMarkAtlasSel();zjOpen('obj');if(zj.mode==='atlas'){if(o.type==='sys'){zjObsDispose();zj.pres.level='zone';zj.pres.zone=o.zone;flyTo(vector(o.p),Math.max(260,Math.min(900,distance)))}else zjObserve(o)}else zjCenterOn(o.p,false)}
 function zjFocus(o){zj.k=tacLayerOf(o.p[1]);zjSelectObj(o);zjCenterOn(o.p,true)}
 
 /* ── gestes de la tactique ── */
@@ -693,7 +711,7 @@ const zjMarks=$('zj-marks');let zjMarkEls=new Map(),zjZoneMesh=null;
 function zjAtlasMarks(){if(zj.mode!=='atlas'){if(zjMarkEls.size){zjMarks.innerHTML='';zjMarkEls.clear()}return}
  // 1. filtre de contexte selon la présentation, 2. regroupement et budget de libellés (§ 7.5)
  const w=innerWidth,h=innerHeight,L=zj.pres.level,selId=zj.sel&&zj.sel.type!=='zone'?zj.sel.id:null,close=L==='object'||L==='system'||L==='travel',pts=[];
- let pool=zjObjects();
+ let pool=zjObjects().filter(o=>o.type!=='sys'||o.id===selId||(L==='zone'&&o.zone===zj.pres.zone));
  if(L==='object'||L==='travel')pool=pool.filter(o=>o.id===selId);
  else if(L==='system')pool=pool.filter(o=>o.id===selId||(zjObs&&o.key===zjObs.key));
  else if(L==='zone')pool=pool.filter(o=>o.zone===zj.pres.zone||o.type==='world');
@@ -1016,7 +1034,7 @@ function zjEstimate(zoneIdStr){const z=zoneParse(zoneIdStr),w=zjWorld(zj.origin)
  const range=Math.max(1,(zj.snap.ranges[w.id]||1))*SECTOR_SIZE,dur=(5+5*Math.min(1,dist/range))*60e3;return{w,dist,range,dur,inRange:dist<=range}}
 function zjZoneHtml(){if(zj.peek)return zjPeekZoneHtml();const id=zj.sel.zone,reg=zj.regionMap.get(id),st=zjZoneState(id),z=zoneParse(id),e=zjEstimate(id),w=e&&e.w,hg=w&&zj.snap.hangars[w.id];
  let h='<div class="zj-kind">ZONE '+zjEsc(z.q+' · '+z.r)+' · '+zjEsc(zjCtxShort(z.k))+'</div>';
- if(!reg){h+='<h3>Hors de la région de test</h3><p class="zj-muted">Le test se limite à 30 zones autour de vos mondes, au contenu fixé et aux coûts maîtrisés. Les zones de test sont hachurées.</p>';return{h,f:''}}
+ if(!reg&&!zjMig()){h+='<h3>Hors de la région de test</h3><p class="zj-muted">Le test se limite à 30 zones autour de vos mondes, au contenu fixé et aux coûts maîtrisés. Les zones de test sont hachurées.</p>';return{h,f:''}}
  const label={todo:'Non sondée',mission:'En mission',done:'Sondée'}[st.st];h+='<h3>'+label+'</h3>';
  let f='';
  if(st.st==='todo'){
@@ -1040,10 +1058,17 @@ const zjOldBtn=(k,key)=>'<button class="zj-second" data-a="g-old" data-k="'+zjEs
 function zjFocusGame(sel){if(!sel||!zjBooted)return false;if(zj.peek)zjPeekStop();const K=String(sel.key||''),sys=(K.match(/^([A-Z]+-[A-Z]-\d{4})/)||[])[1]||'',O=zjObjects();
  if(sel.kind==='travel'){const tr=zjTrFind(K);if(tr){zjSelectTravel(tr.id);return true}}
  let o=null;if(sel.kind==='sig')o=O.find(x=>x.id==='sig:'+K);else if(sel.kind==='home')o=O.find(x=>x.type==='world'&&x.w.kind==='home');else if(sel.kind==='planet')o=O.find(x=>x.type==='world'&&x.w.coord===K);
- if(!o&&sys)o=O.find(x=>x.type==='world'&&x.key===sys)||O.find(x=>x.type==='station'&&x.key===sys)||O.find(x=>x.type==='sig'&&x.key===sys);
+ if(!o&&sys)o=O.find(x=>x.type==='world'&&x.key===sys)||O.find(x=>x.type==='station'&&x.key===sys)||O.find(x=>x.type==='sig'&&x.key===sys)||O.find(x=>x.type==='sys'&&x.key===sys);
  if(o){if(zj.mode!=='tac')zjSetMode('tac');zjFocus(o);return true}
  const p=sys&&zjAddrPos(sys);if(!p)return false;if(zj.mode!=='tac')zjSetMode('tac');zj.k=tacLayerOf(p[1]);zjSelectZone(zoneOfPoint(p));zjCenterOn(p,true);return true}
-function zjObjHtml(){const o=zjObjects().find(x=>x.id===zj.sel.id);if(!o)return{h:'<p class="zj-muted">Objet introuvable.</p>',f:''};const z=zoneParse(o.zone);
+function zjSysHtml(o){const k=o.k,z=zoneParse(o.zone),tag=o.tag;
+ let h='<div class="zj-kind">SYSTÈME BALAYÉ'+(tag==='star'?' · INTÉRESSANT':tag==='skip'?' · SANS INTÉRÊT':'')+'</div><h3>'+zjEsc(o.key)+'</h3><dl class="zj-dl"><dt>Zone</dt><dd>'+zjEsc(z.q+' · '+z.r+' · '+zjCtxShort(z.k))+'</dd>'+(k.at?'<dt>Balayé</dt><dd>'+zjEsc(zjDate(k.at))+'</dd>':'')+'</dl>';
+ const pl=(k.planets||[]).slice().sort((a,b)=>(a.slot||0)-(b.slot||0));
+ if(pl.length){h+='<div class="zj-kind" style="margin-top:10px">EMPLACEMENTS</div>';for(const p of pl)h+='<button class="zj-row" data-a="act" data-k="planet" data-x="'+zjEsc(p.coord)+'" data-w="'+zjEsc(zj.origin)+'"><b>'+zjEsc(String(p.slot==null?'':p.slot).padStart(2,'0')+' · '+(p.player?p.player+(p.bot?' (automate)':''):p.name))+'</b><small>'+zjEsc((p.desc?p.desc+' · ':'')+p.coord)+'</small></button>'}
+ else h+='<p class="zj-muted">Aucune planète relevée dans ce système.</p>';
+ let f='<button class="zj-second'+(tag==='star'?' on':'')+'" data-a="g-tag" data-key="'+zjEsc(o.key)+'" data-v="star">'+(tag==='star'?'Retirer « intéressant »':'Intéressant')+'</button><button class="zj-second'+(tag==='skip'?' on':'')+'" data-a="g-tag" data-key="'+zjEsc(o.key)+'" data-v="skip">'+(tag==='skip'?'Retirer « sans intérêt »':'Sans intérêt')+'</button>';
+ f+='<button class="zj-second" data-a="zone" data-z="'+zjEsc(o.zone)+'">Voir sa zone</button>'+zjOldBtn('system',o.key);return{h,f}}
+function zjObjHtml(){const o=zjObjects().find(x=>x.id===zj.sel.id);if(!o)return{h:'<p class="zj-muted">Objet introuvable.</p>',f:''};if(o.type==='sys')return zjSysHtml(o);const z=zoneParse(o.zone);
  let h='<div class="zj-kind">'+({world:zj.peek?'SON MONDE':'MON MONDE',station:'PORT FRANC',sig:'SIGNATURE'}[o.type]||'LIEU')+'</div><h3>'+zjEsc(o.name)+'</h3><dl class="zj-dl"><dt>Adresse</dt><dd>'+zjEsc(o.type==='world'?o.w.coord:o.key)+'</dd>'+(o.type==='world'?'<dt>Système</dt><dd>'+zjEsc(o.key)+(o.w.spot!=null?' <small>· spot '+String(o.w.spot+1).padStart(2,'0')+'</small>':' <small>· spot inconnu</small>')+'</dd><dt>Amas</dt><dd>'+zjEsc(zjAmasOf(o.w.coord))+'</dd>':'')+'<dt>Zone</dt><dd>'+zjEsc(z.q+' · '+z.r+' · '+zjCtxShort(z.k))+(zj.regionMap.has(o.zone)?' <small>· région de test</small>':'')+'</dd></dl>',f='';
  if(o.type==='station'){const sm=zjStModel(o.key);if(sm)h=h.replace(/<\/dl>/,'<dt>Modèle</dt><dd>'+zjEsc(sm.title)+' <small>· '+zjEsc(zjCode(sm.code))+'</small></dd></dl>')}
  if(o.type==='world'&&zj.peek){const hm=zjHome(),dd=Math.hypot(o.p[0]-hm.p[0],o.p[1]-hm.p[1],o.p[2]-hm.p[2]);if(o.w.kind!=='home')h=h.replace(/<\/dl>$/,'<dt>Capitale</dt><dd>'+zjFmt(dd)+' u <small>· '+zjSecTxt(dd)+'</small></dd></dl>');
@@ -1064,11 +1089,11 @@ function zjObjHtml(){const o=zjObjects().find(x=>x.id===zj.sel.id);if(!o)return{
  if(zjMig())f+=zjOldBtn(o.type==='sig'?'sig':o.type==='world'?(o.w.kind==='home'?'home':'planet'):'system',o.type==='sig'?o.g.id:o.type==='world'?(o.w.kind==='home'?o.key:o.w.coord):o.key);
  return{h,f}}
 function zjHomeHtml(){if(zj.peek)return zjPeekHomeHtml();const R=zj.snap&&zj.snap.zp&&zj.snap.zp.region,zs=zj.snap?zj.snap.zp.zones:{},done=Object.values(zs).filter(z=>z.st==='done'),finds=done.reduce((a,z)=>a+(z.found||[]).length,0),miss=zj.snap?zj.snap.missions.length:0,w=zjWorld(zj.origin),hg=w&&zj.snap.hangars[w.id];
- let h='<div class="zj-kind">'+(zjMig()?'MA CARTE · PROSPECTION PAR ZONES':'PROSPECTION PAR ZONES · TEST')+'</div><h3>Touchez une zone voisine</h3><p class="zj-muted">Les zones hachurées forment '+(zjMig()?'ta région de prospection':'la région de test')+'. Une zone se sonde avec une seule Radar, quel que soit le nombre d’étoiles qu’elle contient.</p>';
- if(R)h+='<div class="zj-stats"><div><b>'+done.length+'/'+R.zones.length+'</b><small>zones sondées</small></div><div><b>'+finds+'</b><small>signaux</small></div><div><b>'+miss+'</b><small>en vol</small></div><div><b>'+(hg?hg.radar:0)+'</b><small>Radars à '+zjEsc(w?w.name:'')+'</small></div></div>';
+ let h='<div class="zj-kind">'+(zjMig()?'MA CARTE · PROSPECTION PAR ZONES':'PROSPECTION PAR ZONES · TEST')+'</div><h3>Touchez une zone voisine</h3><p class="zj-muted">'+(zjMig()?'Toute zone à portée de tes mondes peut être sondée':'Les zones hachurées forment la région de test')+'. Une zone se sonde avec une seule Radar, quel que soit le nombre d’étoiles qu’elle contient.</p>';
+ if(R)h+='<div class="zj-stats"><div><b>'+done.length+(zjMig()?'':'/'+R.zones.length)+'</b><small>zones sondées</small></div><div><b>'+finds+'</b><small>signaux</small></div><div><b>'+miss+'</b><small>en vol</small></div><div><b>'+(hg?hg.radar:0)+'</b><small>Radars à '+zjEsc(w?w.name:'')+'</small></div></div>';
  h+='<button class="zj-row'+(zj.cor.on?' on':'')+'" data-a="cor-net"><b>Réseau de corridors candidat · essai</b><small>'+(zj.cor.on?'Affiché · toucher pour le masquer':'Afficher les 6 corridors du GDD navigation dans l’Atlas et en Tactique')+'</small></button>'+(zj.cor.on?zjCorNetHtml():'');
- if(zjMig())h+='<button class="zj-row" data-a="g-old" data-k="home" data-key=""><b>Ancienne carte</b><small>Pour les actions pas encore reprises ici : balises, routes, flottes, colonisation. Rien n’est perdu.</small></button>';
- h+='<div class="zj-legend"><span><i class="h"></i>Non sondée</span><span><i class="m"></i>En mission</span><span><i class="d"></i>Sondée</span><span><i class="s"></i>Signature</span></div>';return{h,f:''}}
+ if(zjMig())h+='<button class="zj-row" data-a="g-old" data-k="home" data-key=""><b>Ancienne carte</b><small>Pour les actions pas encore reprises ici : balises, routes, flottes. Rien n’est perdu.</small></button>';
+ h+='<div class="zj-legend">'+(zjMig()?'<span><i class="y"></i>Système balayé</span>':'<span><i class="h"></i>Non sondée</span>')+'<span><i class="m"></i>En mission</span><span><i class="d"></i>Sondée</span><span><i class="s"></i>Signature</span></div>';return{h,f:''}}
 function zjChoiceHtml(){let h='<div class="zj-kind">PLUSIEURS LIEUX ICI</div><h3>Lequel ?</h3>';for(const o of zj.list||[])h+='<button class="zj-row" data-a="pick" data-id="'+zjEsc(o.id)+'"><b>'+zjEsc(o.name)+'</b><small>'+zjEsc(o.sub||'')+'</small></button>';return{h,f:''}}
 function zjWorldsHtml(){if(zj.peek){let h='<div class="zj-kind">SES MONDES · '+zjEsc(zj.peek.pseudo.toUpperCase())+'</div><h3>Observer un monde</h3><p class="zj-muted">Choisis un monde pour le voir de près. Les distances restent mesurées depuis '+zjEsc((zjWorld(zj.origin)||{}).name||'')+'. Lecture seule.</p>';
   for(const w of zj.ws)h+='<button class="zj-row'+(w.id===zj.origin?' on':'')+'" data-a="world" data-w="'+zjEsc(w.id)+'"><b>'+zjEsc(w.name)+' · '+(w.kind==='home'?'capitale':'colonie')+(w.unpub?' (pas au registre)':'')+'</b><small>'+zjEsc(w.coord)+' · '+zjEsc(zjAmasOf(w.coord))+(w.id===zj.origin?' · mesures depuis ce monde':'')+'</small></button>';
@@ -1101,6 +1126,7 @@ $('zj-sheet').addEventListener('click',e=>{const b=e.target.closest('[data-a]');
  if(a==='travel-fit')return zjTravelFit();
  if(a==='g-port'){const r=ZH.gameAct('port',b.dataset.d);if(r&&!r.ok)toast(r.why);return}
  if(a==='g-route'){const r=ZH.gameAct('route-tanker',b.dataset.r);if(r&&!r.ok)toast(r.why);return}
+ if(a==='g-tag'){const r=ZH.gameAct('tag',{key:b.dataset.key,v:b.dataset.v});if(r&&!r.ok)toast(r.why);else zjRefresh(true);return}
  if(a==='g-old'){const k=b.dataset.k,key=b.dataset.key;ZH.gameAct('oldmap',key?{kind:k,key}:null);return}
  if(a==='cor-tr'){const tr=zjTrFind(zj.sel&&zj.sel.id);if(!zjCorCompare(zjCorCtxTravel(tr)))return toast('Réseau pas encore prêt, réessaie dans un instant.');zjCorFit();return zjOpen('cor')}
  if(a==='cor-obj'){const o=zjObjects().find(x=>x.id===b.dataset.id);if(!zjCorCompare(zjCorCtxObj(o)))return toast('Réseau pas encore prêt, réessaie dans un instant.');zjCorFit();return zjOpen('cor')}
@@ -1114,7 +1140,8 @@ $('zj-sheet').addEventListener('click',e=>{const b=e.target.closest('[data-a]');
  if(a==='pick'){const o=(zj.list||[]).find(x=>x.id===b.dataset.id);if(o)zjSelectObj(o);return}
  if(a==='worlds')return zjOpen('worlds')});
 function zjLaunch(b){if(zj.peek||!zj.sel||zj.sel.type!=='zone')return;if(b)b.disabled=true;const id=zj.sel.zone,e=zjEstimate(id);if(!e)return;
- const r=ZH.launch({zone:id,world:e.w.id,dist:e.dist,range:e.range,label:'Zone '+id.split(':').slice(1,3).join(' · ')});
+ const oc=!zj.regionMap.has(id)&&zjMig()?zjZoneContent(id):null;if(!zj.regionMap.has(id)&&zjMig()&&!oc){toast('Cette zone n’a pas encore de systèmes chargés, réessaie dans un instant.');if(b)b.disabled=false;return}
+ const r=ZH.launch({zone:id,world:e.w.id,dist:e.dist,range:e.range,label:'Zone '+id.split(':').slice(1,3).join(' · '),content:oc,anchor:oc&&oc.anchor});
  if(!r.ok){toast(r.why==='noradar'?'Aucune Radar prête à '+e.w.name+'.':r.why);zjRefresh(true);return}
  toast(r.already?'Mission déjà en vol pour cette zone.':'Radar lancée · arrivée dans '+zjDur(r.arrivalAt-Date.now())+'.');zjRefresh(true)}
 
@@ -1340,7 +1367,7 @@ function zjCorHtml(){const C=zj.cor,ctx=C.ctx;if(!ctx||!C.plans)return{h:'<p cla
 function zjCorNetHtml(){const g=zjCorGraph();if(!g)return'';return'<p class="zj-muted">Réseau candidat (GDD navigation § 4) : '+g.cors.length+' corridors, '+g.edges.length+' tronçons, '+zjFmt(g.len)+' u mesurés sur les courbes ('+zjFmt(g.chord)+' u en cordes). Valeurs d’essai ; rien n’est branché au jeu.</p>'}
 
 window.STARBYTE_ZONES={zj,refresh:zjRefresh,travels:()=>zj.tr.map(t=>({id:t.id,kind:t.kind,name:t.name,ok:t.ok,from:t.from,to:t.to,L:t.L,n:t.pts.length,route:t.route,status:t.status,phases:t.phases})),trState:id=>{const t=zjTrFind(id);return t&&zjTrState(t,Date.now())},
- follow:id=>zjFollow(id),followState:()=>zj.follow&&{...zj.follow},followStop:zjFollowStop,followResume:zjFollowResume,travelFit:zjTravelFit,selectTravel:zjSelectTravel,trObs:()=>!!zjTrObs,ready:()=>!!zjBooted,focusGame:sel=>zjFocusGame(sel),mig:()=>zjMig(),corCompare:(kind,id)=>{const ctx=kind==='travel'?zjCorCtxTravel(zjTrFind(id)):zjCorCtxObj(zjObjects().find(x=>x.id===id));const ok=zjCorCompare(ctx);if(ok)zjOpen('cor');return ok},corState:()=>{const g=zjCorGraph(),C=zj.cor;return{on:C.on,ready:!!g,net:g&&{cors:g.cors.length,edges:g.edges.length,len:g.len,chord:g.chord,nodes:Object.keys(g.nodes).length},plans:C.plans&&C.plans.map(x=>({k:x.k,name:x.name,len:x.pl.len,min:x.pl.min,fu:x.pl.fu,nCor:x.pl.nCor,lenCor:x.pl.lenCor,test:x.q.test,norm:x.q.norm,fuel:x.q.fuel,best:x.best,sig:x.pl.sig,avoid:x.avoid&&x.avoid.edge.id,legs:x.pl.legs.map(l=>({t:l.type,a:l.a,b:l.b,len:l.len,min:l.min,e:l.edge&&l.edge.id,n:l.pts.length,p0:l.pts[0],p1:l.pts[l.pts.length-1]}))})),pick:C.pick,ctx:C.ctx&&{src:C.ctx.src,O:C.ctx.O.key,D:C.ctx.D.key,fuel:C.ctx.fuel,tier:C.ctx.tier},netVis:zjCorNetVis()&&!!zjCorGraph(),drawn:navRoot.visible,sel:!!zjCorSel}},corToggle:on=>zjCorToggle(on),zoomTo:d=>{travel=null;wantedDistance=d},posOf:a=>zjAddrPos(a),vehPos:()=>{if(!zjTrObs)return null;const g=zjTrObs.group.position,v=zjTrObs.veh.position;return[g.x+v.x+origin.x,g.y+v.y+origin.y,g.z+v.z+origin.z]},corPick:i=>zjCorPickPlan(i),corParams:()=>({...ZJ_COR}),modelState:()=>{const c=zjCat();const vis=g=>{let n=0;if(g)g.traverse(o=>{if(o.isMesh&&o.visible){let v=true;for(let q=o;q;q=q.parent)if(!q.visible){v=false;break}if(v)n++}});return n};return{cat:!!c,stations:c?c.stations.map(x=>x.sys+'='+x.code):[],ships:c?Object.keys(c.ships):[],cache:[...zjM.cache.keys()].map(u=>u.replace(/^.*\//,'')),loads:zjM.loads,fails:zjM.fails,env:!!zjM.env,obs:zjObs&&zjObs.model&&{id:zjObs.id,st:zjObs.model.st,url:zjObs.urls&&zjObs.urls[0],isModel:!!zjObs.main.userData.zjModel,meshes:vis(zjObs.main)},tr:zjTrObs&&zjTrObs.model&&{id:zjTrObs.id,st:zjTrObs.model.st,n:zjTrObs.model.n||0,urls:zjTrObs.urls||[],list:zjTrObs.model.list||[],px:zjTrObs.px,vehVis:zjTrObs.veh.visible,shown:zjTrObs.holder?zjTrObs.holder.children.filter(c=>c.visible).length:0}}},obsTex:()=>{const m=zjObs&&zjObs.main.material,c=m&&m.map&&m.map.image;if(!c)return null;const d=c.getContext('2d').getImageData(0,0,c.width,c.height).data;let h=0;for(let i=0;i<d.length;i+=97)h=(h*31+d[i])>>>0;return h},prism:()=>!!zjZoneMesh,demoSystem:()=>!!systemGroup,panBy:(dx,dy)=>pan(dx,dy),mem:()=>({...renderer.info.memory}),insets:()=>zjInsets(),
+ follow:id=>zjFollow(id),followState:()=>zj.follow&&{...zj.follow},followStop:zjFollowStop,followResume:zjFollowResume,travelFit:zjTravelFit,selectTravel:zjSelectTravel,trObs:()=>!!zjTrObs,ready:()=>!!zjBooted,zoneContent:id=>zjZoneContent(id),openZoneNear:full=>{const h=zjHome();if(!h)return null;const[q0,r0]=tacCellOf(h.p[0],h.p[2]),k=tacLayerOf(h.p[1]);for(let n=3;n<9;n++)for(const[q,r]of hexRing(q0,r0,n)){const id=zoneId(q,r,k);if(zj.regionMap.has(id))continue;const e=zjEstimate(id);if(!e||!e.inRange)continue;if(full){const c=zjZoneContent(id);if(!c||c.cat==='rien')continue}return id}return null},focusGame:sel=>zjFocusGame(sel),mig:()=>zjMig(),corCompare:(kind,id)=>{const ctx=kind==='travel'?zjCorCtxTravel(zjTrFind(id)):zjCorCtxObj(zjObjects().find(x=>x.id===id));const ok=zjCorCompare(ctx);if(ok)zjOpen('cor');return ok},corState:()=>{const g=zjCorGraph(),C=zj.cor;return{on:C.on,ready:!!g,net:g&&{cors:g.cors.length,edges:g.edges.length,len:g.len,chord:g.chord,nodes:Object.keys(g.nodes).length},plans:C.plans&&C.plans.map(x=>({k:x.k,name:x.name,len:x.pl.len,min:x.pl.min,fu:x.pl.fu,nCor:x.pl.nCor,lenCor:x.pl.lenCor,test:x.q.test,norm:x.q.norm,fuel:x.q.fuel,best:x.best,sig:x.pl.sig,avoid:x.avoid&&x.avoid.edge.id,legs:x.pl.legs.map(l=>({t:l.type,a:l.a,b:l.b,len:l.len,min:l.min,e:l.edge&&l.edge.id,n:l.pts.length,p0:l.pts[0],p1:l.pts[l.pts.length-1]}))})),pick:C.pick,ctx:C.ctx&&{src:C.ctx.src,O:C.ctx.O.key,D:C.ctx.D.key,fuel:C.ctx.fuel,tier:C.ctx.tier},netVis:zjCorNetVis()&&!!zjCorGraph(),drawn:navRoot.visible,sel:!!zjCorSel}},corToggle:on=>zjCorToggle(on),zoomTo:d=>{travel=null;wantedDistance=d},posOf:a=>zjAddrPos(a),vehPos:()=>{if(!zjTrObs)return null;const g=zjTrObs.group.position,v=zjTrObs.veh.position;return[g.x+v.x+origin.x,g.y+v.y+origin.y,g.z+v.z+origin.z]},corPick:i=>zjCorPickPlan(i),corParams:()=>({...ZJ_COR}),modelState:()=>{const c=zjCat();const vis=g=>{let n=0;if(g)g.traverse(o=>{if(o.isMesh&&o.visible){let v=true;for(let q=o;q;q=q.parent)if(!q.visible){v=false;break}if(v)n++}});return n};return{cat:!!c,stations:c?c.stations.map(x=>x.sys+'='+x.code):[],ships:c?Object.keys(c.ships):[],cache:[...zjM.cache.keys()].map(u=>u.replace(/^.*\//,'')),loads:zjM.loads,fails:zjM.fails,env:!!zjM.env,obs:zjObs&&zjObs.model&&{id:zjObs.id,st:zjObs.model.st,url:zjObs.urls&&zjObs.urls[0],isModel:!!zjObs.main.userData.zjModel,meshes:vis(zjObs.main)},tr:zjTrObs&&zjTrObs.model&&{id:zjTrObs.id,st:zjTrObs.model.st,n:zjTrObs.model.n||0,urls:zjTrObs.urls||[],list:zjTrObs.model.list||[],px:zjTrObs.px,vehVis:zjTrObs.veh.visible,shown:zjTrObs.holder?zjTrObs.holder.children.filter(c=>c.visible).length:0}}},obsTex:()=>{const m=zjObs&&zjObs.main.material,c=m&&m.map&&m.map.image;if(!c)return null;const d=c.getContext('2d').getImageData(0,0,c.width,c.height).data;let h=0;for(let i=0;i<d.length;i+=97)h=(h*31+d[i])>>>0;return h},prism:()=>!!zjZoneMesh,demoSystem:()=>!!systemGroup,panBy:(dx,dy)=>pan(dx,dy),mem:()=>({...renderer.info.memory}),insets:()=>zjInsets(),
  objScreen:()=>{if(!zjObs)return null;const v=vector(zjObs.p),q=toLocal(v).project(camera),r=new T.Vector3().setFromMatrixColumn(camera.matrixWorld,0),e=toLocal(v.clone().addScaledVector(r,zjObs.R)).project(camera);return{x:(q.x*.5+.5)*innerWidth,y:(-q.y*.5+.5)*innerHeight,rpx:Math.abs(e.x-q.x)*.5*innerWidth}},observe:id=>{const o=zjObjects().find(x=>x.id===id);if(o){zj.sel={type:o.type,id:o.id,p:o.p,zone:o.zone,name:o.name,key:o.key};zjOpen('obj');if(zj.mode==='tac')zjSetMode('atlas');else zjObserve(o)}return!!o},backN:zjBackNeighbourhood,atlasTapAt:(x,y)=>zjAtlasTap(x,y),
  obs:()=>zjObs&&{id:zjObs.id,addr:zjObs.addr,p:zjObs.p,anchor:zjObs.anchor,R:zjObs.R,dObj:zjObs.dObj,dSys:zjObs.dSys,sysR:zjObs.sysR,others:zjObs.others.map(a=>a.id),star:!!(zjObs.star&&zjObs.star.visible),uuid:zjObs.group.uuid},pres:()=>({...zj.pres,distance,wantedDistance}),texN:()=>zjTexCache.size,minD:()=>zjMinD(),screenOf:p=>{const q=toLocal(vector(p)).project(camera);return{x:(q.x*.5+.5)*innerWidth,y:(-q.y*.5+.5)*innerHeight,z:q.z}},cam:()=>({target:[target.x,target.y,target.z],distance,yaw,pitch}),exportHtml:()=>zjSrc?zjExportHtml():null,exportName:()=>zjExportName(),prefetch:zjPrefetch,peekStart:zjPeekStart,selectObj:zjSelectObj,peekStop:zjPeekStop,amas:()=>zjAmasInRange(),draw:()=>zjDraw(),tap:zjTap,pick:zjPick,setMode:zjSetMode,selectZone:zjSelectZone,objects:zjObjects,estimate:zjEstimate,
  cellOf:tacCellOf,center:tacCellCenter,layerOf:tacLayerOf,zoneOfPoint,zoneParse,sx:X=>(X-zj.cx)/zj.upp+innerWidth/2,sy:Z=>(Z-zj.cz)/zj.upp+innerHeight/2,load:zjLoad,

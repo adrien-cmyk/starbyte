@@ -79,3 +79,4 @@ body.zj-tac #zj-depth{display:flex}
 .zj-steps small{display:block;color:#9d97c4;font-size:11px}
 .zj-muted.zj-small{font-size:11px;color:#8a86ab}
 .zj-cor small .zj-min{display:inline;color:#ffcf96;font-weight:600}
+.zj-legend i.y{width:8px;height:8px;margin:0 6px 0 3px;border:1.4px solid rgba(214,224,242,.9);border-radius:0;vertical-align:0}

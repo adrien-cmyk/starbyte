@@ -25,7 +25,7 @@
   if (window.EXTRA_SAVE_KEYS && EXTRA_SAVE_KEYS.indexOf('zoneProspect') < 0) EXTRA_SAVE_KEYS.push('zoneProspect');
 
   const PAGE = 'atlas/index.html';
-  const PAGE_V = 'cca738bdb7';   // empreinte de atlas/index.html, écrite par labo/carte-zones/build.py
+  const PAGE_V = '76f9d6a62e';   // empreinte de atlas/index.html, écrite par labo/carte-zones/build.py
   const GRID = 'tac-2';
   const MIN = 60e3;
   const SB = 'https://elupnpdcblztpfywnhjl.supabase.co';
@@ -184,8 +184,8 @@
       target: s.movingCoordKey && G.knownTargets && G.knownTargets[s.movingCoordKey] ? { label: G.knownTargets[s.movingCoordKey].label, status: G.knownTargets[s.movingCoordKey].status } : null,
     }));
     let tr = []; try { tr = travels(); } catch (e) { console.warn('[zones] missions', e); }
-    const kn = migrated() ? known() : null;   // compte migré : les ports et les routes que la partie connaît
-    return { now, active: G.activeWorld || 'home', worlds: ws, hangars: hang, ranges, zp: JSON.parse(JSON.stringify(z)), missions, sigs, travels: tr, mig: migrated(), ports: kn ? kn.ports : null, routes: kn ? kn.routes : null };
+    const kn = migrated() ? known() : null;   // compte migré : les ports et les routes que la partie connaît, les systèmes balayés et leurs marques
+    return { now, active: G.activeWorld || 'home', worlds: ws, hangars: hang, ranges, zp: JSON.parse(JSON.stringify(z)), missions, sigs, travels: tr, mig: migrated(), ports: kn ? kn.ports : null, routes: kn ? kn.routes : null, systems: kn ? kn.systems : null, tags: kn ? kn.tags : null };
   }
 
   /* ── région de test : écrite une seule fois par la carte (contenu fixe) ── */
@@ -198,9 +198,26 @@
   }
 
   /* ── lancer une Radar sur une zone ── */
+  // 12/11 : univers ouvert (compte migré). Une zone hors de l'ancienne région arrive avec le contenu tiré par la carte ;
+  // le jeu le reprend d'une liste fermée (type de contenu, adresse de système, emplacement habitable vérifié par ses règles)
+  const ZONE_KINDS = {
+    asteroides: { sigType: 'mineral_dense', as: 'moving' }, cristal: { sigType: 'mineral_dense', as: 'moving' }, epave: { sigType: 'metallic_echo', as: 'moving' },
+    debris: { sigType: 'metallic_echo', as: 'moving' }, cargo: { sigType: 'metallic_echo', as: 'moving' }, sonde_ancienne: { sigType: 'heat_point', as: 'moving' },
+    anomalie: { sigType: 'unstable_field', as: 'moving' }, habitable: { sigType: 'heat_point', as: 'fixed', fixedClass: 'habitable' },
+  };
+  const SYS_RE = /^[A-Z]{1,2}-[A-Z]-\d{4}$/, ZONE_RE = /^tac-2:-?\d{1,5}:-?\d{1,5}:-?\d{1,5}$/;
+  function openZone(req) {
+    const c = req && req.content, anchor = String((req && req.anchor) || (c && c.sys) || '');
+    if (!c || !SYS_RE.test(anchor)) return null;
+    if (c.cat === 'rien') return { id: req.zone, anchor, content: { cat: 'rien' }, open: true };
+    if (!['commun', 'choix'].includes(c.cat) || !ZONE_KINDS[c.kind] || !SYS_RE.test(String(c.sys || ''))) return null;
+    if (c.kind === 'habitable' && !check(c.sys, 'habitable').habitable) return null;
+    return { id: req.zone, anchor, content: { cat: c.cat, kind: c.kind, sys: c.sys, ...ZONE_KINDS[c.kind] }, open: true };
+  }
   function launch(req) {
     const z = zp(), id = req && req.zone;
-    const zone = z.region && z.region.zones.find(x => x.id === id);
+    let zone = z.region && z.region.zones.find(x => x.id === id);
+    if (!zone && migrated() && ZONE_RE.test(String(id || ''))) { zone = openZone(req); if (!zone) return { ok: false, why: 'Contenu de zone illisible : rien n’est lancé.' }; }
     if (!zone) return { ok: false, why: 'Cette zone n’est pas dans la région de test.' };
     const st = z.zones[id];
     if (st && st.st === 'done') return { ok: false, why: 'Zone déjà sondée.' };
@@ -229,6 +246,7 @@
     });
     if (!res.ok) return res;
     z.zones[id] = { st: 'mission', mission: res.mission, world: wid, at: Date.now() };
+    if (zone.open) z.zones[id].open = { anchor: zone.anchor, content: zone.content };   // l'arrivée relit ce contenu
     log('launch', { zone: id, world: wid, dist: Math.round(dist), dur: Math.round((res.arrivalAt - Date.now()) / 1000) });
     save(); notify();
     try { if (typeof refreshCurrentScreen === 'function') refreshCurrentScreen(); } catch (e) {}
@@ -239,7 +257,7 @@
   function arrive(mission, idx) {
     const z = zp(), id = mission.zone;
     const zone = z.region && z.region.zones.find(x => x.id === id);
-    const c = zone && zone.content;
+    const c = (zone && zone.content) || (z.zones[id] && z.zones[id].open && z.zones[id].open.content) || null;
     const created = [];
     if (c && c.cat !== 'rien' && c.sys && typeof createSignature === 'function') {
       const sig = createSignature(c.sys, mission.probeName, { type: c.sigType });
@@ -424,12 +442,15 @@
     const t = top ? Math.max(0, top.getBoundingClientRect().bottom - 18) : 0, b = nav ? Math.max(0, innerHeight - nav.getBoundingClientRect().top - 6) : 0;
     frameWrap.style.top = Math.round(t) + 'px'; frameWrap.style.bottom = Math.round(b) + 'px';
     if (s) s.style.setProperty('--sb-atlas-top', Math.round(t) + 'px');
+    // le guide « ? » du Centre de prospection : sous la colonne de zoom de la carte, mesurée dans la carte elle-même
+    try { const f = frameWrap.querySelector('iframe'), zc = f && f.contentDocument && f.contentDocument.getElementById('zj-zoom'); if (zc && s) { const r = zc.getBoundingClientRect(); if (r.height > 0) s.style.setProperty('--sb-guide-top', Math.round(f.getBoundingClientRect().top + r.bottom + 10) + 'px'); } } catch (e) {}
   }
   function styleOnce() {
     if (document.getElementById('sb-atlas-css')) return;
     const st = document.createElement('style'); st.id = 'sb-atlas-css';
-    st.textContent = `#scr-prospect.sb-atlas #spacemap-root,#scr-prospect.sb-atlas .smw-tools,#scr-prospect.sb-atlas .smw-hint,#scr-prospect.sb-atlas .smw-card{display:none!important}
-      #scr-prospect.sb-atlas #sb-pguide-btn{top:calc(var(--sb-atlas-top,68px) + 268px)!important}
+    st.textContent = `#scr-prospect.sb-atlas #spacemap-root,#scr-prospect.sb-atlas .smw-tools,#scr-prospect.sb-atlas .smw-hint,#scr-prospect.sb-atlas .smw-card,
+      #scr-prospect.sb-atlas .pl-card,#scr-prospect.sb-atlas .pl-chip,#scr-prospect.sb-atlas .pl-fx,#scr-prospect.sb-atlas .pl-hud,#scr-prospect.sb-atlas .pl-legend,#scr-prospect.sb-atlas .pl-tac,#scr-prospect.sb-atlas .pl-up,#scr-prospect.sb-atlas .pl-xtra{display:none!important}
+      #scr-prospect.sb-atlas #sb-pguide-btn{top:var(--sb-guide-top,calc(var(--sb-atlas-top,68px) + 268px))!important}
       .sb-atlas-wrap{position:absolute;left:0;right:0;top:0;bottom:0;z-index:2;background:#03040c}.sb-atlas-wrap iframe{position:absolute;inset:0;width:100%;height:100%;border:0}
       .sb-old-bar{position:absolute;left:50%;transform:translateX(-50%);top:calc(var(--sai,0px) + 70px);z-index:22;display:flex;gap:8px;align-items:center;padding:7px 8px 7px 12px;border-radius:12px;
         background:rgba(11,12,28,.92);border:1px solid rgba(178,154,255,.35);font:600 11px/1.2 'Space Grotesk',system-ui;color:#ddd8ff;white-space:nowrap}
@@ -513,13 +534,35 @@
     const ports = [], routes = [];
     try { for (const [sys, p] of Object.entries(G.hiddenPorts || {})) if (p) ports.push({ sys, dock: p.dockId || null, name: p.name || '', label: p.typeLabel || '', enter: !!(p.dockId && typeof stationUI === 'function' && stationUI(p.dockId) && typeof crownEnter === 'function') }); } catch (e) {}
     try { for (const r of (G.routes || [])) if (r && r.portSys) routes.push({ id: r.id, name: r.name || '', port: r.portSys }); } catch (e) {}
-    return { ports, routes };
+    // étape 1 de la migration : les systèmes balayés et leurs 3 emplacements (règle du jeu, rien n'est retiré ni déplacé)
+    const systems = [];
+    try {
+      for (const [k, x] of Object.entries(G.knownSystems || {})) {
+        if (!x || systems.length >= 3000) continue;
+        const sys = SYS_RE.test(k) ? k : `${x.cluster || 'A'}-${x.sector}-${String(x.system).padStart(4, '0')}`;
+        if (!SYS_RE.test(sys)) continue;
+        systems.push({ sys, at: x.discoveredAt || null, mine: !!x.isMine, planets: (x.planets || []).map(p => ({ coord: p.coord, slot: p.slot, type: p.type, name: p.name || '', desc: p.desc || '', player: p.playerName || null, bot: !!p.isBot })) });
+      }
+    } catch (e) {}
+    const tags = {}; try { for (const [k, v] of Object.entries(G.systemTags || {})) if (v === 'star' || v === 'skip') tags[k] = v; } catch (e) {}
+    return { ports, routes, systems, tags };
   }
   function gameAct(kind, arg) {
     log('action', { kind, arg });
     if (kind === 'port') { if (typeof crownEnter !== 'function') return { ok: false, why: 'Entrée indisponible.' }; crownEnter(arg); return { ok: true }; }
     if (kind === 'route-tanker') { if (typeof openTankerComposeForRoute !== 'function') return { ok: false, why: 'Envoi indisponible.' }; openTankerComposeForRoute(arg); return { ok: true }; }
     if (kind === 'oldmap') { showOldMap(arg || null); return { ok: true }; }
+    if (kind === 'tag') {
+      const key = String(arg && arg.key || ''), v = arg && arg.v;
+      if (!SYS_RE.test(key) || (v !== 'star' && v !== 'skip')) return { ok: false, why: 'Marque inconnue.' };
+      if (!G.systemTags) G.systemTags = {};
+      if (G.systemTags[key] === v) delete G.systemTags[key]; else G.systemTags[key] = v;
+      if (!G.mapSeen) G.mapSeen = {};
+      if (!G.mapSeen[key]) G.mapSeen[key] = Date.now();
+      save(); notify();
+      if (G.systemTags[key] === 'skip') { try { toast('Système sans intérêt : ses rapports sont rangés aux archives'); } catch (e) {} }
+      return { ok: true, v: G.systemTags[key] || null };
+    }
     return { ok: false, why: 'Action inconnue' };
   }
 
