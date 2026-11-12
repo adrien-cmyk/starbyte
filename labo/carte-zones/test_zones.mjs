@@ -453,6 +453,9 @@ rec('COR-02', cmpBtn && dT && dT.k === 'libre' && (fT ? (fT.test < dT.test * .95
 await F.evaluate(() => document.querySelector('#zj-sh-foot [data-a="cor-back"]').click()); await sleep(600);
 rec('FOLLOW-T', fit.F.susp && fit.d > fit.L * .4, `Voir le trajet : vue de ${fit.d.toFixed(0)} u pour un tracé de ${fit.L.toFixed(0)} u, suivi suspendu (la mission continue)`);
 // arrière-plan : au retour, la position se recale sur les horaires de la partie
+// (environnement lent : on garde au tanker au moins 4 min de trajet, pour que le saut de 40 % ne le fasse pas arriver)
+await p.evaluate(id => { const m = G.tankerMissions.find(x => x.id === id); if (m && m.status === 'in_transit') { const now = Date.now(), d = now - m.departedAt; if (m.arrivalAt - now < 240000) m.arrivalAt = now + Math.max(240000, d); } }, tk.id);
+await F.evaluate(() => STARBYTE_ZONES.refresh(true)); await sleep(400);
 const bg = await F.evaluate(id => STARBYTE_ZONES.trState('tk:' + id).f, tk.id);
 await p.evaluate(id => { const m = G.tankerMissions.find(x => x.id === id), shift = (m.arrivalAt - m.departedAt) * .4; m.departedAt -= shift; m.arrivalAt -= shift; }, tk.id);   // 40 % du trajet « écoulé » pendant l'absence
 await F.evaluate(() => { document.dispatchEvent(new Event('visibilitychange')); }); await sleep(200);
