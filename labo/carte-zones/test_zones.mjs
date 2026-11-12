@@ -114,7 +114,7 @@ async function newGame(p, url, planet) {
   // 12/11, 8 h 49 (retours d'Adrien) : barre du bas et guide « ? » retirés, leurs raccourcis dans la fiche ; boutons remontés ; essais masqués
   await MF.evaluate(() => document.getElementById('zj-sh-back').click()); await sleep(400);
   await MF.evaluate(() => document.getElementById('zj-sh-back').click()); await sleep(700);
-  const rc = await MF.evaluate(() => ({ nav: [...document.querySelectorAll('#zj-gnav button')].map(b => b.dataset.t + (b.querySelector('svg') ? '' : '(sans icône)')), top: getComputedStyle(document.getElementById('zj-top')).top, essai: !!document.querySelector('#zj-sh-body [data-a="cor-net"]'), bal: !!document.querySelector('#zj-sh-body [data-a="beacons"]') }));
+  const rc = await MF.evaluate(() => ({ nav: [...document.querySelectorAll('#zj-gnav button')].map(b => b.dataset.t + (b.querySelector('svg') ? '' : '(sans icône)')), top: getComputedStyle(document.getElementById('zj-top')).top, essai: /Réseau de corridors candidat/.test(document.getElementById('zj-sh-body').innerText), mesCor: ((document.querySelector('#zj-sh-body [data-a="cor-net"] b') || {}).textContent || ''), bal: !!document.querySelector('#zj-sh-body [data-a="beacons"]') }));
   const rg = await p.evaluate(() => { const s = document.getElementById('scr-prospect'), g = document.getElementById('sb-pguide-btn'), w = document.getElementById('sb-atlas-wrap').getBoundingClientRect(); return { nav: getComputedStyle(s.querySelector('.smw-nav')).display, guide: g ? getComputedStyle(g).display : 'absent', bottom: Math.round(innerHeight - w.bottom) }; });
   await MF.evaluate(() => { const b = document.querySelector('#zj-gnav button[data-t="rapports"]'); if (b) b.click(); }); await sleep(1000);
   const rs = await p.evaluate(() => { const sh = document.querySelector('#scr-prospect .smw-sheet'); return { on: !!(sh && sh.classList.contains('on')), t: sh ? sh.querySelector('.smw-sh-t').textContent : '' }; });
@@ -125,7 +125,7 @@ async function newGame(p, url, planet) {
     `raccourcis dans la fiche : ${rc.nav.join(', ')} · barre du bas du jeu ${rg.nav}, guide « ? » ${rg.guide}, carte jusqu'au bas de l'écran (écart ${rg.bottom} px), barre Atlas/Tactique à ${rc.top} du haut de la carte · « Rapports » ouvre la feuille du jeu (${rs.on}, « ${rs.t} »)`);
   await p.evaluate(sys => openOnMap('system', sys), crownSys); await sleep(2200);
   const es = await MF.evaluate(() => [...document.querySelectorAll('#zj-sh-foot button')].map(b => b.textContent.trim()));
-  rec('MIG-ESSAI', !rc.essai && !es.some(t => /Comparer les itinéraires/.test(t)), `accueil sans « Réseau de corridors candidat · essai » (${!rc.essai}) ; port sans « Comparer les itinéraires · essai » : ${es.join(' | ')} — ils reviendront pour de vrai à l'étape 4`);
+  rec('MIG-ESSAI', !rc.essai && /^Mes corridors · \d+ connus?$/.test(rc.mesCor) && !es.some(t => /essai/i.test(t)), `accueil sans « Réseau de corridors candidat · essai » (${!rc.essai}), à la place « ${rc.mesCor} » (étape 4) ; port sans action d'essai : ${es.join(' | ')}`);
   // étape 2 : poser une balise depuis la fiche d'un système, la voir en route, posée, puis la rappeler (règles et fonctions du jeu)
   await p.evaluate(() => { G.probesPool = G.probesPool || []; if (!G.probesPool.some(x => x.tier === 'beacon' && x.state === 'ready')) G.probesPool.push({ id: 'beacon-test-' + Date.now(), tier: 'beacon', state: 'ready', world: 'home', name: 'Balise d’essai' }); });
   await MF.evaluate(() => STARBYTE_ZONES.refresh(true)); await sleep(500);
