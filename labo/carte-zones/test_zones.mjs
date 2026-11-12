@@ -292,7 +292,9 @@ let F = await frameReady();
 await sleep(3500);
 const reg = await p.evaluate(() => { const r = G.zoneProspect && G.zoneProspect.region; if (!r) return null; const c = { rien: 0, commun: 0, choix: 0 }, kinds = {}; for (const z of r.zones) { c[z.content.cat]++; if (z.content.kind) kinds[z.content.kind] = (kinds[z.content.kind] || 0) + 1; }
   return { n: r.zones.length, c, kinds, grid: r.grid, notes: r.notes, sysOk: r.zones.every(z => z.content.cat === 'rien' || /^[A-Z]-[A-Z]-\d{4}$/.test(z.content.sys)), groups: r.zones.reduce((a, z) => (a[z.grp] = (a[z.grp] || 0) + 1, a), {}) }; });
-rec('RÉGION', reg && reg.n === 30 && reg.c.rien === 12 && reg.c.commun + reg.c.choix === 18 && reg.sysOk && reg.grid === 'tac-2', reg ? `30 zones ${JSON.stringify(reg.groups)} · ${JSON.stringify(reg.c)} · ${JSON.stringify(reg.kinds)} · contenus posés sur de vrais systèmes ${reg.sysOk}${reg.notes && reg.notes.length ? ' · notes : ' + reg.notes.join(' ; ') : ''}` : 'région absente');
+// la maison du compte de test est tirée au hasard : dans un coin pauvre, un contenu sans système à portée est abandonné (noté), la zone reste vide
+const lost = reg && reg.notes ? reg.notes.filter(n => /contenu abandonné/.test(n)).length : 0;
+rec('RÉGION', reg && reg.n === 30 && lost <= 2 && reg.c.rien === 12 + lost && reg.c.commun + reg.c.choix === 18 - lost && reg.sysOk && reg.grid === 'tac-2', reg ? `30 zones ${JSON.stringify(reg.groups)} · ${JSON.stringify(reg.c)} · ${JSON.stringify(reg.kinds)} · contenus posés sur de vrais systèmes ${reg.sysOk}${reg.notes && reg.notes.length ? ' · notes : ' + reg.notes.join(' ; ') : ''}` : 'région absente');
 await p.screenshot({ path: path.join(SHOTS, '1_ouverture.png') });
 
 // un sondage : zone « commun » la plus proche de la capitale
