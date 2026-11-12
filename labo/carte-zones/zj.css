@@ -106,3 +106,7 @@ body.zj-in-game #zj-sheet{top:62px}
 .zj-kind.zj-red{color:#ff8a7d}
 .zj-row.zj-alert{border-color:#ff5a4d99!important;background:rgba(255,90,77,.08)!important}
 .zj-row.zj-alert b{color:#ffb0a8}
+/* étape 5 (12/11) : relais et jonctions des corridors connus */
+.zj-mark.t-node{color:#ddd0ff}
+.zj-mark.t-node i::before{width:9px;height:9px}
+h3 .zj-dim,.zj-dim{color:#77729b;font-weight:500;font-size:.7em}

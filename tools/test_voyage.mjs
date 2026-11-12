@@ -54,4 +54,10 @@ const cors = JSON.parse(bridge.match(/const CORRIDORS = (\[[^\n]*?\]);/)[1].repl
 const ports = JSON.parse(bridge.match(/const NET_PORTS = (\[[^\]]*\])/)[1].replace(/'/g, '"'));
 const netPorts = V.NET.nodes.filter(n => n.type === 'station').map(n => n.key);
 rec('JEU', JSON.stringify(cors) === JSON.stringify(V.NET.corridors.map(c => ({ id: c.id, name: c.name }))) && JSON.stringify(ports) === JSON.stringify(netPorts), `le jeu connaît les ${cors.length} corridors (mêmes ids, mêmes noms) et les ${ports.length} ports du réseau`);
+// 5. étape 5 : les nœuds et les tracés que le jeu utilise pour faire passer les lignes PNJ sur les corridors
+const nodesSrc = bridge.match(/const NET_NODES = (\{[\s\S]*?\});\n/)[1], pathsSrc = bridge.match(/const COR_PATHS = (\{[^\n]*?\});/)[1];
+const NN = new Function('return ' + nodesSrc)(), CP = new Function('return ' + pathsSrc)();
+const nodesOk = V.NET.nodes.every(n => NN[n.id] && NN[n.id][0] === n.type && NN[n.id][1] === n.key) && Object.keys(NN).length === V.NET.nodes.length;
+const pathsOk = V.NET.corridors.every(c => JSON.stringify(CP[c.id]) === JSON.stringify(c.nodes)) && Object.keys(CP).length === V.NET.corridors.length;
+rec('NOEUDS', nodesOk && pathsOk, `le jeu connaît les ${Object.keys(NN).length} nœuds (type, adresse) et le tracé des ${Object.keys(CP).length} corridors comme NET`);
 const bad = R.filter(r => !r.ok).length; console.log(bad ? `\n${bad} échec(s)` : `\nvoyage_core : ${R.length}/${R.length}`); process.exit(bad ? 1 : 0);

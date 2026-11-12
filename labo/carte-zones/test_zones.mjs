@@ -222,6 +222,24 @@ async function newGame(p, url, planet) {
   const vy6 = await p.evaluate(id => { const m = G.tankerMissions.find(x => x.id === id); try { document.getElementById('commerce-sheet-overlay').classList.remove('shown'); } catch (e) {} return m && { v: m.voyage, dur: m.arrivalAt - m.departedAt }; }, vy5);
   rec('MIG-VOYAGE-SANS', vy6 && vy6.v && vy6.v.st === 'local' && vy6.v.why === 'not_deployed' && vy6.dur >= 5 * 60000 * .5, `service pas installé : le tanker part (${vy6 && Math.round(vy6.dur / 60000)} min, horaires du jeu), voyage « ${vy6 && vy6.v && vy6.v.st} » (${vy6 && vy6.v && vy6.v.why})`);
   await p.evaluate(() => SBZones.voyageTransport(null));
+  // étape 5 (partie jeu) : les lignes PNJ des stations passent sur leur corridor ; une balise sur un ancien jalon va au relais le plus proche
+  const ln0 = await p.evaluate(() => { const net = SBLines.network(), crown = net.lines.find(l => l.corridor === 'La Saigne de la Couronne'), refuge = net.lines.find(l => l.corridor === 'La Piste des Glaces');
+    const old = crown && crown.oldChain && crown.oldChain[2], now = Date.now();
+    if (old) { G.probesPool.push({ id: 'beacon-jalon-test', tier: 'beacon', state: 'deployed', deployedSystem: old, deployedAt: now - 3600e3, world: 'home', name: 'Balise du jalon' }); delete G.atlasCarte.etapes.balises; saveGame(); }
+    return { mode: net.mode, crown: crown && crown.chain, crownOld: crown && crown.oldChain && crown.oldChain.length, refuge: refuge && refuge.chain, old, lignes: !!(G.atlasCarte.etapes && G.atlasCarte.etapes.lignes), period: crown && crown.period }; });
+  await sleep(3500);
+  const ln1 = await p.evaluate(() => { const b = sbAllProbes().find(x => x.id === 'beacon-jalon-test'); const n0 = (G.beaconReports || []).length; SBLines.tickBeacons(sbAllProbes().filter(x => x.tier === 'beacon' && x.state === 'deployed'), Date.now());
+    const rep = (G.beaconReports || []).slice(n0).filter(r => r.systemCoord === 'A-M-1979'); return { sys: b && b.deployedSystem, moves: (G.atlasCarte.moves5 || []).map(m => m.from + '>' + m.to), seen: rep.length, label: rep[0] && rep[0].target && rep[0].target.name, copie: !!G.atlasCarte.copie5 }; });
+  await MF.evaluate(() => STARBYTE_ZONES.refresh(true)); await sleep(700);
+  await p.evaluate(() => openOnMap('system', 'A-M-1979')); await sleep(2500);
+  const ln2 = await MF.evaluate(() => ({ sel: STARBYTE_ZONES.zj.sel && STARBYTE_ZONES.zj.sel.id, kind: (document.querySelector('#zj-sh-body .zj-kind') || {}).textContent, h3: (document.querySelector('#zj-sh-body h3') || {}).textContent, body: document.getElementById('zj-sh-body').innerText.replace(/\s+/g, ' ') }));
+  await p.screenshot({ path: path.join(SHOTS, '0m_relais_corridor.png') });
+  const ln3 = await MF.evaluate(() => { STARBYTE_ZONES.setMode('tac'); STARBYTE_ZONES.selectSeg('C5.2'); return { kind: (document.querySelector('#zj-sh-body .zj-kind') || {}).textContent, body: document.getElementById('zj-sh-body').innerText.replace(/\s+/g, ' ') }; });
+  rec('MIG-LIGNES', ln0.mode === 'cor' && JSON.stringify(ln0.crown) === '["A-M-1979"]' && JSON.stringify(ln0.refuge) === '["A-N-2190","A-N-9950","A-N-7595"]' && ln0.crownOld >= 6 && ln0.lignes,
+    `lignes des stations sur leur corridor (${ln0.mode}) : Couronne ${JSON.stringify(ln0.crown)} (au lieu de ${ln0.crownOld} jalons tirés au hasard), Piste des Glaces ${JSON.stringify(ln0.refuge)} · horaires gardés (un départ toutes les ${Math.round(ln0.period / 60000)} min) · connaissances converties ${ln0.lignes}`);
+  rec('MIG-BALISES-RELAIS', ln1.sys === 'A-M-1979' && ln1.moves.includes(ln0.old + '>A-M-1979') && ln1.seen >= 1 && ln1.copie, `balise posée sur l'ancien jalon ${ln0.old} → relais R7 (${ln1.sys}), notée dans « Mes balises » ; copie gardée ${ln1.copie} · au relais, elle voit les convois PNJ : ${ln1.seen} passage(s) relevé(s) (« ${ln1.label || ''} »)`);
+  rec('MIG-RELAIS', ln2.sel === 'sys:A-M-1979' && /^RELAIS · LA SAIGNE DE LA COURONNE/.test(ln2.kind || '') && /Relais R7/.test(ln2.h3 || '') && /PROCHAINS CONVOIS PNJ/.test(ln2.body) && /TRONÇONS QUI LE TOUCHENT/.test(ln2.body) && /BALISE/.test(ln2.body) && /^TRONÇON · LA SAIGNE DE LA COURONNE/.test(ln3.kind || '') && !/essai/i.test(ln3.body),
+    `fiche « ${ln2.kind} · ${ln2.h3} » : ${(ln2.body.match(/PROCHAINS CONVOIS PNJ.{0,120}/) || [''])[0]} · tronçon « ${ln3.kind} » : ${(ln3.body.match(/Embuscade sur ce tronçon[^.]*\./) || [''])[0]}`);
   await p.evaluate(() => goto('planet')); await sleep(1500);
   const m6 = await p.evaluate(() => !!document.getElementById('sb-atlas-wrap'));
   // la marque survit au rechargement (la capitale de l'essai n'est plus lue : c'est la sauvegarde qui fait foi)

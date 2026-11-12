@@ -25,7 +25,7 @@
   if (window.EXTRA_SAVE_KEYS && EXTRA_SAVE_KEYS.indexOf('zoneProspect') < 0) EXTRA_SAVE_KEYS.push('zoneProspect');
 
   const PAGE = 'atlas/index.html';
-  const PAGE_V = 'c1a6ce8ec5';   // empreinte de atlas/index.html, écrite par labo/carte-zones/build.py
+  const PAGE_V = '1ef5c8654d';   // empreinte de atlas/index.html, écrite par labo/carte-zones/build.py
   const GRID = 'tac-2';
   const MIN = 60e3;
   const SB = 'https://elupnpdcblztpfywnhjl.supabase.co';
@@ -217,7 +217,7 @@
     }));
     let tr = []; try { tr = travels(); } catch (e) { console.warn('[zones] missions', e); }
     const kn = migrated() ? known() : null;   // compte migré : les ports et les routes que la partie connaît, les systèmes balayés et leurs marques
-    return { now, active: G.activeWorld || 'home', worlds: ws, hangars: hang, ranges, zp: JSON.parse(JSON.stringify(z)), missions, sigs, travels: tr, mig: migrated(), ports: kn ? kn.ports : null, routes: kn ? kn.routes : null, systems: kn ? kn.systems : null, tags: kn ? kn.tags : null, cmd: kn ? kn.cmd : null, corKnown: kn ? corKnown() : null, netPorts: kn ? NET_PORTS : null, hosted: kn ? kn.hosted : null, incoming: kn ? kn.incoming : null, posts: kn ? kn.posts : null, beacons: kn ? beacons() : null, nav: kn ? navState() : null };
+    return { now, active: G.activeWorld || 'home', worlds: ws, hangars: hang, ranges, zp: JSON.parse(JSON.stringify(z)), missions, sigs, travels: tr, mig: migrated(), ports: kn ? kn.ports : null, routes: kn ? kn.routes : null, systems: kn ? kn.systems : null, tags: kn ? kn.tags : null, cmd: kn ? kn.cmd : null, corKnown: kn ? corKnown() : null, netPorts: kn ? NET_PORTS : null, moves5: kn ? ((G.atlasCarte && G.atlasCarte.moves5) || []) : null, hosted: kn ? kn.hosted : null, incoming: kn ? kn.incoming : null, posts: kn ? kn.posts : null, beacons: kn ? beacons() : null, nav: kn ? navState() : null };
   }
 
   /* ── région de test : écrite une seule fois par la carte (contenu fixe) ── */
@@ -535,7 +535,71 @@
   // ═══ Étape 4 : voyages fixés par le serveur, corridors connus ═══
   // Le réseau candidat (mêmes ids et mêmes noms que NET dans l'Atlas et src/voyage_core.js : tools/test_voyage.mjs le vérifie)
   const CORRIDORS = [{ id: 'C1', name: 'La Vieille Voie du Linceul' }, { id: 'C2', name: 'La Piste des Glaces' }, { id: 'C3', name: 'La Voie Noire' }, { id: 'C4', name: 'La Route des Gardiens' }, { id: 'C5', name: 'La Saigne de la Couronne' }, { id: 'C6', name: 'La Ligne du Regard' }];
-  const NET_PORTS = ['A-O-8715', 'A-N-8096', 'A-N-1556', 'A-K-4227', 'A-M-3340', 'A-L-8388'];   // les stations du réseau : seules destinations des voyages serveur
+  const NET_PORTS = ['A-O-8715', 'A-N-8096', 'A-N-1556', 'A-K-4227', 'A-M-3340', 'A-L-8388'];
+  // étape 5 : les nœuds du réseau et le tracé de chaque corridor (mêmes données que NET : tools/test_voyage.mjs le vérifie)
+  const NET_NODES = { sanct: ['station', 'A-O-8715'], refuge: ['station', 'A-N-8096'], noire: ['station', 'A-N-1556'], akhet: ['station', 'A-K-4227'], crown: ['station', 'A-M-3340'], veyra: ['station', 'A-L-8388'],
+    J1: ['jonction', 'A-N-9388'], J2: ['jonction', 'A-N-7586'], R1: ['relais', 'A-O-1427'], R2: ['relais', 'A-N-7595'], R3: ['relais', 'A-N-9950'], R4: ['relais', 'A-N-2190'], R5: ['relais', 'A-N-6629'],
+    R6: ['relais', 'A-N-1996'], R7: ['relais', 'A-M-1979'], R8: ['relais', 'A-K-5365'], R9: ['relais', 'A-K-0757'], R10: ['relais', 'A-L-7382'] };
+  const COR_PATHS = { C1: ['sanct', 'R1', 'J1'], C2: ['J1', 'refuge', 'R2', 'R3', 'R4', 'crown'], C3: ['J1', 'R5', 'noire', 'R6', 'J2'], C4: ['J2', 'akhet'], C5: ['akhet', 'R7', 'crown'], C6: ['J2', 'R8', 'R9', 'R10', 'veyra'] };
+  // la ligne PNJ d'une station passe sur le corridor du même nom : du bout le plus long jusqu'à la station, sans traverser d'autre station
+  function corridorChain(name, port) {
+    const c = CORRIDORS.find(x => x.name === name); if (!c) return null;
+    const ids = COR_PATHS[c.id], keys = ids.map(id => NET_NODES[id][1]), at = keys.indexOf(port); if (at < 0) return null;
+    const st = i => NET_NODES[ids[i]][0] === 'station', before = [], after = [];
+    for (let i = 0; i < at; i++) if (!st(i)) before.push(keys[i]);
+    for (let i = keys.length - 1; i > at; i--) if (!st(i)) after.push(keys[i]);
+    return before.length >= after.length ? before : after;
+  }
+  // ce qu'une balise posée sur ce nœud verrait : les prochains passages des convois PNJ (horaires communs à tous)
+  function nodeTraffic(sys, hours) {
+    try {
+      if (!window.SBLines || !SYS_RE.test(String(sys || ''))) return [];
+      const net = SBLines.network(), on = net.bySys[sys] || [], now = Date.now(), out = [];
+      for (const { line, i, isPort } of on) for (const ps of SBLines.passages(line, i, now, now + (hours || 4) * 3600e3)) {
+        const cv = SBLines.convoyOf(line, ps.k, ps.dir), cap = isPort ? null : SBLines.capOf(line, i, ps.dir);
+        out.push({ t: ps.t, dir: ps.dir, label: cv.label, ships: cv.ships, cargo: cv.cargo, cap, port: line.port, portName: (G.hiddenPorts && G.hiddenPorts[line.port] && G.hiddenPorts[line.port].name) || null, corridor: line.corridor || null });
+      }
+      return out.sort((a, b) => a.t - b.t).slice(0, 6);
+    } catch (e) { return []; }
+  }
+  // conversion de l'étape 5 (une fois) : ce que la partie savait des anciennes lignes devient la connaissance des corridors ;
+  // les balises et les échos d'antenne posés sur d'anciens jalons vont au nœud le plus proche du corridor du même nom.
+  // Une copie de ce qui est déplacé reste dans la sauvegarde (atlasCarte.copie5).
+  function convertLines(api) {
+    const A = G.atlasCarte; if (!A || !window.SBLines) return;
+    if (!A.etapes) A.etapes = {};
+    if (A.etapes.lignes && A.etapes.balises) return;
+    const net = SBLines.network(); if (net.mode !== 'cor') return;
+    const now = Date.now(), cor = net.lines.filter(l => l.oldChain);
+    if (!A.copie5) A.copie5 = { at: now, beacons: (typeof sbAllProbes === 'function' ? sbAllProbes() : G.probesPool || []).filter(b => b && b.tier === 'beacon' && (b.state === 'deployed')).map(b => ({ id: b.id, sys: b.deployedSystem || null })),
+      going: (G.probeMissions || []).filter(m => m && m.tier === 'beacon' && m.status === 'in_transit').map(m => ({ id: m.id, sys: m.targetCoords })), echoes: JSON.parse(JSON.stringify(G.trafficEchoes || {})), legs: (G.spottedLegs || []).filter(l => l && l.npc).length };
+    if (!A.etapes.lignes) {
+      for (const line of cor) if ((G.spottedLegs || []).some(l => l && l.npc && l.lineId === line.id) || (G.hiddenPorts && G.hiddenPorts[line.port])) { try { SBLines.revealLine(line, now, line.kind && line.kind.label); } catch (e) {} }
+      A.etapes.lignes = now; save();
+    }
+    if (A.etapes.balises || !api || typeof api.posOf !== 'function') return;   // les positions viennent de la carte : on attend qu'elle soit ouverte
+    const d3 = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
+    const target = (sys) => {   // le nœud le plus proche du corridor de la ligne dont ce système était un jalon (numéros 1000 à 9999 : règle du jeu)
+      const line = cor.find(l => l.oldChain.includes(sys)); if (!line) return null;
+      const p = api.posOf(sys); const nodes = line.chain.filter(k => +k.split('-')[2] >= 1000); if (!nodes.length) return null;
+      if (!p) return { sys: nodes[0], line };
+      let best = null, bd = Infinity; for (const k of nodes) { const q = api.posOf(k); if (!q) continue; const dd = d3(p, q); if (dd < bd) { bd = dd; best = k; } }
+      return best ? { sys: best, line, d: Math.round(bd) } : null;
+    };
+    const moves = [];
+    for (const b of (typeof sbAllProbes === 'function' ? sbAllProbes() : G.probesPool || [])) if (b && b.tier === 'beacon' && b.state === 'deployed') {
+      const from = sysOfAddr(b.deployedSystem), t = from && target(from); if (!t || t.sys === from) continue;
+      if ((typeof sbAllProbes === 'function' ? sbAllProbes() : G.probesPool || []).some(x => x !== b && x.tier === 'beacon' && x.state === 'deployed' && sysOfAddr(x.deployedSystem) === t.sys)) continue;   // une balise y est déjà : celle-ci reste
+      b.deployedSystem = t.sys; delete b._linesAt; moves.push({ id: b.id, name: b.name || 'Balise', from, to: t.sys, cor: t.line.corridor, d: t.d || null });
+    }
+    for (const m of (G.probeMissions || [])) if (m && m.tier === 'beacon' && m.status === 'in_transit') {
+      const from = sysOfAddr(m.targetCoords), t = from && target(from); if (!t || t.sys === from) continue;
+      m.targetCoords = t.sys; moves.push({ id: m.id, name: m.probeName || 'Balise en route', from, to: t.sys, cor: t.line.corridor, going: true });
+    }
+    for (const [k, e] of Object.entries(G.trafficEchoes || {})) { const t = target(k); if (!t || t.sys === k || G.trafficEchoes[t.sys]) continue; G.trafficEchoes[t.sys] = e; delete G.trafficEchoes[k]; }
+    A.moves5 = (A.moves5 || []).concat(moves).slice(-40); A.etapes.balises = now; save(); notify();
+    if (moves.length) { try { toast(`${moves.length} balise${moves.length > 1 ? 's' : ''} déplacée${moves.length > 1 ? 's' : ''} sur les relais des corridors · détail dans « Mes balises »`); } catch (e) {} }
+  }   // les stations du réseau : seules destinations des voyages serveur
   // décision du 12/11 : chaque route connue (G.routes) devient la connaissance du corridor du même nom. Rien n'est retiré :
   // les routes restent dans la partie. Une copie de ce qu'elles étaient est gardée dans la sauvegarde avant la conversion.
   function corKnown() {
@@ -620,6 +684,7 @@
       if (typeof G === 'undefined' || !G || !G.planet) return;
       migrate(); hookGame();
       if (!migrated()) return;
+      try { convertLines(frameApi()); } catch (e) { console.warn('[carte] lignes → corridors', e); }
       const b = document.getElementById('sb-zones-btn'); if (b) b.remove();   // le bouton d'essai n'a plus lieu d'être
       if (overlay && !overlay.dataset.peek) close();   // l'ancien cadre plein écran : la carte est maintenant dans le Centre de prospection
       if (onProspect() && !oldMap) mountAtlas(); else if (!onProspect()) unmountAtlas();
@@ -775,7 +840,7 @@
   }
 
   window.SBZones = {
-    allowed, why, open, close, state, saveRegion, launch, arrive, act, check, peek, models, migrated, pilot, known, gameAct, beaconCheck, voyageTransport: (fn) => { voyageTransport = typeof fn === 'function' ? fn : null; }, showOldMap, showNewMap, embedded: () => !!frameWrap, sigAction: (id, wid) => sigAction((G.signatures || {})[id], wid),
+    allowed, why, open, close, state, saveRegion, launch, arrive, act, check, peek, models, migrated, pilot, known, gameAct, beaconCheck, corridorChain, nodeTraffic, voyageTransport: (fn) => { voyageTransport = typeof fn === 'function' ? fn : null; }, showOldMap, showNewMap, embedded: () => !!frameWrap, sigAction: (id, wid) => sigAction((G.signatures || {})[id], wid),
     onChange(f) { listeners.add(f); return () => listeners.delete(f); },
     grid: GRID,
   };

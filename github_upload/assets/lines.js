@@ -92,8 +92,13 @@
 
   /* ── le réseau ── */
   let _net = null;
+  // 12/11 — étape 5 de la migration de la carte (compte pilote seulement) : les lignes des six stations du réseau passent sur le
+  // corridor du même nom (jalons = relais et jonctions du corridor). Horaires, convois, noms et ports ne changent pas ; les
+  // autres joueurs gardent leurs jalons. La chaîne d'origine reste dans line.oldChain (conversion des balises et des connaissances).
+  function corridorMode() { try { return !!(window.SBZones && typeof SBZones.corridorChain === 'function' && SBZones.migrated && SBZones.migrated()); } catch (e) { return false; } }
   function network() {
-    if (_net) return _net;
+    const mode = corridorMode() ? 'cor' : 'old';
+    if (_net && _net.mode === mode) return _net;
     const lines = [], bySys = {}, ports = {}, retired = {};
     const hintsP = (typeof HINT_PREFIXES !== 'undefined') ? HINT_PREFIXES : [];
     const hintsB = (typeof HINT_BODIES !== 'undefined') ? HINT_BODIES : [];
@@ -144,12 +149,16 @@
         };
         const keep = STATION_PORTS[dock.id] && STATION_PORTS[dock.id].keep;
         if (keep && !keep.includes(j)) { retired[line.id] = line; continue; }   // ligne fermée (19/10) : gardée pour la conversion
+        if (mode === 'cor' && STATION_PORTS[dock.id]) {   // la chaîne d'origine a été tirée quand même : les horaires restent les mêmes
+          let c = null; try { c = SBZones.corridorChain(STATION_PORTS[dock.id].route, port); } catch (e) {}
+          if (Array.isArray(c) && c.length && c.every(k => SYS.test(k))) { line.oldChain = chain; line.chain = c.slice(); line.corridor = STATION_PORTS[dock.id].route; }
+        }
         lines.push(line); ports[port].lines.push(line.id);
-        chain.forEach((s, i) => { (bySys[s] = bySys[s] || []).push({ line, i }); });
-        (bySys[port] = bySys[port] || []).push({ line, i: n, isPort: true });
+        line.chain.forEach((s, i) => { (bySys[s] = bySys[s] || []).push({ line, i }); });
+        (bySys[port] = bySys[port] || []).push({ line, i: line.chain.length, isPort: true });
       }
     }
-    _net = { lines, bySys, ports, retired, byId: Object.fromEntries(lines.map(l => [l.id, l])) };
+    _net = { mode, lines, bySys, ports, retired, byId: Object.fromEntries(lines.map(l => [l.id, l])) };
     return _net;
   }
 
