@@ -1099,6 +1099,7 @@ function zjBeaconHtml(sys){const x=zjBc(sys);if(!x||!zjMig()||!sys)return'';cons
   if(!B.posts.includes(sys)&&!zj.ws.some(w=>w.key===sys))h+='<button class="zj-row" data-a="g-post" data-sys="'+zjEsc(sys)+'"><b>Ouvrir un poste ici</b><small>Un tanker en station : les commandants qui y tiennent un poste peuvent te parler</small></button>';return h}
  if(going)return h+'<p class="zj-muted">Balise en route · arrivée dans '+zjDur(going.arrivalAt-Date.now())+' ('+zjClock(going.arrivalAt)+').</p>';
  if((st.deployed||0)>=B.quota)return h+'<p class="zj-muted">'+B.quota+' balises déjà posées depuis '+zjEsc(w?w.name:'ce monde')+' : rappelle-en une pour la poser ici.</p>';
+ if(st.ok){const v=ZH.beaconCheck?ZH.beaconCheck(sys,zj.origin):{ok:true};if(!v.ok)return h+'<p class="zj-muted">'+zjEsc(v.why)+'</p>'}
  if(st.ok)return h+'<button class="zj-row" data-a="g-bc-place" data-sys="'+zjEsc(sys)+'"><b>Poser une balise</b><small>Depuis '+zjEsc(w?w.name:'')+' · surveillance permanente des convois</small></button>';
  if(st.build)return h+'<button class="zj-row" data-a="g-bc-build"><b>Construire une balise</b><small>'+B.cost.metal+' métal · '+B.cost.cristal+' cristal, au Centre de prospection</small></button>';
  return h+'<p class="zj-muted">'+zjEsc(st.why||'Aucune balise prête.')+'</p>'}
