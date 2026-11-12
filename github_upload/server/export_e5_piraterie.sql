@@ -3,7 +3,7 @@
 -- exactement ce que le serveur fait aujourd'hui pour les convois, les balises, les embuscades et les interceptions.
 -- Ces fonctions ne sont pas dans le dépôt (mp_ambush_npc, mp_ambush_orders, mp_intercept, mp_beacon_scan, …).
 --
--- LECTURE SEULE : cette requête ne modifie rien.
+-- LECTURE SEULE : cette requête ne modifie rien. (Elle n'écrit plus « create table » : l'éditeur de Supabase n'affiche plus d'alerte RLS.)
 -- Supabase → SQL Editor → coller → Run → en bas à droite « Export » → CSV → envoyer le fichier à Claude.
 
 with fns as (
@@ -13,7 +13,7 @@ with fns as (
     and (p.proname ~ '^_?mp_(ambush|intercept|beacon|convoy|spy|post|auto_ambush|piracy|npc)' or p.proname ~ '(ambush|intercept|convoy|beacon)')
 ), tbls as (
   select 'table' as genre, c.table_name as nom, '' as signature,
-         'create table public.' || c.table_name || E' (\n  ' || string_agg(c.column_name || ' ' || c.data_type || coalesce(' default ' || c.column_default, '') || case when c.is_nullable = 'NO' then ' not null' else '' end, E',\n  ' order by c.ordinal_position) || E'\n);' as definition
+         'colonnes de public.' || c.table_name || E' :\n  ' || string_agg(c.column_name || ' ' || c.data_type || coalesce(' default ' || c.column_default, '') || case when c.is_nullable = 'NO' then ' not null' else '' end, E',\n  ' order by c.ordinal_position) || E'\n' as definition
   from information_schema.columns c
   where c.table_schema = 'public' and c.table_name in ('convoys', 'ambushes', 'intercepts', 'beacons', 'mp_beacons', 'spotted', 'route_posts', 'posts')
   group by c.table_name
