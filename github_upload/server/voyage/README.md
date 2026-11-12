@@ -23,7 +23,9 @@ Ne jamais modifier `voyage_core.js` à la main : éditer `src/voyage_rules.js` (
 1. **Supabase → SQL Editor** : coller `server/schema_mp_v54_voyages.sql` → *Run*, puis `server/schema_mp_v55_troncons.sql` → *Run*
    (v55 : embuscades sur un tronçon, étape 5 ; rejouable).
 2. **Edge Functions → Deploy a new function → Via editor** : nom `voyage` → créer les deux fichiers ci-dessus (même nom,
-   même contenu) → *Deploy*. Laisser « Verify JWT » activé.
+   même contenu) → *Deploy*. Dans *Settings*, **désactiver « Verify JWT with legacy secret »** (12/11) : la fonction
+   vérifie elle-même la session du joueur (`auth.getUser`, refus 401 sinon) pour `quote` et `launch`, quel que soit le type
+   de clé du projet ; seul `selftest` répond sans session, et il ne lit ni n'écrit rien.
    - ou : copier le dossier dans `supabase/functions/voyage/` puis `supabase functions deploy voyage`.
 
 ## Vérifier
