@@ -3,7 +3,7 @@
 -- exactement ce que le serveur fait aujourd'hui pour les convois, les balises, les embuscades et les interceptions.
 -- Ces fonctions ne sont pas dans le dépôt (mp_ambush_npc, mp_ambush_orders, mp_intercept, mp_beacon_scan, …).
 --
--- LECTURE SEULE : cette requête ne modifie rien. (Elle n'écrit plus « create table » : l'éditeur de Supabase n'affiche plus d'alerte RLS.)
+-- LECTURE SEULE : cette requête ne modifie rien. (Aucune création de table : l'éditeur de Supabase n'affiche plus d'alerte RLS.)
 -- Supabase → SQL Editor → coller → Run → en bas à droite « Export » → CSV → envoyer le fichier à Claude.
 
 with fns as (
