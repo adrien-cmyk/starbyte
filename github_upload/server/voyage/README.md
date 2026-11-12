@@ -20,7 +20,8 @@ Ne jamais modifier `voyage_core.js` à la main : éditer `src/voyage_rules.js` (
 
 ## Installer (une fois)
 
-1. **Supabase → SQL Editor** : coller `server/schema_mp_v54_voyages.sql` → *Run*.
+1. **Supabase → SQL Editor** : coller `server/schema_mp_v54_voyages.sql` → *Run*, puis `server/schema_mp_v55_troncons.sql` → *Run*
+   (v55 : embuscades sur un tronçon, étape 5 ; rejouable).
 2. **Edge Functions → Deploy a new function → Via editor** : nom `voyage` → créer les deux fichiers ci-dessus (même nom,
    même contenu) → *Deploy*. Laisser « Verify JWT » activé.
    - ou : copier le dossier dans `supabase/functions/voyage/` puis `supabase functions deploy voyage`.
@@ -29,6 +30,9 @@ Ne jamais modifier `voyage_core.js` à la main : éditer `src/voyage_rules.js` (
 
 Edge Functions → `voyage` → **Test** → POST, corps `{"action":"selftest"}` → réponse attendue :
 `{"net":"net-b132e211-r4097","plans":[{"k":"libre","len":3583,…},{"k":"cor","len":4278,…}]}`.
+
+Depuis v55, la réponse d'un lancement porte aussi `"convoy":"synced"` : le convoi inscrit au registre a pris le chemin,
+les horaires et les tronçons datés du voyage (`plan.segs`), que le balayage des embuscades (`mp_segment_scan`) utilise.
 
 Puis, après un tanker lancé depuis la nouvelle carte :
 ```sql
