@@ -337,7 +337,9 @@ async function mpAmbushRegister(f) {
     const payload = _mpFleetPayload(f);
     payload.soldiers = { garde: 0, lourd: 0 };
     try { await window.SBMP.beaconsSync(mpBeaconList()); } catch (e) {}   // ROUTES_V2 : la flotte postée est ses propres yeux au registre
-    a.mpAmbushId = await window.SBMP.ambushPost(f.id, f.name, a.system, payload);
+    // 12/11 (étape 5, v55) : une flotte postée sur un tronçon de corridor s'inscrit avec son tronçon (pas de balise exigée)
+    a.mpAmbushId = a.edge ? await _mpRpc('mp_ambush_post_seg', { p_fleet_id: f.id, p_fleet_name: f.name, p_edge: a.edge, p_a: a.a, p_b: a.b, p_fleet: payload })
+                          : await window.SBMP.ambushPost(f.id, f.name, a.system, payload);
     a.blind = false;
     if (window.SBLines && SBLines.pushOrders) { a.ordersSync = false; a.ordersTry = 0; SBLines.pushOrders(f, true); }   // PATCH_1510_ORDRES
     if (typeof saveGame === 'function') saveGame();
@@ -378,7 +380,7 @@ function _mpAmbushPhaseText(f) {
   if (a.phase === 'going') return `Arrivée dans ${formatMissionTimer(Math.max(0, a.arrivesAt - now))}`;
   if (a.phase === 'returning') return `Retour au port dans ${formatMissionTimer(Math.max(0, a.returnsAt - now))}`;
   const _hold = a.hold && Object.values(a.hold).some(v => v > 0) ? ` · en cale : ${typeof _mpResLine === 'function' ? _mpResLine(a.hold) : ''}` : '';
-  return `En embuscade sur ${a.system} · à l'affût` + (window.SBLines && SBLines.ordersLabel ? ' · ' + SBLines.ordersLabel(f).replace('Ordres : ', '') : '') + _hold;   // ROUTES_V2
+  return `En embuscade sur ${a.edge ? 'le tronçon ' + (a.segName || a.edge) : a.system} · à l'affût` + (window.SBLines && SBLines.ordersLabel ? ' · ' + SBLines.ordersLabel(f).replace('Ordres : ', '') : '') + _hold;   // ROUTES_V2
 }
 async function mpAmbushRecall(fleetId) {
   const f = (G.fleet.prepared || []).find(x => x.id === fleetId);

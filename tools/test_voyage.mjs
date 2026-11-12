@@ -60,4 +60,13 @@ const NN = new Function('return ' + nodesSrc)(), CP = new Function('return ' + p
 const nodesOk = V.NET.nodes.every(n => NN[n.id] && NN[n.id][0] === n.type && NN[n.id][1] === n.key) && Object.keys(NN).length === V.NET.nodes.length;
 const pathsOk = V.NET.corridors.every(c => JSON.stringify(CP[c.id]) === JSON.stringify(c.nodes)) && Object.keys(CP).length === V.NET.corridors.length;
 rec('NOEUDS', nodesOk && pathsOk, `le jeu connaît les ${Object.keys(NN).length} nœuds (type, adresse) et le tracé des ${Object.keys(CP).length} corridors comme NET`);
+// 6. étape 5 : tronçons d'un voyage (heures d'entrée et de sortie) ; flotte au rythme de son vaisseau le plus lent
+{ const t0 = 1_800_000_000_000, sg = V.voyageSegs(C, t0, t0 + Math.round(C.test * 60000), 'A-O-2178', 'A-M-3340');
+  const mono = sg.every((s, i) => s.t1 > s.t0 && (i === 0 || s.t0 >= sg[i - 1].t1 - 1)), keys = sg.every(s => /^[A-Z]-[A-Z]-\d{4}$/.test(s.a) && /^[A-Z]-[A-Z]-\d{4}$/.test(s.b));
+  const C5 = sg.find(s => s.e === 'C5.2');
+  rec('TRONCONS', sg.length === C.nCor && mono && keys && ok1.row.plan.segs && ok1.row.plan.segs.length === C.nCor, `${sg.length} tronçons datés pour Drifting Crown (entrée < sortie, dans l'ordre, adresses des nœuds)${C5 ? ' · dernier : C5.2 ' + C5.a + ' → ' + C5.b + ', ' + Math.round((C5.t1 - C5.t0) / 1000) + ' s' : ''} · le serveur les enregistre avec le voyage`);
+  const fr = { fregate: { t1: 3 } }, mix = { fregate: { t1: 3 }, cuirasse: { t2: 1 } };
+  const a1 = V.fleetToSegment(fr, 'A-O-2178-07', 'C5.2'), a2 = V.fleetToSegment(mix, 'A-O-2178-07', 'C5.2');
+  rec('FLOTTE', V.fleetSpeed(fr) === 14 && V.fleetSpeed(mix) === 8 && V.fleetSpeed({}) === null && a1 && a2 && Math.abs(a2.ms / a1.ms - 14 / 8) < .01 && a1.d > 0 && a1.at >= 0 && a1.at <= 1,
+    `frégates seules ${V.fleetSpeed(fr)} u/min, avec un cuirassé ${V.fleetSpeed(mix)} u/min (le plus lent) · rejoindre C5.2 depuis A-O-2178-07 : ${Math.round(a1.d)} u, ${Math.round(a1.ms / 60000)} min contre ${Math.round(a2.ms / 60000)} min`); }
 const bad = R.filter(r => !r.ok).length; console.log(bad ? `\n${bad} échec(s)` : `\nvoyage_core : ${R.length}/${R.length}`); process.exit(bad ? 1 : 0);

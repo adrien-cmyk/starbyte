@@ -25,7 +25,7 @@
   if (window.EXTRA_SAVE_KEYS && EXTRA_SAVE_KEYS.indexOf('zoneProspect') < 0) EXTRA_SAVE_KEYS.push('zoneProspect');
 
   const PAGE = 'atlas/index.html';
-  const PAGE_V = '0e5aaccfed';   // empreinte de atlas/index.html, écrite par labo/carte-zones/build.py
+  const PAGE_V = '8f44ab6584';   // empreinte de atlas/index.html, écrite par labo/carte-zones/build.py
   const GRID = 'tac-2';
   const MIN = 60e3;
   const SB = 'https://elupnpdcblztpfywnhjl.supabase.co';
@@ -162,13 +162,14 @@
     for (const f of (G.fleet && G.fleet.prepared) || []) {
       if (fleetTravel(f, out, coordOf)) continue;
       const a = f && f.ambush; if (!a || !a.phase) continue;
+      const seg = a.edge ? { edge: a.edge, a: a.a, b: a.b, name: a.segName || a.edge } : null;   // étape 5 : posée sur un tronçon
       const ph = [{ dir: 'out', t0: a.departedAt, t1: a.arrivesAt }];
       if (a.phase !== 'going' && a.phase !== 'returning') ph.push({ dir: 'stay', t0: a.arrivesAt, t1: a.endsAt || a.until || null });
       if (a.phase === 'returning') ph.push({ dir: 'back', t0: a.returnDepartedAt || a.arrivesAt, t1: a.returnsAt });
       const comp = {}; for (const k of ['cuirasse', 'fregate', 'tanker']) { const c = (f.composition && f.composition[k]) || {}; comp[k] = { t1: c.t1 || 0, t2: c.t2 || 0, t3: c.t3 || 0 }; }   // composition connue : c'est ta flotte
       const premium = (Array.isArray(f.premium) ? f.premium : []).filter(p => p && /^[a-z0-9-]{2,40}$/.test(String(p.item || ''))).map(p => ({ item: p.item, cat: p.cat || '' }));
-      out.push({ id: 'fl:' + f.id, kind: 'fleet', name: f.name || 'Flotte', comp, premium, world: f.world || 'home', from: coordOf(f.world), to: addrOf(a.system), via: [], toLabel: 'embuscade · ' + (a.system || ''),
-        route: 'direct', mkind: 'embuscade', status: a.phase, statusLabel: { going: 'En route', returning: 'Retour' }[a.phase] || 'En embuscade', phases: ph });
+      out.push({ id: 'fl:' + f.id, kind: 'fleet', name: f.name || 'Flotte', comp, premium, world: f.world || 'home', from: coordOf(f.world), to: addrOf(a.system), via: [], toLabel: 'embuscade · ' + (seg ? seg.name : (a.system || '')), seg,
+        route: 'direct', mkind: 'embuscade', fleetId: String(f.id).slice(0, 80), status: a.phase, statusLabel: { going: 'En route', returning: 'Retour' }[a.phase] || 'En embuscade', phases: ph });
     }
     for (const m of G.colonyMissions || []) {   // l'arche n'enregistre pas son monde de départ : pas de position inventée
       if (!m) continue;
@@ -217,7 +218,7 @@
     }));
     let tr = []; try { tr = travels(); } catch (e) { console.warn('[zones] missions', e); }
     const kn = migrated() ? known() : null;   // compte migré : les ports et les routes que la partie connaît, les systèmes balayés et leurs marques
-    return { now, active: G.activeWorld || 'home', worlds: ws, hangars: hang, ranges, zp: JSON.parse(JSON.stringify(z)), missions, sigs, travels: tr, mig: migrated(), ports: kn ? kn.ports : null, routes: kn ? kn.routes : null, systems: kn ? kn.systems : null, tags: kn ? kn.tags : null, cmd: kn ? kn.cmd : null, corKnown: kn ? corKnown() : null, netPorts: kn ? NET_PORTS : null, moves5: kn ? ((G.atlasCarte && G.atlasCarte.moves5) || []) : null, hosted: kn ? kn.hosted : null, incoming: kn ? kn.incoming : null, posts: kn ? kn.posts : null, beacons: kn ? beacons() : null, nav: kn ? navState() : null };
+    return { now, active: G.activeWorld || 'home', worlds: ws, hangars: hang, ranges, zp: JSON.parse(JSON.stringify(z)), missions, sigs, travels: tr, mig: migrated(), ports: kn ? kn.ports : null, routes: kn ? kn.routes : null, systems: kn ? kn.systems : null, tags: kn ? kn.tags : null, cmd: kn ? kn.cmd : null, fleetsReady: kn ? kn.fleets : null, corKnown: kn ? corKnown() : null, netPorts: kn ? NET_PORTS : null, moves5: kn ? ((G.atlasCarte && G.atlasCarte.moves5) || []) : null, hosted: kn ? kn.hosted : null, incoming: kn ? kn.incoming : null, posts: kn ? kn.posts : null, beacons: kn ? beacons() : null, nav: kn ? navState() : null };
   }
 
   /* ── région de test : écrite une seule fois par la carte (contenu fixe) ── */
@@ -664,6 +665,53 @@
     };
     h._voyageHook = true; window.launchTankerOnRoute = h;
   }
+  // étape 5 : poster une flotte sur un tronçon de corridor. Décisions du 12/11 : le tronçon entier ; durée et coût comme
+  // aujourd'hui (énergie selon le secteur, pas de limite de durée, rappel au port) ; trajet au rythme du vaisseau le plus lent
+  // (calculé par la carte avec les règles du module des voyages). Mêmes contrôles et mêmes ordres que mpAmbushStart.
+  async function postOnSegment(arg) {
+    try {
+      const x = arg || {}, f = ((G.fleet && G.fleet.prepared) || []).find(y => y && String(y.id) === String(x.fleetId));
+      const edge = String(x.edge || ''), A = String(x.a || ''), B = String(x.b || ''), ms = Math.round(Number(x.travelMs) || 0), name = String(x.name || edge).slice(0, 60);
+      const T = (m) => { try { toast(m); } catch (e) {} };
+      if (!f) return T('Flotte introuvable');
+      if (!/^C\d{1,2}\.\d{1,2}$/.test(edge) || !SYS_RE.test(A) || !SYS_RE.test(B) || !(ms >= 60000 && ms <= 12 * 3600e3)) return T('Tronçon inconnu');
+      if (!corKnown().includes(edge.split('.')[0])) return T('Corridor inconnu : découvre d’abord sa route');
+      if ((f.status || 'prepared') !== 'deployed') return T('La flotte doit être en orbite');
+      if (f.repair) return T('Attends la fin des réparations');
+      if (f.ambush) return T(`${f.name} est déjà en embuscade`);
+      const armed = ['fregate', 'cuirasse'].some(type => ['t1', 't2', 't3'].some(t => (f.composition[type] && f.composition[type][t]) > 0));
+      if (!armed) return T('Il faut des frégates ou des cuirassés pour aborder un convoi');
+      if (typeof _mpOnline === 'function' && !_mpOnline()) return T('Registre hors ligne : réessaie dans un instant');
+      if (typeof mpPeaceGuard === 'function' && !(await mpPeaceGuard('Poster cette flotte en embuscade'))) return;
+      const sold = ((f.soldiers && f.soldiers.garde) || 0) + ((f.soldiers && f.soldiers.lourd) || 0);
+      if (sold > 0) {
+        if (typeof sbConfirm === 'function' && !(await sbConfirm({ title: 'Les soldats restent au sol', body: `Une embuscade est un combat spatial : on aborde des convois, on ne débarque pas.<br><br>Les <strong>${sold} soldat${sold > 1 ? 's' : ''}</strong> de ${f.name} restent à la base.`, ok: 'Continuer' }))) return;
+        f.soldiers = Object.assign({}, f.soldiers, { garde: 0, lourd: 0 }); if (typeof syncFleetIntegrity === 'function') syncFleetIntegrity(f);
+      }
+      const orders = window.SBLines && SBLines.chooseOrders ? await SBLines.chooseOrders(null) : { mode: 'manual', players: false };
+      if (!orders) return;
+      const fuel = typeof computeMissionFuelCost === 'function' ? computeMissionFuelCost(f, { distanceMult: typeof _carnetDistanceMult === 'function' ? _carnetDistanceMult(A.split('-')[1]) : 3 }) : 0;
+      if ((G.res.energie.v || 0) < fuel) return T(`Énergie insuffisante : ${typeof fmt === 'function' ? fmt(fuel) : fuel} requis`);
+      const ordTxt = window.SBLines && SBLines.ORDER_MODES ? SBLines.ORDER_MODES[orders.mode].label + (orders.mode === 'manual' ? '' : orders.players ? ' · convois de joueurs compris' : ' · convois PNJ seulement') : '';
+      const tankers = ['t1', 't2', 't3'].reduce((n, t) => n + ((f.composition.tanker && f.composition.tanker[t]) || 0), 0);
+      const esc = (v) => String(v == null ? '' : v).replace(/[<>&"]/g, '');
+      const ok = typeof sbConfirmWarning === 'function' ? await sbConfirmWarning('Embuscade sur un tronçon',
+        `Poster <strong>${esc(f.name)}</strong> sur le tronçon <strong>${esc(name)}</strong> ?<br><br>Trajet ${Math.round(ms / 60000)} min, au rythme de son vaisseau le plus lent · ${typeof fmt === 'function' ? fmt(fuel) : fuel} énergie.`
+        + (ordTxt ? `<br>Ordres : <strong>${ordTxt}</strong>` : '')
+        + `<br><br>Une fois en place, elle intercepte tout convoi qui <strong>entre</strong> sur ce tronçon, par l'un ou l'autre bout. Un convoi déjà entré quand elle arrive lui échappe.`
+        + (tankers ? '' : `<br><br><span style="color:#ffc864">Sans tanker dans la flotte, aucun butin ne pourra être emporté.</span>`)
+        + `<br><br><em>Loin de ta planète, cette flotte ne la protège plus.</em>`, 'Partir en embuscade') : true;
+      if (!ok) return;
+      const now = Date.now();
+      G.res.energie.v = Math.max(0, (G.res.energie.v || 0) - fuel);
+      if (typeof mpPeaceRenounce === 'function') mpPeaceRenounce();
+      f.status = 'in_mission'; f.missionStartedAt = now; f.missionEndsAt = null; f.missionTargetId = null;
+      f.ambush = { system: A, edge, a: A, b: B, segName: name, beaconId: null, phase: 'going', world: f.world || G.activeWorld || 'home', departedAt: now, arrivesAt: now + ms, travelMs: ms, hold: {}, mpAmbushId: null, orders, routeId: null, routeChain: null };
+      if (typeof startMissionTimerLoop === 'function') startMissionTimerLoop();
+      T(`${f.name} part en embuscade sur ${name} · ${Math.round(ms / 60000)} min`);
+      save(); notify();
+    } catch (e) { console.warn('[carte] embuscade sur un tronçon', e); }
+  }
   function hookGame() {
     if (migrated()) hookVoyage();
     if (window.SBMap && !SBMap._atlasHook) {
@@ -709,7 +757,9 @@
       }
     } catch (e) {}
     const tags = {}; try { for (const [k, v] of Object.entries(G.systemTags || {})) if (v === 'star' || v === 'skip') tags[k] = v; } catch (e) {}
-    let cmd = [], hosted = [], incoming = [], posts = { mine: [], others: [] };
+    let cmd = [], hosted = [], incoming = [], posts = { mine: [], others: [] }, fleets = [];
+    try { fleets = ((G.fleet && G.fleet.prepared) || []).filter(f => f && (f.status || 'prepared') === 'deployed' && !f.repair).slice(0, 20).map(f => { const comp = {}; for (const k of ['cuirasse', 'fregate', 'tanker']) { const c = (f.composition && f.composition[k]) || {}; comp[k] = { t1: c.t1 || 0, t2: c.t2 || 0, t3: c.t3 || 0 }; }
+      return { id: String(f.id).slice(0, 80), name: String(f.name || 'Flotte').slice(0, 40), world: f.world || 'home', comp, armed: ['fregate', 'cuirasse'].some(k => comp[k].t1 + comp[k].t2 + comp[k].t3 > 0) }; }); } catch (e) {}
     try { cmd = commanders(); } catch (e) { console.warn('[carte] commandants', e); }
     try { hosted = (G.mpGarHosted || []).filter(g => g && !g.left_at).map(g => ({ pseudo: String(g.owner_pseudo || '').slice(0, 24), fleet: String(g.fleet_name || '').slice(0, 40), host: PLANET_RE.test(g.host_address || '') ? g.host_address : null, def: Math.max(0, Math.floor(Number(g.def) || 0)), arrivesAt: Date.parse(g.arrives_at) || null })); } catch (e) {}
     try { const L = typeof _mpIncoming !== 'undefined' && Array.isArray(_mpIncoming) ? _mpIncoming : []; incoming = L.filter(r => r && Date.parse(r.arrives_at) > Date.now()).map(r => ({ pseudo: String(r.attacker_pseudo || '').slice(0, 24), fleet: String(r.fleet_name || '').slice(0, 40), at: Date.parse(r.arrives_at), target: PLANET_RE.test(r.defender_address || '') ? r.defender_address : null })); } catch (e) {}
@@ -717,7 +767,7 @@
       for (const m of G.tankerMissions || []) if (m && m.kind === 'route_post' && ['in_transit', 'posted'].includes(m.status) && SYS_RE.test(m.targetCoords || '')) posts.mine.push({ sys: m.targetCoords, tanker: String(m.tankerName || 'Tanker').slice(0, 40), status: m.status });
       for (const o of G._mpPosts || []) if (o && SYS_RE.test(o.system || '')) posts.others.push({ sys: o.system, pseudo: String(o.pseudo || '').slice(0, 24), met: !!o.met });
     } catch (e) {}
-    return { ports, routes, systems, tags, cmd, hosted, incoming, posts };
+    return { ports, routes, systems, tags, cmd, hosted, incoming, posts, fleets };
   }
   // étape 3 : les commandants que la partie connaît (mondes balayés, relations, alliance) et ce qui te lie à chacun.
   // Tout vient des fonctions du jeu (registre relevé chaque minute) : aucune donnée n'est convertie.
@@ -805,6 +855,7 @@
       if (typeof openTankerComposeForRoute !== 'function') return { ok: false, why: 'Envoi indisponible.' };
       hookVoyage(); pendingVoyage = { port, pick, at: Date.now() }; openTankerComposeForRoute(route.id); return { ok: true };
     }
+    if (kind === 'ambush-seg') { postOnSegment(arg); return { ok: true }; }
     if (kind === 'fleet-screen') { if (typeof goto === 'function') goto('fleet'); return { ok: true }; }
     if (kind === 'tab') { if (!/^(sondes|missions|rapports|carnet|archives)$/.test(String(arg))) return { ok: false, why: 'Onglet inconnu.' }; window.setProspectTab(arg); return { ok: true }; }
     if (kind === 'beacon-place') {

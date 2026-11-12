@@ -109,3 +109,29 @@ export function voyageOptions(origin, dest, tier, known) {
     legs: x.pl.legs.map(l => ({ t: l.type, a: l.a, b: l.b, len: l.len, e: l.edge ? l.edge.id : null, cor: l.edge ? l.edge.cor : null })),
     via: x.pl.legs.slice(0, -1).map(l => l.b).filter(id => g.nodes[id]).map(id => g.nodes[id].key) })) };
 }
+
+// ── étape 5 : heures d'entrée et de sortie sur chaque tronçon de corridor d'un voyage fixé (l'unité d'interception) ──
+// Les durées des étapes sont proportionnelles à leurs durées en saison normale ; le minimum par mission les étire d'autant.
+export function voyageSegs(plan, depMs, arrMs, originKey, destKey) {
+  const g = voyageGraph(), R = VOYAGE_RULES, key = id => id === '@O' ? originKey : id === '@D' ? destKey : (g.nodes[id] ? g.nodes[id].key : null);
+  const legs = (plan && plan.legs) || [], mins = legs.map(l => l.len / (R.v * (l.t === 'cor' ? R.k : 1))), tot = mins.reduce((a, b) => a + b, 0) || 1;
+  const out = []; let cum = 0;
+  legs.forEach((l, i) => { const t0 = depMs + (arrMs - depMs) * cum / tot; cum += mins[i]; const t1 = depMs + (arrMs - depMs) * cum / tot;
+    if (l.t === 'cor' && l.e) out.push({ e: l.e, a: key(l.a), b: key(l.b), t0: Math.round(t0), t1: Math.round(t1) }); });
+  return out;
+}
+// ── étape 5 : une flotte vole à la vitesse de son vaisseau le plus lent (décision du 12/11 ; valeurs d'essai, u/min en saison normale) ──
+export const FLEET_SPEED = { fregate: 14, cuirasse: 8, tanker: 12 };
+export function fleetSpeed(comp) {
+  let v = null;
+  for (const [ty, sp] of Object.entries(FLEET_SPEED)) { const c = comp && comp[ty], n = c ? (c.t1 | 0) + (c.t2 | 0) + (c.t3 | 0) : 0; if (n > 0) v = v == null ? sp : Math.min(v, sp); }
+  return v;
+}
+// rejoindre un tronçon en vol libre : jusqu'à son point le plus proche (sur la courbe), minimum par mission compris
+export function fleetToSegment(comp, fromAddr, edgeId) {
+  const v = fleetSpeed(comp), p = addressPos(fromAddr), e = voyageGraph().edges.find(x => x.id === edgeId);
+  if (!v || !p || !e) return null;
+  let best = 0, bd = Infinity; e.pts.forEach((q, i) => { const d = d3(p, q); if (d < bd) { bd = d; best = i; } });
+  const R = VOYAGE_RULES, min = Math.max(bd, R.Lmin) / v;
+  return { d: bd, at: best / (e.pts.length - 1), speed: v, norm: min, test: min / R.season, ms: Math.max(60000, Math.round(min / R.season * 60000)) };
+}

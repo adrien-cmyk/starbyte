@@ -693,6 +693,7 @@ function zjDraw(){const mig=zjMig();const c=zjCtx,W=innerWidth,H=innerHeight,inv
   hits.push({x:X,y:Y,o})}
  // 9a. réseau de corridors candidat (prévisualisation d'essai, GDD navigation § 9)
  zjCorDrawTac(c,sx,sy,y0,y1,lines);
+ if(mig){const g=zjCorGraph();if(g)for(const t of zj.tr||[])if(t.seg&&t.status!=='returning'){const e=g.edges.find(x=>x.id===t.seg.edge);if(!e)continue;c.save();c.strokeStyle=t.status==='posted'?'rgba(255,106,90,.9)':'rgba(255,106,90,.45)';c.lineWidth=3.2;c.setLineDash(t.status==='posted'?[]:[6,5]);c.beginPath();e.pts.forEach((q,i)=>{const X=sx(q[0]),Y=sy(q[2]);i?c.lineTo(X,Y):c.moveTo(X,Y)});c.stroke();c.restore();for(let j=1;j<e.pts.length;j++)lines.push({x1:sx(e.pts[j-1][0]),y1:sy(e.pts[j-1][2]),x2:sx(e.pts[j][0]),y2:sy(e.pts[j][2]),o:{type:'seg',id:e.id}})}}
  // 9b. missions suivables : tracé projeté de la mission choisie (parcouru plein, restant en tirets), repère orienté touchable
  {const now=Date.now(),selTr=zj.sel&&zj.sel.type==='travel'?zj.sel.id:null;
   for(const tr of zj.tr){if(!tr.ok)continue;const st=zjTrState(tr,now),isSel=tr.id===selTr;
@@ -1281,6 +1282,7 @@ $('zj-sheet').addEventListener('click',e=>{const b=e.target.closest('[data-a]');
  if(a==='g-fleet-screen'){ZH.gameAct('fleet-screen');return}
  if(a==='bc-go'){const o=zjObjects().find(x=>x.id===b.dataset.id);if(o)zjSelectObj(o);return}
  if(a==='seg-off'){zj.sel=null;zjOpen('home');zj.dirty=true;return}
+ if(a==='g-amb-seg'){const g=zjCorGraph(),e=g&&zj.sel&&g.edges.find(x=>x.id===zj.sel.id);if(!e)return;ZH.gameAct('ambush-seg',{fleetId:b.dataset.id,edge:e.id,a:g.nodes[e.a].key,b:g.nodes[e.b].key,name:e.name+' · '+zjCorName(e.a)+' → '+zjCorName(e.b),travelMs:+b.dataset.ms});return}
  if(a==='g-tag'){const r=ZH.gameAct('tag',{key:b.dataset.key,v:b.dataset.v});if(r&&!r.ok)toast(r.why);else zjRefresh(true);return}
  if(a==='g-old'){const k=b.dataset.k,key=b.dataset.key;ZH.gameAct('oldmap',key?{kind:k,key}:null);return}
  if(a==='cor-tr'){const tr=zjTrFind(zj.sel&&zj.sel.id);if(!zjCorCompare(zjCorCtxTravel(tr)))return toast('Réseau pas encore prêt, réessaie dans un instant.');zjCorFit();return zjOpen('cor')}
@@ -1462,6 +1464,13 @@ function zjCorQuote(pl,ctx){const C=ZJ_COR,mn=C.Lmin/C.v,norm=Math.max(pl.min,mn
 function zjCorCtxTravel(tr){if(!tr||!tr.ok||tr.pts.length<2)return null;const w=zj.ws.find(x=>x.coord===tr.from),dP=tr.pts[tr.pts.length-1],tier=Math.max(1,Math.min(3,parseInt(String(tr.tier||1).replace(/\D/g,''),10)||1));
  return{src:'travel',id:tr.id,O:{id:'@O',name:w?w.name:tr.from,key:tr.from,p:tr.pts[0]},D:{id:'@D',name:tr.toLabel||tr.to,key:tr.to,p:dP},tier,fuel:tr.fuel!=null?tr.fuel:ZJ_COR.fuel[tier],paid:tr.fuel,veh:tr.envoy?tr.envoy.name||'vaisseau d’exception':'tanker T'+tier,tr}}
 function zjCorCtxObj(o){const w=zjWorld(zj.origin)||zjHome();if(!o||!w)return null;return{src:'obj',id:o.id,O:{id:'@O',name:w.name,key:w.coord,p:w.p},D:{id:'@D',name:o.name,key:o.type==='world'?o.w.coord:o.key,p:o.p},tier:1,fuel:ZJ_COR.fuel[1],paid:null,veh:'tanker T1'}}
+// étape 5 : une flotte vole au rythme de son vaisseau le plus lent (valeurs d'essai, u/min en saison normale) ;
+// elle rejoint un tronçon en vol libre jusqu'à son point le plus proche, minimum par mission compris
+const ZJ_FLEET_SPEED={fregate:14,cuirasse:8,tanker:12};
+const zjFleetSpeed=comp=>{let v=null;for(const[ty,sp]of Object.entries(ZJ_FLEET_SPEED)){const c=comp&&comp[ty],n=c?(c.t1|0)+(c.t2|0)+(c.t3|0):0;if(n>0)v=v==null?sp:Math.min(v,sp)}return v};
+function zjFleetSeg(comp,worldId,edgeId){const v=zjFleetSpeed(comp),w=zjWorld(worldId),g=zjCorGraph(),e=g&&g.edges.find(x=>x.id===edgeId);if(!v||!w||!w.p||!e)return null;
+ let best=0,bd=Infinity;e.pts.forEach((q,i)=>{const d=Math.hypot(w.p[0]-q[0],w.p[1]-q[1],w.p[2]-q[2]);if(d<bd){bd=d;best=i}});
+ const min=Math.max(bd,ZJ_COR.Lmin)/v;return{d:bd,at:best/(e.pts.length-1),speed:v,norm:min,test:min/ZJ_COR.season,ms:Math.max(60000,Math.round(min/ZJ_COR.season*60000))}}
 // étape 4 : la partie migrée ne voit et n'emprunte que les corridors qu'elle connaît (une route connue = le corridor du même nom)
 const zjCorOnly=()=>zjMig()?new Set(zj.snap.corKnown||[]):null;
 const zjNetPort=k=>zjMig()&&(zj.snap.netPorts||[]).includes(k);
@@ -1531,7 +1540,13 @@ function zjSelectSeg(id){const g=zjCorGraph(),e=g&&g.edges.find(x=>x.id===id);if
 function zjSegHtml(){const g=zjCorGraph(),e=g&&g.edges.find(x=>x.id===zj.sel.id);if(!e)return{h:'<p class="zj-muted">Tronçon introuvable.</p>',f:''};
  if(zjMig()){const B=zj.snap.beacons,ends=[e.a,e.b].map(id=>g.nodes[id]),watch=B?ends.filter(n=>B.list.some(b=>b.sys===n.key)).map(n=>zjCorName(n.id)):[];
   let h='<div class="zj-kind">TRONÇON · '+zjEsc(e.name.toUpperCase())+'</div><h3>'+zjEsc(zjCorName(e.a))+' → '+zjEsc(zjCorName(e.b))+'</h3><dl class="zj-dl"><dt>Longueur</dt><dd>'+zjFmt(e.len)+' u <small>· mesurée sur la courbe</small></dd><dt>Traversée</dt><dd>'+zjMin(e.len/(ZJ_COR.v*ZJ_COR.k)/ZJ_COR.season)+' <small>· saison de test</small></dd><dt>Balises</dt><dd>'+(watch.length?zjEsc(watch.join(' et '))+' <small>· voient ce tronçon</small>':'aucune à ses deux bouts')+'</dd></dl>';
-  h+='<p class="zj-muted">Embuscade sur ce tronçon : une flotte postée ici interceptera tout convoi qui y entre après la pose (décision du 12/11). Le serveur résoudra l’interception au passage ; cette partie arrive avec l’export des fonctions de piraterie (E5).</p>';
+  const mine=(zj.tr||[]).filter(t=>t.seg&&t.seg.edge===e.id);
+  if(mine.length){h+='<div class="zj-kind" style="margin-top:12px">MES FLOTTES SUR CE TRONÇON</div>';for(const t of mine)h+='<button class="zj-row" data-a="travel" data-id="'+zjEsc(t.id)+'"><b>'+zjEsc(t.name)+'</b><small>'+zjEsc(t.statusLabel||'')+'</small></button>'}
+  h+='<div class="zj-kind" style="margin-top:12px">POSTER UNE FLOTTE EN EMBUSCADE</div><p class="zj-muted">Elle intercepte tout convoi qui <b>entre</b> sur ce tronçon après son arrivée, par l’un ou l’autre bout. Convois PNJ, et convois de joueurs si tu le choisis. Le serveur résout l’abordage au passage.</p>';
+  const known=new Set(zj.snap.corKnown||[]),R=(zj.snap.fleetsReady||[]).filter(f=>f.armed&&!mine.some(t=>t.fleetId===f.id));
+  if(!known.has(e.cor))h+='<p class="zj-muted">Corridor inconnu : découvre d’abord sa route.</p>';
+  else if(!R.length)h+='<p class="zj-muted">Aucune flotte armée en orbite (frégates ou cuirassés).</p>';
+  else for(const f of R){const q=zjFleetSeg(f.comp,f.world,e.id);if(!q)continue;h+='<button class="zj-row" data-a="g-amb-seg" data-id="'+zjEsc(f.id)+'" data-ms="'+q.ms+'"><b>'+zjEsc(f.name)+'</b><small>'+zjMin(q.test)+' de trajet · '+zjFmt(q.d)+' u à '+q.speed+' u/min (son vaisseau le plus lent)</small></button>'}
   return{h,f:'<button class="zj-second" data-a="seg-off">Fermer</button>'}}
  const h='<div class="zj-kind">TRONÇON · RÉSEAU D’ESSAI</div><h3>'+zjEsc(e.name)+'</h3><p class="zj-muted">De '+zjEsc(zjCorName(e.a))+' à '+zjEsc(zjCorName(e.b))+' · '+zjFmt(e.len)+' u · '+zjMin(e.len/(ZJ_COR.v*ZJ_COR.k)/ZJ_COR.season)+' en corridor (saison de test). Valeurs d’essai ; rien n’est branché au jeu.</p>';
  return{h,f:'<button class="zj-second" data-a="seg-off">Fermer</button>'}}

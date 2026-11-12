@@ -244,6 +244,26 @@ async function newGame(p, url, planet) {
   rec('MIG-BALISES-RELAIS', ln1.sys === 'A-M-1979' && ln1.moves.includes(ln0.old + '>A-M-1979') && ln1.seen >= 1 && ln1.copie, `balise posée sur l'ancien jalon ${ln0.old} → relais R7 (${ln1.sys}), notée dans « Mes balises » ; copie gardée ${ln1.copie} · au relais, elle voit les convois PNJ : ${ln1.seen} passage(s) relevé(s) (« ${ln1.label || ''} »)`);
   rec('MIG-RELAIS', ln2.sel === 'sys:A-M-1979' && /^RELAIS · LA SAIGNE DE LA COURONNE/.test(ln2.kind || '') && /Relais R7/.test(ln2.h3 || '') && /PROCHAINS CONVOIS PNJ/.test(ln2.body) && /TRONÇONS QUI LE TOUCHENT/.test(ln2.body) && /BALISE/.test(ln2.body) && /^TRONÇON · LA SAIGNE DE LA COURONNE/.test(ln3.kind || '') && !/essai/i.test(ln3.body),
     `fiche « ${ln2.kind} · ${ln2.h3} » : ${(ln2.body.match(/PROCHAINS CONVOIS PNJ.{0,120}/) || [''])[0]} · tronçon « ${ln3.kind} » : ${(ln3.body.match(/Embuscade sur ce tronçon[^.]*\./) || [''])[0]}`);
+  // étape 5 (embuscade sur un tronçon) : depuis la fiche du tronçon C5.2, une flotte part au rythme de son vaisseau le plus lent ;
+  // en place, elle voit et aborde les convois PNJ qui entrent sur le tronçon (registre : mp_ambush_post_seg, rejoué en SQL à part)
+  const am0 = await p.evaluate(() => { G.fleet.prepared.push({ id: 'fl-seg-test', name: 'Griffes', composition: { fregate: { t1: 3, t2: 0, t3: 0 }, cuirasse: { t1: 1, t2: 0, t3: 0 }, tanker: { t1: 1, t2: 0, t3: 0 } }, soldiers: { garde: 0, lourd: 0 }, status: 'deployed', world: 'home' });
+    G.res.energie.v = Math.max(G.res.energie.v || 0, 50000); window._mpOnline = () => true; window.mpPeaceGuard = async () => true; SBLines.chooseOrders = async () => ({ mode: 'rob_all', players: true }); window.sbConfirmWarning = async () => true; saveGame();
+    return { e0: G.res.energie.v, home: (SBZones.state().worlds.find(w => w.id === 'home') || {}).coord }; });
+  await MF.evaluate(() => STARBYTE_ZONES.refresh(true)); await sleep(700);
+  const am1 = await MF.evaluate(() => { STARBYTE_ZONES.setMode('tac'); STARBYTE_ZONES.selectSeg('C5.2'); const b = document.querySelector('#zj-sh-body [data-a="g-amb-seg"][data-id="fl-seg-test"]'); return { row: b && b.innerText.replace(/\s+/g, ' '), ms: b && +b.dataset.ms }; });
+  const amq = V.fleetToSegment({ fregate: { t1: 3 }, cuirasse: { t1: 1 }, tanker: { t1: 1 } }, am0.home, 'C5.2');
+  await MF.evaluate(() => { const b = document.querySelector('#zj-sh-body [data-a="g-amb-seg"][data-id="fl-seg-test"]'); if (b) b.click(); }); await sleep(1800);
+  const am2 = await p.evaluate(() => { const f = G.fleet.prepared.find(x => x.id === 'fl-seg-test'), a = f && f.ambush; return a && { edge: a.edge, a: a.a, b: a.b, phase: a.phase, ms: a.arrivesAt - a.departedAt, orders: a.orders, e: G.res.energie.v, st: f.status }; });
+  await MF.evaluate(() => STARBYTE_ZONES.refresh(true)); await sleep(700);
+  const am3 = await MF.evaluate(() => { const t = (STARBYTE_ZONES.zj.tr || []).find(x => x.id === 'fl:fl-seg-test'); STARBYTE_ZONES.selectSeg('C5.2'); return { seg: t && t.seg && t.seg.edge, mine: /MES FLOTTES SUR CE TRONÇON[\s\S]*Griffes/.test(document.getElementById('zj-sh-body').innerText) }; });
+  await p.screenshot({ path: path.join(SHOTS, '0n_embuscade_troncon.png') });
+  // arrivée, puis trois heures de passages PNJ relus
+  const am4 = await p.evaluate(() => { const f = G.fleet.prepared.find(x => x.id === 'fl-seg-test'), a = f.ambush, now = Date.now(); a.departedAt = now - a.travelMs - 1000; a.arrivesAt = now - 1000; _mpAmbushTick(f, now);
+    a.postedAt = a.npcAt = now - 3 * 3600e3; const line = SBLines.network().lines.find(l => l.corridor === 'La Saigne de la Couronne'), before = JSON.stringify((G.lineObs || {})[line.id] || {});
+    SBLines.tickAmbushes(Date.now()); const ob = (G.lineObs || {})[line.id] || {}, keys = Object.keys(ob).filter(k => /^t_(out@A-M-1979|in@A-M-3340)$/.test(k));
+    return { phase: a.phase, seen: keys.reduce((n, k) => n + ob[k].length, 0), changed: JSON.stringify(ob) !== before, tries: (a.npcDone || []).length, hold: a.npcPending || a.hold || {} }; });
+  rec('MIG-EMBUSCADE', am1.ms > 0 && amq && am1.ms === amq.ms && am2 && am2.edge === 'C5.2' && am2.a === 'A-M-1979' && am2.b === 'A-M-3340' && am2.phase === 'going' && am2.ms === am1.ms && am2.st === 'in_mission' && am2.e < am0.e0 && am2.orders.players && am3.seg === 'C5.2' && am3.mine && am4.phase === 'posted' && am4.seen > 0 && am4.changed,
+    `fiche du tronçon : « ${am1.row} » (trajet de la carte = règle du serveur : ${am1.ms === (amq && amq.ms)}, ${Math.round(am1.ms / 60000)} min au rythme du cuirassé) · partie ${am2 && am2.edge} (${am2 && am2.a} → ${am2 && am2.b}), énergie ${am0.e0} → ${am2 && am2.e}, ordres ${JSON.stringify(am2 && am2.orders)} · sur la carte : tronçon tenu ${am3.mine} · en place (${am4.phase}) : ${am4.seen} entrée(s) de convois PNJ vues sur C5.2, ${am4.tries} abordage(s) tenté(s)`);
   await p.evaluate(() => goto('planet')); await sleep(1500);
   const m6 = await p.evaluate(() => !!document.getElementById('sb-atlas-wrap'));
   // la marque survit au rechargement (la capitale de l'essai n'est plus lue : c'est la sauvegarde qui fait foi)

@@ -5,7 +5,7 @@
 //   POST { action: 'selftest' }                                    → { net, plans } (vérifie que le module tourne ici)
 //   POST { action: 'quote', origin, dest, tier, known? }           → { ok, net, plans }   (devis, rien n'est écrit)
 //   POST { action: 'launch', origin, dest, tier, pick, mission, known? } → { ok, voyage } (écrit dans public.voyages)
-// Prérequis : schema_mp_v54_voyages.sql. Fichiers à déployer ensemble : index.ts, voyage_core.js.
+// Prérequis : schema_mp_v54_voyages.sql (et v55 pour les tronçons au registre). Fichiers à déployer ensemble : index.ts, voyage_core.js.
 
 import { createClient } from 'npm:@supabase/supabase-js@2';
 import * as V from './voyage_core.js';
@@ -35,8 +35,10 @@ function planLaunch(body: any, reg: any, now: any) {
   if (!o.ok) return { ok: false, why: 'address' };
   const p = o.plans.find((x: any) => x.k === b.pick) || o.plans[0];
   const ms = Math.round(p.test * 60000);
+  // étape 5 : heures d'entrée et de sortie sur chaque tronçon (l'unité d'interception), fixées au départ
+  const segs = V.voyageSegs(p, now, now + ms, b.origin.split('-').slice(0, 3).join('-'), b.dest);
   return { ok: true, row: { mission_id: b.mission, kind: 'tanker', origin: b.origin, dest: b.dest, tier: o.tier, pick: p.k, net_version: o.net,
-    plan: { k: p.k, len: p.len, nCor: p.nCor, legs: p.legs, via: p.via, norm: p.norm, test: p.test, floorT: p.floorT, floorF: p.floorF },
+    plan: { k: p.k, len: p.len, nCor: p.nCor, legs: p.legs, via: p.via, segs, norm: p.norm, test: p.test, floorT: p.floorT, floorF: p.floorF },
     departed_at: now, arrives_at: now + ms, fuel: p.fuel } };
 }
 // ── fin de la logique pure
@@ -79,7 +81,11 @@ Deno.serve(async (req) => {
     const row = { user_id: uid, ...r.row, departed_at: new Date(r.row.departed_at).toISOString(), arrives_at: new Date(r.row.arrives_at).toISOString() };
     const { data, error } = await admin.from('voyages').insert(row).select('*').single();
     if (error) return json({ ok: false, error: error.message }, 500);
-    return json({ ok: true, voyage: data });
+    // étape 5 (v55) : le convoi déjà inscrit au registre prend le chemin, les horaires et les tronçons du voyage
+    // (sans v55, la colonne legs manque : le convoi garde ce que le jeu a inscrit, rien n'échoue)
+    const cv = { via: r.row.plan.via, legs: r.row.plan.segs, departed_at: row.departed_at, arrives_at: row.arrives_at };
+    const up = await admin.from('convoys').update(cv).eq('user_id', uid).eq('mission_id', r.row.mission_id).eq('leg', 'out').in('status', ['enroute']);
+    return json({ ok: true, voyage: data, convoy: up.error ? 'unchanged' : 'synced' });
   }
   return json({ ok: false, error: 'action' }, 400);
 });

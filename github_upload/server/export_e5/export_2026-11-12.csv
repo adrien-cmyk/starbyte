@@ -1,0 +1,803 @@
+genre,nom,signature,definition
+déclencheur,ambushes_fleet_min,ambushes,CREATE TRIGGER ambushes_fleet_min BEFORE UPDATE ON public.ambushes FOR EACH ROW EXECUTE FUNCTION _mp_ambush_fleet_min()
+déclencheur,ambushes_peace,ambushes,CREATE TRIGGER ambushes_peace AFTER INSERT ON public.ambushes FOR EACH ROW EXECUTE FUNCTION _mp_ambushes_peace()
+déclencheur,convoys_trade,convoys,CREATE TRIGGER convoys_trade BEFORE INSERT ON public.convoys FOR EACH ROW EXECUTE FUNCTION _mp_convoy_trade()
+déclencheur,intercepts_no_ally,intercepts,CREATE TRIGGER intercepts_no_ally BEFORE INSERT ON public.intercepts FOR EACH ROW EXECUTE FUNCTION _mp_intercepts_no_ally()
+déclencheur,intercepts_peace,intercepts,CREATE TRIGGER intercepts_peace BEFORE INSERT ON public.intercepts FOR EACH ROW EXECUTE FUNCTION _mp_intercepts_peace()
+déclencheur,intercepts_robbed_buyer,intercepts,CREATE TRIGGER intercepts_robbed_buyer AFTER UPDATE ON public.intercepts FOR EACH ROW EXECUTE FUNCTION _mp_route_robbed_buyer()
+fonction,_mp_ambush_fleet_min,,"CREATE OR REPLACE FUNCTION public._mp_ambush_fleet_min()
+ RETURNS trigger
+ LANGUAGE plpgsql
+ SET search_path TO 'public'
+AS $function$
+declare ty text; t text; o bigint; n bigint; comp jsonb;
+begin
+  if new.fleet is not distinct from old.fleet then return new; end if;
+  comp := coalesce(new.fleet -> 'composition', '{}'::jsonb);
+  foreach ty in array array['tanker', 'fregate', 'cuirasse'] loop
+    foreach t in array array['t1', 't2', 't3'] loop
+      o := coalesce((old.fleet -> 'composition' -> ty ->> t)::bigint, 0);
+      n := coalesce((comp -> ty ->> t)::bigint, 0);
+      if n > o then
+        comp := jsonb_set(case when comp ? ty then comp else comp || jsonb_build_object(ty, '{}'::jsonb) end, array[ty, t], to_jsonb(o));
+      end if;
+    end loop;
+  end loop;
+  new.fleet := jsonb_set(new.fleet, '{composition}', comp);
+  return new;
+end $function$
+"
+fonction,_mp_ambushes_peace,,"CREATE OR REPLACE FUNCTION public._mp_ambushes_peace()
+ RETURNS trigger
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$ begin return new; end $function$
+"
+fonction,_mp_convoy_next,"c convoys, p_system text","CREATE OR REPLACE FUNCTION public._mp_convoy_next(c convoys, p_system text)
+ RETURNS text
+ LANGUAGE sql
+ STABLE
+ SET search_path TO 'public'
+AS $function$
+  select case when c.via is null or array_position(c.via, p_system) is null then null
+              when array_position(c.via, p_system) < cardinality(c.via) then c.via[array_position(c.via, p_system) + 1]
+              else c.to_system end
+$function$
+"
+fonction,_mp_convoy_trade,,"CREATE OR REPLACE FUNCTION public._mp_convoy_trade()
+ RETURNS trigger
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+declare tgt uuid;
+begin
+  if new.kind = 'embassy' then
+    select user_id into tgt from public.worlds where split_part(address, '-', 1) || '-' || split_part(address, '-', 2) || '-' || split_part(address, '-', 3) = new.to_system and new.leg = 'out' limit 1;
+    if tgt is not null and public._mp_rel_active(new.user_id, tgt, 'trade') then new.protection := greatest(new.protection, 0.4); end if;
+  end if;
+  return new;
+end $function$
+"
+fonction,_mp_convoy_visible,"c convoys, p_user uuid, p_system text","CREATE OR REPLACE FUNCTION public._mp_convoy_visible(c convoys, p_user uuid, p_system text)
+ RETURNS boolean
+ LANGUAGE sql
+ STABLE SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+  select c.user_id <> p_user
+     and exists (select 1 from public.beacons b where b.user_id = p_user and b.removed_at is null and b.system = p_system)
+     and public._mp_convoy_window(c, p_system) is not null
+$function$
+"
+fonction,_mp_convoy_window,"c convoys, p_system text","CREATE OR REPLACE FUNCTION public._mp_convoy_window(c convoys, p_system text)
+ RETURNS timestamp with time zone
+ LANGUAGE plpgsql
+ STABLE
+ SET search_path TO 'public'
+AS $function$
+declare n int; i int; dur interval; eta timestamptz; half interval;
+begin
+  if c.status <> 'enroute' or now() >= c.arrives_at or p_system is null then return null; end if;
+  -- voie balisée : un passage sur deux échappe à la balise (même tirage pour ce convoi et ce système)
+  if c.route_type = 'beacon' and (hashtext(c.id::text || p_system) & 1) = 1 then return null; end if;
+  if p_system = c.to_system and now() >= c.arrives_at - interval '12 minutes' then return c.arrives_at; end if;
+  if p_system = c.from_system and now() < c.departed_at + interval '12 minutes' then
+    return least(c.arrives_at, c.departed_at + interval '12 minutes');
+  end if;
+  if c.via is not null then
+    i := array_position(c.via, p_system);
+    if i is not null then
+      n := cardinality(c.via) + 1;
+      dur := c.arrives_at - c.departed_at;
+      eta := c.departed_at + dur * (i::float8 / n);
+      half := greatest(interval '4 minutes', dur / (2 * n));
+      if now() >= eta - half and now() < eta + half then return least(c.arrives_at, eta + half); end if;
+    end if;
+  end if;
+  return null;
+end $function$
+"
+fonction,_mp_intercepts_no_ally,,"CREATE OR REPLACE FUNCTION public._mp_intercepts_no_ally()
+ RETURNS trigger
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+begin
+  if public._mp_same_alliance(new.pirate_id, new.victim_id) then raise exception 'ally'; end if;
+  return new;
+end $function$
+"
+fonction,_mp_intercepts_peace,,"CREATE OR REPLACE FUNCTION public._mp_intercepts_peace()
+ RETURNS trigger
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$ begin return new; end $function$
+"
+fonction,bm_intercept_ship,p_intercept text,"CREATE OR REPLACE FUNCTION public.bm_intercept_ship(p_intercept text)
+ RETURNS text
+ LANGUAGE sql
+ STABLE SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+  select c.tanker_name from public.intercepts i join public.convoys c on c.id = i.convoy_id
+   where i.id::text = p_intercept and i.pirate_id = auth.uid()
+$function$
+"
+fonction,mp_ambush_leave,p_ambush uuid,"CREATE OR REPLACE FUNCTION public.mp_ambush_leave(p_ambush uuid)
+ RETURNS jsonb
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+declare a public.ambushes;
+begin
+  select * into a from public.ambushes where id = p_ambush and user_id = auth.uid() for update;
+  if not found then raise exception 'ambush_unknown'; end if;
+  -- abordage jamais résolu (fonction serveur indisponible) depuis 10 min : annulé, le convoi reprend sa route
+  update public.convoys c set status = case when now() < c.arrives_at and not c.cancelled then 'enroute' else 'ended' end
+    from public.intercepts i
+   where i.ambush_id = a.id and i.status = 'pending' and i.created_at < now() - interval '10 minutes'
+     and c.id = i.convoy_id and c.status = 'engaged';
+  delete from public.intercepts where ambush_id = a.id and status = 'pending' and created_at < now() - interval '10 minutes';
+  if exists (select 1 from public.intercepts where ambush_id = a.id and status in ('pending', 'resolving')) then
+    raise exception 'combat_pending';
+  end if;
+  update public.ambushes set left_at = coalesce(left_at, now()), hold_claimed = true where id = a.id;
+  -- v20 : rejouable par son propriétaire (réponse perdue) : la même cale est renvoyée, 'again' dit qu'elle a déjà été rendue
+  return jsonb_build_object('fleet', a.fleet, 'hold', a.hold, 'again', a.hold_claimed);
+end $function$
+"
+fonction,mp_ambush_leave_fleet,p_fleet_id text,"CREATE OR REPLACE FUNCTION public.mp_ambush_leave_fleet(p_fleet_id text)
+ RETURNS jsonb
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+declare aid uuid;
+begin
+  select id into aid from public.ambushes where user_id = auth.uid() and fleet_id = p_fleet_id and left_at is null;
+  if not found then return null; end if;
+  return public.mp_ambush_leave(aid);
+end $function$
+"
+fonction,mp_ambush_npc,"p_fleet_id text, p_key text, p_loot jsonb, p_fleet jsonb","CREATE OR REPLACE FUNCTION public.mp_ambush_npc(p_fleet_id text, p_key text, p_loot jsonb, p_fleet jsonb)
+ RETURNS jsonb
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+declare a public.ambushes; comp jsonb; ty text; t text; have bigint; want bigint; cap bigint := 0; held bigint; free bigint;
+        k text; got bigint; v_hold jsonb;
+begin
+  select * into a from public.ambushes where user_id = auth.uid() and fleet_id = p_fleet_id and left_at is null for update;
+  if not found then raise exception 'ambush_unknown'; end if;
+  if p_key is null or length(p_key) > 80 then raise exception 'ambush_invalid'; end if;
+  if p_key = any(a.npc_keys) then return jsonb_build_object('hold', a.hold, 'dup', true); end if;
+  -- pertes : on ne fait que descendre
+  comp := coalesce(a.fleet -> 'composition', '{}'::jsonb);
+  if jsonb_typeof(p_fleet -> 'composition') = 'object' then
+    foreach ty in array array['tanker', 'fregate', 'cuirasse'] loop
+      foreach t in array array['t1', 't2', 't3'] loop
+        have := coalesce((comp -> ty ->> t)::bigint, 0);
+        if (p_fleet -> 'composition' -> ty ->> t) ~ '^[0-9]{1,6}$' then
+          want := (p_fleet -> 'composition' -> ty ->> t)::bigint;
+          if want < have then
+            comp := jsonb_set(case when comp ? ty then comp else comp || jsonb_build_object(ty, '{}'::jsonb) end, array[ty, t], to_jsonb(want));
+          end if;
+        end if;
+      end loop;
+    end loop;
+  end if;
+  -- cale : capacité des tankers restants, moins ce qu'elle porte déjà
+  foreach t in array array['t1', 't2', 't3'] loop
+    cap := cap + coalesce((comp -> 'tanker' ->> t)::bigint, 0) * public._mp_cargo_cap(substring(t from 2)::int);
+  end loop;
+  held := coalesce((a.hold ->> 'metal')::bigint, 0) + coalesce((a.hold ->> 'energie')::bigint, 0) + coalesce((a.hold ->> 'cristal')::bigint, 0);
+  free := greatest(0, cap - held);
+  v_hold := jsonb_build_object('metal', coalesce((a.hold ->> 'metal')::bigint, 0), 'energie', coalesce((a.hold ->> 'energie')::bigint, 0),
+                             'cristal', coalesce((a.hold ->> 'cristal')::bigint, 0));
+  foreach k in array array['metal', 'energie', 'cristal'] loop
+    got := case when (p_loot ->> k) ~ '^[0-9]{1,9}$' then least((p_loot ->> k)::bigint, free) else 0 end;
+    if got > 0 then v_hold := jsonb_set(v_hold, array[k], to_jsonb((v_hold ->> k)::bigint + got)); free := free - got; end if;
+  end loop;
+  update public.ambushes set fleet = jsonb_set(a.fleet, '{composition}', comp), hold = v_hold,
+         npc_keys = (array[p_key] || a.npc_keys)[1:40]
+   where id = a.id;
+  return jsonb_build_object('hold', v_hold, 'fleet', jsonb_set(a.fleet, '{composition}', comp));
+end $function$
+"
+fonction,mp_ambush_orders,"p_fleet_id text, p_orders jsonb","CREATE OR REPLACE FUNCTION public.mp_ambush_orders(p_fleet_id text, p_orders jsonb)
+ RETURNS boolean
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+declare m text := coalesce(p_orders ->> 'mode', 'manual');
+begin
+  if m not in ('manual', 'rob_heavy', 'rob_all', 'spy') then m := 'manual'; end if;
+  update public.ambushes
+     set orders = jsonb_build_object('mode', m, 'players', m <> 'manual' and coalesce((p_orders ->> 'players')::boolean, false))
+   where user_id = auth.uid() and fleet_id = p_fleet_id and left_at is null;
+  return found;
+end $function$
+"
+fonction,mp_ambush_post,"p_fleet_id text, p_fleet_name text, p_system text, p_fleet jsonb","CREATE OR REPLACE FUNCTION public.mp_ambush_post(p_fleet_id text, p_fleet_name text, p_system text, p_fleet jsonb)
+ RETURNS uuid
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+declare me public.worlds; aid uuid; old public.ambushes; sys text := public._mp_system(p_system);
+begin
+  select * into me from public.worlds where user_id = auth.uid();
+  if not found then raise exception 'no_world'; end if;
+  if sys is null or p_fleet_id is null or length(p_fleet_id) > 80 then raise exception 'ambush_invalid'; end if;
+  p_fleet := public._mp_registry_fleet_by_id(me, p_fleet_id);   -- v47 : la flotte du registre
+  p_fleet := p_fleet || jsonb_build_object('soldiers', jsonb_build_object('garde', 0, 'lourd', 0));
+  if not exists (select 1 from public.beacons where user_id = me.user_id and removed_at is null and system = sys) then
+    raise exception 'no_beacon';
+  end if;
+  perform pg_advisory_xact_lock(hashtext('ambush:' || me.user_id::text));
+  select * into old from public.ambushes where user_id = me.user_id and fleet_id = p_fleet_id and left_at is null for update;
+  if found then
+    if old.system = sys then return old.id; end if;
+    -- ancienne embuscade restée ouverte (réponse perdue) : fermée, sa cale suit la flotte
+    update public.ambushes set left_at = now(), hold_claimed = true where id = old.id;
+    if exists (select 1 from public.intercepts where ambush_id = old.id and status in ('pending', 'resolving')) then raise exception 'combat_pending'; end if;
+  end if;
+  insert into public.ambushes (user_id, pseudo, fleet_id, fleet_name, system, fleet, hold)
+    values (me.user_id, me.pseudo, p_fleet_id, left(coalesce(p_fleet_name, ''), 40), sys, p_fleet,
+            case when old.id is not null and not old.hold_claimed then old.hold else '{}'::jsonb end)
+    returning id into aid;
+  return aid;
+end $function$
+"
+fonction,mp_auto_ambush,,"CREATE OR REPLACE FUNCTION public.mp_auto_ambush()
+ RETURNS integer
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+declare a public.ambushes; c public.convoys; me public.worlds; vw public.worlds; n int := 0; v_mode text;
+        last timestamptz; cap bigint; held bigint; csum bigint; t text;
+begin
+  if auth.uid() is null then return 0; end if;
+  if not pg_try_advisory_xact_lock(hashtext('mp_auto_ambush')) then return 0; end if;
+  select (value #>> '{}')::timestamptz into last from public.mp_settings where key = 'auto_ambush_at';
+  if last is not null and last > now() - interval '15 seconds' then return 0; end if;
+  insert into public.mp_settings (key, value) values ('auto_ambush_at', to_jsonb(now()))
+    on conflict (key) do update set value = excluded.value, updated_at = now();
+
+  for a in select * from public.ambushes
+            where left_at is null and orders ->> 'mode' in ('rob_heavy', 'rob_all', 'spy')
+              and coalesce((orders ->> 'players')::boolean, false)
+            order by posted_at limit 200 loop
+    begin
+    v_mode := a.orders ->> 'mode';
+    if v_mode <> 'spy' and exists (select 1 from public.intercepts where ambush_id = a.id and status in ('pending', 'resolving')) then continue; end if;
+    select * into me from public.worlds where user_id = a.user_id;
+    if not found then continue; end if;
+    -- plus de vaisseau armé : elle ne peut plus aborder (elle file encore)
+    if v_mode <> 'spy' and coalesce((select sum(coalesce((a.fleet -> 'composition' -> u_ty ->> u_t)::bigint, 0))
+                                       from unnest(array['fregate', 'cuirasse']) u_ty, unnest(array['t1', 't2', 't3']) u_t), 0) = 0 then continue; end if;
+    -- cale pleine : la flotte regarde passer (on ne se bat pas pour rien)
+    if v_mode <> 'spy' then
+      cap := 0;
+      foreach t in array array['t1', 't2', 't3'] loop
+        cap := cap + coalesce((a.fleet -> 'composition' -> 'tanker' ->> t)::bigint, 0) * public._mp_cargo_cap(substring(t from 2)::int);
+      end loop;
+      held := coalesce((a.hold ->> 'metal')::bigint, 0) + coalesce((a.hold ->> 'energie')::bigint, 0) + coalesce((a.hold ->> 'cristal')::bigint, 0);
+      if cap - held <= 0 then continue; end if;
+    end if;
+    for c in select cv.* from public.convoys cv
+              where cv.status = 'enroute' and cv.user_id <> a.user_id and now() < cv.arrives_at and not cv.cancelled
+                and (cv.from_system = a.system or cv.to_system = a.system or (cv.via is not null and a.system = any(cv.via)))
+                and public._mp_convoy_visible(cv, a.user_id, a.system)
+              order by cv.departed_at loop
+      select * into vw from public.worlds where user_id = c.user_id;
+      if found then
+        if vw.season <> me.season then continue; end if;
+        if public.mp_guards_on() and vw.created_at > now() - interval '72 hours' then continue; end if;
+        if public.mp_guards_on() and vw.level * 2 < me.level then continue; end if;
+      end if;
+      if public._mp_same_alliance(a.user_id, c.user_id) then continue; end if;   -- v26 : pas d'abordage entre alliés
+      if vw.user_id is not null and vw.peaceful and v_mode <> 'spy' then continue; end if;   -- v29 : les convois des pacifiques passent
+      if exists (select 1 from public.pacts where status = 'active'
+                  and least(proposer_id, partner_id) = least(a.user_id, c.user_id)
+                  and greatest(proposer_id, partner_id) = greatest(a.user_id, c.user_id)) then continue; end if;
+      if v_mode = 'spy' then
+        if not exists (select 1 from public.spied where pirate_id = a.user_id and convoy_id = c.id) then
+          insert into public.spied (pirate_id, victim_id, convoy_id, from_system, to_system, auto, seen)
+            values (a.user_id, c.user_id, c.id, c.from_system, c.to_system, true, false)
+            on conflict (pirate_id, convoy_id) do nothing;
+          n := n + 1;
+        end if;
+        continue;
+      end if;
+      if exists (select 1 from public.intercepts where convoy_id = c.id) then continue; end if;
+      csum := coalesce((c.cargo ->> 'metal')::bigint, 0) + coalesce((c.cargo ->> 'energie')::bigint, 0) + coalesce((c.cargo ->> 'cristal')::bigint, 0);
+      if csum = 0 then continue; end if;                                                  -- cale vide : rien à prendre
+      if v_mode = 'rob_heavy' and csum <= public._mp_cargo_cap(c.tanker_tier) / 2 then continue; end if;
+      perform public._mp_pair_lock(a.user_id, c.user_id);
+      update public.convoys set status = 'engaged' where id = c.id and status = 'enroute';
+      if not found then continue; end if;
+      insert into public.intercepts (ambush_id, convoy_id, pirate_id, victim_id) values (a.id, c.id, a.user_id, c.user_id);
+      n := n + 1;
+      exit;                                                                               -- un abordage à la fois par flotte
+    end loop;
+    exception when others then
+      raise warning 'mp_auto_ambush : embuscade % ignorée (%)', a.id, sqlerrm;
+    end;
+  end loop;
+  return n;
+end $function$
+"
+fonction,mp_beacon_scan,,"CREATE OR REPLACE FUNCTION public.mp_beacon_scan()
+ RETURNS TABLE(convoy_id uuid, system text, pseudo text, address text, confidence integer, tanker_tier integer, cargo_hint text, window_end timestamp with time zone, leg text, dock_name text, route_type text, can_intercept boolean, spied boolean, next_system text, on_route boolean)
+ LANGUAGE sql
+ STABLE SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+  with mine as (select distinct b.system from public.beacons b where b.user_id = auth.uid() and b.removed_at is null),
+  cand as (
+    select c as cv, m.system as at_system
+      from public.convoys c join mine m
+        on (m.system = c.from_system or m.system = c.to_system or (c.via is not null and c.via @> array[m.system]))
+     where c.status = 'enroute' and c.user_id <> auth.uid() and now() < c.arrives_at
+  ),
+  seen as (
+    select (k.cv).*, k.at_system,
+           public._mp_convoy_window(k.cv, k.at_system) as wend,
+           public._mp_convoy_next(k.cv, k.at_system) as nxt
+      from cand k
+  )
+  select s.id, s.at_system,
+         case when s.route_type = 'beacon' then null else s.pseudo end,
+         null::text,                                       -- l'adresse ne se lit pas au passage : il faut espionner la route
+         case when s.route_type = 'beacon' then 40 else 60 + ((hashtext(s.id::text)::bigint % 31) + 31) % 31 end,
+         s.tanker_tier,
+         case when coalesce((s.cargo ->> 'metal')::bigint, 0) + coalesce((s.cargo ->> 'energie')::bigint, 0) + coalesce((s.cargo ->> 'cristal')::bigint, 0) = 0 then 'vide'
+              when (coalesce((s.cargo ->> 'metal')::bigint, 0) + coalesce((s.cargo ->> 'energie')::bigint, 0) + coalesce((s.cargo ->> 'cristal')::bigint, 0))
+                   > public._mp_cargo_cap(s.tanker_tier) / 2 then 'lourde' else 'légère' end,
+         s.wend, s.leg, s.dock_name, s.route_type,
+         exists (select 1 from public.ambushes a where a.user_id = auth.uid() and a.left_at is null and a.system = s.at_system),
+         exists (select 1 from public.spied sp where sp.pirate_id = auth.uid() and sp.convoy_id = s.id),
+         s.nxt,
+         s.own_route
+    from seen s
+   where s.wend is not null
+   order by s.wend
+   limit 30
+$function$
+"
+fonction,mp_beacons_sync,p_list jsonb,"CREATE OR REPLACE FUNCTION public.mp_beacons_sync(p_list jsonb)
+ RETURNS integer
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+declare e jsonb; n int := 0; sys text; lid text;
+begin
+  if not exists (select 1 from public.worlds where user_id = auth.uid()) then raise exception 'no_world'; end if;
+  if jsonb_typeof(p_list) <> 'array' then raise exception 'beacons_invalid'; end if;
+  perform pg_advisory_xact_lock(hashtext('beacons:' || auth.uid()::text));
+  -- retirées : celles qui ne sont plus dans la liste
+  update public.beacons set removed_at = now()
+   where user_id = auth.uid() and removed_at is null
+     and local_id not in (select x ->> 'local_id' from jsonb_array_elements(p_list) x where x ->> 'local_id' is not null);
+  for e in select * from jsonb_array_elements(p_list) loop
+    exit when n >= 21;                                    -- 21 balises posées au plus (palier max)
+    lid := left(e ->> 'local_id', 80);
+    sys := public._mp_system(e ->> 'system');
+    if lid is null or sys is null then continue; end if;
+    n := n + 1;
+    if exists (select 1 from public.beacons where user_id = auth.uid() and local_id = lid and removed_at is null) then
+      update public.beacons set system = sys where user_id = auth.uid() and local_id = lid and removed_at is null and system <> sys;
+    else
+      insert into public.beacons (user_id, local_id, system) values (auth.uid(), lid, sys);
+    end if;
+  end loop;
+  -- au-delà de 21 : retirées
+  update public.beacons set removed_at = now()
+   where user_id = auth.uid() and removed_at is null
+     and id not in (select id from public.beacons where user_id = auth.uid() and removed_at is null order by placed_at limit 21);
+  return n;
+end $function$
+"
+fonction,mp_claim_intercepts,p_limit integer,"CREATE OR REPLACE FUNCTION public.mp_claim_intercepts(p_limit integer DEFAULT 20)
+ RETURNS TABLE(intercept_id uuid, ambush jsonb, convoy jsonb)
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+begin
+  -- interceptions restées bloquées (fonction interrompue) : remises dans la file
+  update public.intercepts set status = 'pending' where status = 'resolving' and claimed_at < now() - interval '5 minutes';
+  return query
+  with due as (
+    select i.id from public.intercepts i where i.status = 'pending' order by i.created_at limit p_limit for update skip locked
+  ), upd as (
+    update public.intercepts i set status = 'resolving', claimed_at = now() from due where i.id = due.id returning i.*
+  )
+  select u.id, to_jsonb(a), to_jsonb(c)
+    from upd u join public.ambushes a on a.id = u.ambush_id join public.convoys c on c.id = u.convoy_id;
+end $function$
+"
+fonction,mp_convoy_end,"p_mission text, p_leg text","CREATE OR REPLACE FUNCTION public.mp_convoy_end(p_mission text, p_leg text)
+ RETURNS void
+ LANGUAGE sql
+ SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+  update public.convoys set status = case when status = 'enroute' then 'ended' else status end, cancelled = true
+   where user_id = auth.uid() and mission_id = p_mission and leg = p_leg and status in ('enroute', 'engaged')
+$function$
+"
+fonction,mp_convoy_route,"p_mission text, p_leg text, p_via text[], p_own boolean","CREATE OR REPLACE FUNCTION public.mp_convoy_route(p_mission text, p_leg text, p_via text[], p_own boolean DEFAULT false)
+ RETURNS integer
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+declare c public.convoys; clean text[] := '{}'; s text; x text;
+begin
+  select * into c from public.convoys where user_id = auth.uid() and mission_id = p_mission and leg = p_leg for update;
+  if not found then raise exception 'convoy_unknown'; end if;
+  if c.via is not null then return cardinality(c.via); end if;          -- tracé figé au départ
+  foreach x in array coalesce(p_via, '{}'::text[]) loop
+    s := public._mp_system(x);
+    if s is null or s = c.from_system or s = c.to_system or s = any(clean) then continue; end if;
+    clean := clean || s;
+    exit when cardinality(clean) >= 24;
+  end loop;
+  update public.convoys set via = clean, own_route = coalesce(p_own, false) where id = c.id;
+  return cardinality(clean);
+end $function$
+"
+fonction,mp_convoy_seen,p_convoy uuid,"CREATE OR REPLACE FUNCTION public.mp_convoy_seen(p_convoy uuid)
+ RETURNS void
+ LANGUAGE sql
+ SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+  update public.convoys set seen = true where id = p_convoy and user_id = auth.uid() and status in ('intercepted', 'escaped')
+$function$
+"
+fonction,mp_convoy_start,"p_mission text, p_leg text, p_kind text, p_to text, p_dock text, p_route_type text, p_knowledge integer, p_protection numeric, p_tier integer, p_tanker text, p_cargo jsonb, p_duration_ms bigint, p_elapsed_ms bigint, p_origin_address text","CREATE OR REPLACE FUNCTION public.mp_convoy_start(p_mission text, p_leg text, p_kind text, p_to text, p_dock text, p_route_type text, p_knowledge integer, p_protection numeric, p_tier integer, p_tanker text, p_cargo jsonb, p_duration_ms bigint, p_elapsed_ms bigint DEFAULT 0, p_origin_address text DEFAULT NULL::text)
+ RETURNS uuid
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+declare me public.worlds; origin text; cid uuid; tier int := greatest(1, least(3, coalesce(p_tier, 1)));
+begin
+  select * into me from public.worlds where user_id = auth.uid();
+  if not found then raise exception 'no_world'; end if;
+  if p_mission is null or length(p_mission) > 80 or p_leg not in ('out', 'back') or p_kind not in ('route', 'embassy') then
+    raise exception 'convoy_invalid';
+  end if;
+  if public._mp_system(p_to) is null then raise exception 'convoy_invalid'; end if;
+  origin := me.address;
+  if p_origin_address is not null and p_origin_address <> me.address then
+    if not exists (select 1 from public.colonies where user_id = me.user_id and address = p_origin_address) then raise exception 'origin_unknown'; end if;
+    origin := p_origin_address;
+  end if;
+  perform pg_advisory_xact_lock(hashtext('convoy:' || me.user_id::text));
+  select id into cid from public.convoys where user_id = me.user_id and mission_id = p_mission and leg = p_leg;
+  if found then return cid; end if;
+  if (select count(*) from public.convoys where user_id = me.user_id and departed_at > now() - interval '1 day') >= 60 then
+    raise exception 'convoy_rate';
+  end if;
+  insert into public.convoys (user_id, pseudo, address, mission_id, leg, kind, from_system, to_system, dock_name, route_type,
+                              knowledge, protection, tanker_tier, tanker_name, cargo, departed_at, arrives_at)
+    values (me.user_id, me.pseudo, me.address, p_mission, p_leg, p_kind,
+            case when p_leg = 'out' then public._mp_system(origin) else public._mp_system(p_to) end,
+            case when p_leg = 'out' then public._mp_system(p_to) else public._mp_system(origin) end,
+            left(p_dock, 60), case when p_route_type = 'beacon' then 'beacon' else 'direct' end,
+            greatest(0, least(10, coalesce(p_knowledge, 0))), greatest(0, least(1, coalesce(p_protection, 0))),
+            tier, left(coalesce(p_tanker, ''), 24), public._mp_clean_cargo(p_cargo, public._mp_cargo_cap(tier)),
+            now() - make_interval(secs => greatest(0, least(3 * 86400, coalesce(p_elapsed_ms, 0) / 1000.0))),   -- inscrit en retard : la fenêtre de départ n'est pas rallongée
+            now() + make_interval(secs => greatest(60, least(3 * 86400, coalesce(p_duration_ms, 0) / 1000.0))))
+    returning id into cid;
+  return cid;
+end $function$
+"
+fonction,mp_dock_convoys,p_dock_id text,"CREATE OR REPLACE FUNCTION public.mp_dock_convoys(p_dock_id text)
+ RETURNS TABLE(presence_id uuid, pseudo text, tanker_name text, provenance text, cargo_hint text, crew_state text, arrived_at timestamp with time zone, leaves_at timestamp with time zone)
+ LANGUAGE sql
+ STABLE SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+  select p.id, p.pseudo, p.tanker_name, p.provenance, p.cargo_hint, p.crew_state, p.arrived_at, p.leaves_at
+  from public.dock_presence p
+  where p.dock_id = p_dock_id
+    and p.leaves_at > now()
+    and p.user_id <> auth.uid()
+    and exists (select 1 from public.dock_presence mine
+                where mine.user_id = auth.uid() and mine.dock_id = p_dock_id and mine.leaves_at > now())
+  order by p.arrived_at
+$function$
+"
+fonction,mp_finish_intercept,"p_intercept uuid, p_result jsonb","CREATE OR REPLACE FUNCTION public.mp_finish_intercept(p_intercept uuid, p_result jsonb)
+ RETURNS jsonb
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+declare i public.intercepts; c public.convoys; a public.ambushes;
+        won boolean; v_loot jsonb := '{}'::jsonb; k text; want bigint; have bigint; got bigint;
+        cap bigint; held bigint; free bigint; since timestamptz; sector text; share numeric; v_out text; v_mode text := 'cargo'; pr public.orbit_presence;
+begin
+  select * into i from public.intercepts where id = p_intercept and status = 'resolving' for update;
+  if not found then raise exception 'intercept_not_resolving'; end if;
+  select * into c from public.convoys where id = i.convoy_id for update;
+  select * into a from public.ambushes where id = i.ambush_id for update;
+  won := coalesce(p_result ->> 'outcome', '') = 'won';
+  if won then
+    -- cale de butin : la capacité des tankers survivants de la flotte, moins ce qu'elle porte déjà
+    cap := 0;
+    for k in select unnest(array['t1', 't2', 't3']) loop
+      cap := cap + coalesce((p_result -> 'fleet_after' -> 'composition' -> 'tanker' ->> k)::bigint, 0)
+                   * public._mp_cargo_cap(substring(k from 2)::int);
+    end loop;
+    held := coalesce((a.hold ->> 'metal')::bigint, 0) + coalesce((a.hold ->> 'energie')::bigint, 0) + coalesce((a.hold ->> 'cristal')::bigint, 0);
+    free := greatest(0, cap - held);
+    share := 1 - coalesce(c.protection, 0);              -- protection achetée au dock
+    foreach k in array array['metal', 'energie', 'cristal'] loop
+      want := greatest(0, coalesce((p_result -> 'loot' ->> k)::bigint, 0));
+      have := floor(coalesce((c.cargo ->> k)::bigint, 0) * 0.95 * share);
+      got  := least(want, have, free);
+      free := free - got;
+      if got > 0 then v_loot := v_loot || jsonb_build_object(k, got); end if;
+    end loop;
+    if v_loot = '{}'::jsonb then won := false; end if;      -- rien emporté : le convoi passe
+  end if;
+  v_out := case when won then 'won' when coalesce(p_result ->> 'outcome', '') = 'won' then 'empty'
+                else coalesce(nullif(p_result ->> 'outcome', ''), 'lost') end;
+  select min(created_at) into since from public.spied
+   where pirate_id = i.pirate_id and victim_id = i.victim_id and created_at < i.created_at;
+  -- ambassade : où la victime perd-elle ? (avant l'arrivée : cale ; offerte : cale offerte ; déjà acceptée : ses stocks)
+  if won and c.kind = 'embassy' then
+    select * into pr from public.orbit_presence where user_id = c.user_id and mission_id = c.mission_id for update;
+    if not found then v_mode := 'before_arrival';
+    elsif pr.cargo_state = 'accepted' then v_mode := 'stocks';
+    else
+      v_mode := 'offer';
+      if pr.cargo_state = 'offered' then
+        update public.orbit_presence o set cargo = (
+          select coalesce(jsonb_object_agg(e.key, greatest(0, (e.value)::bigint - coalesce((v_loot ->> e.key)::bigint, 0))), '{}'::jsonb)
+            from jsonb_each_text(o.cargo) e)
+         where o.id = pr.id;
+      end if;
+    end if;
+  end if;
+  update public.convoys set status = case when won then 'intercepted' else 'escaped' end,
+         loot = case when won then v_loot else null end, outcome = v_out, pirate_id = i.pirate_id, pirate_pseudo = a.pseudo,
+         spied_since = since, loss_mode = case when won then v_mode else null end, intercept_system = a.system
+   where id = c.id;
+  update public.ambushes set
+    fleet = case when p_result ? 'fleet_after' then jsonb_set(a.fleet, '{composition}', p_result -> 'fleet_after' -> 'composition') else a.fleet end,
+    hold = case when won then jsonb_build_object(
+             'metal',   coalesce((a.hold ->> 'metal')::bigint, 0)   + coalesce((v_loot ->> 'metal')::bigint, 0),
+             'energie', coalesce((a.hold ->> 'energie')::bigint, 0) + coalesce((v_loot ->> 'energie')::bigint, 0),
+             'cristal', coalesce((a.hold ->> 'cristal')::bigint, 0) + coalesce((v_loot ->> 'cristal')::bigint, 0)) else a.hold end
+   where id = a.id;
+  update public.intercepts set status = 'done', resolved_at = now(),
+         result = p_result || jsonb_build_object('outcome', v_out,
+                                                 'loot', v_loot, 'victim', case when c.route_type = 'beacon' then null else c.pseudo end,
+                                                 'dock_name', c.dock_name, 'leg', c.leg, 'kind', c.kind,
+                                                 'system', a.system, 'fleet_id', a.fleet_id)
+   where id = i.id;
+  sector := split_part(c.from_system, '-', 2);
+  if won then
+    perform public._mp_pact_rumor('convoy_robbed', a.pseudo, c.pseudo, sector, '{}'::jsonb);
+  elsif v_out = 'lost' then
+    perform public._mp_pact_rumor('ambush_repelled', c.pseudo, a.pseudo, sector, '{}'::jsonb);
+  end if;
+  return jsonb_build_object('won', won, 'loot', v_loot);
+end $function$
+"
+fonction,mp_intercept,"p_convoy uuid, p_system text, p_fleet_id text","CREATE OR REPLACE FUNCTION public.mp_intercept(p_convoy uuid, p_system text, p_fleet_id text)
+ RETURNS uuid
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+declare c public.convoys; a public.ambushes; iid uuid; sys text := public._mp_system(p_system); me public.worlds; vw public.worlds;
+begin
+  select * into me from public.worlds where user_id = auth.uid();
+  if not found then raise exception 'no_world'; end if;
+  select * into c from public.convoys where id = p_convoy for update;
+  if not found or not public._mp_convoy_visible(c, auth.uid(), sys) then raise exception 'convoy_gone'; end if;
+  select * into a from public.ambushes where user_id = auth.uid() and left_at is null and system = sys and fleet_id = p_fleet_id for update;
+  if not found then raise exception 'no_ambush'; end if;
+  -- mêmes protections que les raids : saison, débutant (72 h), écart de niveau
+  select * into vw from public.worlds where user_id = c.user_id;
+  if found then
+    if vw.season <> me.season then raise exception 'target_other_season'; end if;
+    if public.mp_guards_on() and vw.created_at > now() - interval '72 hours' then raise exception 'target_shielded'; end if;
+    if public.mp_guards_on() and vw.level * 2 < me.level then raise exception 'target_too_weak'; end if;
+  end if;
+  perform public._mp_pair_lock(auth.uid(), c.user_id);
+  if exists (select 1 from public.pacts where status = 'active'
+              and least(proposer_id, partner_id) = least(auth.uid(), c.user_id)
+              and greatest(proposer_id, partner_id) = greatest(auth.uid(), c.user_id)) then
+    raise exception 'pact_active';
+  end if;
+  if exists (select 1 from public.intercepts where ambush_id = a.id and status in ('pending', 'resolving')) then
+    raise exception 'combat_pending';
+  end if;
+  update public.convoys set status = 'engaged' where id = c.id;
+  insert into public.intercepts (ambush_id, convoy_id, pirate_id, victim_id) values (a.id, c.id, auth.uid(), c.user_id)
+    returning id into iid;
+  return iid;
+end $function$
+"
+fonction,mp_intercept_seen,p_intercept uuid,"CREATE OR REPLACE FUNCTION public.mp_intercept_seen(p_intercept uuid)
+ RETURNS void
+ LANGUAGE sql
+ SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+  update public.intercepts set seen = true where id = p_intercept and pirate_id = auth.uid() and status = 'done'
+$function$
+"
+fonction,mp_post_close,p_mission text,"CREATE OR REPLACE FUNCTION public.mp_post_close(p_mission text)
+ RETURNS void
+ LANGUAGE sql
+ SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+  update public.route_posts set left_at = now() where user_id = auth.uid() and mission_id = p_mission and left_at is null
+$function$
+"
+fonction,mp_post_open,"p_mission text, p_system text, p_tanker text, p_route text","CREATE OR REPLACE FUNCTION public.mp_post_open(p_mission text, p_system text, p_tanker text, p_route text DEFAULT NULL::text)
+ RETURNS uuid
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+declare me public.worlds; sys text := public._mp_system(p_system); pid uuid;
+begin
+  select * into me from public.worlds where user_id = auth.uid();
+  if not found then raise exception 'no_world'; end if;
+  if sys is null or p_mission is null or length(p_mission) > 80 then raise exception 'post_invalid'; end if;
+  perform pg_advisory_xact_lock(hashtext('posts:' || me.user_id::text));
+  select id into pid from public.route_posts where user_id = me.user_id and mission_id = p_mission;
+  if found then
+    update public.route_posts set left_at = null where id = pid and left_at is not null;
+    return pid;
+  end if;
+  -- v20 : au-delà de 3 postes ouverts, les plus anciens sont fermés (postes orphelins d'un rappel hors ligne)
+  update public.route_posts set left_at = now()
+   where id in (select id from public.route_posts where user_id = me.user_id and left_at is null
+                order by opened_at desc offset 2);
+  insert into public.route_posts (user_id, pseudo, address, mission_id, system, tanker_name, route_name)
+    values (me.user_id, me.pseudo, me.address, p_mission, sys, left(coalesce(p_tanker, ''), 24), left(p_route, 40))
+    returning id into pid;
+  return pid;
+end $function$
+"
+fonction,mp_posts_visible,,"CREATE OR REPLACE FUNCTION public.mp_posts_visible()
+ RETURNS TABLE(system text, pseudo text, address text, tanker_name text, opened_at timestamp with time zone, met boolean)
+ LANGUAGE sql
+ STABLE SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+  with mine_posts as (select distinct p.system from public.route_posts p where p.user_id = auth.uid() and p.left_at is null),
+  eyes as (
+    select system from mine_posts
+    union
+    select distinct b.system from public.beacons b where b.user_id = auth.uid() and b.removed_at is null
+  )
+  select p.system, p.pseudo, p.address, p.tanker_name, p.opened_at, exists (select 1 from mine_posts m where m.system = p.system)
+    from public.route_posts p join eyes e on e.system = p.system
+   where p.left_at is null and p.user_id <> auth.uid()
+   order by p.opened_at desc
+   limit 40
+$function$
+"
+fonction,mp_spy,"p_convoy uuid, p_system text","CREATE OR REPLACE FUNCTION public.mp_spy(p_convoy uuid, p_system text)
+ RETURNS jsonb
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+declare c public.convoys; sys text := public._mp_system(p_system);
+begin
+  select * into c from public.convoys where id = p_convoy;
+  if not found or not public._mp_convoy_visible(c, auth.uid(), sys) then raise exception 'convoy_gone'; end if;
+  if not exists (select 1 from public.ambushes where user_id = auth.uid() and left_at is null and system = sys) then
+    raise exception 'no_ambush';
+  end if;
+  insert into public.spied (pirate_id, victim_id, convoy_id, from_system, to_system)
+    values (auth.uid(), c.user_id, c.id, c.from_system, c.to_system)
+    on conflict (pirate_id, convoy_id) do nothing;
+  return jsonb_build_object('pseudo', c.pseudo, 'address', c.address, 'from_system', c.from_system,
+                            'to_system', c.to_system, 'dock_name', c.dock_name, 'leg', c.leg, 'kind', c.kind);
+end $function$
+"
+table,ambushes,,"create table public.ambushes (
+  id uuid default gen_random_uuid() not null,
+  user_id uuid not null,
+  pseudo text not null,
+  fleet_id text not null,
+  fleet_name text,
+  system text not null,
+  fleet jsonb not null,
+  hold jsonb default '{}'::jsonb not null,
+  hold_claimed boolean default false not null,
+  posted_at timestamp with time zone default now() not null,
+  left_at timestamp with time zone,
+  orders jsonb default '{}'::jsonb not null,
+  npc_keys ARRAY default '{}'::text[] not null
+);"
+table,beacons,,"create table public.beacons (
+  id uuid default gen_random_uuid() not null,
+  user_id uuid not null,
+  local_id text not null,
+  system text not null,
+  placed_at timestamp with time zone default now() not null,
+  removed_at timestamp with time zone
+);"
+table,convoys,,"create table public.convoys (
+  id uuid default gen_random_uuid() not null,
+  user_id uuid not null,
+  pseudo text not null,
+  address text not null,
+  mission_id text not null,
+  leg text not null,
+  kind text not null,
+  from_system text not null,
+  to_system text not null,
+  dock_name text,
+  route_type text default 'direct'::text not null,
+  knowledge integer default 0 not null,
+  protection numeric default 0 not null,
+  tanker_tier integer default 1 not null,
+  tanker_name text,
+  cargo jsonb default '{}'::jsonb not null,
+  departed_at timestamp with time zone default now() not null,
+  arrives_at timestamp with time zone not null,
+  status text default 'enroute'::text not null,
+  loot jsonb,
+  outcome text,
+  loss_mode text,
+  intercept_system text,
+  cancelled boolean default false not null,
+  pirate_id uuid,
+  pirate_pseudo text,
+  spied_since timestamp with time zone,
+  seen boolean default false not null,
+  via ARRAY,
+  own_route boolean default false not null
+);"
+table,intercepts,,"create table public.intercepts (
+  id uuid default gen_random_uuid() not null,
+  ambush_id uuid not null,
+  convoy_id uuid not null,
+  pirate_id uuid not null,
+  victim_id uuid not null,
+  status text default 'pending'::text not null,
+  result jsonb,
+  created_at timestamp with time zone default now() not null,
+  claimed_at timestamp with time zone,
+  resolved_at timestamp with time zone,
+  seen boolean default false not null
+);"
+table,route_posts,,"create table public.route_posts (
+  id uuid default gen_random_uuid() not null,
+  user_id uuid not null,
+  pseudo text not null,
+  address text not null,
+  mission_id text not null,
+  system text not null,
+  tanker_name text,
+  route_name text,
+  opened_at timestamp with time zone default now() not null,
+  left_at timestamp with time zone
+);"

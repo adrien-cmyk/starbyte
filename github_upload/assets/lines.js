@@ -1004,14 +1004,14 @@
   function portLabel(line) { return G.hiddenPorts && G.hiddenPorts[line.port] ? G.hiddenPorts[line.port].name : null; }
 
   // l'abordage d'un passage PNJ (résolu ici, déterministe pour cette flotte et ce passage)
-  function robNpc(f, line, i, k, dir, t, how) {
+  function robNpc(f, line, i, k, dir, t, how, atSys) {   // atSys : le bout du tronçon par où le convoi est entré (embuscade sur un tronçon)
     const a = f.ambush;
     if (!a) return null;
     const pid = pidOf(line, k, dir);
     if (fleets().some(x => x.ambush && (x.ambush.npcDone || []).includes(pid))) return null;
     a.npcDone = [pid].concat(a.npcDone || []).slice(0, 40);
     const cv = convoyOf(line, k, dir);
-    const sys = a.system;
+    const sys = atSys || a.system;
     const r = rngOf(`rob:${f.id}:${pid}`);
     const A = fleetAtk(f), E = escortOf(cv, line.id, t);
     const p = A > 0 ? A / (A + E) : 0;
@@ -1119,6 +1119,22 @@
     } finally { _npcBusy = false; }
   }
   // tick : les passages PNJ devant mes flottes postées depuis le dernier passage du jeu
+  // 12/11 (étape 5) : les entrées d'un tronçon (a ↔ b) sur les lignes qui l'empruntent — un convoi « aller » entre par le bout
+  // le plus loin de la station, un convoi « retour » par l'autre bout
+  function segEntries(net, a) {
+    const out = [];
+    for (const line of net.lines) {
+      const stops = line.chain.concat([line.port]);
+      for (let i = 0; i < stops.length - 1; i++) {
+        const x = stops[i], y = stops[i + 1];
+        if ((x === a.a && y === a.b) || (x === a.b && y === a.a)) {
+          out.push({ line, i, dir: 'out', sys: x, isPort: false });
+          out.push({ line, i: i + 1, dir: 'in', sys: y, isPort: i + 1 === stops.length - 1 });
+        }
+      }
+    }
+    return out;
+  }
   function tickAmbushes(now) {
     if (typeof G === 'undefined' || !G) return;
     state();
@@ -1129,16 +1145,17 @@
       if (!a || a.phase !== 'posted') continue;
       pushOrders(f);
       a.blind = false;   // v2 : une flotte postée voit par elle-même (plus besoin de balise sur son système)
-      const on = (net.bySys[a.system] || []).filter(o => !o.isPort);
+      // 12/11 (étape 5) : une flotte postée sur un TRONÇON de corridor voit les convois qui y entrent, par l'un ou l'autre bout
+      const on = a.edge ? segEntries(net, a) : (net.bySys[a.system] || []).filter(o => !o.isPort);
       const from = Math.max(a.npcAt || a.postedAt || now, now - HEAT_MS);
       a.npcAt = now;
       if (!on.length) continue;
       const o = ordersOf(f);
       let list = [];
-      for (const { line, i } of on) for (const ps of passages(line, i, from, now)) list.push({ line, i, ...ps });
+      for (const e of on) for (const ps of passages(e.line, e.i, from, now)) if (!e.dir || ps.dir === e.dir) list.push({ line: e.line, i: e.i, ...ps, at: e.sys || a.system, isPort: !!e.isPort });
       list.sort((x, y) => x.t - y.t);
       // la flotte voit par elle-même : chaque passage devient un rapport (comme une balise) — « me demander » y propose d'aborder
-      for (const ps of list.slice(-3)) { record({ id: 'amb-' + f.id }, a.system, { ...ps, isPort: false }, now); dirty = true; }
+      for (const ps of list.slice(-3)) { record({ id: 'amb-' + f.id }, ps.at, ps, now); dirty = true; }
       if (o.mode === 'manual') continue;
       let skipped = false;
       for (const ps of list.slice(-6)) {
@@ -1149,11 +1166,11 @@
         if (fleetAtk(f) <= 0 || holdCap(f) - holdUsed(a) <= 0) continue;     // rien à gagner : la flotte regarde passer
         // un capitaine ne se jette pas sur une escorte qui le dépasse : il laisse passer et le signale
         if (odds(f, cv, ps.line.id, ps.t) < 0.35) {
-          markReport(ps.line, ps.k, ps.dir, a.system, 'tooStrong');
+          markReport(ps.line, ps.k, ps.dir, ps.at, 'tooStrong');
           if (!skipped && typeof toast === 'function') toast(`${f.name} laisse passer ${cvName(cv)} : escorte trop forte pour elle`);
           skipped = true; continue;
         }
-        robNpc(f, ps.line, ps.i, ps.k, ps.dir, ps.t, 'auto');
+        robNpc(f, ps.line, ps.i, ps.k, ps.dir, ps.t, 'auto', ps.at);
         dirty = true;
       }
       pushNpc(f);
@@ -1168,7 +1185,7 @@
     pollSpied();
   }
   // le registre applique les ordres aux convois de joueurs ; tout jeu ouvert l'y aide
-  let _autoAt = 0;
+  let _autoAt = 0, _segScan = null;
   async function autoPlayers() {
     if (!online() || Date.now() - _autoAt < 30000) return;
     _autoAt = Date.now();
@@ -1176,6 +1193,10 @@
       const n = await _mpRpc('mp_auto_ambush', {});
       if (n > 0 && window.SBMP && SBMP.resolveDue) SBMP.resolveDue(true);
     } catch (e) {}
+    if (_segScan !== false && fleets().some(f => f.ambush && f.ambush.edge) || _segScan === true) {   // étape 5 (v55) : embuscades sur un tronçon
+      try { const n = await _mpRpc('mp_segment_scan', {}); _segScan = true; if (n > 0 && window.SBMP && SBMP.resolveDue) SBMP.resolveDue(true); }
+      catch (e) { if (/mp_segment_scan|does not exist|PGRST202|404/i.test(String(e && (e.message || e.code) || e))) _segScan = false; }
+    }
   }
   // routes de joueurs filées en mon absence
   let _spiedAt = 0;
