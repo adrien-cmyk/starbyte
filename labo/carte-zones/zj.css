@@ -94,3 +94,15 @@ body.zj-in-game #zj-sheet{top:62px}
 #zj-gnav svg{width:20px;height:20px;flex:none}
 #zj-gnav span{font:600 9px/1 system-ui;letter-spacing:.02em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
 #zj-gnav i{position:absolute;top:1px;right:calc(50% - 20px);min-width:15px;height:15px;padding:0 4px;border-radius:8px;background:#ffc864;color:#1a1408;font:700 9px/15px system-ui;font-style:normal;text-align:center}
+/* étape 3 (12/11) : commandants, relations, raids annoncés, flottes hostiles */
+.zj-mark.t-cmd{color:#ff9a8a}
+.zj-mark.t-cmd i::before{box-shadow:0 0 0 3px #0b0c1c,0 0 0 4.5px currentColor}
+.zj-mark.t-travel.hostile{color:#ff6a5a}
+.zj-cmd{margin:6px 0 4px;padding-top:2px}
+.zj-cmd>b{display:block;margin-top:8px;font-size:15px}
+.zj-rels{display:flex;flex-wrap:wrap;gap:6px;margin:6px 0 8px}
+.zj-rel{font-size:11px;font-weight:600;padding:3px 8px;border-radius:7px;border:1px solid #ffffff26;color:#d9d6f0}
+.zj-rel.al{color:#5fffe8;border-color:#5fffe866}.zj-rel.en{color:#ff7a6d;border-color:#ff5a4d77}.zj-rel.tr{color:#ffc864;border-color:#ffc86466}.zj-rel.pa{color:#9fe0a0;border-color:#9fe0a066}
+.zj-kind.zj-red{color:#ff8a7d}
+.zj-row.zj-alert{border-color:#ff5a4d99!important;background:rgba(255,90,77,.08)!important}
+.zj-row.zj-alert b{color:#ffb0a8}

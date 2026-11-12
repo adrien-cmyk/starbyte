@@ -52,6 +52,10 @@ function zjObjects(){if(performance.now()-zj.objsT<1000&&zj.objs.length)return z
  if(mig){const tg=zj.snap.tags||{},taken=new Set(out.filter(o=>o.type!=='sig').map(o=>o.key));   // étape 1 : les systèmes balayés, avec leurs emplacements (règle du jeu)
   for(const k of zj.snap.systems||[]){if(taken.has(k.sys))continue;const p=zjPosOf(k.sys);if(!p)continue;taken.add(k.sys);out.push({type:'sys',id:'sys:'+k.sys,name:'Système '+k.sys,sub:(k.planets.length?k.planets.length+' emplacement'+(k.planets.length>1?'s':''):'balayé')+' · '+k.sys,key:k.sys,p,k,tag:tg[k.sys]||null})}
   // étape 2 : une balise posée sur un système qui n'est pas encore sur la carte y ajoute ce système
+  // étape 3 : les commandants connus de la partie (mondes balayés, relations, alliance)
+  const CM=new Map();for(const c of zj.snap.cmd||[]){if(!CM.has(c.sys))CM.set(c.sys,[]);CM.get(c.sys).push(c)}
+  for(const[sys,L]of CM){if(taken.has(sys)||out.some(o=>o.key===sys&&o.type==='sys'))continue;if(out.some(o=>o.key===sys&&o.type!=='sig'))continue;const p=zjPosOf(sys);if(!p)continue;taken.add(sys);out.push({type:'sys',id:'sys:'+sys,name:'Système '+sys,sub:sys,key:sys,p,k:{sys,at:null,planets:[],unknown:true},tag:tg[sys]||null})}
+  for(const o of out)if(o.type==='sys'&&CM.has(o.key)){o.cmd=CM.get(o.key);o.name=[...new Set(o.cmd.map(c=>c.pseudo))].join(' · ');o.sub='Commandant · '+o.key}
   const B=zj.snap.beacons;if(B)for(const b of [...B.list,...B.going]){if(taken.has(b.sys)||out.some(o=>o.key===b.sys))continue;const p=zjPosOf(b.sys);if(!p)continue;taken.add(b.sys);out.push({type:'sys',id:'sys:'+b.sys,name:'Système '+b.sys,sub:'balise · '+b.sys,key:b.sys,p,k:{sys:b.sys,at:null,planets:[],unknown:true},tag:tg[b.sys]||null})}}
  for(const o of out)o.zone=zoneOfPoint(o.p);zj.objs=out;zj.objsT=performance.now();return out}
 function zjMissionPos(m){const w=zjWorld(m.world),z=zoneParse(m.zone);if(!w||!z)return null;const c=zoneCenter(z.q,z.r,z.k),now=Date.now(),f=Math.max(0,Math.min(1,(now-m.departedAt)/Math.max(1,m.arrivalAt-m.departedAt)));
@@ -189,11 +193,14 @@ function zjDraw(){const mig=zjMig();const c=zjCtx,W=innerWidth,H=innerHeight,inv
  if(sz&&sz.k===zj.k){const[cx,cz]=tacCellCenter(sz.q,sz.r),X=sx(cx),Y=sy(cz);c.beginPath();zjHexPath(c,X,Y,inv*.98);c.strokeStyle='#ffffff';c.lineWidth=2.6;c.stroke();c.beginPath();zjHexPath(c,X,Y,inv*1.06);c.strokeStyle='rgba(255,255,255,.28)';c.lineWidth=1.2;c.stroke()}
  // 8. objets importants : seules cibles touchables
  const ind=[],labs=[];const labOk=(x,y,w)=>{if(labs.some(r=>x<r[0]+r[2]&&x+w>r[0]&&Math.abs(y-r[1])<13))return false;labs.push([x,y,w]);return true};
- const zjOrd=o=>o.type==='world'?0:o.type==='station'?1:o.type==='sig'?2:3;
+ const zjOrd=o=>o.type==='world'?0:o.type==='station'?1:o.type==='sig'?2:o.cmd?2.5:3;
  for(const o of zjObjects().slice().sort((a,b)=>zjOrd(a)-zjOrd(b))){if(!zjInSlice(o.p[1])){if(o.type==='world'||(zj.sel&&zj.sel.id===o.id))ind.push(o);continue}
   const X=sx(o.p[0]),Y=sy(o.p[2]);if(X<-30||X>W+30||Y<-30||Y>H+30)continue;
+  if(o.type==='world'&&mig&&(zj.snap.incoming||[]).some(r=>zjRaidHits(r,o.w))){zj.anim=!zjReduce||zj.anim;const q=zjReduce?.5:(t*1.1)%1;c.strokeStyle='rgba(255,90,77,'+(.95-.7*q)+')';c.lineWidth=2;c.beginPath();c.arc(X,Y,10+12*q,0,6.283);c.stroke()}
   if(o.type==='world'){c.strokeStyle='#80e6d3';c.lineWidth=2;c.beginPath();c.arc(X,Y,8,0,6.283);c.stroke();c.fillStyle='#80e6d3';c.beginPath();c.arc(X,Y,3,0,6.283);c.fill();c.font='600 10px system-ui';c.textAlign='left';c.textBaseline='middle';const t=zjMine(o.w.kind).toUpperCase()+' · '+o.name;if(labOk(X+12,Y,c.measureText(t).width))c.fillText(t,X+12,Y)}
   else if(o.type==='station'){c.fillStyle='#0b0c1c';c.strokeStyle='#ffcf96';c.lineWidth=2;c.beginPath();c.arc(X,Y,7,0,6.283);c.fill();c.stroke();c.fillStyle='#ffcf96';c.font='600 10px system-ui';c.textAlign='left';c.textBaseline='middle';const t=o.name.toUpperCase();if(labOk(X+12,Y,c.measureText(t).width))c.fillText(t,X+12,Y)}
+  else if(o.type==='sys'&&o.cmd){const col=zjCmdCol(o.cmd);c.fillStyle='#0b0c1c';c.strokeStyle=col;c.lineWidth=2;c.beginPath();c.arc(X,Y,6.5,0,6.283);c.fill();c.stroke();c.fillStyle=col;c.beginPath();c.arc(X,Y,2.2,0,6.283);c.fill();
+   c.font='600 10px system-ui';c.textAlign='left';c.textBaseline='middle';const t=o.name.toUpperCase();if(labOk(X+12,Y,c.measureText(t).width))c.fillText(t,X+12,Y)}
   else if(o.type==='sys'){const col=o.tag==='star'?'#ffc864':o.tag==='skip'?'rgba(255,106,90,.8)':'rgba(214,224,242,.9)';c.fillStyle='#0b0c1c';c.fillRect(X-4,Y-4,8,8);c.strokeStyle=col;c.lineWidth=1.4;c.strokeRect(X-3.5,Y-3.5,7,7);
    if(o.tag==='star'){c.fillStyle=col;c.fillRect(X-1.5,Y-1.5,3,3)}if(hexPx>=70||(zj.sel&&zj.sel.id===o.id)){c.fillStyle=col;c.font='500 9px ui-monospace,SFMono-Regular,monospace';c.textAlign='left';c.textBaseline='middle';if(labOk(X+9,Y,c.measureText(o.key).width))c.fillText(o.key,X+9,Y)}}
   else{const g=o.g,d=7;c.beginPath();c.moveTo(X,Y-d);c.lineTo(X+d,Y);c.lineTo(X,Y+d);c.lineTo(X-d,Y);c.closePath();c.fillStyle='#0b0c1c';c.fill();
@@ -212,8 +219,8 @@ function zjDraw(){const mig=zjMig();const c=zjCtx,W=innerWidth,H=innerHeight,inv
     for(let j=1;j<P.length;j++)lines.push({x1:sx(P[j-1][0]),y1:sy(P[j-1][2]),x2:sx(P[j][0]),y2:sy(P[j][2]),o:{type:'travel',id:tr.id}})}
    const o={type:'travel',id:tr.id,name:tr.name,p:st.p};if(!zjInSlice(st.p[1])){if(isSel)ind.push(o);continue}
    const X=sx(st.p[0]),Y=sy(st.p[2]);if(X<-30||X>W+30||Y<-30||Y>H+30)continue;const a=Math.atan2(st.dir?st.dir[2]:1,st.dir?st.dir[0]:0);
-   c.save();c.translate(X,Y);c.rotate(a);c.beginPath();c.moveTo(9,0);c.lineTo(-6,6);c.lineTo(-3,0);c.lineTo(-6,-6);c.closePath();c.fillStyle=isSel?'#ffffff':'#9fd3ff';c.fill();c.restore();
-   if(isSel||hexPx>=40){c.fillStyle='#cfe9ff';c.font='600 10px system-ui';c.textAlign='left';c.textBaseline='middle';const t=tr.name.toUpperCase()+' · '+(ZJ_TR_KIND[tr.kind]||'');if(labOk(X+12,Y,c.measureText(t).width))c.fillText(t,X+12,Y)}
+   c.save();c.translate(X,Y);c.rotate(a);c.beginPath();c.moveTo(9,0);c.lineTo(-6,6);c.lineTo(-3,0);c.lineTo(-6,-6);c.closePath();c.fillStyle=isSel?'#ffffff':tr.hostile?'#ff6a5a':'#9fd3ff';c.fill();c.restore();
+   if(isSel||hexPx>=40||tr.hostile){c.fillStyle=tr.hostile?'#ffb0a8':'#cfe9ff';c.font='600 10px system-ui';c.textAlign='left';c.textBaseline='middle';const t=tr.name.toUpperCase()+' · '+(ZJ_TR_KIND[tr.kind]||'');if(labOk(X+12,Y,c.measureText(t).width))c.fillText(t,X+12,Y)}
    hits.push({x:X,y:Y,o})}}
  // 9. Radars en vol (position issue des horodatages)
  if(zj.snap)for(const m of zj.snap.missions){if(zj.tr.some(t=>t.ok&&t.id==='pr:'+m.id))continue;const p=zjMissionPos(m);if(!p||!zjInSlice(p[1]))continue;const X=sx(p[0]),Y=sy(p[2]);if(X<-10||X>W+10||Y<-10||Y>H+10)continue;zj.anim=!zjReduce||zj.anim;
@@ -271,7 +278,7 @@ const zjMarks=$('zj-marks');let zjMarkEls=new Map(),zjZoneMesh=null;
 function zjAtlasMarks(){if(zj.mode!=='atlas'){if(zjMarkEls.size){zjMarks.innerHTML='';zjMarkEls.clear()}return}
  // 1. filtre de contexte selon la présentation, 2. regroupement et budget de libellés (§ 7.5)
  const w=innerWidth,h=innerHeight,L=zj.pres.level,selId=zj.sel&&zj.sel.type!=='zone'?zj.sel.id:null,close=L==='object'||L==='system'||L==='travel',pts=[];
- let pool=zjObjects().filter(o=>o.type!=='sys'||o.id===selId||(L==='zone'&&o.zone===zj.pres.zone));
+ let pool=zjObjects().filter(o=>o.type!=='sys'||o.cmd||o.id===selId||(L==='zone'&&o.zone===zj.pres.zone));
  if(L==='object'||L==='travel')pool=pool.filter(o=>o.id===selId);
  else if(L==='system')pool=pool.filter(o=>o.id===selId||(zjObs&&o.key===zjObs.key));
  else if(L==='zone')pool=pool.filter(o=>o.zone===zj.pres.zone||o.type==='world');
@@ -304,7 +311,7 @@ function zjAtlasMarks(){if(zj.mode!=='atlas'){if(zjMarkEls.size){zjMarks.innerHT
  const keep=new Set();
  for(const g of groups){const o=g.items[0],many=g.items.length>1,lab=g.sel||named<budget;if(lab)named++;
   const key=L+'|'+(g.solo?'s|':'')+g.items.map(o=>o.id).sort().join('|');keep.add(key);let el=zjMarkEls.get(key);
-  if(!el){el=document.createElement('button');el.className='zj-mark';el.classList.add('t-'+(many?'many':o.type));if(g.solo)el.classList.add('solo');if(g.decor){el.classList.add('decor');el.tabIndex=-1}
+  if(!el){el=document.createElement('button');el.className='zj-mark';el.classList.add('t-'+(many?'many':o.type==='sys'&&o.cmd?'cmd':o.type));if(!many&&o.type==='travel'&&o.tr&&o.tr.hostile)el.classList.add('hostile');if(g.solo)el.classList.add('solo');if(g.decor){el.classList.add('decor');el.tabIndex=-1}
    const full=g.solo&&o.type!=='star'?(o.type==='world'?o.w.coord:o.type==='travel'?(o.tr.to?'vers '+o.tr.to:''):o.key):'';
    el.innerHTML='<i></i><b>'+zjEsc(many?g.items.length+' lieux':(o.type==='world'&&!g.solo?zjMine(o.w.kind)+' · '+o.name:o.name))+(full?' <small>· '+zjEsc(full)+'</small>':'')+'</b>';
    if(!g.decor){el.addEventListener('pointerdown',e=>e.stopPropagation());el.addEventListener('pointerup',e=>e.stopPropagation());
@@ -326,8 +333,17 @@ function zjAtlasTap(x,y){const L=zj.pres.level;
  if(L==='travel'){if(zjTrObs&&x!=null){raycaster.setFromCamera(new T.Vector2(x/innerWidth*2-1,-y/innerHeight*2+1),camera);if(raycaster.intersectObject(zjTrObs.veh,true).length)zjOpen('travel')}return}
  if(zjObs&&x!=null&&(L==='object'||L==='system')){raycaster.setFromCamera(new T.Vector2(x/innerWidth*2-1,-y/innerHeight*2+1),camera);const h=raycaster.intersectObjects(zjObs.pick,true)[0];
   if(h){let m=h.object;while(m&&!m.userData.zjId)m=m.parent;const id=m&&m.userData.zjId;if(id===zjObs.id)return zjOpen('obj');const o=id&&zjObjects().find(a=>a.id===id);if(o)return zjSelectObj(o)}}
- if(L==='object'||L==='system'||L==='zone')return;   // gros plan ou volume : le vide ne fait rien
+ if(L==='object'||L==='system')return;   // gros plan : le vide ne change pas l'objet regardé
+ // 12/11 (Adrien) : « quand je touche dans le vide ça devrait sélectionner quelque chose quand même » : la zone sous le doigt,
+ // comme en Tactique. Les repères (mondes, ports, commandants, missions) passent avant : ce sont des boutons au-dessus de la carte.
+ const id=zjAtlasZoneAt(x,y);if(id)return zjSelectZone(id);
  if(zj.sel){zj.sel=null;zjMarkAtlasSel();zj.dirty=true;zjOpen('home')}}
+// la zone sous le doigt : celle de l'étoile touchée (la plus proche le long du regard), sinon le point du plan horizontal du centre de vue
+function zjAtlasZoneAt(x,y){if(x==null)return null;raycaster.setFromCamera(new T.Vector2(x/innerWidth*2-1,-y/innerHeight*2+1),camera);
+ raycaster.params.Points.threshold=Math.max(2,Math.min(30,distance*.007));let p=null;
+ try{const hit=raycaster.intersectObjects([...sectors.values()])[0];if(hit){const s=hit.object.userData.sector,v=s&&getPoint(s,hit.index);if(v)p=[v.x,v.y,v.z]}}catch(e){}
+ if(!p){const pl=new T.Plane(new T.Vector3(0,1,0),-(target.y-origin.y)),o=new T.Vector3();if(raycaster.ray.intersectPlane(pl,o)){o.add(origin);p=[o.x,o.y,o.z]}}
+ return p?zoneOfPoint(p):null}
 
 /* ══ OBSERVER (cahier « Observer une planète, son système et son voisinage », 11 nov.) ══
    Deux états distincts : ce qui est sélectionné (zj.sel) et la façon de le présenter dans l'Atlas (zj.pres).
@@ -466,7 +482,7 @@ function zjObsLabel(o){if(o.type==='station')return'Observer le port';if(o.type=
    droite pour un vol direct. Le suivi est un état de caméra : l'arrêter libère la caméra, la mission continue.
    Une partie lue (export, autre commandant) n'en présente aucune : rien n'est inventé. */
 zj.tr=[];zj.follow=null;let zjTrObs=null;
-const ZJ_TR_KIND={tanker:'TANKER',probe:'SONDE',fleet:'FLOTTE',ark:'ARCHE'};
+const ZJ_TR_KIND={tanker:'TANKER',probe:'SONDE',fleet:'FLOTTE',ark:'ARCHE'},ZJ_FL_KIND={embuscade:'EMBUSCADE',garnison:'GARNISON',raid:'RAID',mission:'MISSION',imperial:'EXPÉDITION IMPÉRIALE'};
 function zjAddrPos(a){const x=zjParseAddr(a);if(!x)return null;if(x.spot==null)return zjPosOf(x.key);const d=tacSecData(x.s,true),sp=localSpotOffset(x.spot);return[d.pos[x.i*3]+sp[0],d.pos[x.i*3+1]+sp[1],d.pos[x.i*3+2]+sp[2]]}
 function zjTrBuild(list){const out=[];for(const t of list||[]){let pts=[],ok=!!t.from&&!!t.to;
   if(ok){const w=zj.ws.find(x=>x.coord===t.from);pts.push(w?w.p:zjAddrPos(t.from));for(const v of t.via||[])pts.push(zjAddrPos(v));pts.push(zjAddrPos(t.to));ok=pts.every(Boolean)}
@@ -554,8 +570,8 @@ function zjFollowFrame(){const F=zj.follow;if(!F)return;const tr=zjTrFind(F.id);
   if(y<lo-H*.15||y>=lo+H*1.15){zj.k=tacLayerOf(y);zjDepthUI()}zjCenterOn(st.p,true)}}
 function zjTravelHtml(){const tr=zjTrFind(zj.sel.id),F=zj.follow&&zj.follow.id===zj.sel.id?zj.follow:null;
  if(!tr)return{h:'<div class="zj-kind">MISSION</div><h3>'+zjEsc(zj.sel.name||'Mission')+'</h3><p class="zj-muted">Mission terminée : le jeu l’a retirée de la liste des missions en cours'+(F&&F.endedAt?' ('+zjClock(new Date(F.endedAt))+')':'')+'. Le résultat est dans tes rapports.</p>',f:''};
- const st=zjTrState(tr,Date.now()),fromW=zj.ws.find(w=>w.coord===tr.from),dest=zjTrDest(tr),PH={out:'Aller',stay:tr.kind==='fleet'?'En embuscade':'À destination',back:'Retour'};
- let h='<div class="zj-kind">'+(ZJ_TR_KIND[tr.kind]||'MISSION')+(tr.tier?' · '+zjEsc(String(tr.tier).toUpperCase().replace(/^(\d)$/,'T$1')):'')+' · '+zjEsc(tr.statusLabel)+'</div><h3>'+zjEsc(tr.name)+'</h3><dl class="zj-dl">';
+ const st=zjTrState(tr,Date.now()),fromW=zj.ws.find(w=>w.coord===tr.from),dest=zjTrDest(tr),PH={out:'Aller',stay:tr.stayLabel||(tr.kind==='fleet'?'En embuscade':'À destination'),back:'Retour'};
+ let h='<div class="zj-kind'+(tr.hostile?' zj-red':'')+'">'+(ZJ_TR_KIND[tr.kind]||'MISSION')+(tr.kind==='fleet'&&ZJ_FL_KIND[tr.mkind]?' · '+ZJ_FL_KIND[tr.mkind]:'')+(tr.tier?' · '+zjEsc(String(tr.tier).toUpperCase().replace(/^(\d)$/,'T$1')):'')+' · '+zjEsc(tr.statusLabel)+'</div><h3>'+zjEsc(tr.name)+'</h3><dl class="zj-dl">';
  h+='<dt>Départ</dt><dd>'+zjEsc(fromW?fromW.name:(tr.from||'non enregistré'))+(tr.from?' <small>· '+zjEsc(tr.from)+'</small>':'')+'</dd>';
  h+='<dt>Vers</dt><dd>'+zjEsc(tr.toLabel||tr.to||'—')+' <small>· '+zjEsc(tr.to||'sans adresse sur la carte')+'</small></dd>';
  h+='<dt>Phase</dt><dd>'+(st.done?'Arrivée prévue atteinte':PH[st.phase])+(st.phase!=='stay'&&!st.done?' <small>· '+Math.round(st.f*100)+' %</small>':'')+'</dd>';
@@ -563,9 +579,11 @@ function zjTravelHtml(){const tr=zjTrFind(zj.sel.id),F=zj.follow&&zj.follow.id==
  if(tr.kind==='fleet'&&tr.comp){const fc=zjFleetCount(tr),parts=Object.entries(fc.by).map(([k,n])=>n+' '+ZJ_SHIP_FR[k][n>1?1:0]);if(fc.pr)parts.push(fc.pr+' d’exception');h+='<dt>Effectif</dt><dd>'+zjEsc(parts.join(' · ')||'aucun vaisseau')+' <small>· '+fc.n+' au total</small></dd>'}
  if(tr.ok&&tr.pts.length>1)h+='<dt>Tracé</dt><dd>'+zjFmt(tr.L)+' u <small>· '+(tr.route==='ligne'?(tr.pts.length-2)+' jalons connus de la ligne':'vol direct')+'</small></dd>';
  h+='</dl><p class="zj-muted">'+(tr.ok?'Horaires de la partie. Position estimée '+(tr.route==='ligne'?'le long des jalons connus':'en ligne droite')+(st.done?' ; le jeu confirmera la suite (retour, rapport).':'.')+' Suivre ne change rien à la mission.':'Position non représentable : '+(tr.from?'la destination n’a pas d’adresse sur la carte':'le monde de départ n’est pas enregistré')+'. Seuls les horaires sont exacts.')+'</p>';
+ if(tr.note)h+='<p class="zj-muted zj-small">'+zjEsc(tr.note)+'</p>';
  if(zjTrObs&&zjTrObs.id===tr.id&&zj.mode==='atlas')h+=zjModelLine(zjTrObs,tr.kind==='probe'?'Une sonde':'Ce vaisseau');
  let f='';if(tr.ok){if(F&&F.on&&!F.susp)f+='<button class="zj-primary" data-a="follow-stop">Arrêter le suivi</button>';else if(F&&F.susp&&!F.ended)f+='<button class="zj-primary" data-a="follow-resume">Reprendre le suivi</button>';else f+='<button class="zj-primary" data-a="follow" data-id="'+zjEsc(tr.id)+'">Suivre dans l’Atlas</button>';
   f+='<button class="zj-second" data-a="travel-fit">Voir le trajet</button>';if(tr.kind==='tanker'&&!zj.peek&&!zjMig())f+='<button class="zj-second" data-a="cor-tr">Comparer les itinéraires · essai</button>';if(dest)f+='<button class="zj-second" data-a="travel-dest">Observer la destination</button>'}
+ if(/^fl:/.test(tr.id)&&!zj.peek&&zjMig())f+='<button class="zj-second" data-a="g-fleet" data-id="'+zjEsc(tr.id.slice(3))+'">Ouvrir la flotte</button>';
  return{h,f}}
 function zjTravelRows(){const now=Date.now();let h='';for(const tr of zj.tr){const st=zjTrState(tr,now);h+='<button class="zj-row" data-a="travel" data-id="'+zjEsc(tr.id)+'"><b>'+zjEsc(tr.name)+' · '+zjEsc((ZJ_TR_KIND[tr.kind]||'').toLowerCase())+'</b><small>'+zjEsc(tr.statusLabel)+' · '+zjEsc(tr.toLabel||tr.to||'')+(st.eta?' · '+zjClock(new Date(st.eta)):'')+(tr.ok?'':' · position non représentable')+'</small></button>'}return h}
 
@@ -626,7 +644,8 @@ function zjSysHtml(o){const k=o.k,z=zoneParse(o.zone),tag=o.tag;
  const pl=(k.planets||[]).slice().sort((a,b)=>(a.slot||0)-(b.slot||0));
  if(pl.length){h+='<div class="zj-kind" style="margin-top:10px">EMPLACEMENTS</div>';for(const p of pl)h+='<button class="zj-row" data-a="act" data-k="planet" data-x="'+zjEsc(p.coord)+'" data-w="'+zjEsc(zj.origin)+'"><b>'+zjEsc(String(p.slot==null?'':p.slot).padStart(2,'0')+' · '+(p.player?p.player+(p.bot?' (automate)':''):p.name))+'</b><small>'+zjEsc((p.desc?p.desc+' · ':'')+p.coord)+'</small></button>'}
  else h+='<p class="zj-muted">'+(k.unknown?'Système pas encore balayé.':'Aucune planète relevée dans ce système.')+'</p>';
- h+=zjBeaconHtml(o.key);
+ h+=zjBeaconHtml(o.key)+zjPostsHtml(o.key);
+ if(o.cmd)h=zjCmdHtml(o)+h.replace('<div class="zj-kind">','<div class="zj-kind" style="margin-top:14px">');
  let f='<button class="zj-second'+(tag==='star'?' on':'')+'" data-a="g-tag" data-key="'+zjEsc(o.key)+'" data-v="star">'+(tag==='star'?'Retirer « intéressant »':'Intéressant')+'</button><button class="zj-second'+(tag==='skip'?' on':'')+'" data-a="g-tag" data-key="'+zjEsc(o.key)+'" data-v="skip">'+(tag==='skip'?'Retirer « sans intérêt »':'Sans intérêt')+'</button>';
  f+='<button class="zj-second" data-a="zone" data-z="'+zjEsc(o.zone)+'">Voir sa zone</button>'+zjOldBtn('system',o.key);return{h,f}}
 // étape 2 : ce que la carte propose pour une balise sur ce système (mêmes règles que l'ancienne carte)
@@ -642,6 +661,41 @@ function zjBeaconHtml(sys){const x=zjBc(sys);if(!x||!zjMig()||!sys)return'';cons
  if(st.ok)return h+'<button class="zj-row" data-a="g-bc-place" data-sys="'+zjEsc(sys)+'"><b>Poser une balise</b><small>Depuis '+zjEsc(w?w.name:'')+' · surveillance permanente des convois</small></button>';
  if(st.build)return h+'<button class="zj-row" data-a="g-bc-build"><b>Construire une balise</b><small>'+B.cost.metal+' métal · '+B.cost.cristal+' cristal, au Centre de prospection</small></button>';
  return h+'<p class="zj-muted">'+zjEsc(st.why||'Aucune balise prête.')+'</p>'}
+// étape 3 : commandants, garnisons, raids annoncés, postes (lus dans le jeu ; les actions ouvrent les écrans du jeu)
+const zjCmdCol=L=>L.some(c=>c.rel&&c.rel.enemy)?'#ff5a4d':L.some(c=>c.rel&&c.rel.ally)?'#5fffe8':'#ff9a8a';
+const zjRaidHits=(r,w)=>r.target?r.target===w.coord:w.kind==='home';
+function zjCmdHtml(o){const L=o.cmd,one=L.length===1;let h='<div class="zj-kind">'+(one?'COMMANDANT':'COMMANDANTS')+(L.every(c=>c.bot)?' · AUTOMATE':'')+'</div><h3>'+zjEsc(o.name)+'</h3>';
+ for(const c of L){const r=c.rel||{},tags=[],lui=one?'lui':zjEsc(c.pseudo);
+  if(r.ally)tags.push('<span class="zj-rel al">★ Allié · '+zjEsc(r.ally)+'</span>');
+  if(r.enemy)tags.push('<span class="zj-rel en">⚔ Ennemi déclaré'+(r.enemyByMe?' (par toi)':'')+'</span>');
+  if(r.trade)tags.push('<span class="zj-rel tr">⚑ Accord commercial</span>');
+  if(r.pact)tags.push('<span class="zj-rel pa">'+(r.pact==='active'?'Pacte de non-agression':r.pact==='proposed-mine'?'Pacte proposé · en attente':'Il te propose un pacte')+'</span>');
+  if(c.bot&&!one)tags.push('<span class="zj-rel">Automate</span>');
+  h+='<div class="zj-cmd">'+(one?'':'<b>'+zjEsc(c.pseudo)+'</b>')+'<p class="zj-muted">'+zjEsc(c.planet||'Monde habité')+' · '+zjEsc(c.addr)+(c.level?' · niv. '+zjEsc(c.level):'')+(c.known?'':' · système pas encore sondé')+'</p>'+(tags.length?'<div class="zj-rels">'+tags.join('')+'</div>':'');
+  for(const n of c.orbit||[])h+='<p class="zj-muted">'+zjEsc(n)+' est en orbite chez '+lui+' : ambassade ouverte.</p>';
+  if(c.inc)h+='<p class="zj-muted">Son vaisseau '+zjEsc(c.inc)+' est en orbite chez toi.</p>';
+  for(const g of c.gar||[])h+='<p class="zj-muted">'+zjEsc(g.name)+' · '+(g.phase==='going'?'arrivée en garnison '+zjLeft(g.at):g.phase==='returning'?'retour '+zjLeft(g.at):'en garnison chez '+lui)+'.</p>';
+  if(!zj.peek){h+='<button class="zj-row" data-a="g-cmd" data-x="'+zjEsc(c.coord)+'"><b>Voir sa fiche</b><small>La fiche du jeu : message, tanker, ambassade, sonder à nouveau</small></button>';
+   if(c.embassy)h+='<button class="zj-row" data-a="g-emb" data-x="'+zjEsc(c.addr)+'"><b>Ouvrir l’ambassade</b><small>Discuter et négocier'+(r.ally?', canal de l’alliance':'')+'</small></button>';
+   if(c.canGarrison)h+='<button class="zj-row" data-a="g-gar" data-x="'+zjEsc(c.addr)+'"><b>Envoyer une flotte en garnison</b><small>Elle combat avec ses défenses si un raid arrive chez '+lui+'</small></button>';
+   for(const g of c.gar||[])if(g.phase!=='returning')h+='<button class="zj-row" data-a="g-gar-back" data-id="'+zjEsc(g.id)+'"><b>Rappeler '+zjEsc(g.name)+'</b><small>Le jeu demande confirmation</small></button>'}
+  h+='</div>'}
+ if(!zj.peek&&L.some(c=>!c.bot&&!(c.rel&&c.rel.ally)))h+='<p class="zj-muted zj-small">Un raid se lance depuis une flotte composée (écran Flotte), comme dans le jeu.</p>';
+ return h}
+function zjPostsHtml(sys){const P=zj.snap&&zj.snap.posts;if(!P||!zjMig())return'';const mine=P.mine.filter(x=>x.sys===sys),oth=P.others.filter(x=>x.sys===sys);if(!mine.length&&!oth.length)return'';
+ let h='<div class="zj-kind" style="margin-top:12px">POSTES</div>';for(const m of mine)h+='<p class="zj-muted">'+zjEsc(m.tanker)+(m.status==='posted'?' tient ton poste ici.':' part ouvrir ton poste ici.')+'</p>';
+ for(const x of oth)h+='<p class="zj-muted"><b>'+zjEsc(x.pseudo)+'</b> tient un poste ici'+(x.met?' : canal d’ambassade ouvert.':' : ouvre le tien pour lui parler.')+'</p>';return h}
+function zjWorldMpHtml(w){const I=(zj.snap.incoming||[]).filter(r=>zjRaidHits(r,w)),G=(zj.snap.hosted||[]).filter(g=>g.host?g.host===w.coord:w.kind==='home');let h='';
+ if(I.length){h+='<div class="zj-kind zj-red" style="margin-top:12px">FLOTTE HOSTILE EN APPROCHE</div>';for(const r of I)h+='<p class="zj-muted"><b>'+zjEsc(r.pseudo)+'</b>'+(r.fleet?' · '+zjEsc(r.fleet):'')+' · impact à '+zjClock(r.at)+' ('+zjLeft(r.at)+'). Le registre ne donne que l’heure d’impact, pas sa route.</p>';
+  h+='<button class="zj-row" data-a="g-fleet-screen"><b>Préparer la défense</b><small>Écran Flotte : déployer une flotte en orbite</small></button>'}
+ if(G.length){h+='<div class="zj-kind" style="margin-top:12px">GARNISONS ALLIÉES ICI</div>';for(const g of G)h+='<p class="zj-muted">'+zjEsc(g.fleet||'Flotte')+' de <b>'+zjEsc(g.pseudo)+'</b> · '+zjFmt(g.def)+' de défense'+(g.arrivesAt&&g.arrivesAt>Date.now()?' · en route':'')+'.</p>'}
+ return h}
+function zjCmdsHtml(){const L=zj.snap&&zj.snap.cmd||[];let h='<div class="zj-kind">COMMANDANTS</div><h3>'+L.length+' connu'+(L.length>1?'s':'')+'</h3>';
+ if(!L.length)h+='<p class="zj-muted">Aucun commandant connu. Une Radar qui balaie un système habité l’inscrit ici et sur la carte.</p>';
+ const rank=c=>c.rel&&c.rel.ally?0:c.rel&&c.rel.enemy?1:c.gar&&c.gar.length?2:c.bot?4:3;
+ for(const c of L.slice().sort((a,b)=>rank(a)-rank(b)||a.pseudo.localeCompare(b.pseudo))){const o=zjObjects().find(x=>x.type==='sys'&&x.key===c.sys),r=c.rel||{};
+  h+='<button class="zj-row" data-a="bc-go" data-id="'+zjEsc(o?o.id:'')+'"><b>'+zjEsc(c.pseudo)+(r.ally?' · allié':r.enemy?' · ennemi':c.bot?' · automate':'')+'</b><small>'+zjEsc((c.planet?c.planet+' · ':'')+c.addr)+(c.gar&&c.gar.length?' · ta garnison':'')+(c.orbit&&c.orbit.length?' · ambassade':'')+(o?'':' · position inconnue')+'</small></button>'}
+ return{h,f:''}}
 function zjBeaconsHtml(){const B=zj.snap&&zj.snap.beacons;let h='<div class="zj-kind">MES BALISES</div><h3>'+(B?B.list.length:0)+' en surveillance</h3>';if(!B)return{h,f:''};
  if(!B.list.length&&!B.going.length)h+='<p class="zj-muted">Aucune balise posée. Choisis un système sur la carte : sa fiche propose « Poser une balise ».</p>';
  for(const b of B.list)h+='<button class="zj-row" data-a="bc-go" data-id=""'+zjEsc((zjObjects().find(o=>o.key===b.sys)||{}).id||'')+'"><b>'+zjEsc(b.name)+' · '+zjEsc(b.sys)+'</b><small>'+b.n+' détection'+(b.n>1?'s':'')+(b.routes.length?' · balise '+zjEsc(b.routes.join(', ')):'')+'</small></button>';
@@ -654,7 +708,8 @@ function zjObjHtml(){const o=zjObjects().find(x=>x.id===zj.sel.id);if(!o)return{
   f=o.w.id===zj.origin?'<p class="zj-muted">Les distances et la portée sont mesurées depuis ce monde.</p>':'<button class="zj-second" data-a="origin" data-w="'+zjEsc(o.w.id)+'">Mesurer depuis ce monde</button>'}
  else if(o.type==='world'){f=o.w.id===zj.origin?'<p class="zj-muted">Les sondages partent de ce monde.</p>':'<button class="zj-second" data-a="origin" data-w="'+zjEsc(o.w.id)+'">Lancer les sondages depuis '+zjEsc(o.name)+'</button>'}
  if(o.type==='sig')f=zj.peek?'<span class="zj-off">'+zjEsc(zjSigState(o.g))+'</span>':zjActBtn(ZH.sigAction(o.g.id,zj.origin),o.g.id,zj.origin);
- if(o.type==='sig'||o.type==='station')h+=zjBeaconHtml(o.key);
+ if(o.type==='sig'||o.type==='station')h+=zjBeaconHtml(o.key)+zjPostsHtml(o.key);
+ if(o.type==='world'&&zjMig()&&!zj.peek)h+=zjWorldMpHtml(o.w);
  // observer : un gros plan dans l'Atlas, sans mission, sans changer le départ des sondages
  const obsHere=zj.mode==='atlas'&&zjObs&&zjObs.id===o.id&&zj.pres.level!=='neighbourhood';
  if(obsHere){h+=o.type==='sig'?(o.g.resolved?'':'<p class="zj-muted">Signature non identifiée : la vue rapprochée n’en révèle pas la nature.</p>'):o.type==='station'?zjModelLine(zjObs,'Ce port'):'<p class="zj-muted">Aperçu générique : l’apparence réelle de ce monde n’est pas encore transmise à la carte. Nom, adresse et position sont exacts.</p>';
@@ -672,8 +727,11 @@ function zjHomeHtml(){if(zj.peek)return zjPeekHomeHtml();const R=zj.snap&&zj.sna
  let h='<div class="zj-kind">'+(zjMig()?'MA CARTE · PROSPECTION PAR ZONES':'PROSPECTION PAR ZONES · TEST')+'</div><h3>Touchez une zone voisine</h3><p class="zj-muted">'+(zjMig()?'Toute zone à portée de tes mondes peut être sondée':'Les zones hachurées forment la région de test')+'. Une zone se sonde avec une seule Radar, quel que soit le nombre d’étoiles qu’elle contient.</p>';
  if(R)h+='<div class="zj-stats"><div><b>'+done.length+(zjMig()?'':'/'+R.zones.length)+'</b><small>zones sondées</small></div><div><b>'+finds+'</b><small>signaux</small></div><div><b>'+miss+'</b><small>en vol</small></div><div><b>'+(hg?hg.radar:0)+'</b><small>Radars à '+zjEsc(w?w.name:'')+'</small></div></div>';
  if(!zjMig())h+='<button class="zj-row'+(zj.cor.on?' on':'')+'" data-a="cor-net"><b>Réseau de corridors candidat · essai</b><small>'+(zj.cor.on?'Affiché · toucher pour le masquer':'Afficher les 6 corridors du GDD navigation dans l’Atlas et en Tactique')+'</small></button>'+(zj.cor.on?zjCorNetHtml():'');
+ if(zjMig()&&zj.snap.cmd){const L=zj.snap.cmd,al=L.filter(c=>c.rel&&c.rel.ally).length,en=L.filter(c=>c.rel&&c.rel.enemy).length,ga=L.reduce((n,c)=>n+(c.gar||[]).length,0);
+  for(const r of zj.snap.incoming||[])h+='<button class="zj-row zj-alert" data-a="raid-in" data-t="'+zjEsc(r.target||'')+'"><b>⚠ Flotte hostile · '+zjEsc(r.pseudo)+'</b><small>Impact à '+zjClock(r.at)+' ('+zjLeft(r.at)+') · '+zjEsc(r.target||'ta capitale')+'</small></button>';
+  h+='<button class="zj-row" data-a="cmds"><b>Commandants · '+L.length+'</b><small>'+(L.length?([al?al+' allié'+(al>1?'s':''):'',en?en+' ennemi'+(en>1?'s':''):'',ga?ga+' garnison'+(ga>1?'s':''):''].filter(Boolean).join(' · ')||'toucher pour la liste'):'Ceux que tes Radars trouvent apparaissent ici et sur la carte')+'</small></button>'}
  if(zjMig()&&zj.snap.beacons){const B=zj.snap.beacons;h+='<button class="zj-row" data-a="beacons"><b>Mes balises · '+B.list.length+(B.going.length?' + '+B.going.length+' en route':'')+'</b><small>'+(B.list.length?B.list.reduce((a,b)=>a+b.n,0)+' détection(s) au total · toucher pour la liste':'Poser une balise depuis la fiche d’un système')+'</small></button>'}
- if(zjMig())h+='<button class="zj-row" data-a="g-old" data-k="home" data-key=""><b>Ancienne carte</b><small>Pour les actions pas encore reprises ici : routes, flottes. Rien n’est perdu.</small></button>';
+ if(zjMig())h+='<button class="zj-row" data-a="g-old" data-k="home" data-key=""><b>Ancienne carte</b><small>Pour les actions pas encore reprises ici : routes et lignes, embuscades. Rien n’est perdu.</small></button>';
  h+='<div class="zj-legend">'+(zjMig()?'<span><i class="y"></i>Système balayé</span>':'<span><i class="h"></i>Non sondée</span>')+'<span><i class="m"></i>En mission</span><span><i class="d"></i>Sondée</span><span><i class="s"></i>Signature</span></div>';return{h,f:''}}
 function zjChoiceHtml(){let h='<div class="zj-kind">PLUSIEURS LIEUX ICI</div><h3>Lequel ?</h3>';for(const o of zj.list||[])h+='<button class="zj-row" data-a="pick" data-id="'+zjEsc(o.id)+'"><b>'+zjEsc(o.name)+'</b><small>'+zjEsc(o.sub||'')+'</small></button>';return{h,f:''}}
 function zjWorldsHtml(){if(zj.peek){let h='<div class="zj-kind">SES MONDES · '+zjEsc(zj.peek.pseudo.toUpperCase())+'</div><h3>Observer un monde</h3><p class="zj-muted">Choisis un monde pour le voir de près. Les distances restent mesurées depuis '+zjEsc((zjWorld(zj.origin)||{}).name||'')+'. Lecture seule.</p>';
@@ -690,7 +748,7 @@ function zjGameNav(){const nav=zjMig()&&document.body.classList.contains('zj-in-
  if(!g){g=document.createElement('nav');g.id='zj-gnav';head.insertBefore(g,$('zj-sh-tog'))}
  const h=nav.map(x=>'<button data-a="g-tab" data-t="'+zjEsc(x.t)+'" aria-label="'+zjEsc(x.label)+'">'+x.svg+'<span>'+zjEsc(x.label)+'</span>'+(x.n?'<i>'+x.n+'</i>':'')+'</button>').join('');if(g.innerHTML!==h)g.innerHTML=h}
 function zjSheet(){if(!zj.snap){return}let r;
- if(zj.view==='zone'&&zj.sel&&zj.sel.type==='zone')r=zjZoneHtml();else if(zj.view==='travel'&&zj.sel&&zj.sel.type==='travel')r=zjTravelHtml();else if(zj.view==='obj'&&zj.sel&&zj.sel.id&&zj.sel.type!=='travel')r=zjObjHtml();else if(zj.view==='choix')r=zjChoiceHtml();else if(zj.view==='worlds')r=zjWorldsHtml();else if(zj.view==='cor')r=zjCorHtml();else if(zj.view==='beacons')r=zjBeaconsHtml();else if(zj.view==='seg'&&zj.sel&&zj.sel.type==='seg')r=zjSegHtml();else{zj.view='home';r=zjHomeHtml()}
+ if(zj.view==='zone'&&zj.sel&&zj.sel.type==='zone')r=zjZoneHtml();else if(zj.view==='travel'&&zj.sel&&zj.sel.type==='travel')r=zjTravelHtml();else if(zj.view==='obj'&&zj.sel&&zj.sel.id&&zj.sel.type!=='travel')r=zjObjHtml();else if(zj.view==='choix')r=zjChoiceHtml();else if(zj.view==='worlds')r=zjWorldsHtml();else if(zj.view==='cor')r=zjCorHtml();else if(zj.view==='beacons')r=zjBeaconsHtml();else if(zj.view==='cmds')r=zjCmdsHtml();else if(zj.view==='seg'&&zj.sel&&zj.sel.type==='seg')r=zjSegHtml();else{zj.view='home';r=zjHomeHtml()}
  const ae=document.activeElement;if(ae&&$('zj-sheet').contains(ae)&&ae.tagName==='INPUT')return;
  $('zj-sh-body').innerHTML=r.h;$('zj-sh-foot').innerHTML=r.f||'';$('zj-sheet').querySelector('.zj-test').textContent=zj.peek?'LECTURE · '+zj.peek.pseudo.toUpperCase():zjMig()?'MA CARTE':'TEST · COMPTE HADRIEN';zjGameNav();$('zj-worlds').textContent=zj.peek?'Ses mondes':'Mes mondes';$('zj-sh-back').hidden=zj.view==='home';$('zj-sheet').dataset.state=zj.sheet}
 $('zj-sheet').addEventListener('click',e=>{const b=e.target.closest('[data-a]');if(!b)return;const a=b.dataset.a;
@@ -718,6 +776,11 @@ $('zj-sheet').addEventListener('click',e=>{const b=e.target.closest('[data-a]');
  if(a==='g-bc-build'){ZH.gameAct('beacon-build');return}
  if(a==='g-post'){const r=ZH.gameAct('post-here',b.dataset.sys);if(r&&!r.ok)toast(r.why);zjRefresh(true);return}
  if(a==='beacons'){zjOpen('beacons');return}
+ if(a==='cmds'){zjOpen('cmds');return}
+ if(a==='raid-in'){const w=zj.ws.find(x=>x.coord===b.dataset.t)||zjHome(),o=w&&zjObjects().find(x=>x.id==='world:'+w.id);if(o)zjSelectObj(o);return}
+ if(a==='g-cmd'||a==='g-emb'||a==='g-gar'){const r=ZH.gameAct(a==='g-cmd'?'cmd-sheet':a==='g-emb'?'embassy':'garrison',b.dataset.x);if(r&&!r.ok)toast(r.why);return}
+ if(a==='g-gar-back'||a==='g-fleet'){const r=ZH.gameAct(a==='g-fleet'?'fleet':'garrison-recall',b.dataset.id);if(r&&!r.ok)toast(r.why);return}
+ if(a==='g-fleet-screen'){ZH.gameAct('fleet-screen');return}
  if(a==='bc-go'){const o=zjObjects().find(x=>x.id===b.dataset.id);if(o)zjSelectObj(o);return}
  if(a==='seg-off'){zj.sel=null;zjOpen('home');zj.dirty=true;return}
  if(a==='g-tag'){const r=ZH.gameAct('tag',{key:b.dataset.key,v:b.dataset.v});if(r&&!r.ok)toast(r.why);else zjRefresh(true);return}

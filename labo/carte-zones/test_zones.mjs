@@ -149,6 +149,46 @@ async function newGame(p, url, planet) {
   const b5 = await p.evaluate(id => { const b = id && sbAllProbes().find(x => x.id === id); return b ? b.state : null; }, b3);
   rec('MIG-BALISE', (far.valid || (!b0.place && b0.body.includes(far.error))) && b1.place && b2 && /Balise en route/.test(b2f) && !!b3 && b4.recall && b5 === 'ready',
     `hors de portée (${far.valid ? 'aucun cas' : '« ' + far.error + ' »'}) : bouton ${b0.place}, raison affichée ${!far.valid && b0.body.includes(far.error)} · système ${ks.sys} : « Poser une balise » ${b1.place} → mission du jeu ${b2}, fiche « ${(b2f.match(/Balise en route[^.]*\./) || [''])[0]} » · arrivée : balise ${b3} posée, « Rappeler la balise » ${b4.recall} (« ${(b4.body.match(/BALISE.{0,90}/) || [''])[0]} ») · rappel : balise ${b5}`);
+  // étape 3 : commandants (balayé, allié ; relation seule, ennemi), garnison, raid, raid annoncé, garnison alliée chez moi
+  const cm = await p.evaluate(() => { const A = MY_ADDRESS, now = Date.now(), sys = A.cluster + '-' + A.sector + '-' + (A.system + 3), addr = sys + '-03', enemy = A.cluster + '-' + A.sector + '-' + (A.system + 7) + '-02', m = sys.match(/^([A-Z]+)-([A-Z])-(\d{4})$/);
+    const planets = generateDiscoveredSystem(m[2], m[3], m[1]); planets.push({ coord: addr, slot: 3, type: 'tellurique', name: 'Vel Kor', playerName: 'Kerath', isReal: true, mpAddress: addr, playerLevel: 7 });
+    G.knownSystems[sys] = { cluster: m[1], sector: m[2], system: m[3], planets, discoveredAt: now - 3600e3, isMine: false };
+    G.mpAlliance = { alliance: { id: 'al-test', name: 'Ordre Test', color: '#5fffe8', leader: true }, members: [{ pseudo: 'Kerath', address: addr, addresses: [addr], me: false }, { pseudo: 'Hadrien', me: true, addresses: [] }], invites: [], sent: [], messages: [] };
+    G.mpRelations = [{ kind: 'enemy', pseudo: 'Borg', addresses: [enemy], byMe: true }];
+    const comp = (f, c) => ({ fregate: { t1: f, t2: 0, t3: 0 }, cuirasse: { t1: c, t2: 0, t3: 0 }, tanker: { t1: 0, t2: 0, t3: 0 } });
+    G.fleet.prepared.push({ id: 'fl-gar-test', name: 'Garde d’honneur', composition: comp(2, 0), soldiers: { garde: 0, lourd: 0 }, status: 'in_mission', world: 'home', missionStartedAt: now - 60000, garrison: { address: addr, pseudo: 'Kerath', phase: 'going', world: 'home', departedAt: now - 60000, arrivesAt: now + 600000, travelMs: 660000 } });
+    G.fleet.prepared.push({ id: 'fl-raid-test', name: 'Lames', composition: comp(3, 1), soldiers: { garde: 0, lourd: 0 }, status: 'in_mission', world: 'home', missionStartedAt: now - 120000, mpArrivesAt: now + 480000, missionEndsAt: now + 1800000, mpRaidId: 'raid-test', mpTarget: { name: 'Borg Prime', pseudo: 'Borg', address: enemy } });
+    _mpIncoming = [{ id: 'in-test', attacker_pseudo: 'Borg', fleet_name: 'Horde', arrives_at: new Date(now + 900000).toISOString(), defender_address: null }];
+    G.mpGarHosted = [{ owner_pseudo: 'Kerath', fleet_name: 'Bouclier', host_address: null, def: 1200, arrives_at: new Date(now - 1000).toISOString() }];
+    saveGame(); return { sys, addr, enemy }; });
+  await MF.evaluate(() => STARBYTE_ZONES.refresh(true)); await sleep(900);
+  const c1 = await MF.evaluate(c => { const Z = STARBYTE_ZONES, S = Z.zj.snap, k = (S.cmd || []).find(x => x.pseudo === 'Kerath'), b = (S.cmd || []).find(x => x.pseudo === 'Borg'), o = Z.objects().find(x => x.key === c.sys), oe = Z.objects().find(x => x.key === c.enemy.split('-').slice(0, 3).join('-'));
+    const tr = Z.travels(), g = tr.find(t => t.id === 'fl:fl-gar-test'), r = tr.find(t => t.id === 'fl:fl-raid-test');
+    return { k: k && { ally: k.rel.ally, gar: k.gar.length, emb: k.embassy, can: k.canGarrison }, b: b && { enemy: b.rel.enemy, known: b.known }, o: o && { type: o.type, name: o.name, cmd: !!o.cmd }, oe: oe && oe.name, g: g && { ok: g.ok, st: g.status }, r: r && { ok: r.ok, n: r.n, to: r.to } }; }, cm);
+  await p.evaluate(sys => openOnMap('system', sys), cm.sys); await sleep(2500);
+  const c2 = await MF.evaluate(() => ({ kind: (document.querySelector('#zj-sh-body .zj-kind') || {}).textContent, h3: (document.querySelector('#zj-sh-body h3') || {}).textContent, body: document.getElementById('zj-sh-body').innerText.replace(/\s+/g, ' '), acts: [...document.querySelectorAll('#zj-sh-body .zj-row b')].map(b => b.textContent) }));
+  await p.screenshot({ path: path.join(SHOTS, '0h_commandant_allie.png') });
+  await MF.evaluate(() => { document.getElementById('zj-sh-back').click(); document.getElementById('zj-sh-back').click(); }); await sleep(800);
+  const c3 = await MF.evaluate(() => [...document.querySelectorAll('#zj-sh-body .zj-row b')].map(b => b.textContent));
+  await MF.evaluate(() => { const b = document.querySelector('#zj-sh-body [data-a="raid-in"]'); if (b) b.click(); }); await sleep(900);
+  const c4 = await MF.evaluate(() => document.getElementById('zj-sh-body').innerText.replace(/\s+/g, ' '));
+  await p.screenshot({ path: path.join(SHOTS, '0i_raid_annonce.png') });
+  rec('MIG-COMMANDANTS', c1.k && c1.k.ally === 'Ordre Test' && c1.k.gar === 1 && c1.k.emb && c1.k.can && c1.b && c1.b.enemy && !c1.b.known && c1.o && c1.o.cmd && /Kerath/.test(c1.o.name) && c1.oe === 'Borg'
+    && /COMMANDANT/.test(c2.kind) && /Kerath/.test(c2.h3 || '') && /Allié · Ordre Test/.test(c2.body) && /Garde d’honneur · arrivée en garnison/.test(c2.body) && ['Voir sa fiche', 'Ouvrir l’ambassade', 'Envoyer une flotte en garnison', 'Rappeler Garde d’honneur'].every(t => c2.acts.includes(t)),
+    `Kerath (balayé, allié) : ${JSON.stringify(c1.k)}, repère « ${c1.o && c1.o.name} » · Borg (relation seule) : ${JSON.stringify(c1.b)}, repère sur son système « ${c1.oe} » · fiche « ${c2.kind} · ${c2.h3} » : ${c2.acts.join(' | ')}`);
+  rec('MIG-FLOTTES', c1.g && c1.g.ok && c1.g.st === 'going' && c1.r && c1.r.ok && c1.r.to === cm.enemy && c3.some(t => /Flotte hostile · Borg/.test(t)) && c3.some(t => /^Commandants · \d+$/.test(t)) && /FLOTTE HOSTILE EN APPROCHE/.test(c4) && /Bouclier de Kerath/.test(c4),
+    `garnison en route ${JSON.stringify(c1.g)}, raid vers ${c1.r && c1.r.to} (${c1.r && c1.r.ok}) · accueil : ${c3.filter(t => /Flotte hostile|Commandants/.test(t)).join(' | ')} · capitale : « ${(c4.match(/FLOTTE HOSTILE[^.]*\./) || [''])[0]} » ; « ${(c4.match(/Bouclier[^.]*\./) || [''])[0]} »`);
+  // la fiche d'un commandant ouvre la fiche du jeu
+  await p.evaluate(sys => openOnMap('system', sys), cm.sys); await sleep(2200);
+  await MF.evaluate(() => { const b = document.querySelector('#zj-sh-body [data-a="g-cmd"]'); if (b) setTimeout(() => b.click(), 30); }); await sleep(2500);
+  const c5 = await p.evaluate(() => ({ scr: typeof getCurrentScreen === 'function' ? getCurrentScreen() : '', txt: (document.body.innerText.match(/Kerath[^\n]{0,40}/) || [''])[0] }));
+  rec('MIG-FICHE', c5.scr !== 'prospect' && /Kerath/.test(c5.txt), `« Voir sa fiche » ouvre l'écran du jeu « ${c5.scr} » (« ${c5.txt} »)`);
+  await p.evaluate(() => goto('prospect')); await sleep(2500); MF = await frame(); await sleep(800);
+  // Atlas : toucher le vide choisit la zone sous le doigt
+  const v1 = await MF.evaluate(async () => { const Z = STARBYTE_ZONES; Z.setMode('atlas'); await new Promise(r => setTimeout(r, 1500)); Z.backN(); await new Promise(r => setTimeout(r, 2500)); const before = Z.zj.sel && Z.zj.sel.type;
+    Z.atlasTap(innerWidth / 2 + 40, innerHeight * .3); await new Promise(r => setTimeout(r, 400)); return { before, sel: Z.zj.sel && Z.zj.sel.type, zone: Z.zj.sel && Z.zj.sel.zone, view: Z.zj.view, lvl: Z.pres().level }; });
+  await p.screenshot({ path: path.join(SHOTS, '0j_atlas_vide_zone.png') });
+  rec('MIG-VIDE', v1.sel === 'zone' && !!v1.zone && v1.view === 'zone', `Atlas, voisinage : toucher le vide → ${v1.sel} ${v1.zone} (fiche ${v1.view}, présentation ${v1.lvl})`);
   await p.evaluate(() => goto('planet')); await sleep(1500);
   const m6 = await p.evaluate(() => !!document.getElementById('sb-atlas-wrap'));
   // la marque survit au rechargement (la capitale de l'essai n'est plus lue : c'est la sauvegarde qui fait foi)
