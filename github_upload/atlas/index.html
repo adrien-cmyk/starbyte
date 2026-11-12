@@ -105,6 +105,20 @@ body.zj-tac #zj-depth{display:flex}
 .zj-muted.zj-small{font-size:11px;color:#8a86ab}
 .zj-cor small .zj-min{display:inline;color:#ffcf96;font-weight:600}
 .zj-legend i.y{width:8px;height:8px;margin:0 6px 0 3px;border:1.4px solid rgba(214,224,242,.9);border-radius:0;vertical-align:0}
+/* dans le jeu (12/11) : la carte est déjà sous le bandeau du Centre de prospection, pas sous l'encoche ; les boutons remontent */
+body.zj-in-game #zj-top{top:8px}
+body.zj-in-game #zj-depth{top:58px}
+body.zj-in-game #zj-zoom{top:110px}
+body.zj-in-game #zj-sheet{top:62px}
+@media (max-width:800px){body.zj-in-game #zj-depth{top:56px}body.zj-in-game #zj-zoom{top:108px}body.zj-in-game #zj-sheet{top:auto}}
+/* raccourcis du Centre de prospection dans l'en-tête de la fiche (la barre du bas du jeu est masquée sous la carte) */
+#zj-sh-head.zj-has-gnav .zj-test{display:none}
+#zj-gnav{flex:1;display:flex;gap:2px;min-width:0;justify-content:space-around}
+#zj-sh-head #zj-gnav button{position:relative;flex:1;min-width:0;width:auto;height:46px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;padding:0 2px;border-radius:10px;background:none;color:#c9c6e6}
+#zj-gnav button:active{background:#ffffff14}
+#zj-gnav svg{width:20px;height:20px;flex:none}
+#zj-gnav span{font:600 9px/1 system-ui;letter-spacing:.02em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
+#zj-gnav i{position:absolute;top:1px;right:calc(50% - 20px);min-width:15px;height:15px;padding:0 4px;border-radius:8px;background:#ffc864;color:#1a1408;font:700 9px/15px system-ui;font-style:normal;text-align:center}
 
 </style>
 </head>
@@ -497,7 +511,9 @@ function zjObjects(){if(performance.now()-zj.objsT<1000&&zj.objs.length)return z
  else for(const st of CARNET_ST){const p=zjPosOf(st.key);if(p)out.push({type:'station',id:'st:'+st.key,name:st.name,sub:'Port franc · '+st.key,key:st.key,p})}
  if(zj.snap)for(const g of zj.snap.sigs){const p=zjPosOf(g.system);if(!p)continue;out.push({type:'sig',id:'sig:'+g.id,name:zjSigName(g),sub:g.system,key:g.system,p,g})}
  if(mig){const tg=zj.snap.tags||{},taken=new Set(out.filter(o=>o.type!=='sig').map(o=>o.key));   // étape 1 : les systèmes balayés, avec leurs emplacements (règle du jeu)
-  for(const k of zj.snap.systems||[]){if(taken.has(k.sys))continue;const p=zjPosOf(k.sys);if(!p)continue;out.push({type:'sys',id:'sys:'+k.sys,name:'Système '+k.sys,sub:(k.planets.length?k.planets.length+' emplacement'+(k.planets.length>1?'s':''):'balayé')+' · '+k.sys,key:k.sys,p,k,tag:tg[k.sys]||null})}}
+  for(const k of zj.snap.systems||[]){if(taken.has(k.sys))continue;const p=zjPosOf(k.sys);if(!p)continue;taken.add(k.sys);out.push({type:'sys',id:'sys:'+k.sys,name:'Système '+k.sys,sub:(k.planets.length?k.planets.length+' emplacement'+(k.planets.length>1?'s':''):'balayé')+' · '+k.sys,key:k.sys,p,k,tag:tg[k.sys]||null})}
+  // étape 2 : une balise posée sur un système qui n'est pas encore sur la carte y ajoute ce système
+  const B=zj.snap.beacons;if(B)for(const b of [...B.list,...B.going]){if(taken.has(b.sys)||out.some(o=>o.key===b.sys))continue;const p=zjPosOf(b.sys);if(!p)continue;taken.add(b.sys);out.push({type:'sys',id:'sys:'+b.sys,name:'Système '+b.sys,sub:'balise · '+b.sys,key:b.sys,p,k:{sys:b.sys,at:null,planets:[],unknown:true},tag:tg[b.sys]||null})}}
  for(const o of out)o.zone=zoneOfPoint(o.p);zj.objs=out;zj.objsT=performance.now();return out}
 function zjMissionPos(m){const w=zjWorld(m.world),z=zoneParse(m.zone);if(!w||!z)return null;const c=zoneCenter(z.q,z.r,z.k),now=Date.now(),f=Math.max(0,Math.min(1,(now-m.departedAt)/Math.max(1,m.arrivalAt-m.departedAt)));
  return[w.p[0]+(c[0]-w.p[0])*f,w.p[1]+(c[1]-w.p[1])*f,w.p[2]+(c[2]-w.p[2])*f]}
@@ -594,7 +610,8 @@ function zjCtxLabel(){const ws=zj.ws.filter(w=>tacLayerOf(w.p[1])===zj.k);if(ws.
  const d=zj.k-zjHomeK(),h=zjHome();return(d>0?'Au-dessus':'Au-dessous')+' de '+(h?h.name:'ma planète')+' · '+Math.abs(d)+' couche'+(Math.abs(d)>1?'s':'')}
 
 /* ══ DESSIN DE LA TACTIQUE ══ */
-function zjDraw(){const mig=zjMig();const c=zjCtx,W=innerWidth,H=innerHeight,inv=1/zj.upp,v=zjView(),[y0,y1]=tacLayerY(zj.k),hexPx=TAC_GRID.S*inv,ins=zjInsets(),hits=[],chips=[],t=performance.now()/1000,now=Date.now();
+const zjSegD=(px,py,l)=>{const dx=l.x2-l.x1,dy=l.y2-l.y1,L=dx*dx+dy*dy||1,u=Math.max(0,Math.min(1,((px-l.x1)*dx+(py-l.y1)*dy)/L));return Math.hypot(l.x1+u*dx-px,l.y1+u*dy-py)};
+function zjDraw(){const mig=zjMig();const c=zjCtx,W=innerWidth,H=innerHeight,inv=1/zj.upp,v=zjView(),[y0,y1]=tacLayerY(zj.k),hexPx=TAC_GRID.S*inv,ins=zjInsets(),hits=[],chips=[],lines=[],t=performance.now()/1000,now=Date.now();
  const sx=X=>(X-zj.cx)*inv+W/2,sy=Z=>(Z-zj.cz)*inv+H/2,mapOpen=ins.bottom-ins.top>=80;zj.anim=false;
  c.setTransform(zjDpr,0,0,zjDpr,0,0);c.clearRect(0,0,W,H);
  const need=zjNeedSectors(v),SS=SECTOR_SIZE,loadedAt=new Set();for(const s of need)if(tacSecs.has(keyOf(s)))loadedAt.add(s[0]*1e6+s[2]);
@@ -643,15 +660,17 @@ function zjDraw(){const mig=zjMig();const c=zjCtx,W=innerWidth,H=innerHeight,inv
   else{const g=o.g,d=7;c.beginPath();c.moveTo(X,Y-d);c.lineTo(X+d,Y);c.lineTo(X,Y+d);c.lineTo(X-d,Y);c.closePath();c.fillStyle='#0b0c1c';c.fill();
    c.strokeStyle=!g.resolved?'#f2f0ff':g.resolvedType==='moving'?'#ffc864':g.fixedAddress?'#9fe0a0':'#b29aff';c.lineWidth=1.8;c.stroke();if(!g.resolved){c.fillStyle='#f2f0ff';c.font='700 9px system-ui';c.textAlign='center';c.textBaseline='middle';c.fillText('?',X,Y+.5)}
    if(hexPx>=60){c.fillStyle='#ece8ff';c.font='10px system-ui';c.textAlign='left';c.textBaseline='middle';if(labOk(X+11,Y,c.measureText(o.name).width))c.fillText(o.name,X+11,Y)}}
+  if(mig&&zj.snap.beacons){const bc=zjBc(o.key);if(bc&&(bc.here||bc.going)){c.save();c.strokeStyle='#c4a8ff';c.lineWidth=1.6;if(bc.going)c.setLineDash([3,3]);c.beginPath();c.arc(X,Y,13,0,6.283);c.stroke();c.restore()}}
   hits.push({x:X,y:Y,o})}
  // 9a. réseau de corridors candidat (prévisualisation d'essai, GDD navigation § 9)
- zjCorDrawTac(c,sx,sy,y0,y1);
+ zjCorDrawTac(c,sx,sy,y0,y1,lines);
  // 9b. missions suivables : tracé projeté de la mission choisie (parcouru plein, restant en tirets), repère orienté touchable
  {const now=Date.now(),selTr=zj.sel&&zj.sel.type==='travel'?zj.sel.id:null;
   for(const tr of zj.tr){if(!tr.ok)continue;const st=zjTrState(tr,now),isSel=tr.id===selTr;
    if(isSel&&tr.pts.length>1){const P=tr.pts,cut=st.along*tr.L;c.save();c.lineWidth=2;c.strokeStyle='rgba(159,211,255,.55)';c.setLineDash([6,5]);c.beginPath();P.forEach((q,j)=>j?c.lineTo(sx(q[0]),sy(q[2])):c.moveTo(sx(q[0]),sy(q[2])));c.stroke();c.setLineDash([]);
     c.strokeStyle='#d7ecff';c.beginPath();if(st.phase==='back'){c.moveTo(sx(P[P.length-1][0]),sy(P[P.length-1][2]))}else{c.moveTo(sx(P[0][0]),sy(P[0][2]));for(let j=1;j<P.length&&tr.cum[j]<=cut;j++)c.lineTo(sx(P[j][0]),sy(P[j][2]))}c.lineTo(sx(st.p[0]),sy(st.p[2]));c.stroke();
-    for(const q of P.slice(1,-1)){const X=sx(q[0]),Y=sy(q[2]);c.strokeStyle='#9fd3ff';c.lineWidth=1.4;c.strokeRect(X-3,Y-3,6,6)}c.restore()}
+    for(const q of P.slice(1,-1)){const X=sx(q[0]),Y=sy(q[2]);c.strokeStyle='#9fd3ff';c.lineWidth=1.4;c.strokeRect(X-3,Y-3,6,6)}c.restore();
+    for(let j=1;j<P.length;j++)lines.push({x1:sx(P[j-1][0]),y1:sy(P[j-1][2]),x2:sx(P[j][0]),y2:sy(P[j][2]),o:{type:'travel',id:tr.id}})}
    const o={type:'travel',id:tr.id,name:tr.name,p:st.p};if(!zjInSlice(st.p[1])){if(isSel)ind.push(o);continue}
    const X=sx(st.p[0]),Y=sy(st.p[2]);if(X<-30||X>W+30||Y<-30||Y>H+30)continue;const a=Math.atan2(st.dir?st.dir[2]:1,st.dir?st.dir[0]:0);
    c.save();c.translate(X,Y);c.rotate(a);c.beginPath();c.moveTo(9,0);c.lineTo(-6,6);c.lineTo(-3,0);c.lineTo(-6,-6);c.closePath();c.fillStyle=isSel?'#ffffff':'#9fd3ff';c.fill();c.restore();
@@ -670,7 +689,7 @@ function zjDraw(){const mig=zjMig();const c=zjCtx,W=innerWidth,H=innerHeight,inv
   if(inside){c.setLineDash([3,3]);c.strokeStyle='#80e6d3';c.lineWidth=1.3;c.beginPath();c.arc(X,Y,9,0,6.283);c.stroke();c.setLineDash([])}
   c.fillStyle='rgba(12,12,29,.94)';c.strokeStyle='#80e6d3';c.lineWidth=1;c.beginPath();c.roundRect?c.roundRect(bx,by,tw,bh,8):c.rect(bx,by,tw,bh);c.fill();c.stroke();c.fillStyle='#bff3e9';c.textAlign='left';c.textBaseline='middle';
   c.fillText((inside?'':(X<ins.left+10?'← ':X>ins.right-10?'→ ':Y<ins.top+10?'↑ ':'↓ '))+lab,bx+8,by+bh/2);chips.push({x:bx,y:by-7,w:tw,h:bh+14,o})}
- zj.hits=hits;zj.chips=chips;zj.lastDraw=performance.now();zj.dirty=false;zjDepthUI()}
+ zj.hits=hits;zj.chips=chips;zj.lines=lines;zj.lastDraw=performance.now();zj.dirty=false;zjDepthUI()}
 
 /* ── toucher : objet important d'abord, sinon la zone ; un pincement ne produit jamais de toucher ── */
 function zjPick(px,py){for(const ch of zj.chips)if(px>=ch.x&&px<=ch.x+ch.w&&py>=ch.y&&py<=ch.y+ch.h)return{chip:ch};
@@ -678,6 +697,8 @@ function zjPick(px,py){for(const ch of zj.chips)if(px>=ch.x&&px<=ch.x+ch.w&&py>=
 function zjTap(px,py){const r=zjPick(px,py);
  if(r.chip){zjFocus(r.chip.o);return}
  const l=r.list;if(l.length){const close=l.filter(a=>a.d<=l[0].d+10);if(close.length===1)return zjSelectObj(close[0].h.o);zj.list=close.map(a=>a.h.o);zjOpen('choix');return}
+ const ln=(zj.lines||[]).map(l=>({l,d:zjSegD(px,py,l)})).filter(a=>a.d<=12).sort((a,b)=>a.d-b.d)[0];   // un tracé touché : la mission ou le tronçon, pas la zone dessous
+ if(ln){if(ln.l.o.type==='travel')return zjSelectTravel(ln.l.o.id);if(ln.l.o.type==='seg')return zjSelectSeg(ln.l.o.id)}
  const[wx,wz]=zjW(px,py),[q,rr]=tacCellOf(wx,wz);zjSelectZone(zoneId(q,rr,zj.k))}
 function zjCenterOn(p,force){if(zj.mode!=='tac')return;const ins=zjInsets(),W=innerWidth,H=innerHeight,X=(p[0]-zj.cx)/zj.upp+W/2,Y=(p[2]-zj.cz)/zj.upp+H/2,pad=Math.min(60,TAC_R/zj.upp);
  if(!force&&X>ins.left+pad&&X<ins.right-pad&&Y>ins.top+pad&&Y<ins.bottom-pad)return;const tx=(ins.left+ins.right)/2,ty=(ins.top+ins.bottom)/2;zj.cx=p[0]-(tx-W/2)*zj.upp;zj.cz=p[2]-(ty-H/2)*zj.upp;zj.dirty=true}
@@ -1005,7 +1026,7 @@ function zjTravelHtml(){const tr=zjTrFind(zj.sel.id),F=zj.follow&&zj.follow.id==
  h+='</dl><p class="zj-muted">'+(tr.ok?'Horaires de la partie. Position estimée '+(tr.route==='ligne'?'le long des jalons connus':'en ligne droite')+(st.done?' ; le jeu confirmera la suite (retour, rapport).':'.')+' Suivre ne change rien à la mission.':'Position non représentable : '+(tr.from?'la destination n’a pas d’adresse sur la carte':'le monde de départ n’est pas enregistré')+'. Seuls les horaires sont exacts.')+'</p>';
  if(zjTrObs&&zjTrObs.id===tr.id&&zj.mode==='atlas')h+=zjModelLine(zjTrObs,tr.kind==='probe'?'Une sonde':'Ce vaisseau');
  let f='';if(tr.ok){if(F&&F.on&&!F.susp)f+='<button class="zj-primary" data-a="follow-stop">Arrêter le suivi</button>';else if(F&&F.susp&&!F.ended)f+='<button class="zj-primary" data-a="follow-resume">Reprendre le suivi</button>';else f+='<button class="zj-primary" data-a="follow" data-id="'+zjEsc(tr.id)+'">Suivre dans l’Atlas</button>';
-  f+='<button class="zj-second" data-a="travel-fit">Voir le trajet</button>';if(tr.kind==='tanker'&&!zj.peek)f+='<button class="zj-second" data-a="cor-tr">Comparer les itinéraires · essai</button>';if(dest)f+='<button class="zj-second" data-a="travel-dest">Observer la destination</button>'}
+  f+='<button class="zj-second" data-a="travel-fit">Voir le trajet</button>';if(tr.kind==='tanker'&&!zj.peek&&!zjMig())f+='<button class="zj-second" data-a="cor-tr">Comparer les itinéraires · essai</button>';if(dest)f+='<button class="zj-second" data-a="travel-dest">Observer la destination</button>'}
  return{h,f}}
 function zjTravelRows(){const now=Date.now();let h='';for(const tr of zj.tr){const st=zjTrState(tr,now);h+='<button class="zj-row" data-a="travel" data-id="'+zjEsc(tr.id)+'"><b>'+zjEsc(tr.name)+' · '+zjEsc((ZJ_TR_KIND[tr.kind]||'').toLowerCase())+'</b><small>'+zjEsc(tr.statusLabel)+' · '+zjEsc(tr.toLabel||tr.to||'')+(st.eta?' · '+zjClock(new Date(st.eta)):'')+(tr.ok?'':' · position non représentable')+'</small></button>'}return h}
 
@@ -1062,12 +1083,30 @@ function zjFocusGame(sel){if(!sel||!zjBooted)return false;if(zj.peek)zjPeekStop(
  if(o){if(zj.mode!=='tac')zjSetMode('tac');zjFocus(o);return true}
  const p=sys&&zjAddrPos(sys);if(!p)return false;if(zj.mode!=='tac')zjSetMode('tac');zj.k=tacLayerOf(p[1]);zjSelectZone(zoneOfPoint(p));zjCenterOn(p,true);return true}
 function zjSysHtml(o){const k=o.k,z=zoneParse(o.zone),tag=o.tag;
- let h='<div class="zj-kind">SYSTÈME BALAYÉ'+(tag==='star'?' · INTÉRESSANT':tag==='skip'?' · SANS INTÉRÊT':'')+'</div><h3>'+zjEsc(o.key)+'</h3><dl class="zj-dl"><dt>Zone</dt><dd>'+zjEsc(z.q+' · '+z.r+' · '+zjCtxShort(z.k))+'</dd>'+(k.at?'<dt>Balayé</dt><dd>'+zjEsc(zjDate(k.at))+'</dd>':'')+'</dl>';
+ let h='<div class="zj-kind">'+(k.unknown?'SYSTÈME':'SYSTÈME BALAYÉ')+(tag==='star'?' · INTÉRESSANT':tag==='skip'?' · SANS INTÉRÊT':'')+'</div><h3>'+zjEsc(o.key)+'</h3><dl class="zj-dl"><dt>Zone</dt><dd>'+zjEsc(z.q+' · '+z.r+' · '+zjCtxShort(z.k))+'</dd>'+(k.at?'<dt>Balayé</dt><dd>'+zjEsc(zjDate(k.at))+'</dd>':'')+'</dl>';
  const pl=(k.planets||[]).slice().sort((a,b)=>(a.slot||0)-(b.slot||0));
  if(pl.length){h+='<div class="zj-kind" style="margin-top:10px">EMPLACEMENTS</div>';for(const p of pl)h+='<button class="zj-row" data-a="act" data-k="planet" data-x="'+zjEsc(p.coord)+'" data-w="'+zjEsc(zj.origin)+'"><b>'+zjEsc(String(p.slot==null?'':p.slot).padStart(2,'0')+' · '+(p.player?p.player+(p.bot?' (automate)':''):p.name))+'</b><small>'+zjEsc((p.desc?p.desc+' · ':'')+p.coord)+'</small></button>'}
- else h+='<p class="zj-muted">Aucune planète relevée dans ce système.</p>';
+ else h+='<p class="zj-muted">'+(k.unknown?'Système pas encore balayé.':'Aucune planète relevée dans ce système.')+'</p>';
+ h+=zjBeaconHtml(o.key);
  let f='<button class="zj-second'+(tag==='star'?' on':'')+'" data-a="g-tag" data-key="'+zjEsc(o.key)+'" data-v="star">'+(tag==='star'?'Retirer « intéressant »':'Intéressant')+'</button><button class="zj-second'+(tag==='skip'?' on':'')+'" data-a="g-tag" data-key="'+zjEsc(o.key)+'" data-v="skip">'+(tag==='skip'?'Retirer « sans intérêt »':'Sans intérêt')+'</button>';
  f+='<button class="zj-second" data-a="zone" data-z="'+zjEsc(o.zone)+'">Voir sa zone</button>'+zjOldBtn('system',o.key);return{h,f}}
+// étape 2 : ce que la carte propose pour une balise sur ce système (mêmes règles que l'ancienne carte)
+const zjBc=sys=>{const B=zj.snap&&zj.snap.beacons;return B?{B,here:B.list.find(b=>b.sys===sys),going:B.going.find(b=>b.sys===sys)}:null};
+function zjBeaconHtml(sys){const x=zjBc(sys);if(!x||!zjMig()||!sys)return'';const{B,here,going}=x,st=B.status[zj.origin]||B.status.home||{},w=zjWorld(zj.origin);
+ let h='<div class="zj-kind" style="margin-top:12px">BALISE</div>';
+ if(here){h+='<p class="zj-muted"><b>'+zjEsc(here.name)+'</b> en surveillance'+(here.at?' depuis le '+zjEsc(zjDate(here.at)):'')+' · '+here.n+' détection'+(here.n>1?'s':'')+(here.routes.length?' · balise '+zjEsc(here.routes.join(', ')):'')+'.</p>';
+  h+='<button class="zj-row" data-a="g-bc-recall" data-id="'+zjEsc(here.id)+'"><b>Rappeler la balise</b><small>Le jeu prévient si elle balise une route ou porte une route vendue</small></button>';
+  if(!B.posts.includes(sys)&&!zj.ws.some(w=>w.key===sys))h+='<button class="zj-row" data-a="g-post" data-sys="'+zjEsc(sys)+'"><b>Ouvrir un poste ici</b><small>Un tanker en station : les commandants qui y tiennent un poste peuvent te parler</small></button>';return h}
+ if(going)return h+'<p class="zj-muted">Balise en route · arrivée dans '+zjDur(going.arrivalAt-Date.now())+' ('+zjClock(going.arrivalAt)+').</p>';
+ if((st.deployed||0)>=B.quota)return h+'<p class="zj-muted">'+B.quota+' balises déjà posées depuis '+zjEsc(w?w.name:'ce monde')+' : rappelle-en une pour la poser ici.</p>';
+ if(st.ok)return h+'<button class="zj-row" data-a="g-bc-place" data-sys="'+zjEsc(sys)+'"><b>Poser une balise</b><small>Depuis '+zjEsc(w?w.name:'')+' · surveillance permanente des convois</small></button>';
+ if(st.build)return h+'<button class="zj-row" data-a="g-bc-build"><b>Construire une balise</b><small>'+B.cost.metal+' métal · '+B.cost.cristal+' cristal, au Centre de prospection</small></button>';
+ return h+'<p class="zj-muted">'+zjEsc(st.why||'Aucune balise prête.')+'</p>'}
+function zjBeaconsHtml(){const B=zj.snap&&zj.snap.beacons;let h='<div class="zj-kind">MES BALISES</div><h3>'+(B?B.list.length:0)+' en surveillance</h3>';if(!B)return{h,f:''};
+ if(!B.list.length&&!B.going.length)h+='<p class="zj-muted">Aucune balise posée. Choisis un système sur la carte : sa fiche propose « Poser une balise ».</p>';
+ for(const b of B.list)h+='<button class="zj-row" data-a="bc-go" data-id=""'+zjEsc((zjObjects().find(o=>o.key===b.sys)||{}).id||'')+'"><b>'+zjEsc(b.name)+' · '+zjEsc(b.sys)+'</b><small>'+b.n+' détection'+(b.n>1?'s':'')+(b.routes.length?' · balise '+zjEsc(b.routes.join(', ')):'')+'</small></button>';
+ for(const g of B.going)h+='<button class="zj-row" data-a="bc-go" data-id=""'+zjEsc((zjObjects().find(o=>o.key===g.sys)||{}).id||'')+'"><b>En route · '+zjEsc(g.sys)+'</b><small>arrivée dans '+zjDur(g.arrivalAt-Date.now())+'</small></button>';
+ return{h,f:''}}
 function zjObjHtml(){const o=zjObjects().find(x=>x.id===zj.sel.id);if(!o)return{h:'<p class="zj-muted">Objet introuvable.</p>',f:''};if(o.type==='sys')return zjSysHtml(o);const z=zoneParse(o.zone);
  let h='<div class="zj-kind">'+({world:zj.peek?'SON MONDE':'MON MONDE',station:'PORT FRANC',sig:'SIGNATURE'}[o.type]||'LIEU')+'</div><h3>'+zjEsc(o.name)+'</h3><dl class="zj-dl"><dt>Adresse</dt><dd>'+zjEsc(o.type==='world'?o.w.coord:o.key)+'</dd>'+(o.type==='world'?'<dt>Système</dt><dd>'+zjEsc(o.key)+(o.w.spot!=null?' <small>· spot '+String(o.w.spot+1).padStart(2,'0')+'</small>':' <small>· spot inconnu</small>')+'</dd><dt>Amas</dt><dd>'+zjEsc(zjAmasOf(o.w.coord))+'</dd>':'')+'<dt>Zone</dt><dd>'+zjEsc(z.q+' · '+z.r+' · '+zjCtxShort(z.k))+(zj.regionMap.has(o.zone)?' <small>· région de test</small>':'')+'</dd></dl>',f='';
  if(o.type==='station'){const sm=zjStModel(o.key);if(sm)h=h.replace(/<\/dl>/,'<dt>Modèle</dt><dd>'+zjEsc(sm.title)+' <small>· '+zjEsc(zjCode(sm.code))+'</small></dd></dl>')}
@@ -1075,6 +1114,7 @@ function zjObjHtml(){const o=zjObjects().find(x=>x.id===zj.sel.id);if(!o)return{
   f=o.w.id===zj.origin?'<p class="zj-muted">Les distances et la portée sont mesurées depuis ce monde.</p>':'<button class="zj-second" data-a="origin" data-w="'+zjEsc(o.w.id)+'">Mesurer depuis ce monde</button>'}
  else if(o.type==='world'){f=o.w.id===zj.origin?'<p class="zj-muted">Les sondages partent de ce monde.</p>':'<button class="zj-second" data-a="origin" data-w="'+zjEsc(o.w.id)+'">Lancer les sondages depuis '+zjEsc(o.name)+'</button>'}
  if(o.type==='sig')f=zj.peek?'<span class="zj-off">'+zjEsc(zjSigState(o.g))+'</span>':zjActBtn(ZH.sigAction(o.g.id,zj.origin),o.g.id,zj.origin);
+ if(o.type==='sig'||o.type==='station')h+=zjBeaconHtml(o.key);
  // observer : un gros plan dans l'Atlas, sans mission, sans changer le départ des sondages
  const obsHere=zj.mode==='atlas'&&zjObs&&zjObs.id===o.id&&zj.pres.level!=='neighbourhood';
  if(obsHere){h+=o.type==='sig'?(o.g.resolved?'':'<p class="zj-muted">Signature non identifiée : la vue rapprochée n’en révèle pas la nature.</p>'):o.type==='station'?zjModelLine(zjObs,'Ce port'):'<p class="zj-muted">Aperçu générique : l’apparence réelle de ce monde n’est pas encore transmise à la carte. Nom, adresse et position sont exacts.</p>';
@@ -1084,15 +1124,16 @@ function zjObjHtml(){const o=zjObjects().find(x=>x.id===zj.sel.id);if(!o)return{
   if(pt.enter&&pt.dock)g+='<button class="zj-primary" data-a="g-port" data-d="'+zjEsc(pt.dock)+'">Entrer dans le port</button>';
   if(rt)g+='<button class="zj-second" data-a="g-route" data-r="'+zjEsc(rt.id)+'">Envoyer un tanker · '+zjEsc(rt.name)+'</button>';
   if(rt)h=h.replace(/<\/dl>/,'<dt>Route</dt><dd>'+zjEsc(rt.name)+' <small>· connue</small></dd></dl>');f=g+f}
- if(o.type==='station'&&!zj.peek)f+='<button class="zj-second" data-a="cor-obj" data-id="'+zjEsc(o.id)+'">Comparer les itinéraires · essai</button>';
+ if(o.type==='station'&&!zj.peek&&!zjMig())f+='<button class="zj-second" data-a="cor-obj" data-id="'+zjEsc(o.id)+'">Comparer les itinéraires · essai</button>';
  f+='<button class="zj-second" data-a="zone" data-z="'+zjEsc(o.zone)+'">Voir sa zone</button>';
  if(zjMig())f+=zjOldBtn(o.type==='sig'?'sig':o.type==='world'?(o.w.kind==='home'?'home':'planet'):'system',o.type==='sig'?o.g.id:o.type==='world'?(o.w.kind==='home'?o.key:o.w.coord):o.key);
  return{h,f}}
 function zjHomeHtml(){if(zj.peek)return zjPeekHomeHtml();const R=zj.snap&&zj.snap.zp&&zj.snap.zp.region,zs=zj.snap?zj.snap.zp.zones:{},done=Object.values(zs).filter(z=>z.st==='done'),finds=done.reduce((a,z)=>a+(z.found||[]).length,0),miss=zj.snap?zj.snap.missions.length:0,w=zjWorld(zj.origin),hg=w&&zj.snap.hangars[w.id];
  let h='<div class="zj-kind">'+(zjMig()?'MA CARTE · PROSPECTION PAR ZONES':'PROSPECTION PAR ZONES · TEST')+'</div><h3>Touchez une zone voisine</h3><p class="zj-muted">'+(zjMig()?'Toute zone à portée de tes mondes peut être sondée':'Les zones hachurées forment la région de test')+'. Une zone se sonde avec une seule Radar, quel que soit le nombre d’étoiles qu’elle contient.</p>';
  if(R)h+='<div class="zj-stats"><div><b>'+done.length+(zjMig()?'':'/'+R.zones.length)+'</b><small>zones sondées</small></div><div><b>'+finds+'</b><small>signaux</small></div><div><b>'+miss+'</b><small>en vol</small></div><div><b>'+(hg?hg.radar:0)+'</b><small>Radars à '+zjEsc(w?w.name:'')+'</small></div></div>';
- h+='<button class="zj-row'+(zj.cor.on?' on':'')+'" data-a="cor-net"><b>Réseau de corridors candidat · essai</b><small>'+(zj.cor.on?'Affiché · toucher pour le masquer':'Afficher les 6 corridors du GDD navigation dans l’Atlas et en Tactique')+'</small></button>'+(zj.cor.on?zjCorNetHtml():'');
- if(zjMig())h+='<button class="zj-row" data-a="g-old" data-k="home" data-key=""><b>Ancienne carte</b><small>Pour les actions pas encore reprises ici : balises, routes, flottes. Rien n’est perdu.</small></button>';
+ if(!zjMig())h+='<button class="zj-row'+(zj.cor.on?' on':'')+'" data-a="cor-net"><b>Réseau de corridors candidat · essai</b><small>'+(zj.cor.on?'Affiché · toucher pour le masquer':'Afficher les 6 corridors du GDD navigation dans l’Atlas et en Tactique')+'</small></button>'+(zj.cor.on?zjCorNetHtml():'');
+ if(zjMig()&&zj.snap.beacons){const B=zj.snap.beacons;h+='<button class="zj-row" data-a="beacons"><b>Mes balises · '+B.list.length+(B.going.length?' + '+B.going.length+' en route':'')+'</b><small>'+(B.list.length?B.list.reduce((a,b)=>a+b.n,0)+' détection(s) au total · toucher pour la liste':'Poser une balise depuis la fiche d’un système')+'</small></button>'}
+ if(zjMig())h+='<button class="zj-row" data-a="g-old" data-k="home" data-key=""><b>Ancienne carte</b><small>Pour les actions pas encore reprises ici : routes, flottes. Rien n’est perdu.</small></button>';
  h+='<div class="zj-legend">'+(zjMig()?'<span><i class="y"></i>Système balayé</span>':'<span><i class="h"></i>Non sondée</span>')+'<span><i class="m"></i>En mission</span><span><i class="d"></i>Sondée</span><span><i class="s"></i>Signature</span></div>';return{h,f:''}}
 function zjChoiceHtml(){let h='<div class="zj-kind">PLUSIEURS LIEUX ICI</div><h3>Lequel ?</h3>';for(const o of zj.list||[])h+='<button class="zj-row" data-a="pick" data-id="'+zjEsc(o.id)+'"><b>'+zjEsc(o.name)+'</b><small>'+zjEsc(o.sub||'')+'</small></button>';return{h,f:''}}
 function zjWorldsHtml(){if(zj.peek){let h='<div class="zj-kind">SES MONDES · '+zjEsc(zj.peek.pseudo.toUpperCase())+'</div><h3>Observer un monde</h3><p class="zj-muted">Choisis un monde pour le voir de près. Les distances restent mesurées depuis '+zjEsc((zjWorld(zj.origin)||{}).name||'')+'. Lecture seule.</p>';
@@ -1103,10 +1144,15 @@ function zjWorldsHtml(){if(zj.peek){let h='<div class="zj-kind">SES MONDES · '+
  if(zj.tr.length)h+='<div class="zj-kind" style="margin-top:14px">EN VOL · '+zj.tr.length+'</div>'+zjTravelRows();
  if(ZH&&ZH.peek)h+='<div class="zj-find"><div><b>Voir la partie d’un commandant</b><small>Lecture seule : son empire placé sur cette carte, rien n’est modifié chez lui</small></div><div class="zj-peek-f"><input id="zj-peek-in" value="Panzerstorm" maxlength="40" autocomplete="off" autocapitalize="off" spellcheck="false" aria-label="Pseudo du commandant"><button class="zj-act" data-a="peek">Voir</button></div></div>';
  return{h,f:''}}
+// raccourcis du jeu (Sondes, Missions, Rapports, Carnet, Archives), avec leurs icônes et leurs pastilles lues dans le jeu
+function zjGameNav(){const nav=zjMig()&&document.body.classList.contains('zj-in-game')&&zj.snap.nav||null,head=$('zj-sh-head');let g=$('zj-gnav');
+ head.classList.toggle('zj-has-gnav',!!(nav&&nav.length));if(!nav||!nav.length){if(g)g.remove();return}
+ if(!g){g=document.createElement('nav');g.id='zj-gnav';head.insertBefore(g,$('zj-sh-tog'))}
+ const h=nav.map(x=>'<button data-a="g-tab" data-t="'+zjEsc(x.t)+'" aria-label="'+zjEsc(x.label)+'">'+x.svg+'<span>'+zjEsc(x.label)+'</span>'+(x.n?'<i>'+x.n+'</i>':'')+'</button>').join('');if(g.innerHTML!==h)g.innerHTML=h}
 function zjSheet(){if(!zj.snap){return}let r;
- if(zj.view==='zone'&&zj.sel&&zj.sel.type==='zone')r=zjZoneHtml();else if(zj.view==='travel'&&zj.sel&&zj.sel.type==='travel')r=zjTravelHtml();else if(zj.view==='obj'&&zj.sel&&zj.sel.id&&zj.sel.type!=='travel')r=zjObjHtml();else if(zj.view==='choix')r=zjChoiceHtml();else if(zj.view==='worlds')r=zjWorldsHtml();else if(zj.view==='cor')r=zjCorHtml();else{zj.view='home';r=zjHomeHtml()}
+ if(zj.view==='zone'&&zj.sel&&zj.sel.type==='zone')r=zjZoneHtml();else if(zj.view==='travel'&&zj.sel&&zj.sel.type==='travel')r=zjTravelHtml();else if(zj.view==='obj'&&zj.sel&&zj.sel.id&&zj.sel.type!=='travel')r=zjObjHtml();else if(zj.view==='choix')r=zjChoiceHtml();else if(zj.view==='worlds')r=zjWorldsHtml();else if(zj.view==='cor')r=zjCorHtml();else if(zj.view==='beacons')r=zjBeaconsHtml();else if(zj.view==='seg'&&zj.sel&&zj.sel.type==='seg')r=zjSegHtml();else{zj.view='home';r=zjHomeHtml()}
  const ae=document.activeElement;if(ae&&$('zj-sheet').contains(ae)&&ae.tagName==='INPUT')return;
- $('zj-sh-body').innerHTML=r.h;$('zj-sh-foot').innerHTML=r.f||'';$('zj-sheet').querySelector('.zj-test').textContent=zj.peek?'LECTURE · '+zj.peek.pseudo.toUpperCase():zjMig()?'MA CARTE':'TEST · COMPTE HADRIEN';$('zj-worlds').textContent=zj.peek?'Ses mondes':'Mes mondes';$('zj-sh-back').hidden=zj.view==='home';$('zj-sheet').dataset.state=zj.sheet}
+ $('zj-sh-body').innerHTML=r.h;$('zj-sh-foot').innerHTML=r.f||'';$('zj-sheet').querySelector('.zj-test').textContent=zj.peek?'LECTURE · '+zj.peek.pseudo.toUpperCase():zjMig()?'MA CARTE':'TEST · COMPTE HADRIEN';zjGameNav();$('zj-worlds').textContent=zj.peek?'Ses mondes':'Mes mondes';$('zj-sh-back').hidden=zj.view==='home';$('zj-sheet').dataset.state=zj.sheet}
 $('zj-sheet').addEventListener('click',e=>{const b=e.target.closest('[data-a]');if(!b)return;const a=b.dataset.a;
  if(a==='peek'){const v=($('zj-peek-in')&&$('zj-peek-in').value||'').trim();if(v){b.disabled=true;zjPeekStart(v).then(()=>{b.disabled=false})}return}
  if(a==='peek-off')return zjPeekStop();
@@ -1126,6 +1172,14 @@ $('zj-sheet').addEventListener('click',e=>{const b=e.target.closest('[data-a]');
  if(a==='travel-fit')return zjTravelFit();
  if(a==='g-port'){const r=ZH.gameAct('port',b.dataset.d);if(r&&!r.ok)toast(r.why);return}
  if(a==='g-route'){const r=ZH.gameAct('route-tanker',b.dataset.r);if(r&&!r.ok)toast(r.why);return}
+ if(a==='g-tab'){ZH.gameAct('tab',b.dataset.t);return}
+ if(a==='g-bc-place'){const r=ZH.gameAct('beacon-place',{sys:b.dataset.sys,world:zj.origin});if(r&&!r.ok&&r.why)toast(r.why);zjRefresh(true);return}
+ if(a==='g-bc-recall'){ZH.gameAct('beacon-recall',b.dataset.id);return}
+ if(a==='g-bc-build'){ZH.gameAct('beacon-build');return}
+ if(a==='g-post'){const r=ZH.gameAct('post-here',b.dataset.sys);if(r&&!r.ok)toast(r.why);zjRefresh(true);return}
+ if(a==='beacons'){zjOpen('beacons');return}
+ if(a==='bc-go'){const o=zjObjects().find(x=>x.id===b.dataset.id);if(o)zjSelectObj(o);return}
+ if(a==='seg-off'){zj.sel=null;zjOpen('home');zj.dirty=true;return}
  if(a==='g-tag'){const r=ZH.gameAct('tag',{key:b.dataset.key,v:b.dataset.v});if(r&&!r.ok)toast(r.why);else zjRefresh(true);return}
  if(a==='g-old'){const k=b.dataset.k,key=b.dataset.key;ZH.gameAct('oldmap',key?{kind:k,key}:null);return}
  if(a==='cor-tr'){const tr=zjTrFind(zj.sel&&zj.sel.id);if(!zjCorCompare(zjCorCtxTravel(tr)))return toast('Réseau pas encore prêt, réessaie dans un instant.');zjCorFit();return zjOpen('cor')}
@@ -1335,13 +1389,15 @@ function zjCorToggle(on){zj.cor.on=on==null?!zj.cor.on:!!on;if(!zj.cor.on){zj.co
 // Tactique (GDD navigation § 9) : la portion dans la tranche en trait plein, le reste atténué en tirets ; sorties ▲/▼ là où le
 // corridor quitte la couche ; seuls les vrais nœuds de la couche sont dessinés (deux corridors qui se croisent en projection : rien)
 const ZJ_COR_RGB={imperial:'189,209,255',marchand:'255,207,150',arme:'255,153,107',pirate:'255,112,128'};
-function zjCorDrawTac(c,sx,sy,y0,y1){const g=zj.cor.on&&zjCorGraph();if(!g)return;const inL=y=>y>=y0&&y<y1;c.save();c.lineCap='round';
+function zjCorDrawTac(c,sx,sy,y0,y1,lines){const g=zj.cor.on&&zjCorGraph();if(!g)return;const inL=y=>y>=y0&&y<y1;c.save();c.lineCap='round';
  const strokePath=(P,rgb,w,selected)=>{for(let j=1;j<P.length;j++){const a=P[j-1],b=P[j],ia=inL(a[1]),ib=inL(b[1]);
    c.setLineDash(ia&&ib?[]:[5,6]);c.strokeStyle='rgba('+rgb+','+(ia&&ib?(selected?.95:.75):(selected?.4:.2))+')';c.lineWidth=ia&&ib?w:Math.max(1,w-1);c.beginPath();c.moveTo(sx(a[0]),sy(a[2]));c.lineTo(sx(b[0]),sy(b[2]));c.stroke();
    if(ia!==ib){const yb=ia?(b[1]>=y1?y1:y0):(a[1]>=y1?y1:y0),u=(yb-a[1])/((b[1]-a[1])||1e-9),X=sx(a[0]+(b[0]-a[0])*u),Y=sy(a[2]+(b[2]-a[2])*u),up=(ia?b[1]:a[1])>=y1;   // sortie de la couche
     c.setLineDash([]);c.fillStyle='rgba('+rgb+',.95)';c.font='700 11px system-ui';c.textAlign='center';c.textBaseline='middle';c.fillText(up?'▲':'▼',X,Y)}}};
  for(const cr of g.cors)strokePath(cr.pts,ZJ_COR_RGB[cr.cls]||'220,220,255',2,false);
  const x=zj.cor.plans&&zj.cor.plans[zj.cor.pick];if(x)strokePath(x.pl.pts,'255,255,255',3,true);
+ const se=zj.sel&&zj.sel.type==='seg'&&g.edges.find(e=>e.id===zj.sel.id);if(se)strokePath(se.pts,'255,255,255',3.4,true);
+ if(lines)for(const e of g.edges)for(let j=1;j<e.pts.length;j++){const a=e.pts[j-1],b=e.pts[j];if(!inL(a[1])&&!inL(b[1]))continue;lines.push({x1:sx(a[0]),y1:sy(a[2]),x2:sx(b[0]),y2:sy(b[2]),o:{type:'seg',id:e.id}})}
  c.setLineDash([]);c.textAlign='left';c.textBaseline='middle';
  for(const n of Object.values(g.nodes)){if(!inL(n.p[1])||n.type==='station')continue;const X=sx(n.p[0]),Y=sy(n.p[2]);   // les stations ont déjà leur repère
   if(n.type==='jonction'){c.fillStyle='#0b0c1c';c.strokeStyle='#ddd0ff';c.lineWidth=2;c.beginPath();c.rect(X-5,Y-5,10,10);c.fill();c.stroke();c.fillStyle='#ddd0ff';c.font='600 10px system-ui';c.fillText(n.id,X+8,Y)}
@@ -1364,6 +1420,10 @@ function zjCorHtml(){const C=zj.cor,ctx=C.ctx;if(!ctx||!C.plans)return{h:'<p cla
  h+='<p class="zj-muted zj-small">Valeurs d’essai (décisions E1 à E3) : '+ZJ_COR.v+' u/min en vol libre, ×'+String(ZJ_COR.k).replace('.',',')+' en corridor ; saison de test : durées ÷'+ZJ_COR.season+'. Carburant proportionnel à la longueur, '+Math.round(ZJ_COR.kFuel*100)+' % en corridor, égal au coût d’aujourd’hui ('+zjFmt(ctx.fuel)+') pour '+zjFmt(ZJ_COR.Lref)+' u de vol libre. Minimum par mission : '+zjMin(ZJ_COR.Lmin/ZJ_COR.v/ZJ_COR.season)+' et '+zjFmt(Math.round(ctx.fuel*ZJ_COR.Lmin/ZJ_COR.Lref))+' de carburant (l’équivalent de '+zjFmt(ZJ_COR.Lmin)+' u). Longueurs mesurées sur les courbes.</p>';
  const f='<button class="zj-primary" data-a="cor-fit">Voir l’itinéraire</button>'+'<button class="zj-second" data-a="cor-back">'+(ctx.src==='travel'?'Revenir à la mission':'Revenir au port')+'</button>'+'<button class="zj-second" data-a="cor-off">Masquer le réseau</button>';
  return{h,f}}
+function zjSelectSeg(id){const g=zjCorGraph(),e=g&&g.edges.find(x=>x.id===id);if(!e)return;zj.follow=null;zjTrObsDispose();zj.sel={type:'seg',id,name:e.name,p:e.pts[e.pts.length>>1]};zj.dirty=true;zjOpen('seg')}
+function zjSegHtml(){const g=zjCorGraph(),e=g&&g.edges.find(x=>x.id===zj.sel.id);if(!e)return{h:'<p class="zj-muted">Tronçon introuvable.</p>',f:''};
+ const h='<div class="zj-kind">TRONÇON · RÉSEAU D’ESSAI</div><h3>'+zjEsc(e.name)+'</h3><p class="zj-muted">De '+zjEsc(zjCorName(e.a))+' à '+zjEsc(zjCorName(e.b))+' · '+zjFmt(e.len)+' u · '+zjMin(e.len/(ZJ_COR.v*ZJ_COR.k)/ZJ_COR.season)+' en corridor (saison de test). Valeurs d’essai ; rien n’est branché au jeu.</p>';
+ return{h,f:'<button class="zj-second" data-a="seg-off">Fermer</button>'}}
 function zjCorNetHtml(){const g=zjCorGraph();if(!g)return'';return'<p class="zj-muted">Réseau candidat (GDD navigation § 4) : '+g.cors.length+' corridors, '+g.edges.length+' tronçons, '+zjFmt(g.len)+' u mesurés sur les courbes ('+zjFmt(g.chord)+' u en cordes). Valeurs d’essai ; rien n’est branché au jeu.</p>'}
 
 window.STARBYTE_ZONES={zj,refresh:zjRefresh,travels:()=>zj.tr.map(t=>({id:t.id,kind:t.kind,name:t.name,ok:t.ok,from:t.from,to:t.to,L:t.L,n:t.pts.length,route:t.route,status:t.status,phases:t.phases})),trState:id=>{const t=zjTrFind(id);return t&&zjTrState(t,Date.now())},

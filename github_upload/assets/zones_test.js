@@ -25,7 +25,7 @@
   if (window.EXTRA_SAVE_KEYS && EXTRA_SAVE_KEYS.indexOf('zoneProspect') < 0) EXTRA_SAVE_KEYS.push('zoneProspect');
 
   const PAGE = 'atlas/index.html';
-  const PAGE_V = '76f9d6a62e';   // empreinte de atlas/index.html, écrite par labo/carte-zones/build.py
+  const PAGE_V = '1aa956dd80';   // empreinte de atlas/index.html, écrite par labo/carte-zones/build.py
   const GRID = 'tac-2';
   const MIN = 60e3;
   const SB = 'https://elupnpdcblztpfywnhjl.supabase.co';
@@ -185,7 +185,7 @@
     }));
     let tr = []; try { tr = travels(); } catch (e) { console.warn('[zones] missions', e); }
     const kn = migrated() ? known() : null;   // compte migré : les ports et les routes que la partie connaît, les systèmes balayés et leurs marques
-    return { now, active: G.activeWorld || 'home', worlds: ws, hangars: hang, ranges, zp: JSON.parse(JSON.stringify(z)), missions, sigs, travels: tr, mig: migrated(), ports: kn ? kn.ports : null, routes: kn ? kn.routes : null, systems: kn ? kn.systems : null, tags: kn ? kn.tags : null };
+    return { now, active: G.activeWorld || 'home', worlds: ws, hangars: hang, ranges, zp: JSON.parse(JSON.stringify(z)), missions, sigs, travels: tr, mig: migrated(), ports: kn ? kn.ports : null, routes: kn ? kn.routes : null, systems: kn ? kn.systems : null, tags: kn ? kn.tags : null, beacons: kn ? beacons() : null, nav: kn ? navState() : null };
   }
 
   /* ── région de test : écrite une seule fois par la carte (contenu fixe) ── */
@@ -439,18 +439,16 @@
   function place() {   // la carte entre le bandeau du haut et la barre du bas
     if (!frameWrap) return;
     const s = scrP(), top = s && s.querySelector('.smw-top'), nav = s && s.querySelector('.smw-nav');
-    const t = top ? Math.max(0, top.getBoundingClientRect().bottom - 18) : 0, b = nav ? Math.max(0, innerHeight - nav.getBoundingClientRect().top - 6) : 0;
+    const t = top ? Math.max(0, top.getBoundingClientRect().bottom - 22) : 0, b = nav && nav.offsetParent ? Math.max(0, innerHeight - nav.getBoundingClientRect().top - 6) : 0;
     frameWrap.style.top = Math.round(t) + 'px'; frameWrap.style.bottom = Math.round(b) + 'px';
     if (s) s.style.setProperty('--sb-atlas-top', Math.round(t) + 'px');
-    // le guide « ? » du Centre de prospection : sous la colonne de zoom de la carte, mesurée dans la carte elle-même
-    try { const f = frameWrap.querySelector('iframe'), zc = f && f.contentDocument && f.contentDocument.getElementById('zj-zoom'); if (zc && s) { const r = zc.getBoundingClientRect(); if (r.height > 0) s.style.setProperty('--sb-guide-top', Math.round(f.getBoundingClientRect().top + r.bottom + 10) + 'px'); } } catch (e) {}
   }
   function styleOnce() {
     if (document.getElementById('sb-atlas-css')) return;
     const st = document.createElement('style'); st.id = 'sb-atlas-css';
     st.textContent = `#scr-prospect.sb-atlas #spacemap-root,#scr-prospect.sb-atlas .smw-tools,#scr-prospect.sb-atlas .smw-hint,#scr-prospect.sb-atlas .smw-card,
       #scr-prospect.sb-atlas .pl-card,#scr-prospect.sb-atlas .pl-chip,#scr-prospect.sb-atlas .pl-fx,#scr-prospect.sb-atlas .pl-hud,#scr-prospect.sb-atlas .pl-legend,#scr-prospect.sb-atlas .pl-tac,#scr-prospect.sb-atlas .pl-up,#scr-prospect.sb-atlas .pl-xtra{display:none!important}
-      #scr-prospect.sb-atlas #sb-pguide-btn{top:var(--sb-guide-top,calc(var(--sb-atlas-top,68px) + 268px))!important}
+      #scr-prospect.sb-atlas #sb-pguide-btn,#scr-prospect.sb-atlas .smw-nav{display:none!important}
       .sb-atlas-wrap{position:absolute;left:0;right:0;top:0;bottom:0;z-index:2;background:#03040c}.sb-atlas-wrap iframe{position:absolute;inset:0;width:100%;height:100%;border:0}
       .sb-old-bar{position:absolute;left:50%;transform:translateX(-50%);top:calc(var(--sai,0px) + 70px);z-index:22;display:flex;gap:8px;align-items:center;padding:7px 8px 7px 12px;border-radius:12px;
         background:rgba(11,12,28,.92);border:1px solid rgba(178,154,255,.35);font:600 11px/1.2 'Space Grotesk',system-ui;color:#ddd8ff;white-space:nowrap}
@@ -547,11 +545,64 @@
     const tags = {}; try { for (const [k, v] of Object.entries(G.systemTags || {})) if (v === 'star' || v === 'skip') tags[k] = v; } catch (e) {}
     return { ports, routes, systems, tags };
   }
+  // étape 2 : les balises, avec les règles et les fonctions du jeu (quota, hangar du monde de départ, rappel avec ses avertissements)
+  const sysOfAddr = (a) => (String(a || '').toUpperCase().match(/^([A-Z]+-[A-Z]-\d{4})/) || [])[1] || null;
+  function beacons() {
+    const all = (typeof sbAllProbes === 'function' ? sbAllProbes() : (G.probesPool || []));
+    const list = [];
+    for (const b of all) if (b && b.tier === 'beacon' && b.state === 'deployed') {
+      const sys = sysOfAddr(b.deployedSystem); if (!sys) continue;
+      let routes = []; try { routes = window.SBLines && SBLines.routesBalisedBy ? SBLines.routesBalisedBy(sys).map(r => r.name) : []; } catch (e) {}
+      list.push({ id: b.id, name: b.name || 'Balise', sys, at: b.deployedAt || null, n: b.detectionCount || 0, world: b.world || 'home', routes });
+    }
+    const going = (G.probeMissions || []).filter(m => m && m.tier === 'beacon' && m.status === 'in_transit').map(m => ({ id: m.id, sys: sysOfAddr(m.targetCoords), arrivalAt: m.arrivalAt, world: m.world || 'home' })).filter(x => x.sys);
+    const cfg = (typeof PROBE_TIER_CONFIG !== 'undefined' && PROBE_TIER_CONFIG.beacon) || {};
+    const status = {};
+    for (const w of worlds()) {
+      let st = { ok: false, build: false, why: '' };
+      try { st = inWorld(w.id, () => (typeof _probeTierStatus === 'function' ? _probeTierStatus('beacon') : st)); } catch (e) {}
+      let n = 0; try { n = inWorld(w.id, () => (G.probesPool || []).filter(b => b.tier === 'beacon' && b.state === 'deployed').length); } catch (e) {}
+      status[w.id] = { ok: !!st.ok, build: !!st.build, why: st.why || '', deployed: n };
+    }
+    return { list, going, quota: cfg.quotaMax || 3, cost: { metal: (cfg.cost && cfg.cost.metal) || 300, cristal: (cfg.cost && cfg.cost.cristal) || 100 }, status, posts: (G.tankerMissions || []).filter(m => m && m.kind === 'route_post' && ['in_transit', 'posted'].includes(m.status)).map(m => sysOfAddr(m.targetCoords)).filter(Boolean) };
+  }
+  // les raccourcis du Centre de prospection (Sondes, Missions, Rapports, Carnet, Archives) : leurs icônes et leurs pastilles, lus dans le jeu
+  function navState() {
+    const out = [];
+    try {
+      for (const b of document.querySelectorAll('#scr-prospect .smw-nav button[data-t]')) {
+        if (b.style.display === 'none') continue;
+        const svg = b.querySelector('svg'), lab = b.querySelector('span'), bd = b.querySelector('.smw-mb, [id$="-badge"]');
+        const n = bd && getComputedStyle(bd).display !== 'none' ? (parseInt(bd.textContent, 10) || 0) : 0;
+        out.push({ t: b.dataset.t, label: lab ? lab.textContent.trim() : b.dataset.t, svg: svg ? svg.outerHTML : '', n });
+      }
+    } catch (e) {}
+    return out;
+  }
   function gameAct(kind, arg) {
     log('action', { kind, arg });
     if (kind === 'port') { if (typeof crownEnter !== 'function') return { ok: false, why: 'Entrée indisponible.' }; crownEnter(arg); return { ok: true }; }
     if (kind === 'route-tanker') { if (typeof openTankerComposeForRoute !== 'function') return { ok: false, why: 'Envoi indisponible.' }; openTankerComposeForRoute(arg); return { ok: true }; }
     if (kind === 'oldmap') { showOldMap(arg || null); return { ok: true }; }
+    if (kind === 'tab') { if (!/^(sondes|missions|rapports|carnet|archives)$/.test(String(arg))) return { ok: false, why: 'Onglet inconnu.' }; window.setProspectTab(arg); return { ok: true }; }
+    if (kind === 'beacon-place') {
+      const sys = sysOfAddr(arg && arg.sys), wid = (arg && arg.world) || G.activeWorld || 'home';
+      if (!sys || !SYS_RE.test(sys)) return { ok: false, why: 'Système inconnu.' };
+      let m = null; try { m = inWorld(wid, () => launchProbe('beacon', sys, 'local', false)); } catch (e) { console.warn('[carte] balise', e); }
+      if (!m) return { ok: false, why: '' };   // le jeu a déjà dit pourquoi
+      save(); notify(); try { toast('Balise en route vers ' + sys); } catch (e) {}
+      return { ok: true };
+    }
+    if (kind === 'beacon-recall') {
+      if (!(window.SBMap && SBMap.recallBeacon)) return { ok: false, why: 'Rappel indisponible.' };
+      Promise.resolve(SBMap.recallBeacon(String(arg || ''))).then(() => { save(); notify(); }).catch(() => notify());
+      return { ok: true };
+    }
+    if (kind === 'beacon-build') { if (typeof openProbeDetail === 'function') openProbeDetail('beacon'); return { ok: true }; }
+    if (kind === 'post-here') {
+      const sys = sysOfAddr(arg); if (!sys || typeof launchRoutePost !== 'function') return { ok: false, why: 'Poste indisponible.' };
+      launchRoutePost(null, sys); save(); notify(); return { ok: true };
+    }
     if (kind === 'tag') {
       const key = String(arg && arg.key || ''), v = arg && arg.v;
       if (!SYS_RE.test(key) || (v !== 'star' && v !== 'skip')) return { ok: false, why: 'Marque inconnue.' };

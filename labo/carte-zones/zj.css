@@ -80,3 +80,17 @@ body.zj-tac #zj-depth{display:flex}
 .zj-muted.zj-small{font-size:11px;color:#8a86ab}
 .zj-cor small .zj-min{display:inline;color:#ffcf96;font-weight:600}
 .zj-legend i.y{width:8px;height:8px;margin:0 6px 0 3px;border:1.4px solid rgba(214,224,242,.9);border-radius:0;vertical-align:0}
+/* dans le jeu (12/11) : la carte est déjà sous le bandeau du Centre de prospection, pas sous l'encoche ; les boutons remontent */
+body.zj-in-game #zj-top{top:8px}
+body.zj-in-game #zj-depth{top:58px}
+body.zj-in-game #zj-zoom{top:110px}
+body.zj-in-game #zj-sheet{top:62px}
+@media (max-width:800px){body.zj-in-game #zj-depth{top:56px}body.zj-in-game #zj-zoom{top:108px}body.zj-in-game #zj-sheet{top:auto}}
+/* raccourcis du Centre de prospection dans l'en-tête de la fiche (la barre du bas du jeu est masquée sous la carte) */
+#zj-sh-head.zj-has-gnav .zj-test{display:none}
+#zj-gnav{flex:1;display:flex;gap:2px;min-width:0;justify-content:space-around}
+#zj-sh-head #zj-gnav button{position:relative;flex:1;min-width:0;width:auto;height:46px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;padding:0 2px;border-radius:10px;background:none;color:#c9c6e6}
+#zj-gnav button:active{background:#ffffff14}
+#zj-gnav svg{width:20px;height:20px;flex:none}
+#zj-gnav span{font:600 9px/1 system-ui;letter-spacing:.02em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
+#zj-gnav i{position:absolute;top:1px;right:calc(50% - 20px);min-width:15px;height:15px;padding:0 4px;border-radius:8px;background:#ffc864;color:#1a1408;font:700 9px/15px system-ui;font-style:normal;text-align:center}

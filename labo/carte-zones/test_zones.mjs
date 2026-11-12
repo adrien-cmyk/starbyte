@@ -107,6 +107,39 @@ async function newGame(p, url, planet) {
   // ce qui appartenait à l'ancienne carte (légende, puces, aide de plan) ne passe jamais par-dessus la nouvelle
   const ov = await p.evaluate(() => { const s = document.getElementById('scr-prospect'), out = {}; for (const c of ['pl-legend', 'pl-chip', 'pl-hud', 'pl-xtra']) { const d = document.createElement('div'); d.className = c + ' on'; s.appendChild(d); out[c] = getComputedStyle(d).display; d.remove(); } return out; });
   rec('MIG-SURCOUCHE', Object.values(ov).every(v => v === 'none'), `éléments de l'ancienne carte sur la nouvelle : ${Object.entries(ov).map(([k, v]) => k + ' ' + v).join(', ')}`);
+  // 12/11, 8 h 49 (retours d'Adrien) : barre du bas et guide « ? » retirés, leurs raccourcis dans la fiche ; boutons remontés ; essais masqués
+  await MF.evaluate(() => document.getElementById('zj-sh-back').click()); await sleep(400);
+  await MF.evaluate(() => document.getElementById('zj-sh-back').click()); await sleep(700);
+  const rc = await MF.evaluate(() => ({ nav: [...document.querySelectorAll('#zj-gnav button')].map(b => b.dataset.t + (b.querySelector('svg') ? '' : '(sans icône)')), top: getComputedStyle(document.getElementById('zj-top')).top, essai: !!document.querySelector('#zj-sh-body [data-a="cor-net"]'), bal: !!document.querySelector('#zj-sh-body [data-a="beacons"]') }));
+  const rg = await p.evaluate(() => { const s = document.getElementById('scr-prospect'), g = document.getElementById('sb-pguide-btn'), w = document.getElementById('sb-atlas-wrap').getBoundingClientRect(); return { nav: getComputedStyle(s.querySelector('.smw-nav')).display, guide: g ? getComputedStyle(g).display : 'absent', bottom: Math.round(innerHeight - w.bottom) }; });
+  await MF.evaluate(() => { const b = document.querySelector('#zj-gnav button[data-t="rapports"]'); if (b) b.click(); }); await sleep(1000);
+  const rs = await p.evaluate(() => { const sh = document.querySelector('#scr-prospect .smw-sheet'); return { on: !!(sh && sh.classList.contains('on')), t: sh ? sh.querySelector('.smw-sh-t').textContent : '' }; });
+  await p.screenshot({ path: path.join(SHOTS, '0e_raccourci_rapports.png') });
+  await p.evaluate(() => { const x = document.querySelector('#scr-prospect .smw-sh-x'); if (x) x.click(); }); await sleep(600);
+  await p.screenshot({ path: path.join(SHOTS, '0f_accueil_raccourcis.png') });
+  rec('MIG-RACCOURCIS', rc.nav.length >= 4 && rc.nav.includes('rapports') && rc.nav.every(x => !/sans/.test(x)) && rg.nav === 'none' && (rg.guide === 'none' || rg.guide === 'absent') && rg.bottom <= 1 && rc.top === '8px' && rs.on,
+    `raccourcis dans la fiche : ${rc.nav.join(', ')} · barre du bas du jeu ${rg.nav}, guide « ? » ${rg.guide}, carte jusqu'au bas de l'écran (écart ${rg.bottom} px), barre Atlas/Tactique à ${rc.top} du haut de la carte · « Rapports » ouvre la feuille du jeu (${rs.on}, « ${rs.t} »)`);
+  await p.evaluate(sys => openOnMap('system', sys), crownSys); await sleep(2200);
+  const es = await MF.evaluate(() => [...document.querySelectorAll('#zj-sh-foot button')].map(b => b.textContent.trim()));
+  rec('MIG-ESSAI', !rc.essai && !es.some(t => /Comparer les itinéraires/.test(t)), `accueil sans « Réseau de corridors candidat · essai » (${!rc.essai}) ; port sans « Comparer les itinéraires · essai » : ${es.join(' | ')} — ils reviendront pour de vrai à l'étape 4`);
+  // étape 2 : poser une balise depuis la fiche d'un système, la voir en route, posée, puis la rappeler (règles et fonctions du jeu)
+  await p.evaluate(() => { G.probesPool = G.probesPool || []; if (!G.probesPool.some(x => x.tier === 'beacon' && x.state === 'ready')) G.probesPool.push({ id: 'beacon-test-' + Date.now(), tier: 'beacon', state: 'ready', world: 'home', name: 'Balise d’essai' }); });
+  await MF.evaluate(() => STARBYTE_ZONES.refresh(true)); await sleep(500);
+  await p.evaluate(sys => openOnMap('system', sys), ks.sys); await sleep(2500);
+  const b1 = await MF.evaluate(() => ({ place: !!document.querySelector('#zj-sh-body [data-a="g-bc-place"]'), body: document.getElementById('zj-sh-body').innerText.replace(/\s+/g, ' ') }));
+  await MF.evaluate(() => { const b = document.querySelector('#zj-sh-body [data-a="g-bc-place"]'); if (b) b.click(); }); await sleep(1500);
+  const b2 = await p.evaluate(sys => !!(G.probeMissions || []).find(x => x.tier === 'beacon' && x.status === 'in_transit' && String(x.targetCoords).startsWith(sys)), ks.sys);
+  await MF.evaluate(() => STARBYTE_ZONES.refresh(true)); await sleep(700);
+  const b2f = await MF.evaluate(() => document.getElementById('zj-sh-body').innerText.replace(/\s+/g, ' '));
+  await p.evaluate(sys => { const m = (G.probeMissions || []).find(x => x.tier === 'beacon' && x.status === 'in_transit' && String(x.targetCoords).startsWith(sys)); if (m) { m.arrivalAt = Date.now() - 1; tickProbes(); } }, ks.sys);
+  const b3 = await p.evaluate(sys => { const b = sbAllProbes().find(x => x.tier === 'beacon' && x.state === 'deployed' && String(x.deployedSystem || '').startsWith(sys)); return b ? b.id : null; }, ks.sys);
+  await MF.evaluate(() => STARBYTE_ZONES.refresh(true)); await sleep(900);
+  const b4 = await MF.evaluate(() => ({ recall: !!document.querySelector('#zj-sh-body [data-a="g-bc-recall"]'), body: document.getElementById('zj-sh-body').innerText.replace(/\s+/g, ' ') }));
+  await p.screenshot({ path: path.join(SHOTS, '0g_balise_posee.png') });
+  await MF.evaluate(() => { const b = document.querySelector('#zj-sh-body [data-a="g-bc-recall"]'); if (b) b.click(); }); await sleep(1500);
+  const b5 = await p.evaluate(id => { const b = id && sbAllProbes().find(x => x.id === id); return b ? b.state : null; }, b3);
+  rec('MIG-BALISE', b1.place && b2 && /Balise en route/.test(b2f) && !!b3 && b4.recall && b5 === 'ready',
+    `système ${ks.sys} : « Poser une balise » ${b1.place} → mission du jeu ${b2}, fiche « ${(b2f.match(/Balise en route[^.]*\./) || [''])[0]} » · arrivée : balise ${b3} posée, « Rappeler la balise » ${b4.recall} (« ${(b4.body.match(/BALISE.{0,90}/) || [''])[0]} ») · rappel : balise ${b5}`);
   await p.evaluate(() => goto('planet')); await sleep(1500);
   const m6 = await p.evaluate(() => !!document.getElementById('sb-atlas-wrap'));
   // la marque survit au rechargement (la capitale de l'essai n'est plus lue : c'est la sauvegarde qui fait foi)
@@ -380,6 +413,13 @@ await F.evaluate(() => { STARBYTE_ZONES.followResume(); STARBYTE_ZONES.setMode('
 const tac = await F.evaluate(id => { const S = STARBYTE_ZONES, st = S.trState('tk:' + id); return { k: S.zj.k, lay: Math.floor(st.p[1] / 200), origin: S.zj.origin, F: S.followState() }; }, tk.id);
 await p.screenshot({ path: path.join(SHOTS, '16_tanker_suivi_tactique.png') });
 rec('FOLLOW-06', tac.F.on && Math.abs(tac.k - tac.lay) <= 1 && tac.origin === 'home', `Tactique en suivi : couche ${tac.k} (le tanker est dans la tranche ${tac.lay}, marge de 15 %), départ des sondages ${tac.origin} inchangé`);
+// 12/11 (retour d'Adrien) : toucher le tracé de la mission en Tactique garde la mission ; avant, la zone dessous était choisie
+const lineTap = kind => F.evaluate(kind => { const S = STARBYTE_ZONES, zj = S.zj, W = innerWidth, H = innerHeight;
+  for (const l of (zj.lines || []).filter(l => l.o.type === kind)) for (const u of [.5, .3, .7, .15, .85]) { const x = l.x1 + (l.x2 - l.x1) * u, y = l.y1 + (l.y2 - l.y1) * u; if (x < 30 || x > W - 30 || y < 150 || y > H - 260) continue; const pk = S.pick(x, y); if (pk.chip || pk.list.length) continue;
+    const zone = S.zj.sel && S.zj.sel.type; S.tap(x, y); return { x: Math.round(x), y: Math.round(y), before: zone, sel: zj.sel && zj.sel.type, id: zj.sel && zj.sel.id, kind: (document.querySelector('#zj-sh-body .zj-kind') || {}).textContent, n: zj.lines.filter(l => l.o.type === kind).length }; }
+  return { n: (zj.lines || []).filter(l => l.o.type === kind).length }; }, kind);
+const rt1 = await lineTap('travel'); await sleep(300);
+rec('ROUTE-01', rt1.sel === 'travel' && rt1.id === 'tk:' + tk.id, `tracé de la mission en Tactique (${rt1.n} segments touchables) : toucher (${rt1.x}, ${rt1.y}), loin du repère → fiche ${rt1.sel} ${rt1.id || ''} (« ${rt1.kind || ''} »), pas la zone dessous`);
 // arrivée puis fin : l'état vient du jeu
 await p.evaluate(id => { const m = G.tankerMissions.find(x => x.id === id); m.arrivalAt = Date.now() - 1; tickTankerMissions(); }, tk.id);
 await F.evaluate(() => STARBYTE_ZONES.refresh(true)); await sleep(600);
@@ -426,6 +466,9 @@ await F.evaluate(() => STARBYTE_ZONES.backN()); await sleep(2500);
 await p.screenshot({ path: path.join(SHOTS, '18_reseau_atlas.png') });
 await F.evaluate(k => { const S = STARBYTE_ZONES, o = S.objects().find(o => o.type === 'station' && o.key === k); S.setMode('tac'); S.corCompare('obj', o.id); const pl = S.corState().plans, i = pl.findIndex(x => x.k === 'cor'); if (i >= 0) S.corPick(i); else document.querySelector('#zj-sh-foot [data-a="cor-fit"]').click(); }, ex ? ex.k : 'A-M-3340'); await sleep(1800);
 await p.screenshot({ path: path.join(SHOTS, '19_itineraire_tactique.png') });
+const rt2 = await lineTap('seg'); await sleep(400);
+await p.screenshot({ path: path.join(SHOTS, '19b_troncon_touche.png') });
+rec('ROUTE-02', rt2.sel === 'seg' && /TRONÇON/.test(rt2.kind || ''), `réseau d'essai affiché (${rt2.n} segments touchables) : toucher un corridor en (${rt2.x}, ${rt2.y}) → fiche « ${rt2.kind || ''} » (${rt2.id || ''}), pas la zone dessous`);
 // flotte mixte en embuscade (la tienne : composition connue) : un modèle par type présent, effectif complet dans la fiche
 const flId = await p.evaluate(() => { const now = Date.now(), sys = (G.worlds[0] && G.worlds[0].coord || '').split('-').slice(0, 3).join('-');
   const f = { id: 'fl-test-mixte', name: 'Escadre Mixte', composition: { cuirasse: { t1: 2, t2: 0, t3: 0 }, fregate: { t1: 6, t2: 0, t3: 0 }, tanker: { t1: 3, t2: 0, t3: 0 } }, soldiers: { garde: 0, lourd: 0 }, createdAt: now,
