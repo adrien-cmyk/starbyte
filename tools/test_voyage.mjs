@@ -48,4 +48,10 @@ const ko1 = fn.planLaunch({ origin: 'A-B-1000-01', dest: 'A-M-3340', tier: 1, pi
 const ko2 = fn.planLaunch({ origin: 'A-O-2178-07', dest: 'A-B-1000', tier: 1, pick: 'cor', mission: 'tm-1794000000002-ab3c' }, reg, 1_800_000_000_000);
 rec('SERVEUR', ok1.ok && ok1.row.arrives_at - ok1.row.departed_at === Math.round(C.test * 60000) && ok1.row.fuel === C.fuel && ok1.row.net_version === g.version && ko1.why === 'origin_not_yours' && ko2.why === 'not_a_port',
   `lancement : ${ok1.ok ? Math.round((ok1.row.arrives_at - ok1.row.departed_at) / 1000) + ' s, ' + ok1.row.fuel + ' carburant, ' + ok1.row.plan.nCor + ' tronçons' : ok1.why} · monde d'un autre : ${ko1.why} · destination hors des ports : ${ko2.why}`);
+// 4. le jeu (assets/zones_test.js) nomme les corridors et les ports du réseau comme NET : la conversion « route → corridor » en dépend
+const bridge = readFileSync(path.join(ROOT, 'github_upload/assets/zones_test.js'), 'utf8');
+const cors = JSON.parse(bridge.match(/const CORRIDORS = (\[[^\n]*?\]);/)[1].replace(/(\w+):/g, '"$1":').replace(/'/g, '"'));
+const ports = JSON.parse(bridge.match(/const NET_PORTS = (\[[^\]]*\])/)[1].replace(/'/g, '"'));
+const netPorts = V.NET.nodes.filter(n => n.type === 'station').map(n => n.key);
+rec('JEU', JSON.stringify(cors) === JSON.stringify(V.NET.corridors.map(c => ({ id: c.id, name: c.name }))) && JSON.stringify(ports) === JSON.stringify(netPorts), `le jeu connaît les ${cors.length} corridors (mêmes ids, mêmes noms) et les ${ports.length} ports du réseau`);
 const bad = R.filter(r => !r.ok).length; console.log(bad ? `\n${bad} échec(s)` : `\nvoyage_core : ${R.length}/${R.length}`); process.exit(bad ? 1 : 0);

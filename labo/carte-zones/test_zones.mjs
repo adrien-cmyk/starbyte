@@ -5,6 +5,7 @@
 // 2. Compte de test (localhost = même règle que le panneau de triche) : région, sondage, résultat, Légère, rechargement.
 import { createServer } from 'node:http';
 import { readFile, stat, mkdir } from 'node:fs/promises';
+import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -17,6 +18,9 @@ const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; cha
 const serve = () => new Promise(res => { const s = createServer(async (q, r) => { try { let p = decodeURIComponent(new URL(q.url, 'http://x').pathname); if (p.endsWith('/')) p += 'index.html'; const f = path.join(DIR, p); const st = await stat(f).catch(() => null); if (!st || !st.isFile()) { r.writeHead(404); return r.end(); } r.writeHead(200, { 'Content-Type': MIME[path.extname(f).toLowerCase()] || 'application/octet-stream', 'Cache-Control': 'no-store' }); r.end(await readFile(f)); } catch (e) { r.writeHead(500); r.end(String(e)); } }); s.listen(0, '127.0.0.1', () => res(s)); });
 const R = []; const rec = (id, ok, note) => { R.push({ id, ok, note }); console.log((ok ? '✓' : '✗') + ' ' + id.padEnd(9) + ' ' + note); };
 const sleep = ms => new Promise(r => setTimeout(r, ms));
+// étape 4 : le module pur des voyages (celui du serveur) et la logique pure de la fonction `voyage`, rejouée sans base
+const V = await import(path.resolve(here, '..', '..', 'src', 'voyage_core.js'));
+const VS = (() => { const src = readFileSync(path.resolve(here, '..', '..', 'github_upload', 'server', 'voyage', 'index.ts'), 'utf8'); const pure = src.slice(src.indexOf('// ── logique pure'), src.indexOf('// ── fin de la logique pure')).replace(/(\w|\)): any\b/g, '$1'); return new Function('V', pure + '\nreturn { planLaunch };')(V); })();
 
 const srv = await serve(); const port = srv.address().port; await mkdir(SHOTS, { recursive: true });
 const browser = await chromium.launch({ executablePath: process.env.CHROME || '/usr/bin/google-chrome', headless: true, args: ['--no-sandbox', '--use-gl=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist', '--host-resolver-rules=MAP play.test 127.0.0.1'] });
@@ -189,6 +193,35 @@ async function newGame(p, url, planet) {
     Z.atlasTap(innerWidth / 2 + 40, innerHeight * .3); await new Promise(r => setTimeout(r, 400)); return { before, sel: Z.zj.sel && Z.zj.sel.type, zone: Z.zj.sel && Z.zj.sel.zone, view: Z.zj.view, lvl: Z.pres().level }; });
   await p.screenshot({ path: path.join(SHOTS, '0j_atlas_vide_zone.png') });
   rec('MIG-VIDE', v1.sel === 'zone' && !!v1.zone && v1.view === 'zone', `Atlas, voisinage : toucher le vide → ${v1.sel} ${v1.zone} (fiche ${v1.view}, présentation ${v1.lvl})`);
+  // étape 4 : route connue → corridor connu ; itinéraires sans « essai » ; « Lancer ce trajet » → composition du jeu → voyage fixé par le serveur
+  await p.exposeFunction('sbVoyageTest', body => { const r = VS.planLaunch(body, { address: body.origin, colonies: [] }, Date.now()); return r.ok ? { ok: true, voyage: { id: 'v-test-' + r.row.mission_id.slice(-4), ...r.row, departed_at: new Date(r.row.departed_at).toISOString(), arrives_at: new Date(r.row.arrives_at).toISOString() } } : { ok: false, error: r.why }; });
+  const vy0 = await p.evaluate(sys => { SBZones.voyageTransport(b => window.sbVoyageTest(b)); SBLines.ensureRoute(sys); G.fleet.stationed.tanker = { t1: 3, t2: 0, t3: 0 }; G.fuel = 500; saveGame();
+    const r = (G.routes || []).find(x => x.portSys === sys); return { route: r && r.name, home: (SBZones.state().worlds.find(w => w.id === 'home') || {}).coord }; }, crownSys);
+  await MF.evaluate(() => STARBYTE_ZONES.refresh(true)); await sleep(700);
+  await p.evaluate(sys => openOnMap('system', sys), crownSys); await sleep(2500);
+  await MF.evaluate(() => { const b = document.querySelector('#zj-sh-foot [data-a="cor-obj"]'); if (b) b.click(); }); await sleep(1500);
+  const vy1 = await MF.evaluate(() => { const S = STARBYTE_ZONES; return { known: S.zj.snap.corKnown, kind: (document.querySelector('#zj-sh-body .zj-kind') || {}).textContent, body: document.getElementById('zj-sh-body').innerText.replace(/\s+/g, ' '), launch: !!document.querySelector('#zj-sh-foot [data-a="g-voyage"]'), plans: S.corState().plans }; });
+  await p.screenshot({ path: path.join(SHOTS, '0k_itineraires_port.png') });
+  const vq = V.voyageOptions(vy0.home, crownSys, 1, vy1.known || []);
+  const vpar = (vy1.plans || []).length === vq.plans.length && vq.plans.every(b => { const a = vy1.plans.find(x => x.k === b.k); return a && Math.abs(a.len - b.len) < 1e-6 && Math.abs(a.test - b.test) < 1e-9 && a.fuel === b.fuel; });
+  await MF.evaluate(() => { const b = document.querySelector('#zj-sh-foot [data-a="g-voyage"]'); if (b) b.click(); }); await sleep(1500);
+  const vy2 = await p.evaluate(() => { const ov = document.getElementById('commerce-sheet-overlay'); const shown = !!(ov && ov.classList.contains('shown')); const before = G.fuel; onLaunchTankerOnRouteClick(); const m = G.tankerMissions[G.tankerMissions.length - 1]; return { shown, before, id: m && m.id, local: m && (m.arrivalAt - m.departedAt) }; });
+  await sleep(2500);
+  const vy3 = await p.evaluate(id => { const m = G.tankerMissions.find(x => x.id === id); try { const ov = document.getElementById('commerce-sheet-overlay'); if (ov) ov.classList.remove('shown'); } catch (e) {} return m && { v: m.voyage, dur: m.arrivalAt - m.departedAt, fuel: m.fuelCost, gfuel: G.fuel, copie: !!(G.atlasCarte.copie4 && G.atlasCarte.copie4.routes), known: G.atlasCarte.cor && G.atlasCarte.cor.known }; }, vy2.id);
+  const vp = vq.plans.find(x => x.k === (vy3 && vy3.v && vy3.v.pick));
+  await MF.evaluate(id => { STARBYTE_ZONES.refresh(true); }, vy2.id); await sleep(800);
+  const vy4 = await MF.evaluate(id => { STARBYTE_ZONES.selectTravel('tk:' + id); return document.getElementById('zj-sh-body').innerText.replace(/\s+/g, ' '); }, vy2.id);
+  await p.screenshot({ path: path.join(SHOTS, '0l_voyage_serveur.png') });
+  rec('MIG-VOYAGE', vy0.route === 'La Saigne de la Couronne' && (vy1.known || []).includes('C5') && /^ITINÉRAIRES$/.test(vy1.kind || '') && !/essai/i.test(vy1.body) && vy1.launch && vpar && vy2.shown && vy3 && vy3.v && vy3.v.st === 'server' && vp && vy3.dur === Math.round(vp.test * 60000) && vy3.fuel === vp.fuel && Math.abs(vy3.gfuel - (vy2.before - vp.fuel)) <= 3 && vy3.copie && /Voyage fixé par le serveur/.test(vy4),
+    `route « ${vy0.route} » → corridors connus ${JSON.stringify(vy1.known)} (copie des routes gardée ${vy3 && vy3.copie}) · fiche « ${vy1.kind} », sans « essai » ${!/essai/i.test(vy1.body)}, devis de la carte = devis du serveur ${vpar} · composition du jeu ouverte ${vy2.shown} · voyage ${vy3 && vy3.v && vy3.v.st} (${vy3 && vy3.v && vy3.v.pick}) : ${vy3 && Math.round(vy3.dur / 1000)} s au lieu de ${Math.round(vy2.local / 1000)} s, ${vy3 && vy3.fuel} carburant (stock ${vy2.before} → ${vy3 && vy3.gfuel}) · fiche de la mission : « ${(vy4.match(/Voyage fixé[^.]*\./) || [''])[0]} »`);
+  // le service pas encore installé : le tanker part quand même, avec les horaires du jeu, et la carte le dit
+  await p.evaluate(() => SBZones.voyageTransport(async () => ({ ok: false, error: 'not_deployed' })));
+  await MF.evaluate(() => { const r = window.parent.SBZones.gameAct('voyage', { port: STARBYTE_ZONES.zj.cor.ctx.D.key, pick: 'libre' }); return r; });
+  await sleep(800);
+  const vy5 = await p.evaluate(() => { onLaunchTankerOnRouteClick(); const m = G.tankerMissions[G.tankerMissions.length - 1]; return m && m.id; }); await sleep(1500);
+  const vy6 = await p.evaluate(id => { const m = G.tankerMissions.find(x => x.id === id); try { document.getElementById('commerce-sheet-overlay').classList.remove('shown'); } catch (e) {} return m && { v: m.voyage, dur: m.arrivalAt - m.departedAt }; }, vy5);
+  rec('MIG-VOYAGE-SANS', vy6 && vy6.v && vy6.v.st === 'local' && vy6.v.why === 'not_deployed' && vy6.dur >= 5 * 60000 * .5, `service pas installé : le tanker part (${vy6 && Math.round(vy6.dur / 60000)} min, horaires du jeu), voyage « ${vy6 && vy6.v && vy6.v.st} » (${vy6 && vy6.v && vy6.v.why})`);
+  await p.evaluate(() => SBZones.voyageTransport(null));
   await p.evaluate(() => goto('planet')); await sleep(1500);
   const m6 = await p.evaluate(() => !!document.getElementById('sb-atlas-wrap'));
   // la marque survit au rechargement (la capitale de l'essai n'est plus lue : c'est la sauvegarde qui fait foi)
@@ -500,7 +533,7 @@ rec('MODEL-01b', ms.obs && ms.obs.st === 'ok' && ms.obs.isModel && ms.obs.meshes
 // comparaison depuis la capitale vers chaque station du réseau : accès, corridor, sortie ; longueurs sur les courbes
 const cor = await F.evaluate(async () => { const S = STARBYTE_ZONES, out = [], keys = ['A-O-8715', 'A-N-8096', 'A-N-1556', 'A-K-4227', 'A-M-3340', 'A-L-8388'];
   for (const k of keys) { const o = S.objects().find(o => o.type === 'station' && o.key === k); if (!o || !S.corCompare('obj', o.id)) continue; const st = S.corState(); out.push({ k, plans: st.plans, D: o.p }); }
-  return { out, net: S.corState().net, par: S.corParams() }; });
+  return { out, net: S.corState().net, par: S.corParams(), origin: S.zj.cor.ctx && S.zj.cor.ctx.O.key }; });
 let c3 = true, c4 = true, c5 = true, c3n = 0, wins = 0, ex = null;
 for (const r of cor.out) { const d = r.plans[0]; for (const x of r.plans) {
   const sumL = x.legs.reduce((a, l) => a + l.len, 0), sumM = x.legs.reduce((a, l) => a + l.min, 0); if (Math.abs(sumL - x.len) > .01 || Math.abs(sumM - x.min) > 1e-6 || Math.abs(x.test - Math.max(x.min, cor.par.Lmin / cor.par.v) / cor.par.season) > 1e-6) c3 = false;   // un seul devis : toutes les phases comptées
@@ -508,6 +541,10 @@ for (const r of cor.out) { const d = r.plans[0]; for (const x of r.plans) {
   if (x.k === 'cor') { c3n++; const L0 = x.legs[0], Ln = x.legs[x.legs.length - 1]; if (L0.t !== 'free' && L0.a !== '@O') c3 = false; if (Ln.t !== 'free' && Math.hypot(Ln.p1[0] - r.D[0], Ln.p1[1] - r.D[1], Ln.p1[2] - r.D[2]) > .01) c3 = false; if (x.min < d.min) wins++; if (!ex) ex = { k: r.k, x, d }; }
   for (const l of x.legs) if (l.t === 'cor' && !(l.len >= Math.hypot(l.p1[0] - l.p0[0], l.p1[1] - l.p0[1], l.p1[2] - l.p0[2]) - 1e-6)) c4 = false; } }
 rec('COR-03', c3 && c3n > 0, `${cor.out.length} ports comparés depuis la capitale, ${c3n} itinéraires par corridors : accès en vol libre, corridors, sortie en vol libre (nulle quand le port est sur le réseau), un seul devis (longueur, durée, carburant = somme des phases)${ex ? ' · ex. ' + ex.k + ' : ' + ex.x.legs.map(l => (l.t === 'cor' ? l.e : 'libre') + ' ' + l.len.toFixed(0)).join(' → ') + ' u, ' + ex.x.test.toFixed(1) + ' min d’essai contre ' + ex.d.test.toFixed(1) + ' en direct' : ''}`);
+{ let par = true, n = 0, worst = 0; const sig = legs => legs.map(l => l.a + '>' + l.b + (l.e ? ':' + l.e : '')).join('|');
+  for (const r of cor.out) { const o = V.voyageOptions(cor.origin, r.k, 1, null); for (const k of ['libre', 'cor']) { const a = r.plans.find(x => x.k === k), b = o.plans.find(x => x.k === k); if (!a && !b) continue; if (!a || !b) { par = false; continue; } n++;
+    worst = Math.max(worst, Math.abs(a.len - b.len), Math.abs(a.test - b.test)); if (Math.abs(a.len - b.len) > 1e-6 || Math.abs(a.test - b.test) > 1e-9 || a.fuel !== b.fuel || sig(a.legs) !== sig(b.legs) || a.best !== b.best) par = false; } }
+  rec('COR-PARITE', par && n >= 6, `${n} itinéraires depuis ${cor.origin} : l'Atlas et le module du serveur donnent la même longueur, la même durée, le même carburant et les mêmes tronçons (écart maximal ${worst.toExponential(1)})`); }
 rec('COR-04', c4 && cor.net && cor.net.len > cor.net.chord, `réseau : ${cor.net.cors} corridors, ${cor.net.edges} tronçons, ${cor.net.len.toFixed(0)} u mesurés sur les courbes (cordes : ${cor.net.chord.toFixed(0)} u) ; chaque tronçon est facturé à sa longueur courbe`);
 rec('COR-05', c5, `les itinéraires ne changent de corridor qu’aux nœuds du réseau (stations, jonctions J1, J2) ; deux tracés qui se croisent ne créent aucune correspondance`);
 // gros plan : le réseau s'efface (aucun retour à l'enchevêtrement)

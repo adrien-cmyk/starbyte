@@ -25,7 +25,7 @@
   if (window.EXTRA_SAVE_KEYS && EXTRA_SAVE_KEYS.indexOf('zoneProspect') < 0) EXTRA_SAVE_KEYS.push('zoneProspect');
 
   const PAGE = 'atlas/index.html';
-  const PAGE_V = '42961bfc93';   // empreinte de atlas/index.html, écrite par labo/carte-zones/build.py
+  const PAGE_V = 'c1a6ce8ec5';   // empreinte de atlas/index.html, écrite par labo/carte-zones/build.py
   const GRID = 'tac-2';
   const MIN = 60e3;
   const SB = 'https://elupnpdcblztpfywnhjl.supabase.co';
@@ -143,13 +143,15 @@
     const TK = { in_transit: 'En route', exploring: 'En exploration', docked: 'À quai', returning: 'Retour', orbital_relay: 'En orbite', posted: 'En poste' };   // étape 3 : ambassade et poste
     for (const m of G.tankerMissions || []) {
       if (!m || !TK[m.status]) continue;
-      const to = addrOf(m.targetCoords), via = (Array.isArray(m.via) ? m.via : []).map(addrOf).filter(Boolean);
+      const vy = m.voyage && m.voyage.st === 'server' ? m.voyage : null;
+      const to = addrOf(m.portSys || m.targetCoords), via = (vy ? vy.via : Array.isArray(m.via) ? m.via : []).map(addrOf).filter(Boolean);
       const ph = [{ dir: 'out', t0: m.departedAt, t1: m.arrivalAt }];
       if (m.status === 'docked') ph.push({ dir: 'stay', t0: m.arrivalAt, t1: m.dockStay && m.dockStay.endsAt || null });
       if (m.status === 'orbital_relay' || m.status === 'posted') ph.push({ dir: 'stay', t0: m.arrivalAt, t1: null });
       if (m.status === 'returning') { const t1 = m.returnArrivalAt || m.arrivalAt, t0 = m.returnDepartedAt || m.cancelledAt || Math.max(m.departedAt, t1 - (m.arrivalAt - m.departedAt)); ph.push({ dir: 'back', t0, t1 }); }
       out.push({ id: 'tk:' + m.id, kind: 'tanker', name: m.tankerName || 'Tanker', tier: m.tier || null, fuel: typeof m.fuelCost === 'number' ? m.fuelCost : null, envoy: m.bmEnvoy && /^[a-z0-9-]{2,40}$/.test(String(m.bmEnvoy.item || '')) ? { item: m.bmEnvoy.item, name: m.bmEnvoy.name || '' } : null, world: m.world || 'home', from: coordOf(m.world), to, via, toLabel: m.targetLabel || m.routeName || '',
-        route: m.kind === 'route_run' ? (via.length ? 'ligne' : 'route') : 'direct', mkind: m.kind || 'cible', status: m.status, statusLabel: TK[m.status], phases: ph,
+        route: vy ? (vy.pick === 'cor' ? 'corridors' : 'direct') : m.kind === 'route_run' ? (via.length ? 'ligne' : 'route') : 'direct', mkind: m.kind || 'cible',
+        voyage: m.voyage ? { st: m.voyage.st, why: m.voyage.why || null, nCor: m.voyage.nCor || 0, net: m.voyage.net || null, cors: m.voyage.cors || [] } : null, status: m.status, statusLabel: TK[m.status], phases: ph,
         stayLabel: m.status === 'orbital_relay' ? 'En orbite' + (m.mpTarget && m.mpTarget.pseudo ? ' chez ' + String(m.mpTarget.pseudo).slice(0, 24) : '') : m.status === 'posted' ? 'En poste' : null });
     }
     for (const m of G.probeMissions || []) {
@@ -215,7 +217,7 @@
     }));
     let tr = []; try { tr = travels(); } catch (e) { console.warn('[zones] missions', e); }
     const kn = migrated() ? known() : null;   // compte migré : les ports et les routes que la partie connaît, les systèmes balayés et leurs marques
-    return { now, active: G.activeWorld || 'home', worlds: ws, hangars: hang, ranges, zp: JSON.parse(JSON.stringify(z)), missions, sigs, travels: tr, mig: migrated(), ports: kn ? kn.ports : null, routes: kn ? kn.routes : null, systems: kn ? kn.systems : null, tags: kn ? kn.tags : null, cmd: kn ? kn.cmd : null, hosted: kn ? kn.hosted : null, incoming: kn ? kn.incoming : null, posts: kn ? kn.posts : null, beacons: kn ? beacons() : null, nav: kn ? navState() : null };
+    return { now, active: G.activeWorld || 'home', worlds: ws, hangars: hang, ranges, zp: JSON.parse(JSON.stringify(z)), missions, sigs, travels: tr, mig: migrated(), ports: kn ? kn.ports : null, routes: kn ? kn.routes : null, systems: kn ? kn.systems : null, tags: kn ? kn.tags : null, cmd: kn ? kn.cmd : null, corKnown: kn ? corKnown() : null, netPorts: kn ? NET_PORTS : null, hosted: kn ? kn.hosted : null, incoming: kn ? kn.incoming : null, posts: kn ? kn.posts : null, beacons: kn ? beacons() : null, nav: kn ? navState() : null };
   }
 
   /* ── région de test : écrite une seule fois par la carte (contenu fixe) ── */
@@ -530,7 +532,76 @@
   function showNewMap(sel) { oldMap = false; const s = scrP(); const bar = s && s.querySelector('.sb-old-bar'); if (bar) bar.remove(); mountAtlas(); if (sel) focusAtlas(sel); }
   // les entrées du jeu vers l'ancienne carte passent par la nouvelle
   let origRender = null, origSelect = null, origFlight = null, origGoto = null;
+  // ═══ Étape 4 : voyages fixés par le serveur, corridors connus ═══
+  // Le réseau candidat (mêmes ids et mêmes noms que NET dans l'Atlas et src/voyage_core.js : tools/test_voyage.mjs le vérifie)
+  const CORRIDORS = [{ id: 'C1', name: 'La Vieille Voie du Linceul' }, { id: 'C2', name: 'La Piste des Glaces' }, { id: 'C3', name: 'La Voie Noire' }, { id: 'C4', name: 'La Route des Gardiens' }, { id: 'C5', name: 'La Saigne de la Couronne' }, { id: 'C6', name: 'La Ligne du Regard' }];
+  const NET_PORTS = ['A-O-8715', 'A-N-8096', 'A-N-1556', 'A-K-4227', 'A-M-3340', 'A-L-8388'];   // les stations du réseau : seules destinations des voyages serveur
+  // décision du 12/11 : chaque route connue (G.routes) devient la connaissance du corridor du même nom. Rien n'est retiré :
+  // les routes restent dans la partie. Une copie de ce qu'elles étaient est gardée dans la sauvegarde avant la conversion.
+  function corKnown() {
+    const A = G.atlasCarte; if (!A) return [];
+    const names = new Set((G.routes || []).filter(r => r && r.status !== 'collapsed').map(r => r.name));
+    const now = CORRIDORS.filter(c => names.has(c.name)).map(c => c.id), prev = (A.cor && A.cor.known) || [];
+    const all = [...new Set([...prev, ...now])].filter(id => CORRIDORS.some(c => c.id === id));
+    if (!A.etapes) A.etapes = {};
+    if (!A.etapes.corridors || all.length !== prev.length) {
+      if (!A.copie4) A.copie4 = { at: Date.now(), routes: (G.routes || []).map(r => ({ id: r.id, name: r.name, portSys: r.portSys || null, status: r.status || null })) };
+      A.cor = { known: all, from: Object.fromEntries(all.map(id => { const c = CORRIDORS.find(x => x.id === id), r = (G.routes || []).find(x => x.name === c.name); return [id, r ? r.id : null]; })), at: Date.now() };
+      if (!A.etapes.corridors) A.etapes.corridors = Date.now();
+      save();
+    }
+    return all;
+  }
+  const VOYAGE_URL = 'https://elupnpdcblztpfywnhjl.supabase.co/functions/v1/voyage', VOYAGE_KEY = 'sb_publishable_tXGrQIROzH2DwBrny1GcHQ_iKJKoBOQ';
+  let voyageTransport = null;   // tests : remplace l'appel réseau (la logique serveur est rejouée dans le test) ; jamais utilisé par le jeu
+  async function voyageCall(body, timeoutMs) {
+    if (voyageTransport) { try { return await voyageTransport(body); } catch (e) { return { ok: false, error: 'offline' }; } }
+    let tok = null; try { const a = JSON.parse(localStorage.getItem('starbyte_auth') || 'null'); tok = a && (a.access_token || (a.currentSession && a.currentSession.access_token)); } catch (e) {}
+    if (!tok) return { ok: false, error: 'not_signed_in' };
+    const ctl = typeof AbortController === 'function' ? new AbortController() : null, timer = setTimeout(() => { try { ctl && ctl.abort(); } catch (e) {} }, timeoutMs || 10000);
+    try {
+      const res = await fetch(VOYAGE_URL, { method: 'POST', headers: { 'Content-Type': 'application/json', apikey: VOYAGE_KEY, Authorization: 'Bearer ' + tok }, body: JSON.stringify(body), signal: ctl ? ctl.signal : undefined });
+      if (res.status === 404) return { ok: false, error: 'not_deployed' };
+      let j = null; try { j = await res.json(); } catch (e) {}
+      return j && typeof j === 'object' ? j : { ok: false, error: 'http_' + res.status };
+    } catch (e) { return { ok: false, error: 'offline' }; }
+    finally { clearTimeout(timer); }
+  }
+  const VOYAGE_WHY = { not_deployed: 'le service des voyages n’est pas encore installé au serveur', not_signed_in: 'partie non reliée au cloud', offline: 'serveur injoignable', origin_not_yours: 'monde de départ inconnu du registre', not_a_port: 'port hors du réseau', rate: 'trop de voyages cette heure-ci', address: 'adresse refusée', mission: 'mission refusée' };
+  let pendingVoyage = null;
+  // le tanker est parti (composition et confirmation habituelles du jeu) : le serveur fixe son chemin, ses horaires et son carburant
+  async function voyageLaunch(m, pv) {
+    const wcoord = (worlds().find(w => w.id === (m.world || 'home')) || {}).coord;
+    m.voyage = { st: 'pending', pick: pv.pick, at: Date.now() }; save(); notify();
+    const r = await voyageCall({ action: 'launch', origin: wcoord, dest: pv.port, tier: m.tier, pick: pv.pick, mission: m.id, known: corKnown() });
+    const mm = (G.tankerMissions || []).find(x => x && x.id === m.id); if (!mm) return;
+    if (!r || !r.ok || !r.voyage) {
+      mm.voyage = { st: 'local', pick: pv.pick, why: String((r && r.error) || 'offline').slice(0, 40), at: Date.now() }; save(); notify();
+      try { toast(`${mm.tankerName} part avec les horaires du jeu : ${VOYAGE_WHY[mm.voyage.why] || mm.voyage.why}`); } catch (e) {}
+      return;
+    }
+    const v = r.voyage, dep = Date.parse(v.departed_at), arr = Date.parse(v.arrives_at), plan = v.plan || {};
+    if (mm.status === 'in_transit' && dep && arr > dep) { mm.departedAt = dep; mm.arrivalAt = arr; }
+    const fuel = Math.max(0, Math.round(Number(v.fuel) || 0)), diff = (mm.fuelCost || 0) - fuel;   // le jeu avait débité le coût d'aujourd'hui : on rend, ou on prend, la différence
+    G.fuel = Math.max(0, (G.fuel || 0) + diff); mm.fuelCost = fuel;
+    mm.voyage = { st: 'server', id: String(v.id || '').slice(0, 40), net: String(v.net_version || '').slice(0, 40), pick: v.pick === 'libre' ? 'libre' : 'cor', len: Math.round(plan.len || 0), nCor: plan.nCor | 0,
+      via: (Array.isArray(plan.via) ? plan.via : []).filter(k => SYS_RE.test(k)).slice(0, 24), cors: [...new Set((plan.legs || []).map(l => l && l.cor).filter(Boolean))].slice(0, 8), at: Date.now() };
+    save(); notify();
+    try { toast(`${mm.tankerName} : voyage fixé par le serveur · arrivée ${new Date(mm.arrivalAt).toLocaleTimeString('fr-CH', { hour: '2-digit', minute: '2-digit' })} · ${fuel} carburant`); } catch (e) {}
+  }
+  function hookVoyage() {
+    if (typeof window.launchTankerOnRoute !== 'function' || window.launchTankerOnRoute._voyageHook) return;
+    const orig = window.launchTankerOnRoute;
+    const h = function (routeId, tierKey, cargo, envoyIn) {
+      const pv = pendingVoyage, route = (G.routes || []).find(r => r && r.id === routeId);
+      const m = orig.apply(this, arguments);
+      try { if (m && pv && !envoyIn && migrated() && route && route.portSys === pv.port && Date.now() - pv.at < 15 * 60000) { pendingVoyage = null; voyageLaunch(m, pv); } } catch (e) { console.warn('[carte] voyage', e); }
+      return m;
+    };
+    h._voyageHook = true; window.launchTankerOnRoute = h;
+  }
   function hookGame() {
+    if (migrated()) hookVoyage();
     if (window.SBMap && !SBMap._atlasHook) {
       origRender = SBMap.render; origSelect = SBMap.select; origFlight = SBMap.showFlight;
       SBMap.render = function () { if (migrated() && !oldMap) { if (onProspect()) mountAtlas(); return; } return origRender.apply(this, arguments); };
@@ -661,6 +732,14 @@
     if (kind === 'garrison-recall' || kind === 'fleet') { const id = String(arg || ''); const f = ((G.fleet && G.fleet.prepared) || []).find(x => x && String(x.id) === id); if (!f) return { ok: false, why: 'Flotte introuvable.' };
       if (kind === 'fleet') { if (typeof openFleetDetail !== 'function') return { ok: false, why: 'Indisponible.' }; openFleetDetail(f.id); return { ok: true }; }
       if (typeof mpGarrisonRecall !== 'function') return { ok: false, why: 'Indisponible.' }; Promise.resolve(mpGarrisonRecall(f.id)).then(() => { save(); notify(); }).catch(() => notify()); return { ok: true }; }
+    if (kind === 'voyage') {
+      const port = String(arg && arg.port || ''), pick = arg && arg.pick === 'libre' ? 'libre' : 'cor';
+      if (!NET_PORTS.includes(port)) return { ok: false, why: 'Ce port n’est pas sur le réseau.' };
+      const route = (G.routes || []).find(r => r && r.portSys === port && r.status !== 'collapsed');
+      if (!route) return { ok: false, why: 'Route inconnue : découvre d’abord ce port.' };
+      if (typeof openTankerComposeForRoute !== 'function') return { ok: false, why: 'Envoi indisponible.' };
+      hookVoyage(); pendingVoyage = { port, pick, at: Date.now() }; openTankerComposeForRoute(route.id); return { ok: true };
+    }
     if (kind === 'fleet-screen') { if (typeof goto === 'function') goto('fleet'); return { ok: true }; }
     if (kind === 'tab') { if (!/^(sondes|missions|rapports|carnet|archives)$/.test(String(arg))) return { ok: false, why: 'Onglet inconnu.' }; window.setProspectTab(arg); return { ok: true }; }
     if (kind === 'beacon-place') {
@@ -696,7 +775,7 @@
   }
 
   window.SBZones = {
-    allowed, why, open, close, state, saveRegion, launch, arrive, act, check, peek, models, migrated, pilot, known, gameAct, beaconCheck, showOldMap, showNewMap, embedded: () => !!frameWrap, sigAction: (id, wid) => sigAction((G.signatures || {})[id], wid),
+    allowed, why, open, close, state, saveRegion, launch, arrive, act, check, peek, models, migrated, pilot, known, gameAct, beaconCheck, voyageTransport: (fn) => { voyageTransport = typeof fn === 'function' ? fn : null; }, showOldMap, showNewMap, embedded: () => !!frameWrap, sigAction: (id, wid) => sigAction((G.signatures || {})[id], wid),
     onChange(f) { listeners.add(f); return () => listeners.delete(f); },
     grid: GRID,
   };
