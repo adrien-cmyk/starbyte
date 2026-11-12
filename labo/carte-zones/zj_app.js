@@ -641,8 +641,9 @@ function zjFocusGame(sel){if(!sel||!zjBooted)return false;if(zj.peek)zjPeekStop(
  const p=sys&&zjAddrPos(sys);if(!p)return false;if(zj.mode!=='tac')zjSetMode('tac');zj.k=tacLayerOf(p[1]);zjSelectZone(zoneOfPoint(p));zjCenterOn(p,true);return true}
 function zjSysHtml(o){const k=o.k,z=zoneParse(o.zone),tag=o.tag;
  let h='<div class="zj-kind">'+(k.unknown?'SYSTÈME':'SYSTÈME BALAYÉ')+(tag==='star'?' · INTÉRESSANT':tag==='skip'?' · SANS INTÉRÊT':'')+'</div><h3>'+zjEsc(o.key)+'</h3><dl class="zj-dl"><dt>Zone</dt><dd>'+zjEsc(z.q+' · '+z.r+' · '+zjCtxShort(z.k))+'</dd>'+(k.at?'<dt>Balayé</dt><dd>'+zjEsc(zjDate(k.at))+'</dd>':'')+'</dl>';
- const pl=(k.planets||[]).slice().sort((a,b)=>(a.slot||0)-(b.slot||0));
- if(pl.length){h+='<div class="zj-kind" style="margin-top:10px">EMPLACEMENTS</div>';for(const p of pl)h+='<button class="zj-row" data-a="act" data-k="planet" data-x="'+zjEsc(p.coord)+'" data-w="'+zjEsc(zj.origin)+'"><b>'+zjEsc(String(p.slot==null?'':p.slot).padStart(2,'0')+' · '+(p.player?p.player+(p.bot?' (automate)':''):p.name))+'</b><small>'+zjEsc((p.desc?p.desc+' · ':'')+p.coord)+'</small></button>'}
+ const slotOf=p=>p.slot!=null&&p.slot!==''?+p.slot:+((String(p.coord||'').match(/-(\d{1,2})$/)||[])[1]||0);   // le numéro d'emplacement, sinon celui de l'adresse
+ const pl=(k.planets||[]).slice().sort((a,b)=>slotOf(a)-slotOf(b));
+ if(pl.length){h+='<div class="zj-kind" style="margin-top:10px">EMPLACEMENTS</div>';for(const p of pl)h+='<button class="zj-row" data-a="act" data-k="planet" data-x="'+zjEsc(p.coord)+'" data-w="'+zjEsc(zj.origin)+'"><b>'+zjEsc(String(slotOf(p)).padStart(2,'0')+' · '+(p.player?p.player+(p.bot?' (automate)':''):p.name))+'</b><small>'+zjEsc((p.desc?p.desc+' · ':'')+p.coord)+'</small></button>'}
  else h+='<p class="zj-muted">'+(k.unknown?'Système pas encore balayé.':'Aucune planète relevée dans ce système.')+'</p>';
  h+=zjBeaconHtml(o.key)+zjPostsHtml(o.key);
  if(o.cmd)h=zjCmdHtml(o)+h.replace('<div class="zj-kind">','<div class="zj-kind" style="margin-top:14px">');
