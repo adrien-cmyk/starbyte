@@ -1398,7 +1398,7 @@ function zjCorDrawTac(c,sx,sy,y0,y1,lines){const g=zj.cor.on&&zjCorGraph();if(!g
  for(const cr of g.cors)strokePath(cr.pts,ZJ_COR_RGB[cr.cls]||'220,220,255',2,false);
  const x=zj.cor.plans&&zj.cor.plans[zj.cor.pick];if(x)strokePath(x.pl.pts,'255,255,255',3,true);
  const se=zj.sel&&zj.sel.type==='seg'&&g.edges.find(e=>e.id===zj.sel.id);if(se)strokePath(se.pts,'255,255,255',3.4,true);
- if(lines)for(const e of g.edges)for(let j=1;j<e.pts.length;j++){const a=e.pts[j-1],b=e.pts[j];if(!inL(a[1])&&!inL(b[1]))continue;lines.push({x1:sx(a[0]),y1:sy(a[2]),x2:sx(b[0]),y2:sy(b[2]),o:{type:'seg',id:e.id}})}
+ if(lines)for(const e of g.edges)for(let j=1;j<e.pts.length;j++){const a=e.pts[j-1],b=e.pts[j];lines.push({x1:sx(a[0]),y1:sy(a[2]),x2:sx(b[0]),y2:sy(b[2]),o:{type:'seg',id:e.id}})}
  c.setLineDash([]);c.textAlign='left';c.textBaseline='middle';
  for(const n of Object.values(g.nodes)){if(!inL(n.p[1])||n.type==='station')continue;const X=sx(n.p[0]),Y=sy(n.p[2]);   // les stations ont déjà leur repère
   if(n.type==='jonction'){c.fillStyle='#0b0c1c';c.strokeStyle='#ddd0ff';c.lineWidth=2;c.beginPath();c.rect(X-5,Y-5,10,10);c.fill();c.stroke();c.fillStyle='#ddd0ff';c.font='600 10px system-ui';c.fillText(n.id,X+8,Y)}
