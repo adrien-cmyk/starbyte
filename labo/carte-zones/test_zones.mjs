@@ -40,16 +40,51 @@ async function newGame(p, url, planet) {
     const m = launchProbe('radar', MY_ADDRESS.cluster + '-' + MY_ADDRESS.sector + '-' + String(MY_ADDRESS.system).padStart(4, '0'), 'local', false);
     if (m) { m.arrivalAt = Date.now() - 1; tickProbes(); }
     const rep = (G.probeReports || [])[0];
-    return { allowed: SBZones.allowed(), btn: !!document.getElementById('sb-zones-btn'), overlay: !!document.getElementById('sb-zones-overlay'), saved: 'zoneProspect' in snap, gz: G.zoneProspect === undefined,
+    return { allowed: SBZones.allowed(), btn: !!document.getElementById('sb-zones-btn'), overlay: !!document.getElementById('sb-zones-overlay'), saved: 'zoneProspect' in snap || 'atlasCarte' in snap, gz: G.zoneProspect === undefined && G.atlasCarte === undefined && !SBZones.migrated(),
       radar: { before: pool, after: G.probesPool.filter(x => x.tier === 'radar').length, report: rep && rep.tier === 'radar' && !rep.zone } };
   });
   rec('JOUEUR', !r.allowed && !r.btn && !r.overlay && !r.saved && r.gz && r.radar.report && r.radar.after === r.radar.before - 1,
     `compte ordinaire (capitaine nommé « Hadrien » dans la partie) : accès ${r.allowed}, bouton ${r.btn}, carte ouverte par ?zones ${r.overlay}, clé dans la sauvegarde ${r.saved} ; une Radar normale part et revient par le chemin habituel (${r.radar.before} → ${r.radar.after} Radars, rapport classique ${r.radar.report})`);
   // 10/11 soir : la capitale du compte de test (A-O-2178) suffit, même sans pseudo ni email lisibles sur l'appareil
   const g = await p.evaluate(async () => { MY_ADDRESS.cluster = 'A'; MY_ADDRESS.sector = 'O'; MY_ADDRESS.system = 2178; goto('prospect'); await new Promise(r => setTimeout(r, 2600));
-    const b = document.getElementById('sb-zones-btn'); return { why: SBZones.why(), btn: !!b, vis: !!(b && b.offsetParent), tools: [...document.querySelectorAll('#scr-prospect .smw-tools button')].filter(x => x.offsetParent).map(x => x.id || x.className || x.dataset.a) }; });
-  rec('CAPITALE', g.why === 'capitale' && g.btn && g.vis, `hors localhost, capitale A-O-2178 : accès « ${g.why} », bouton visible ${g.vis} (outils visibles : ${g.tools.join(', ')})`);
-  await p.screenshot({ path: path.join(SHOTS, '0_bouton_test.png') });
+    const b = document.getElementById('sb-zones-btn'); return { why: SBZones.why(), mig: SBZones.migrated(), flag: !!(G.atlasCarte && G.atlasCarte.v === 1), wrap: !!document.getElementById('sb-atlas-wrap'), rootHidden: getComputedStyle(document.getElementById('spacemap-root')).display === 'none', nav: !!document.querySelector('#scr-prospect .smw-nav'), btn: !!b, vis: !!(b && b.offsetParent), tools: [...document.querySelectorAll('#scr-prospect .smw-tools button')].filter(x => x.offsetParent).map(x => x.id || x.className || x.dataset.a) }; });
+  // 12/11 : la capitale du compte pilote (A-O-2178) bascule sa partie sur la nouvelle carte ; le bouton d'essai disparaît
+  rec('CAPITALE', g.why === 'capitale' && !g.btn && g.mig && g.flag && g.wrap && g.rootHidden && g.nav, `hors localhost, capitale A-O-2178 : accès « ${g.why} », partie migrée ${g.mig} (marque ${g.flag}), carte du Centre de prospection = nouvelle carte ${g.wrap}, ancienne cachée ${g.rootHidden}, barre du bas ${g.nav}, bouton d'essai ${g.btn}`);
+  await p.screenshot({ path: path.join(SHOTS, '0_centre_nouvelle_carte.png') });
+
+  // ═══ 1b. Bascule de la partie pilote (12/11, progressive) ═══
+  const crownSys = await p.evaluate(() => { const ds = STATION_UI.crown, sys = mpDockSystem({ id: ds.id }); G.hiddenPorts = G.hiddenPorts || {}; G.hiddenPorts[sys] = { dockId: ds.id, name: 'The Drifting Crown', typeLabel: 'Port franc' }; saveGame(); return sys; });
+  const frame = async () => { for (let i = 0; i < 80; i++) { const f = p.frames().find(f => /atlas\/index\.html.*in=jeu/.test(f.url())); if (f) { const ok = await f.evaluate(() => !!(window.STARBYTE_ZONES && STARBYTE_ZONES.ready && STARBYTE_ZONES.ready())).catch(() => false); if (ok) return f; } await sleep(500); } return null; };
+  let MF = await frame(); await sleep(1500);
+  const m1 = MF && await MF.evaluate(() => { const Z = STARBYTE_ZONES; Z.refresh(true); return { mig: Z.mig(), st: Z.objects().filter(o => o.type === 'station').map(o => o.key), kicker: (document.querySelector('#zj-sh-body .zj-kind') || {}).textContent, close: document.getElementById('zj-close').hidden, old: !![...document.querySelectorAll('#zj-sh-body button')].find(b => /Ancienne carte/.test(b.textContent)) }; });
+  const snapM = await p.evaluate(() => { saveGame(); const s = JSON.parse(localStorage.getItem('starbyte_savegame') || '{}'); return s.atlasCarte || null; });
+  rec('MIG-CARTE', m1 && m1.mig && m1.st.length === 1 && m1.st[0] === crownSys && /MA CARTE/.test(m1.kicker) && m1.close && m1.old && snapM && snapM.v === 1,
+    `nouvelle carte dans le Centre de prospection : « ${m1 && m1.kicker} », croix du jeu seule (${m1 && m1.close}), ports affichés = ports découverts dans la partie (${m1 && m1.st.join(', ')}), « Ancienne carte » à l'accueil ${m1 && m1.old} · marque sauvegardée ${JSON.stringify(snapM)}`);
+  // « Voir sur la carte » du jeu (rapports, carnet) passe par la nouvelle carte
+  await p.evaluate(sys => openOnMap('system', sys), crownSys); await sleep(2500);
+  const m2 = await MF.evaluate(() => ({ sel: STARBYTE_ZONES.zj.sel && STARBYTE_ZONES.zj.sel.id, foot: [...document.querySelectorAll('#zj-sh-foot button')].map(b => b.textContent.trim()) }));
+  rec('MIG-VISEE', m2.sel === 'st:' + crownSys && m2.foot.includes('Entrer dans le port') && m2.foot.includes('Ancienne carte ici'), `openOnMap('system', ${crownSys}) → ${m2.sel} · actions : ${m2.foot.join(' | ')}`);
+  await p.screenshot({ path: path.join(SHOTS, '0b_port_nouvelle_carte.png') });
+  // l'ancienne carte, au même endroit, puis retour
+  await MF.evaluate(() => { const b = [...document.querySelectorAll('#zj-sh-foot button')].find(b => /Ancienne carte ici/.test(b.textContent)); setTimeout(() => b.click(), 30); });
+  await sleep(4500);
+  const m3 = await p.evaluate(() => { const s = document.getElementById('scr-prospect'); return { wrap: !!document.getElementById('sb-atlas-wrap'), bar: !!s.querySelector('.sb-old-bar'), sm3: !!document.querySelector('#spacemap-root .sm3-wrap'), root: getComputedStyle(document.getElementById('spacemap-root')).display, sel: SBMap._collect && (() => { try { return SBMap._e && SBMap._e.ready; } catch (e) { return null; } })() }; });
+  await p.screenshot({ path: path.join(SHOTS, '0c_ancienne_carte.png') });
+  await p.evaluate(() => document.querySelector('#scr-prospect .sb-old-bar button').click()); await sleep(2500);
+  const m4 = await p.evaluate(() => ({ wrap: !!document.getElementById('sb-atlas-wrap'), bar: !!document.querySelector('.sb-old-bar'), root: getComputedStyle(document.getElementById('spacemap-root')).display }));
+  rec('MIG-ANCIENNE', !m3.wrap && m3.bar && m3.sm3 && m3.root !== 'none' && m4.wrap && !m4.bar && m4.root === 'none', `« Ancienne carte ici » : ancienne carte affichée ${m3.sm3}, bandeau « Nouvelle carte » ${m3.bar} · retour : nouvelle carte ${m4.wrap}, ancienne cachée ${m4.root === 'none'}`);
+  // entrer dans un port découvert, depuis la nouvelle carte
+  MF = await frame(); await p.evaluate(sys => openOnMap('system', sys), crownSys); await sleep(2500);
+  await MF.evaluate(() => { const b = [...document.querySelectorAll('#zj-sh-foot button')].find(b => /Entrer dans le port/.test(b.textContent)); setTimeout(() => b.click(), 30); });
+  await sleep(3500);
+  const m5 = await p.evaluate(() => ({ crown: !!document.getElementById('crown-sp'), txt: ((document.getElementById('crown-sp') || {}).innerText || '').replace(/\s+/g, ' ').slice(0, 60) }));
+  rec('MIG-PORT', m5.crown && /DRIFTING CROWN/i.test(m5.txt), `« Entrer dans le port » ouvre la station du jeu : « ${m5.txt} »`);
+  await p.evaluate(() => { try { crownSpaceClose(); } catch (e) {} goto('planet'); }); await sleep(1500);
+  const m6 = await p.evaluate(() => !!document.getElementById('sb-atlas-wrap'));
+  // la marque survit au rechargement (la capitale de l'essai n'est plus lue : c'est la sauvegarde qui fait foi)
+  await p.reload(); await sleep(6000);
+  const m7 = await p.evaluate(() => ({ mig: SBZones.migrated(), flag: G.atlasCarte && G.atlasCarte.v, why: SBZones.why() }));
+  rec('MIG-SUITE', !m6 && m7.mig && m7.flag === 1, `planète : carte déchargée (${!m6}) · après rechargement : partie toujours migrée ${m7.mig} (marque v${m7.flag}, accès d'essai « ${m7.why} »)`);
   await ctx.close();
 }
 

@@ -25,7 +25,7 @@
   if (window.EXTRA_SAVE_KEYS && EXTRA_SAVE_KEYS.indexOf('zoneProspect') < 0) EXTRA_SAVE_KEYS.push('zoneProspect');
 
   const PAGE = 'atlas/index.html';
-  const PAGE_V = 'ece5a638b1';   // empreinte de atlas/index.html, écrite par labo/carte-zones/build.py
+  const PAGE_V = 'cca738bdb7';   // empreinte de atlas/index.html, écrite par labo/carte-zones/build.py
   const GRID = 'tac-2';
   const MIN = 60e3;
   const SB = 'https://elupnpdcblztpfywnhjl.supabase.co';
@@ -184,7 +184,8 @@
       target: s.movingCoordKey && G.knownTargets && G.knownTargets[s.movingCoordKey] ? { label: G.knownTargets[s.movingCoordKey].label, status: G.knownTargets[s.movingCoordKey].status } : null,
     }));
     let tr = []; try { tr = travels(); } catch (e) { console.warn('[zones] missions', e); }
-    return { now, active: G.activeWorld || 'home', worlds: ws, hangars: hang, ranges, zp: JSON.parse(JSON.stringify(z)), missions, sigs, travels: tr };
+    const kn = migrated() ? known() : null;   // compte migré : les ports et les routes que la partie connaît
+    return { now, active: G.activeWorld || 'home', worlds: ws, hangars: hang, ranges, zp: JSON.parse(JSON.stringify(z)), missions, sigs, travels: tr, mig: migrated(), ports: kn ? kn.ports : null, routes: kn ? kn.routes : null };
   }
 
   /* ── région de test : écrite une seule fois par la carte (contenu fixe) ── */
@@ -303,13 +304,15 @@
 
   /* ── ouverture de la carte en plein écran ── */
   function open(opt) {
-    if (overlay || !allowed()) return;
+    try { migrate(); } catch (e) {}
+    if (migrated() && !(opt && opt.peek) && !(opt && opt.overlay)) { oldMap = false; if (typeof goto === 'function' && !onProspect()) goto('prospect'); showNewMap(opt && opt.focus || null); return; }
+    if (overlay || !(allowed() || migrated())) return;
     const pk = opt && opt.peek ? '&peek=' + encodeURIComponent(String(opt.peek).slice(0, 40)) : '';
     overlay = document.createElement('div');
     overlay.id = 'sb-zones-overlay';
     overlay.style.cssText = 'position:fixed;inset:0;z-index:9998;background:#03040c';
     overlay.innerHTML = '<iframe title="Carte par zones (test)" style="position:absolute;inset:0;width:100%;height:100%;border:0"></iframe>';
-    overlay.querySelector('iframe').src = PAGE + '?v=' + PAGE_V + pk;
+    overlay.querySelector('iframe').src = PAGE + '?v=' + PAGE_V + pk; overlay.dataset.peek = pk ? '1' : '';
     document.body.appendChild(overlay);
     log('open', {});
   }
@@ -384,15 +387,151 @@
     return { meshopt: abs('assets/meshopt_decoder.module.js'), stations, ships, bmUrl: bm };
   }
 
+  /* ══ 12/11 : la partie d'Hadrien passe sur la nouvelle carte (bascule progressive, décision d'Adrien du 12/11) ══
+     Compte pilote seulement : pseudo du registre « hadrien » ou capitale A-O-2178 (pas tous les comptes du mode triche ;
+     les essais locaux le demandent avec localStorage sb_atlas_pilote = 1). La marque G.atlasCarte est posée une fois.
+     Le Centre de prospection garde son bandeau, ses feuilles (Sondes, Missions, Rapports, Carnet, Archives) et sa croix ;
+     seule la carte du fond change : la nouvelle carte entre le bandeau et la barre du bas. L'ancienne reste à un bouton,
+     au même endroit (« Ancienne carte »), tant que toutes ses actions ne sont pas reprises. Aucune donnée n'est convertie
+     à cette étape : routes → corridors et balises viendront chacune avec sa propre migration. */
+  function pilot() {
+    if (window.SB_ZONES_OFF) return false;
+    try { if (localStorage.getItem('sb_atlas_pilote') === '1') return true; } catch (e) {}
+    try { const n = window.SBMP && SBMP.world && SBMP.world.pseudo; if (n && DEV_NAMES.includes(String(n).trim().toLowerCase())) return true; } catch (e) {}
+    try {
+      const sys = (a) => a ? `${a.cluster}-${a.sector}-${String(a.system).padStart(4, '0')}` : '';
+      if (typeof MY_ADDRESS !== 'undefined' && DEV_SYSTEMS.includes(sys(MY_ADDRESS))) return true;
+      const reg = window.SBMP && SBMP.world && SBMP.world.address;
+      if (reg && DEV_SYSTEMS.some(s => String(reg).indexOf(s + '-') === 0)) return true;
+    } catch (e) {}
+    return false;
+  }
+  const migrated = () => !window.SB_ZONES_OFF && typeof G !== 'undefined' && !!G && !!G.atlasCarte && G.atlasCarte.v >= 1;
+  let oldMap = false, frameWrap = null, pendingFocus = null;
+  function migrate() {
+    if (typeof G === 'undefined' || !G || !G.planet || migrated() || !pilot()) return false;
+    G.atlasCarte = { v: 1, since: Date.now(), mode: 'progressive', etapes: { bascule: Date.now() } };
+    log('migration', { etape: 'bascule' }); save();
+    try { if (typeof toast === 'function') toast('Ta partie passe sur la nouvelle carte. L’ancienne reste à un bouton : « Ancienne carte ».'); } catch (e) {}
+    return true;
+  }
+  const scrP = () => document.getElementById('scr-prospect');
+  const onProspect = () => { try { return typeof getCurrentScreen === 'function' ? getCurrentScreen() === 'prospect' : !!(scrP() && scrP().offsetParent); } catch (e) { return false; } };
+  function frameApi() { try { const f = frameWrap && frameWrap.querySelector('iframe'); const w = f && f.contentWindow; return w && w.STARBYTE_ZONES && w.STARBYTE_ZONES.ready && w.STARBYTE_ZONES.ready() ? w.STARBYTE_ZONES : null; } catch (e) { return null; } }
+  function place() {   // la carte entre le bandeau du haut et la barre du bas
+    if (!frameWrap) return;
+    const s = scrP(), top = s && s.querySelector('.smw-top'), nav = s && s.querySelector('.smw-nav');
+    const t = top ? Math.max(0, top.getBoundingClientRect().bottom - 18) : 0, b = nav ? Math.max(0, innerHeight - nav.getBoundingClientRect().top - 6) : 0;
+    frameWrap.style.top = Math.round(t) + 'px'; frameWrap.style.bottom = Math.round(b) + 'px';
+    if (s) s.style.setProperty('--sb-atlas-top', Math.round(t) + 'px');
+  }
+  function styleOnce() {
+    if (document.getElementById('sb-atlas-css')) return;
+    const st = document.createElement('style'); st.id = 'sb-atlas-css';
+    st.textContent = `#scr-prospect.sb-atlas #spacemap-root,#scr-prospect.sb-atlas .smw-tools,#scr-prospect.sb-atlas .smw-hint,#scr-prospect.sb-atlas .smw-card{display:none!important}
+      #scr-prospect.sb-atlas #sb-pguide-btn{top:calc(var(--sb-atlas-top,68px) + 268px)!important}
+      .sb-atlas-wrap{position:absolute;left:0;right:0;top:0;bottom:0;z-index:2;background:#03040c}.sb-atlas-wrap iframe{position:absolute;inset:0;width:100%;height:100%;border:0}
+      .sb-old-bar{position:absolute;left:50%;transform:translateX(-50%);top:calc(var(--sai,0px) + 70px);z-index:22;display:flex;gap:8px;align-items:center;padding:7px 8px 7px 12px;border-radius:12px;
+        background:rgba(11,12,28,.92);border:1px solid rgba(178,154,255,.35);font:600 11px/1.2 'Space Grotesk',system-ui;color:#ddd8ff;white-space:nowrap}
+      .sb-old-bar button{font:700 11px/1 'Space Grotesk',system-ui;color:#0b0c1c;background:#b29aff;border:0;border-radius:8px;padding:7px 10px}`;
+    document.head.appendChild(st);
+  }
+  function mountAtlas() {
+    if (!migrated() || oldMap) return false;
+    const s = scrP(); if (!s) return false;
+    styleOnce(); s.classList.add('sb-atlas');
+    const bar = s.querySelector('.sb-old-bar'); if (bar) bar.remove();
+    if (!frameWrap || !frameWrap.isConnected) {
+      frameWrap = document.createElement('div'); frameWrap.className = 'sb-atlas-wrap'; frameWrap.id = 'sb-atlas-wrap';
+      frameWrap.innerHTML = '<iframe title="Carte" allow="fullscreen"></iframe>';
+      frameWrap.querySelector('iframe').src = PAGE + '?v=' + PAGE_V + '&in=jeu';
+      const map = s.querySelector('.smw-map'); s.insertBefore(frameWrap, map ? map.nextSibling : s.firstChild);
+      log('carte', { mount: true });
+    }
+    place(); setTimeout(place, 300);
+    return true;
+  }
+  function unmountAtlas() { if (frameWrap) { frameWrap.remove(); frameWrap = null; } }
+  // vise un objet dans la nouvelle carte dès qu'elle est prête (« Voir sur la carte » des rapports, du carnet, des missions)
+  function focusAtlas(sel) {
+    pendingFocus = sel; const t0 = Date.now();
+    (function tryIt() {
+      if (pendingFocus !== sel) return;
+      const A = frameApi();
+      if (A) { pendingFocus = null; try { A.focusGame(sel); } catch (e) { console.warn('[carte] visée', e); } return; }
+      if (Date.now() - t0 < 15000) setTimeout(tryIt, 250);
+    })();
+  }
+  // l'ancienne carte, au même endroit, le temps que toutes ses actions passent dans la nouvelle
+  function showOldMap(sel) {
+    oldMap = true; unmountAtlas();
+    const s = scrP(); if (s) s.classList.remove('sb-atlas');
+    if (typeof getCurrentScreen === 'function' && getCurrentScreen() !== 'prospect' && typeof goto === 'function') goto('prospect');
+    try { origRender && origRender(); } catch (e) {}
+    if (sel && sel.kind && sel.key && origSelect) { try { origSelect(sel.kind, sel.key); } catch (e) {} }
+    if (s && !s.querySelector('.sb-old-bar')) {
+      styleOnce();
+      const bar = document.createElement('div'); bar.className = 'sb-old-bar';
+      bar.innerHTML = '<span>Ancienne carte</span><button type="button">Nouvelle carte</button>';
+      bar.querySelector('button').onclick = (e) => { e.stopPropagation(); showNewMap(); };
+      s.appendChild(bar);
+    }
+    log('carte', { old: true, sel: sel || null });
+  }
+  function showNewMap(sel) { oldMap = false; const s = scrP(); const bar = s && s.querySelector('.sb-old-bar'); if (bar) bar.remove(); mountAtlas(); if (sel) focusAtlas(sel); }
+  // les entrées du jeu vers l'ancienne carte passent par la nouvelle
+  let origRender = null, origSelect = null, origFlight = null, origGoto = null;
+  function hookGame() {
+    if (window.SBMap && !SBMap._atlasHook) {
+      origRender = SBMap.render; origSelect = SBMap.select; origFlight = SBMap.showFlight;
+      SBMap.render = function () { if (migrated() && !oldMap) { if (onProspect()) mountAtlas(); return; } return origRender.apply(this, arguments); };
+      SBMap.select = function (kind, key) { if (migrated() && !oldMap) { mountAtlas(); focusAtlas({ kind, key }); return; } return origSelect.apply(this, arguments); };
+      if (origFlight) SBMap.showFlight = function (id) { if (migrated() && !oldMap) { if (typeof goto === 'function' && !onProspect()) goto('prospect'); mountAtlas(); focusAtlas({ kind: 'travel', key: 'pr:' + id }); return; } return origFlight.apply(this, arguments); };
+      SBMap._atlasHook = true;
+    }
+    if (typeof window.goto === 'function' && !window.goto._atlasHook) {
+      origGoto = window.goto;
+      const g = function (scr) { const r = origGoto.apply(this, arguments); try { if (migrated()) { if (scr === 'prospect') { if (!oldMap) mountAtlas(); } else unmountAtlas(); } } catch (e) {} return r; };
+      g._atlasHook = true; window.goto = g;
+    }
+  }
+  function migTick() {
+    try {
+      if (typeof G === 'undefined' || !G || !G.planet) return;
+      migrate(); hookGame();
+      if (!migrated()) return;
+      const b = document.getElementById('sb-zones-btn'); if (b) b.remove();   // le bouton d'essai n'a plus lieu d'être
+      if (overlay && !overlay.dataset.peek) close();   // l'ancien cadre plein écran : la carte est maintenant dans le Centre de prospection
+      if (onProspect() && !oldMap) mountAtlas(); else if (!onProspect()) unmountAtlas();
+      place();
+    } catch (e) { console.warn('[carte] bascule', e); }
+  }
+  addEventListener('resize', () => place());
+  setTimeout(migTick, 1200); setInterval(migTick, 1500);
+  // ce que la carte demande au jeu (compte migré) : ports connus, routes connues, l'ancienne carte au même endroit
+  function known() {
+    const ports = [], routes = [];
+    try { for (const [sys, p] of Object.entries(G.hiddenPorts || {})) if (p) ports.push({ sys, dock: p.dockId || null, name: p.name || '', label: p.typeLabel || '', enter: !!(p.dockId && typeof stationUI === 'function' && stationUI(p.dockId) && typeof crownEnter === 'function') }); } catch (e) {}
+    try { for (const r of (G.routes || [])) if (r && r.portSys) routes.push({ id: r.id, name: r.name || '', port: r.portSys }); } catch (e) {}
+    return { ports, routes };
+  }
+  function gameAct(kind, arg) {
+    log('action', { kind, arg });
+    if (kind === 'port') { if (typeof crownEnter !== 'function') return { ok: false, why: 'Entrée indisponible.' }; crownEnter(arg); return { ok: true }; }
+    if (kind === 'route-tanker') { if (typeof openTankerComposeForRoute !== 'function') return { ok: false, why: 'Envoi indisponible.' }; openTankerComposeForRoute(arg); return { ok: true }; }
+    if (kind === 'oldmap') { showOldMap(arg || null); return { ok: true }; }
+    return { ok: false, why: 'Action inconnue' };
+  }
+
   window.SBZones = {
-    allowed, why, open, close, state, saveRegion, launch, arrive, act, check, peek, models, sigAction: (id, wid) => sigAction((G.signatures || {})[id], wid),
+    allowed, why, open, close, state, saveRegion, launch, arrive, act, check, peek, models, migrated, pilot, known, gameAct, showOldMap, showNewMap, embedded: () => !!frameWrap, sigAction: (id, wid) => sigAction((G.signatures || {})[id], wid),
     onChange(f) { listeners.add(f); return () => listeners.delete(f); },
     grid: GRID,
   };
 
   /* ── bouton d'entrée : Centre de prospection, à côté de « Recentrer » et « Vue d'ensemble » ── */
   function install() {
-    if (installed || !allowed()) return;
+    if (installed || !allowed() || migrated()) return;
     const tools = document.querySelector('#scr-prospect .smw-tools');
     if (!tools) return;
     installed = true;

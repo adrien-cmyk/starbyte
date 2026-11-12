@@ -1487,6 +1487,7 @@ const SAVE_VERSION = '0.5.0';
 // (fonction-constante en var : lue par saveGame/loadGame, déclarée avant tout appel)
 var EXTRA_SAVE_KEYS = [
   'zoneProspect',   // ZONES_1011 — carte par zones (compte de test seulement ; absente des autres parties)
+  'atlasCarte',   // CARTE_1211 — partie passée sur la nouvelle carte (compte pilote seulement) : date et étapes de la migration
   'explore',   // EXPLORE_0311 — clairière aux lapins : heures de retour des lapins, captures, totaux
   'troopFamine', '_bioBuffer',   // PATCH_2210_VIVRES
   '_fakePurged',   // PATCH_2210_UNIVERS_OUVERT
