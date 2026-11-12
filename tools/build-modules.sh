@@ -3,6 +3,7 @@
 #   home   → github_upload/assets/home.js  = bundle esbuild de src/home.js (+ orbit3d.js, unit3d.js)
 #   cloud  → github_upload/assets/cloud.js = bundle esbuild de src/cloud.js + @supabase/supabase-js 2.117.3 (version figée :
 #            une autre version change tout le bundle ; installée --no-save si absente)
+#   voyage → src/voyage_core.js et server/voyage/voyage_core.js (tools/build-voyage.py), puis tools/test_voyage.mjs
 #   m3-verify → copie src/m3core.js et src/m3session.js dans server/m3-verify/ (fonction Edge, à redéployer ensuite)
 #   match3 → github_upload/assets/match3.js  = src/m3secours_vocab.js (tel quel) + bundle esbuild de src/match3.js
 #            (qui importe src/m3core.js, le moteur pur, et src/m3view3d.js, le plateau 3D).
@@ -29,5 +30,8 @@ case "$what" in
     [ "$v" = "2.117.3" ] || npm install --no-save @supabase/supabase-js@2.117.3 >/dev/null 2>&1
     npx esbuild src/cloud.js --bundle --format=esm --minify --target=es2020,safari15 --legal-comments=none --outfile=github_upload/assets/cloud.js
     echo "assets/cloud.js : $(wc -c < github_upload/assets/cloud.js) octets (supabase-js 2.117.3)" ;;
-  *) echo "module inconnu : $what (disponible : match3, m3-verify, home, cloud)"; exit 1 ;;
+  voyage)
+    python3 tools/build-voyage.py && node tools/test_voyage.mjs
+    echo "server/voyage : voyage_core.js régénéré (à redéployer avec index.ts)" ;;
+  *) echo "module inconnu : $what (disponible : match3, m3-verify, home, cloud, voyage)"; exit 1 ;;
 esac
