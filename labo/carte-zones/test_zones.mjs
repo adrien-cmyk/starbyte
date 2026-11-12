@@ -285,8 +285,9 @@ if (st.found) {
 rec('STATION', stOk, `Atlas, station ${st.name} devant les étoiles : ${stNote}`);
 // 11/11 : en gros plan, le vide ne désélectionne plus (cahier « Observer ») ; au voisinage, si
 const closeTap = await F.evaluate(async () => { const S = STARBYTE_ZONES; S.atlasTap(5, 300); const keep = S.zj.sel && S.zj.sel.type; S.backN(); await new Promise(r => setTimeout(r, 2500)); return { keep, lvl: S.pres().level }; });
-const empty = await F.evaluate(() => { STARBYTE_ZONES.atlasTap(5, 300); return STARBYTE_ZONES.zj.sel; });
-rec('VIDE', empty === null && closeTap.keep === 'station' && closeTap.lvl === 'neighbourhood', `Atlas, toucher le vide : en gros plan la cible reste (${closeTap.keep}) ; après « Retour au voisinage » (${closeTap.lvl}), désélection, aucune étoile choisie`);
+// 12/11 (Adrien, 10 h 12) : « quand je touche dans le vide ça devrait sélectionner quelque chose quand même » → la zone sous le doigt
+const empty = await F.evaluate(() => { STARBYTE_ZONES.atlasTap(5, 300); const s = STARBYTE_ZONES.zj.sel; return s && { type: s.type, zone: s.zone }; });
+rec('VIDE', empty && empty.type === 'zone' && !!empty.zone && closeTap.keep === 'station' && closeTap.lvl === 'neighbourhood', `Atlas, toucher le vide : en gros plan la cible reste (${closeTap.keep}) ; après « Retour au voisinage » (${closeTap.lvl}), la zone sous le doigt est choisie (${empty && empty.zone}), jamais une étoile seule`);
 
 // Mes mondes : la colonie, sans changement de compte
 await F.evaluate(() => { STARBYTE_ZONES.setMode('tac'); document.getElementById('zj-worlds').click(); }); await sleep(300);

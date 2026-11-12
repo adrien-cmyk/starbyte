@@ -342,7 +342,7 @@ function zjAtlasTap(x,y){const L=zj.pres.level;
 function zjAtlasZoneAt(x,y){if(x==null)return null;raycaster.setFromCamera(new T.Vector2(x/innerWidth*2-1,-y/innerHeight*2+1),camera);
  raycaster.params.Points.threshold=Math.max(2,Math.min(30,distance*.007));let p=null;
  try{const hit=raycaster.intersectObjects([...sectors.values()])[0];if(hit){const s=hit.object.userData.sector,v=s&&getPoint(s,hit.index);if(v)p=[v.x,v.y,v.z]}}catch(e){}
- if(!p){const pl=new T.Plane(new T.Vector3(0,1,0),-(target.y-origin.y)),o=new T.Vector3();if(raycaster.ray.intersectPlane(pl,o)){o.add(origin);p=[o.x,o.y,o.z]}}
+ if(!p){const pl=new T.Plane(new T.Vector3(0,1,0),-(target.y-origin.y)),o=new T.Vector3();if(!raycaster.ray.intersectPlane(pl,o)||o.distanceTo(raycaster.ray.origin)>distance*4)raycaster.ray.at(distance,o);o.add(origin);p=[o.x,o.y,o.z]}   // regard au-dessus de l'horizon : le point à la distance du centre de vue
  return p?zoneOfPoint(p):null}
 
 /* ══ OBSERVER (cahier « Observer une planète, son système et son voisinage », 11 nov.) ══
