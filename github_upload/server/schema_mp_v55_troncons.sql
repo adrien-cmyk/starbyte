@@ -8,6 +8,13 @@
 -- exportées, avec seulement l'ajout signalé « v55 ».
 -- À coller dans Supabase → SQL Editor → Run. Rejouable.
 
+-- 0. v54 d'abord : sans la table des voyages, rien ne s'installe (message clair au lieu de « type public.voyages does not exist »)
+do $$ begin
+  if to_regclass('public.voyages') is null then
+    raise exception 'v55 : installer d''abord schema_mp_v54_voyages.sql (table public.voyages), puis relancer ce fichier. Rien n''a été modifié.';
+  end if;
+end $$;
+
 -- 1. colonnes : le tronçon d'une embuscade, les tronçons datés d'un convoi
 alter table public.ambushes add column if not exists edge text;
 alter table public.ambushes add column if not exists node_b text;
