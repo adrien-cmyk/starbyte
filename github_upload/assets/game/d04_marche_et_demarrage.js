@@ -1118,7 +1118,7 @@ var SBProspectGuide = (function () {
       const n = (k) => { const c = ready(k); return c ? `${c} prête${c > 1 ? 's' : ''}` : 'à construire'; };
       return `<h3>Tes sondes</h3>
       <p>Chacune a un seul métier. On les enchaîne.</p>
-      ${row('◯', '#e6f0ff', 'Radar', 'jetable', 'Balaie un <b>système entier</b> et relève des <b>signatures</b> opaques (SIG-…). Elle brûle à l\'arrivée.', n('radar'))}
+      ${row('◯', '#e6f0ff', 'Radar', 'jetable', 'Sonde une <b>zone entière</b> et relève des <b>signatures</b> opaques (SIG-…). Elle brûle à l\'arrivée.', n('radar'))}
       ${row('◇', '#5fcc8a', 'Légère', 'résolution', '<b>Identifie</b> une signature : une veine ou une épave à exploiter, ou un corps orbital.', n('light'))}
       ${row('◈', '#9a8aff', 'Moyenne', 'verrouillage', '<b>Verrouille</b> un corps orbital : il devient une adresse fixe dans ton carnet.', n('medium'))}
       ${row('⌖', '#a370ff', 'Balise', 'surveillance', 'Reste dans un système et voit <b>passer les convois</b> : qui, d\'où, vers où. Les routes se dessinent.', n('beacon'))}
@@ -1127,15 +1127,16 @@ var SBProspectGuide = (function () {
     () => `<h3>Verrouiller une signature</h3>
       <p>Une signature, c'est un écho : quelque chose est là, mais quoi, et où exactement ? Trois sondes pour le savoir.</p>
       <div class="chain">
-        <div class="st"><div class="n" style="color:#e6f0ff">1</div><div><div class="ti">Radar sur un système</div><div class="ds">Le balayage revient avec des échos opaques.</div><span class="chip" style="color:#e6f0ff">SIG-7F2 · écho métallique</span></div></div>
+        <div class="st"><div class="n" style="color:#e6f0ff">1</div><div><div class="ti">Radar sur une zone</div><div class="ds">Le sondage revient avec des échos opaques.</div><span class="chip" style="color:#e6f0ff">SIG-7F2 · écho métallique</span></div></div>
         <div class="st"><div class="n" style="color:#5fcc8a">2</div><div><div class="ti">Légère sur la signature</div><div class="ds">Elle dit ce que c'est : une <b>veine</b> ou une <b>épave</b> (un tanker peut aller l'exploiter), ou un <b>corps orbital</b>.</div><span class="chip" style="color:#5fcc8a">SIG-7F2 → corps orbital</span></div></div>
         <div class="st"><div class="n" style="color:#9a8aff">3</div><div><div class="ti">Moyenne : verrouillage</div><div class="ds">Le corps orbital devient une <b>adresse fixe</b>, pour toujours, dans ton carnet. Tes tankers et tes flottes peuvent alors s'y rendre.</div><span class="chip" style="color:#9a8aff">A-N-3709-24 · au carnet</span></div></div>
       </div>
       <div class="note">💡 La Moyenne demande la <b>cartographie sismique</b> : laboratoire amélioré au niveau 2.</div>`,
     () => `<h3>Lire la carte</h3>
-      <div class="gest"><div class="g">👆</div><div><b>Touche un système</b> pour l'ouvrir, puis envoie une <b>Radar</b>. Commence par tes voisins : c'est rapide et ça coûte peu.</div></div>
+      <div class="gest"><div class="g">🧭</div><div><b>Atlas</b> pour l'espace en 3D, <b>Tactique</b> pour la vue de dessus, couche par couche.</div></div>
+      <div class="gest"><div class="g">👆</div><div><b>Touche une zone</b> voisine, puis « <b>Sonder cette zone</b> » : une seule <b>Radar</b> suffit, quel que soit le nombre d'étoiles. Commence près de ta planète : c'est rapide et ça coûte peu.</div></div>
       <div class="gest"><div class="g">📄</div><div><b>Rapports</b> : chaque sonde revient avec un rapport. Touche une signature pour y envoyer une Légère.</div></div>
-      <div class="gest"><div class="g">📒</div><div><b>Carnet</b> : tout ce que tu connais (systèmes, signatures suivies, commandants).</div></div>
+      <div class="gest"><div class="g">📒</div><div><b>Carnet</b> : tout ce que tu connais (systèmes, signatures suivies, commandants). <b>Mes mondes</b> : tes planètes et ce qui est en vol.</div></div>
       <div class="gest"><div class="g">⌖</div><div>Le viseur recentre la carte sur ta planète.</div></div>
       <div class="gest"><div class="g">📡</div><div>Ton <b>antenne</b> capte aussi du trafic : quand une bulle apparaît en haut, quelqu'un passe dans le coin.</div></div>`,
     () => hasShip()

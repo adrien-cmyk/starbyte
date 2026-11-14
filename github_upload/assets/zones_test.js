@@ -680,6 +680,7 @@
     if (!played || locked) { A.accueil = played ? 'sans-centre' : 'nouveau'; save(); return; }
     if (typeof sbConfirm !== 'function') return;
     const mo = document.getElementById('sb-modal-overlay'); if (mo && !mo.classList.contains('hidden')) return;   // une autre question est ouverte
+    if (document.getElementById('sb-pguide') || document.getElementById('sb-sheet')) return;   // le guide de l'officier de bord ou une feuille est ouvert
     try { const c = document.getElementById('sb-coach'); if (c && c.offsetParent && getComputedStyle(c).display !== 'none') return; } catch (e) {}   // le guide du tutoriel parle : plus tard
     try { if (typeof getCurrentScreen === 'function' && !['planet', 'prospect', 'dashboard'].includes(getCurrentScreen())) return; } catch (e) {}
     const b = A.bilan || {}, esc = (v) => String(v == null ? '' : v).replace(/[<>&"]/g, ''), pl = (n, a, z) => n + ' ' + (n > 1 ? z : a);
