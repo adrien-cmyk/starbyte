@@ -298,7 +298,7 @@ async function newGame(p, url, planet) {
   await p.evaluate(() => sessionStorage.setItem('sb_mig_go', '1'));
   await p.reload({ waitUntil: 'load' });
   let wl = null; for (let i = 0; i < 40 && !wl; i++) { await sleep(500); wl = await p.evaluate(() => { const o = document.getElementById('sb-modal-overlay'); return o && !o.classList.contains('hidden') ? { title: document.getElementById('sb-modal-title').textContent, body: document.getElementById('sb-modal-body').innerText.replace(/\s+/g, ' '), ok: document.getElementById('sb-modal-confirm').textContent } : null; }).catch(() => null); }
-  await p.screenshot({ path: path.join(SHOTS, '0c_fiche_accueil.png') });
+  await p.screenshot({ path: path.join(SHOTS, '0c_fiche_accueil.png'), timeout: 15000 }).catch(() => {});   // capture seulement : la planète 3D en arrière-plan peut la ralentir
   await p.evaluate(() => { try { sbModalResolve(false); } catch (e) {} });
   const c = await p.evaluate((cr) => {
     const A = G.atlasCarte || {}, b = Object.fromEntries(sbAllProbes().filter(x => x.tier === 'beacon').map(x => [x.id, x.state === 'deployed' ? x.deployedSystem : 'hangar']));
