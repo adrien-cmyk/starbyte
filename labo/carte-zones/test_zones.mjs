@@ -228,7 +228,9 @@ async function newGame(p, url, planet) {
     if (old) { G.probesPool.push({ id: 'beacon-jalon-test', tier: 'beacon', state: 'deployed', deployedSystem: old, deployedAt: now - 3600e3, world: 'home', name: 'Balise du jalon' }); delete G.atlasCarte.etapes.balises; saveGame(); }
     return { mode: net.mode, crown: crown && crown.chain, crownOld: crown && crown.oldChain && crown.oldChain.length, refuge: refuge && refuge.chain, old, lignes: !!(G.atlasCarte.etapes && G.atlasCarte.etapes.lignes), period: crown && crown.period }; });
   await sleep(3500);
-  const ln1 = await p.evaluate(() => { const b = sbAllProbes().find(x => x.id === 'beacon-jalon-test'); const n0 = (G.beaconReports || []).length; SBLines.tickBeacons(sbAllProbes().filter(x => x.tier === 'beacon' && x.state === 'deployed'), Date.now());
+  const ln1 = await p.evaluate(() => { const b = sbAllProbes().find(x => x.id === 'beacon-jalon-test'); const n0 = (G.beaconReports || []).length;
+    if (b) b._linesAt = Date.now() - 3 * 3600e3;   // 14/11 : la conversion repart de maintenant (pas de relève rétroactive) ; on relit 3 h pour voir les passages au relais
+    SBLines.tickBeacons(sbAllProbes().filter(x => x.tier === 'beacon' && x.state === 'deployed'), Date.now());
     // ce qui reste quel que soit l'horaire : les passages relevés au relais (un rapport n'existe que dans la fenêtre de 12 min d'un passage)
     const line = SBLines.network().lines.find(l => l.corridor === 'La Saigne de la Couronne'), ob = (G.lineObs || {})[line.id] || {};
     const seen = Object.entries(ob).filter(([k]) => /@A-M-1979$/.test(k)).reduce((a, [, v]) => a + (Array.isArray(v) ? v.length : 0), 0);
