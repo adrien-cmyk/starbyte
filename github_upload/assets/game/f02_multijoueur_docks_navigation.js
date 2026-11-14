@@ -604,7 +604,8 @@ function sbConvList() {
 function sbConvCard() {
   const list = sbConvList(); if (!list.length) return '';
   const esc = (t) => String(t == null ? '' : t).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-  return `<div style="margin:0 14px 12px;border:1px solid rgba(95,255,232,.35);border-radius:12px;background:rgba(8,24,28,.6);overflow:hidden">
+  // PATCH_1411_CONV — flex:0 0 auto : sans ça, la carte (overflow:hidden) était écrasée par une longue liste de rapports et ses boutons coupés
+  return `<div style="flex:0 0 auto;margin:0 14px 12px;border:1px solid rgba(95,255,232,.35);border-radius:12px;background:rgba(8,24,28,.6);overflow:hidden">
     <div style="padding:9px 12px 6px;font-size:10px;letter-spacing:.18em;color:#5fffe8">CONVERSATIONS</div>
     ${list.map(c => `<button onclick="sbNotifClose();openEmbassy('${esc(c.addr)}')" style="display:flex;align-items:center;gap:10px;width:100%;padding:9px 12px;border:0;border-top:1px solid rgba(255,255,255,.06);background:none;color:#e6f0ff;text-align:left;font:inherit">
       <span style="font-size:18px">💬</span>

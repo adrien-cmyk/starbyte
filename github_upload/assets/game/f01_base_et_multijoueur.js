@@ -2245,6 +2245,9 @@ function _mpApplyRaidAgainstHome(raid) {
   if ((G.reports || []).some(r => r.mpRaidId === raid.id)) return true;   // déjà intégré
   const res = raid.result || {};
   if (raid.status === 'aborted' || res.outcome === 'aborted') return true;   // aucun combat : rien à intégrer
+  // PATCH_1411_DEPW — la colonie visée (base de pillage 50 %). Définition retirée par erreur le 30/10 : le rapport de défense plantait,
+  // le raid n'était jamais marqué vu et ses pertes étaient réappliquées à chaque relève.
+  const _depW = (G.worlds || []).find(w => w && w.kind === 'colony' && w.id === G.activeWorld);
   const won = res.outcome === 'victory';
   const loot = Object.assign({ metal: 0, energie: 0, cristal: 0 }, won ? (res.loot || {}) : {});
   for (const k of ['metal', 'energie', 'cristal']) {   // 30/10 : le stock de la planète attaquée (capitale ou colonie)
