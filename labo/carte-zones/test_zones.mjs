@@ -471,6 +471,7 @@ const sheet = await F.evaluate(() => ({ body: document.getElementById('zj-sh-bod
 await p.screenshot({ path: path.join(SHOTS, '13_tanker_tactique.png') });
 await F.evaluate(() => document.querySelector('#zj-sh-foot [data-a="follow"]').click()); await sleep(3200);
 const vehD = () => { const S = STARBYTE_ZONES, v = S.vehPos(), c = S.cam(); return v ? Math.hypot(c.target[0] - v[0], c.target[1] - v[1], c.target[2] - v[2]) : 1e9; };
+for (let i = 0; i < 16 && await F.evaluate(`(${vehD.toString()})()`) >= .6; i++) await sleep(500);   // le vol d'approche peut durer plus longtemps sur une machine lente
 const fol = await F.evaluate(`(${(id => { const S = STARBYTE_ZONES, st = S.trState('tk:' + id), c = S.cam(); return { mode: S.zj.mode, lvl: S.pres().level, F: S.followState(), dNow: Math.hypot(c.target[0] - st.p[0], c.target[1] - st.p[1], c.target[2] - st.p[2]), marks: S.atlasState().marks.map(m => m.t), obs: S.trObs(), prism: S.prism() }; }).toString()})(${JSON.stringify(tk.id)})`);
 fol.d = await F.evaluate(`(${vehD.toString()})()`);
 for (let i = 0; i < 60; i++) { const m = await F.evaluate(() => STARBYTE_ZONES.modelState()); if (m.tr && m.tr.st !== 'loading') break; await sleep(1000); }   // le modèle se charge pendant le suivi
