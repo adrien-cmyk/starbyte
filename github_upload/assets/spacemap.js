@@ -364,7 +364,7 @@
           c = occ.has(near.idx) ? nearestFree(x, z, minRing) : near;
           if (c) break;
         }
-        if (!c) c = nearestFree(B.x + Math.cos(base) * R, B.z + Math.sin(base) * R, minRing);
+        if (!c) c = nearestFree(B.x + Math.cos(base) * Rf, B.z + Math.sin(base) * Rf, minRing);   // 14/11 : R n'existe que dans la boucle (« R is not defined » sur une vraie partie)
         if (c) put(kA, c);
       }
       for (let i = 1; i < n; i++) {

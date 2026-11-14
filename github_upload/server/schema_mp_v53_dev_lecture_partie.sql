@@ -1,3 +1,4 @@
+-- ⚠ RETIRÉE le 14/11/2026 par schema_mp_v56_retrait_lecture_test.sql (outil de test supprimé du jeu) : ne plus rejouer ce fichier.
 -- v53 (10/11/2026) — CARTE PAR ZONES · LECTURE D'UNE PARTIE (compte de test seulement)
 -- Demande d'Adrien (10/11) : « J'aimerais voir ce que donne le jeu de Panzerstorm dans cette nouvelle carte. »
 -- La carte par zones (atlas/index.html, ouverte par assets/zones_test.js) sait afficher la partie d'un autre

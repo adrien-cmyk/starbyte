@@ -25,7 +25,7 @@ once("activeKeys.add(keyOf(HOME_SECTOR));requestSector(HOME_SECTOR,true);", js +
 m = re.search(r'<canvas id="space"[^>]*>(</canvas>)?', s); assert m
 s = s[:m.end()] + '\n' + open(os.path.join(D, 'zj.html'), encoding='utf-8').read() + s[m.end():]
 once("</style>", open(os.path.join(D, 'zj.css'), encoding='utf-8').read() + "\n</style>")
-once("<title>Starbyte · Atlas vivant · navigation</title>", "<title>Starbyte · Carte par zones (test)</title><script>document.documentElement.classList.add('zj-js')</script>")
+once("<title>Starbyte · Atlas vivant · navigation</title>", "<title>Starbyte · Carte</title><script>document.documentElement.classList.add('zj-js')</script>")
 out = os.path.join(ROOT, 'github_upload', 'atlas', 'index.html')
 os.makedirs(os.path.dirname(out), exist_ok=True)
 open(out, 'w', encoding='utf-8').write(s)

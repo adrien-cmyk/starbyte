@@ -1,7 +1,8 @@
 // Essais du cahier « Observer une planète, son système et son voisinage » (11/11/2026).
-// Page = carte par zones en fichier autonome, avec les quatre mondes de Panzerstorm donnés par le cahier (§ 4).
+// 14/11 : la carte n'a plus de fichier exporté ni de lecture d'une autre partie. Elle est ouverte ici comme dans le jeu, dans un
+// cadre, avec un pont de jeu simulé (même interface que assets/zones_test.js) : une partie à quatre mondes (capitale + 3 colonies).
 // Usage : node labo/carte-zones/test_observer.mjs   (après python3 labo/carte-zones/build.py)
-import { createRequire } from 'node:module'; import fs from 'node:fs'; import path from 'node:path';
+import { createRequire } from 'node:module'; import fs from 'node:fs'; import path from 'node:path'; import { createServer } from 'node:http';
 const require = createRequire(import.meta.url);
 let pw; try { pw = require('playwright'); } catch { pw = require('/opt/npm-tools/node_modules/playwright'); }
 const { chromium, devices } = pw;
@@ -10,24 +11,36 @@ const SHOTS = path.join(ROOT, 'labo', 'carte-zones', 'captures'); fs.mkdirSync(S
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const results = []; const rec = (id, ok, msg) => { results.push({ id, ok, msg }); console.log((ok ? '✓ ' : '✗ ') + id.padEnd(8) + ' ' + msg); };
 
-const DATA = { ok: true, pseudo: 'Panzerstorm', planet_name: 'BLACKSTONE', address: 'A-O-6386-40', level: 9, saved_at: new Date().toISOString(),
-  colonies: [{ address: 'A-R-5999-08', name: 'REDSTONE' }, { address: 'A-L-9952-59', name: 'WHITESTONE' }, { address: 'A-R-4979-40', name: 'YELLOWSTONE' }],
-  save_worlds: [], known_targets: [], reports: [], missions: [], arks: [],
-  signatures: [{ id: 'SIG-RS1', system: 'A-R-5999', type: 'heat_point', typeLabel: 'Point chaud', resolved: false }, { id: 'SIG-OB2', system: 'A-O-6390', type: 'heat_point', typeLabel: 'Point chaud', resolved: false }],
-  known_systems: ['A-O-6386', 'A-O-6390', 'A-O-6400', 'A-R-5999', 'A-R-4979', 'A-L-9952'] };
+// la partie simulée : capitale BLACKSTONE et trois colonies (adresses du cahier, § 4)
+const WORLDS = [{ id: 'w:A-O-6386-40', kind: 'home', name: 'BLACKSTONE', coord: 'A-O-6386-40' }, { id: 'w:A-R-5999-08', kind: 'colony', name: 'REDSTONE', coord: 'A-R-5999-08' },
+  { id: 'w:A-L-9952-59', kind: 'colony', name: 'WHITESTONE', coord: 'A-L-9952-59' }, { id: 'w:A-R-4979-40', kind: 'colony', name: 'YELLOWSTONE', coord: 'A-R-4979-40' }];
+const SIGS = [{ id: 'SIG-RS1', system: 'A-R-5999', type: 'heat_point', typeLabel: 'Point chaud', resolved: false }, { id: 'SIG-OB2', system: 'A-O-6390', type: 'heat_point', typeLabel: 'Point chaud', resolved: false }];
+const KNOWN = ['A-O-6386', 'A-O-6390', 'A-O-6400', 'A-R-5999', 'A-R-4979', 'A-L-9952'];
 const SPOT = { 'A-O-6386-40': 39, 'A-R-5999-08': 7, 'A-L-9952-59': 58, 'A-R-4979-40': 39 };
-const src = fs.readFileSync(path.join(ROOT, 'github_upload', 'atlas', 'index.html'), 'utf8');
-const TAG = '<script id="application">';
-const page = src.replace(TAG, () => '<script>window.SB_ZONES_EMBED=' + JSON.stringify({ v: 1, pseudo: 'Panzerstorm', data: DATA, region: null, exportedAt: Date.now() }).replace(/</g, '\\u003c') + '</' + 'script>\n' + TAG);
-const FILE = path.join(SHOTS, 'observer_panzerstorm.html'); fs.writeFileSync(FILE, page);
+const BRIDGE = `(() => { const W = ${JSON.stringify(WORLDS)}, S = ${JSON.stringify(SIGS)}, K = ${JSON.stringify(KNOWN)};
+  const state = () => ({ now: Date.now(), active: 'w:A-O-6386-40', worlds: W, hangars: Object.fromEntries(W.map(w => [w.id, { radar: 2, radarAll: 2, light: 0, lightAll: 0, medium: 0, mediumAll: 0, metal: 0, tankers: 0 }])),
+    ranges: Object.fromEntries(W.map(w => [w.id, 4])), zp: { v: 1, grid: 'tac-2', region: null, zones: {}, journal: [] }, missions: [], sigs: S.map(g => ({ ...g })), travels: [], mig: true,
+    ports: [{ sys: 'A-M-3340', dock: 'dock-37oe89', name: 'The Drifting Crown', label: 'Port franc', enter: false }], routes: [], systems: K.map(k => ({ sys: k, at: null, mine: false, planets: [] })), tags: {}, cmd: [], fleetsReady: [],
+    corKnown: [], netPorts: [], moves5: [], hosted: [], incoming: [], posts: { mine: [], others: [] }, beacons: { list: [], going: [], quota: 3, cost: { metal: 300, cristal: 100 }, status: {}, posts: [] }, nav: [] });
+  window.SBZones = { state, check: () => ({ radar: true, habitable: false }), sigAction: () => ({ kind: 'off', label: 'Signature à identifier' }), act: () => ({ ok: false }), launch: () => ({ ok: false }),
+    close() {}, onChange: () => () => {}, gameAct: () => ({ ok: false, why: 'essai' }), beaconCheck: () => ({ ok: false, why: '' }), nodeTraffic: () => [] }; })();`;
+const HOST = `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>html,body{margin:0;height:100%;background:#000;overflow:hidden}iframe{position:fixed;inset:0;width:100%;height:100%;border:0}</style><script>${BRIDGE}</script><iframe src="/github_upload/atlas/index.html?v=obs"></iframe>`;
+const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8', '.json': 'application/json', '.png': 'image/png', '.jpg': 'image/jpeg', '.webp': 'image/webp', '.glb': 'model/gltf-binary', '.wasm': 'application/wasm', '.css': 'text/css' };
+const srv = await new Promise(res => { const s = createServer((q, r) => { const u = decodeURIComponent(new URL(q.url, 'http://x').pathname); if (u === '/hote.html') { r.writeHead(200, { 'Content-Type': MIME['.html'] }); r.end(HOST); return; }
+  const f = path.join(ROOT, u); if (!f.startsWith(ROOT) || !fs.existsSync(f) || !fs.statSync(f).isFile()) { r.writeHead(404); r.end(); return; } r.writeHead(200, { 'Content-Type': MIME[path.extname(f)] || 'application/octet-stream' }); r.end(fs.readFileSync(f)); }); s.listen(0, '127.0.0.1', () => res(s)); });
+const URL0 = `http://127.0.0.1:${srv.address().port}/hote.html`;
 
 const browser = await chromium.launch({ executablePath: '/usr/bin/google-chrome', headless: true, args: ['--no-sandbox', '--use-gl=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] });
 async function open(ctxOpt) {
-  const ctx = await browser.newContext(ctxOpt); const p = await ctx.newPage(); const errs = [];
-  p.on('pageerror', e => errs.push(String(e.message || e).slice(0, 200)));
-  await p.goto('file://' + FILE, { waitUntil: 'load', timeout: 60000 });
-  for (let i = 0; i < 40; i++) { await sleep(400); if (await p.evaluate(() => !!(window.STARBYTE_ZONES && STARBYTE_ZONES.zj.peek && STARBYTE_ZONES.zj.ws.length))) break; }
-  await sleep(1200); return { ctx, p, errs };
+  const ctx = await browser.newContext(ctxOpt); const page = await ctx.newPage(); const errs = [];
+  page.on('pageerror', e => errs.push(String(e.message || e).slice(0, 200)));
+  await page.goto(URL0, { waitUntil: 'load', timeout: 60000 });
+  let F = null;
+  for (let i = 0; i < 60; i++) { await sleep(400); F = page.frames().find(f => /atlas\/index\.html/.test(f.url())); if (F && await F.evaluate(() => !!(window.STARBYTE_ZONES && STARBYTE_ZONES.zj.snap && STARBYTE_ZONES.zj.ws.length)).catch(() => false)) break; }
+  await sleep(1200);
+  // la carte vit dans le cadre : les évaluations s'y font, les captures prennent la page entière
+  const p = { evaluate: (f, a) => F.evaluate(f, a), screenshot: (o) => page.screenshot(o), page };
+  return { ctx, p, errs };
 }
 const Z = (p, f, a) => p.evaluate(f, a);
 const settle = async (p, ms = 2200) => { await sleep(ms); };
@@ -37,16 +50,16 @@ const st = p => Z(p, () => { const S = STARBYTE_ZONES, zj = S.zj; return { mode:
 // ═══ iPhone ═══
 const { ctx, p, errs } = await open({ ...devices['iPhone 13'] });
 const ids = await Z(p, () => STARBYTE_ZONES.zj.ws.map(w => ({ id: w.id, name: w.name, coord: w.coord, spot: w.spot, off: [w.p[0], w.p[1], w.p[2]], zone: w.zone })));
-const before = await Z(p, () => JSON.stringify({ d: window.SB_ZONES_EMBED.data, ws: STARBYTE_ZONES.zj.ws.map(w => [w.id, w.coord, w.p, w.zone]), est: STARBYTE_ZONES.zj.ws.map(w => STARBYTE_ZONES.estimate(w.zone)) }));
+const before = await Z(p, () => JSON.stringify({ d: parent.SBZones.state().worlds, ws: STARBYTE_ZONES.zj.ws.map(w => [w.id, w.coord, w.p, w.zone]), est: STARBYTE_ZONES.zj.ws.map(w => STARBYTE_ZONES.estimate(w.zone)) }));
 const okIds = ids.length === 4 && ids.every(w => SPOT[w.coord] === w.spot && w.id === (w.coord === 'A-O-6386-40' ? 'w:A-O-6386-40' : 'w:' + w.coord));
 rec('ID-03', okIds, ids.map(w => `${w.name} ${w.coord} → spot ${w.spot + 1} (indice ${w.spot}), id ${w.id}`).join(' · '));
 
-// 1. Tactique : REDSTONE choisie dans « Ses mondes »
+// 1. Tactique : REDSTONE choisie dans « Mes mondes »
 await Z(p, () => document.getElementById('zj-worlds').click()); await sleep(300);
 await Z(p, () => [...document.querySelectorAll('#zj-sh-body [data-a="world"]')].find(b => /REDSTONE/.test(b.textContent)).click()); await sleep(500);
 let s = await st(p);
-rec('VIEW-02a', s.sel === 'world:w:A-R-5999-08' && s.origin !== 'w:A-R-5999-08' && /A-R-5999-08/.test(s.body) && /spot 08/.test(s.body) && /Observer sa colonie/.test(s.foot),
-  `Tactique, Ses mondes › REDSTONE : sélection ${s.sel}, origin des mesures inchangée (${s.origin}) · fiche « ${s.body.slice(0, 150)} » · boutons « ${s.foot} »`);
+rec('VIEW-02a', s.sel === 'world:w:A-R-5999-08' && s.origin !== 'w:A-R-5999-08' && /A-R-5999-08/.test(s.body) && /spot 08/.test(s.body) && /Observer ma colonie/.test(s.foot),
+  `Tactique, Mes mondes › REDSTONE : sélection ${s.sel}, origin des mesures inchangée (${s.origin}) · fiche « ${s.body.slice(0, 150)} » · boutons « ${s.foot} »`);
 const tacZone = s.zone, tacK = s.k;
 await p.screenshot({ path: path.join(SHOTS, 'obs_1_tactique_redstone.png') });
 
@@ -81,7 +94,7 @@ rec('PICK-01', s2.sel === s.sel && s2.view === 'obj', `toucher le modèle : sél
 rec('PICK-02', s2.sel === s.sel, `les étoiles derrière la planète ne sont pas des cibles (sélection inchangée : ${s2.sel})`);
 
 // 4. Pincer puis relever les doigts : pas de clic parasite
-const cdp = await ctx.newCDPSession(p), d0 = (await Z(p, () => STARBYTE_ZONES.pres())).wantedDistance;
+const cdp = await ctx.newCDPSession(p.page), d0 = (await Z(p, () => STARBYTE_ZONES.pres())).wantedDistance;
 const tp = (a, b) => [{ x: a, y: 180, id: 1 }, { x: b, y: 180, id: 2 }];   // au-dessus du libellé de la planète
 await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: tp(140, 250) }); await sleep(60);
 for (const b of [235, 220, 200, 185]) { await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: tp(140, b) }); await sleep(40); }
@@ -151,7 +164,7 @@ const others = await Z(p, async () => { const S = STARBYTE_ZONES, wait = ms => n
   const stn = S.objects().find(o => o.type === 'station'); S.observe(stn.id); await wait(2000); out.st = { lvl: S.pres().level, mark: S.atlasState().marks.map(m => m.t), body: document.getElementById('zj-sh-body').innerText.replace(/\s+/g, ' ').slice(0, 220) };
   const sig = S.objects().find(o => o.type === 'sig' && o.g.id === 'SIG-RS1'); S.observe(sig.id); await wait(2000); out.sig = { lvl: S.pres().level, mark: S.atlasState().marks.map(m => m.t), body: document.getElementById('zj-sh-body').innerText.replace(/\s+/g, ' ') };
   return out; });
-rec('STATION', others.st.lvl === 'object' && others.st.mark.length === 1 && /Fichier exporté : les modèles 3D restent dans le jeu. Silhouette générique, identité exacte/.test(others.st.body), `port observé : ${others.st.lvl} · « ${others.st.mark[0]} » · « ${others.st.body.slice(0, 120)} »`);
+rec('STATION', others.st.lvl === 'object' && others.st.mark.length === 1 && /Catalogue des modèles du jeu non lu : silhouette générique, identité exacte/.test(others.st.body), `port observé : ${others.st.lvl} · « ${others.st.mark[0]} » · « ${others.st.body.slice(0, 120)} »`);
 rec('SIGNAT', others.sig.lvl === 'object' && /n’en révèle pas la nature/.test(others.sig.body) && !/Champ|Épave|Cristal|habitable/i.test(others.sig.body), `signature non identifiée en gros plan : « ${others.sig.mark[0]} » · « ${others.sig.body.slice(0, 200)} »`);
 await p.screenshot({ path: path.join(SHOTS, 'obs_7_signature.png') });
 await Z(p, () => { const S = STARBYTE_ZONES; S.setMode('tac'); const R = S.zj.snap.zp.region; S.selectZone(R ? R.zones[0].id : S.zj.ws[0].zone); S.setMode('atlas'); }); await settle(p, 2000);
@@ -159,13 +172,13 @@ s4 = await st(p);
 rec('FOC-03', s4.pres.level === 'zone' && s4.prism && s4.selType === 'zone' && !s4.obs, `zone choisie puis Atlas : présentation ${s4.pres.level}, prisme ${s4.prism}, aucun modèle d'objet`);
 await p.screenshot({ path: path.join(SHOTS, 'obs_8_zone.png') });
 
-// 11. Données inchangées, lecture seule
-const after = await Z(p, () => JSON.stringify({ d: window.SB_ZONES_EMBED.data, ws: STARBYTE_ZONES.zj.ws.map(w => [w.id, w.coord, w.p, w.zone]), est: STARBYTE_ZONES.zj.ws.map(w => STARBYTE_ZONES.estimate(w.zone)) }));
+// 11. Données inchangées
+const after = await Z(p, () => JSON.stringify({ d: parent.SBZones.state().worlds, ws: STARBYTE_ZONES.zj.ws.map(w => [w.id, w.coord, w.p, w.zone]), est: STARBYTE_ZONES.zj.ws.map(w => STARBYTE_ZONES.estimate(w.zone)) }));
 rec('DATA-01', after === before, `adresses, positions, zones et découvertes identiques avant et après toutes les observations : ${after === before}`);
 rec('DATA-02', after === before, `distances et portées de jeu (estimations de zone) inchangées par l'échelle de présentation : ${after === before}`);
-const ro = await Z(p, () => ({ launch: !!document.querySelector('[data-a="launch"],[data-a="act"],[data-a="build-radar"]'), origin: STARBYTE_ZONES.zj.origin }));
-rec('VIEW-01', !ro.launch, `aucune commande d'envoi ni de gestion dans sa partie (bouton présent : ${ro.launch})`);
-rec('VIEW-02', ro.origin === s.origin || ro.origin === 'w:A-O-6386-40', `mesures toujours depuis ${ro.origin} après avoir observé ses quatre mondes`);
+const ro = await Z(p, () => ({ origin: STARBYTE_ZONES.zj.origin, txt: document.body.innerText }));
+rec('VIEW-01', !/\bTEST\b|essai|compte de test|lecture seule|Ses mondes/i.test(ro.txt), `aucune mention d'essai ni de lecture d'une autre partie sur la carte`);
+rec('VIEW-02', ro.origin === s.origin || ro.origin === 'w:A-O-6386-40', `départ des sondages toujours depuis ${ro.origin} après avoir observé les quatre mondes`);
 rec('ERREURS', errs.length === 0, errs.length ? errs.join(' | ') : 'aucune erreur de page (iPhone)');
 await ctx.close();
 
@@ -184,5 +197,5 @@ const rmv = await Z(rm.p, async () => { STARBYTE_ZONES.observe('world:w:A-R-5999
   return { d: c.distance, dObj: o.dObj, dt: Math.hypot(c.target[0] - o.p[0], c.target[1] - o.p[1], c.target[2] - o.p[2]), lvl: pr.level }; });
 rec('MOTION', rmv.lvl === 'object' && Math.abs(rmv.d - rmv.dObj) < .5 && rmv.dt < .01, `mouvement réduit : cadrage immédiat (${rmv.d.toFixed(1)} u pour ${rmv.dObj.toFixed(1)} u visés, 120 ms après le choix), sans vol`);
 await rm.ctx.close();
-await browser.close();
+await browser.close(); srv.close();
 const bad = results.filter(r => !r.ok); console.log(`\n${results.length - bad.length}/${results.length} contrôles OK`); process.exit(bad.length ? 1 : 0);

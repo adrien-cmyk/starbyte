@@ -1,8 +1,9 @@
 #!/usr/bin/env node
-// Test de la carte par zones (compte de test) dans le vrai jeu, Chromium sans écran, iPhone émulé.
+// Test de la carte (Atlas et Tactique) dans le vrai jeu, Chromium sans écran, iPhone émulé.
 //   node labo/carte-zones/test_zones.mjs           → rapport + captures dans labo/carte-zones/captures/
-// 1. Joueur ordinaire (adresse qui n'est pas localhost, sans le pseudo ni l'email d'Adrien) : rien ne change.
-// 2. Compte de test (localhost = même règle que le panneau de triche) : région, sondage, résultat, Légère, rechargement.
+// 1. Toutes les parties (14/11) : un joueur ordinaire passe sur la nouvelle carte ; actions reprises de l'ancienne carte.
+// 1c. Conversion d'une partie existante : même avancement sur les corridors, aucun port donné, fiche d'accueil une fois.
+// 2. Sondage d'une zone (univers ouvert), suivi d'une mission, modèles du jeu, corridors connus.
 import { createServer } from 'node:http';
 import { readFile, stat, mkdir } from 'node:fs/promises';
 import { readFileSync } from 'node:fs';
@@ -32,10 +33,10 @@ async function newGame(p, url, planet) {
   await sleep(1500);
 }
 
-// ═══ 1. Joueur ordinaire ═══
+// ═══ 1. Toutes les parties (14/11) : un joueur ordinaire passe sur la nouvelle carte ═══
 {
   const ctx = await browser.newContext(iphone); const p = await ctx.newPage(); watch(p, '[ordinaire]');
-  await newGame(p, `http://play.test:${port}/?zones`, 'TERRA');
+  await newGame(p, `http://play.test:${port}/?zones=Panzerstorm`, 'TERRA');   // l'ancien raccourci d'essai ne fait plus rien
   await sleep(4000);
   const r = await p.evaluate(() => {
     saveGame(); const snap = JSON.parse(localStorage.getItem('starbyte_savegame') || '{}');
@@ -44,16 +45,15 @@ async function newGame(p, url, planet) {
     const m = launchProbe('radar', MY_ADDRESS.cluster + '-' + MY_ADDRESS.sector + '-' + String(MY_ADDRESS.system).padStart(4, '0'), 'local', false);
     if (m) { m.arrivalAt = Date.now() - 1; tickProbes(); }
     const rep = (G.probeReports || [])[0];
-    return { allowed: SBZones.allowed(), btn: !!document.getElementById('sb-zones-btn'), overlay: !!document.getElementById('sb-zones-overlay'), saved: 'zoneProspect' in snap || 'atlasCarte' in snap, gz: G.zoneProspect === undefined && G.atlasCarte === undefined && !SBZones.migrated(),
+    return { allowed: SBZones.allowed(), mig: SBZones.migrated(), mode: G.atlasCarte && G.atlasCarte.mode, saved: 'atlasCarte' in snap, btn: !!document.getElementById('sb-zones-btn'), overlay: !!document.getElementById('sb-zones-overlay'),
+      tools: ['peek', 'saveRegion'].filter(k => k in SBZones), region: !!(G.zoneProspect && G.zoneProspect.region), welcome: G.atlasCarte && G.atlasCarte.accueil, modal: !document.getElementById('sb-modal-overlay').classList.contains('hidden'),
       radar: { before: pool, after: G.probesPool.filter(x => x.tier === 'radar').length, report: rep && rep.tier === 'radar' && !rep.zone } };
   });
-  rec('JOUEUR', !r.allowed && !r.btn && !r.overlay && !r.saved && r.gz && r.radar.report && r.radar.after === r.radar.before - 1,
-    `compte ordinaire (capitaine nommé « Hadrien » dans la partie) : accès ${r.allowed}, bouton ${r.btn}, carte ouverte par ?zones ${r.overlay}, clé dans la sauvegarde ${r.saved} ; une Radar normale part et revient par le chemin habituel (${r.radar.before} → ${r.radar.after} Radars, rapport classique ${r.radar.report})`);
-  // 10/11 soir : la capitale du compte de test (A-O-2178) suffit, même sans pseudo ni email lisibles sur l'appareil
+  rec('TOUS', r.allowed && r.mig && r.mode === 'generale' && r.saved && !r.btn && !r.overlay && !r.tools.length && !r.region && r.welcome === 'nouveau' && !r.modal && r.radar.report && r.radar.after === r.radar.before - 1,
+    `compte ordinaire neuf : partie migrée ${r.mig} (marque « ${r.mode} » enregistrée ${r.saved}), pas de bouton d'essai (${r.btn}), ?zones=Panzerstorm sans effet (${r.overlay}), outils d'essai ${JSON.stringify(r.tools)}, région d'essai ${r.region}, fiche d'accueil « ${r.welcome} » (nouveau joueur : aucune), une Radar normale part et revient par le chemin habituel (${r.radar.before} → ${r.radar.after}, rapport classique ${r.radar.report})`);
   const g = await p.evaluate(async () => { MY_ADDRESS.cluster = 'A'; MY_ADDRESS.sector = 'O'; MY_ADDRESS.system = 2178; goto('prospect'); await new Promise(r => setTimeout(r, 2600));
-    const b = document.getElementById('sb-zones-btn'); return { why: SBZones.why(), mig: SBZones.migrated(), flag: !!(G.atlasCarte && G.atlasCarte.v === 1), wrap: !!document.getElementById('sb-atlas-wrap'), rootHidden: getComputedStyle(document.getElementById('spacemap-root')).display === 'none', nav: !!document.querySelector('#scr-prospect .smw-nav'), btn: !!b, vis: !!(b && b.offsetParent), tools: [...document.querySelectorAll('#scr-prospect .smw-tools button')].filter(x => x.offsetParent).map(x => x.id || x.className || x.dataset.a) }; });
-  // 12/11 : la capitale du compte pilote (A-O-2178) bascule sa partie sur la nouvelle carte ; le bouton d'essai disparaît
-  rec('CAPITALE', g.why === 'capitale' && !g.btn && g.mig && g.flag && g.wrap && g.rootHidden && g.nav, `hors localhost, capitale A-O-2178 : accès « ${g.why} », partie migrée ${g.mig} (marque ${g.flag}), carte du Centre de prospection = nouvelle carte ${g.wrap}, ancienne cachée ${g.rootHidden}, barre du bas ${g.nav}, bouton d'essai ${g.btn}`);
+    return { mig: SBZones.migrated(), flag: !!(G.atlasCarte && G.atlasCarte.v === 1), wrap: !!document.getElementById('sb-atlas-wrap'), rootHidden: getComputedStyle(document.getElementById('spacemap-root')).display === 'none', nav: !!document.querySelector('#scr-prospect .smw-nav'), btn: !!document.getElementById('sb-zones-btn') }; });
+  rec('CENTRE', !g.btn && g.mig && g.flag && g.wrap && g.rootHidden && g.nav, `Centre de prospection : nouvelle carte ${g.wrap}, ancienne cachée ${g.rootHidden}, bandeau et feuilles du jeu ${g.nav}, bouton d'essai ${g.btn}`);
   await p.screenshot({ path: path.join(SHOTS, '0_centre_nouvelle_carte.png') });
 
   // ═══ 1b. Bascule de la partie pilote (12/11, progressive) ═══
@@ -83,7 +83,7 @@ async function newGame(p, url, planet) {
   await sleep(3500);
   const m5 = await p.evaluate(() => ({ crown: !!document.getElementById('crown-sp'), txt: ((document.getElementById('crown-sp') || {}).innerText || '').replace(/\s+/g, ' ').slice(0, 60) }));
   rec('MIG-PORT', m5.crown && /DRIFTING CROWN/i.test(m5.txt), `« Entrer dans le port » ouvre la station du jeu : « ${m5.txt} »`);
-  // univers ouvert : une zone hors de l'ancienne région de 30 zones, à portée, se sonde ; son contenu ne dépend que de la zone
+  // univers ouvert : toute zone à portée se sonde ; son contenu ne dépend que de la zone
   await p.evaluate(() => { try { crownSpaceClose(); } catch (e) {} goto('prospect'); }); await sleep(2500);
   MF = await frame(); await sleep(800);
   const oz = await MF.evaluate(() => { const Z = STARBYTE_ZONES, id = Z.openZoneNear(true); if (!id) return null; Z.setMode('tac'); Z.selectZone(id, true); const c1 = Z.zoneContent(id); return { id, c1: JSON.stringify(c1), body: document.getElementById('zj-sh-body').innerText.replace(/\s+/g, ' '), btn: !![...document.querySelectorAll('#zj-sh-foot button')].find(b => /Sonder cette zone/.test(b.textContent)) }; });
@@ -94,9 +94,9 @@ async function newGame(p, url, planet) {
   const om = await p.evaluate(id => { const m = (G.probeMissions || []).find(x => x.zone === id); const z = G.zoneProspect.zones[id]; if (m) { m.arrivalAt = Date.now() - 1; tickProbes(); } const z2 = G.zoneProspect.zones[id]; return { m: !!m, open: z && z.open && z.open.content, done: z2 && z2.st, found: z2 && (z2.found || []).length, sig: z2 && z2.found && z2.found[0] && G.signatures[z2.found[0]] && G.signatures[z2.found[0]].system }; }, oz && oz.id);
   const oc = oz && JSON.parse(oz.c1);
   rec('MIG-OUVERT', oz && !/région de test/.test(oz.body) && oz.btn && om.m && om.done === 'done' && (oc.cat === 'rien' ? om.found === 0 : om.found === 1 && om.sig === oc.sys) && JSON.stringify(om.open) === JSON.stringify(oc.cat === 'rien' ? { cat: 'rien' } : Object.fromEntries(Object.entries(oc).filter(([k]) => k !== 'anchor'))),
-    `zone ${oz && oz.id} (hors des 30 zones de l'essai, à portée) : « Sonder cette zone » ${oz && oz.btn}, aucun « région de test » ; contenu tiré de la zone : ${oz && oz.c1} → mission ${om.m}, arrivée ${om.done}, ${om.found} signature${om.found > 1 ? 's' : ''}${om.sig ? ' sur ' + om.sig : ''}`);
+    `zone ${oz && oz.id} (à portée) : « Sonder cette zone » ${oz && oz.btn}, aucun « région de test » ; contenu tiré de la zone : ${oz && oz.c1} → mission ${om.m}, arrivée ${om.done}, ${om.found} signature${om.found > 1 ? 's' : ''}${om.sig ? ' sur ' + om.sig : ''}`);
   // étape 1 : les systèmes balayés et leurs emplacements ; marquer un système
-  const ks = await p.evaluate(() => { const sys = G.zoneProspect.region.zones.find(z => z.anchor && z.cat === 'rien' && z.grp !== 'A0').anchor, m = sys.match(/^([A-Z]+)-([A-Z])-(\d{4})$/);
+  const ks = await p.evaluate(() => { const a = MY_ADDRESS, sys = `${a.cluster}-${a.sector}-${String(((a.system + 11 - 1000) % 9000) + 1000).padStart(4, '0')}`, m = sys.match(/^([A-Z]+)-([A-Z])-(\d{4})$/);
     G.knownSystems = G.knownSystems || {}; G.knownSystems[sys] = { cluster: m[1], sector: m[2], system: m[3], planets: generateDiscoveredSystem(m[2], m[3], m[1]), discoveredAt: Date.now() - 3600e3, isMine: false };
     saveGame(); return { sys, n: G.knownSystems[sys].planets.length }; });
   await MF.evaluate(() => STARBYTE_ZONES.refresh(true)); await sleep(600);
@@ -273,7 +273,61 @@ async function newGame(p, url, planet) {
   await ctx.close();
 }
 
-// ═══ 2. Compte de test ═══
+// ═══ 1c. Conversion d'une partie existante (décision du 14/11 : « même avancement, aucun cadeau ») ═══
+// Une partie jouée sur l'ancienne carte (carte coupée : SB_ZONES_OFF), avec des balises, des signaux d'antenne, des tronçons connus et une
+// flotte en embuscade sur d'anciens jalons ; puis la même partie rechargée normalement : la migration et sa conversion passent.
+{
+  const ctx = await browser.newContext(iphone); const p = await ctx.newPage(); watch(p, '[conversion]');
+  await p.addInitScript(() => { if (!sessionStorage.getItem('sb_mig_go')) window.SB_ZONES_OFF = true; });
+  await newGame(p, `http://play.test:${port}/`, 'ANCIENNE'); await sleep(2500);
+  const set = await p.evaluate(() => {
+    const net = SBLines.network(), now = Date.now(), cr = net.byId['dock-37oe89-0'], rg = net.byId['dock-o3pz0b-0'], gl = net.byId['dock-wc15ki-0'];
+    G.hiddenPorts = G.hiddenPorts || {}; G.hiddenPorts[gl.port] = { dockId: gl.dockId, name: 'Refuge', typeLabel: 'Port franc', at: now };   // le port des Glaces est connu, les deux autres non
+    const B = (id, sys) => G.probesPool.push({ id, tier: 'beacon', state: 'deployed', deployedSystem: sys, deployedAt: now - 7200e3, _linesAt: now, world: 'home', name: id });
+    B('b-cr', cr.chain[3]); B('b-rg0', rg.chain[0]); B('b-rg5', rg.chain[5]); B('b-rg6', rg.chain[6]); B('b-gl', gl.chain[gl.chain.length - 1]);
+    G.trafficEchoes = G.trafficEchoes || {}; G.trafficEchoes[cr.chain[0]] = { lineId: cr.id, at: now }; G.trafficEchoes[rg.chain[1]] = { lineId: rg.id, at: now };
+    G.spottedLegs = G.spottedLegs || []; G.spottedLegs.push({ id: 'tl-a', lineId: rg.id, from: rg.chain[2], to: rg.chain[3], npc: true, at: now, pseudo: 'Convoi', cargo: 'moyen' }, { id: 'tl-b', lineId: rg.id, from: rg.chain[5], to: rg.chain[6], npc: true, at: now, pseudo: 'Convoi', cargo: 'moyen' });
+    G.fleet.prepared.push({ id: 'fl-jalon', name: 'Vigie', composition: { fregate: { t1: 2, t2: 0, t3: 0 }, cuirasse: { t1: 0, t2: 0, t3: 0 }, tanker: { t1: 0, t2: 0, t3: 0 } }, soldiers: { garde: 0, lourd: 0 }, status: 'in_mission', world: 'home', missionStartedAt: now - 4 * 3600e3,
+      ambush: { system: cr.chain[2], phase: 'posted', world: 'home', departedAt: now - 4 * 3600e3, arrivesAt: now - 3.5 * 3600e3, postedAt: now - 3.5 * 3600e3, npcAt: now, hold: {}, orders: { mode: 'manual', players: false } } });
+    G.antenna = Object.assign(G.antenna || {}, { built: true, building: false });
+    saveGame();
+    return { mode: net.mode, cr: cr.chain, crId: cr.id, rg: rg.chain, rgId: rg.id, gl: gl.chain, ports: Object.keys(G.hiddenPorts).sort(), routes: (G.routes || []).map(r => r.id).sort(), mig: SBZones.migrated() };
+  });
+  await p.evaluate(() => sessionStorage.setItem('sb_mig_go', '1'));
+  await p.reload({ waitUntil: 'load' });
+  let wl = null; for (let i = 0; i < 40 && !wl; i++) { await sleep(500); wl = await p.evaluate(() => { const o = document.getElementById('sb-modal-overlay'); return o && !o.classList.contains('hidden') ? { title: document.getElementById('sb-modal-title').textContent, body: document.getElementById('sb-modal-body').innerText.replace(/\s+/g, ' '), ok: document.getElementById('sb-modal-confirm').textContent } : null; }).catch(() => null); }
+  await p.screenshot({ path: path.join(SHOTS, '0c_fiche_accueil.png') });
+  await p.evaluate(() => { try { sbModalResolve(false); } catch (e) {} });
+  const c = await p.evaluate((cr) => {
+    const A = G.atlasCarte || {}, b = Object.fromEntries(sbAllProbes().filter(x => x.tier === 'beacon').map(x => [x.id, x.state === 'deployed' ? x.deployedSystem : 'hangar']));
+    const f = G.fleet.prepared.find(x => x.id === 'fl-jalon'), a = f && f.ambush, now = Date.now(); if (a) { a.npcAt = now - 3 * 3600e3; }
+    const line = SBLines.network().lines.find(l => l.id === cr), before = JSON.stringify((G.lineObs || {})[line.id] || {});
+    SBLines.tickAmbushes(now); const ob = (G.lineObs || {})[line.id] || {};
+    return { mode: SBLines.network().mode, b, echoes: Object.fromEntries(Object.entries(G.trafficEchoes || {}).map(([k, e]) => [k, e.lineId])), legs: (G.spottedLegs || []).filter(l => l.npc).map(l => l.lineId + ':' + l.from + '>' + l.to),
+      ports: Object.keys(G.hiddenPorts || {}).sort(), routes: (G.routes || []).map(r => r.id).sort(), bilan: A.bilan, legacy: (A.legacy5 || []).map(x => x.name + '@' + x.sys), copie: !!A.copie5, accueil: A.accueil, mode5: A.mode,
+      amb: a && a.system, seen: Object.keys(ob).filter(k => k.endsWith('@' + (a && a.system))).length, changed: JSON.stringify(ob) !== before };
+  }, set.crId);
+  const R7 = 'A-M-1979', J2 = 'A-N-7586', R8 = 'A-K-5365', R9 = 'A-K-0757', R10 = 'A-L-7382', R2 = 'A-N-7595';
+  rec('CONV-BALISES', set.mode === 'old' && c.mode === 'cor' && c.b['b-cr'] === 'hangar' && c.b['b-rg6'] === R8 && c.b['b-rg5'] === J2 && c.b['b-rg0'] === 'hangar' && c.b['b-gl'] === R2,
+    `avant ${set.mode}, après ${c.mode} · Couronne (port inconnu, un seul relais) : jalon 4/${set.cr.length} → ${c.b['b-cr']} · Regard (port inconnu) : 7/8 → ${c.b['b-rg6']} (R9 sous 1000 : relais d'avant), 6/8 → ${c.b['b-rg5']}, 1/8 → ${c.b['b-rg0']} (plus de relais libre) · Glaces (port connu) : ${set.gl.length}/${set.gl.length} → ${c.b['b-gl']} (R2)`);
+  rec('CONV-SIGNAUX', c.echoes[R7] === set.crId && c.echoes[J2] === set.rgId && !c.echoes[set.cr[0]] && !c.echoes[set.rg[1]],
+    `signal de la Couronne → R7 (${c.echoes[R7] ? 'oui' : 'non'}), signal du Regard 2/8 → J2 (${c.echoes[J2] ? 'oui' : 'non'}), anciens jalons libérés`);
+  const rgLegs = c.legs.filter(x => x.startsWith(set.rgId + ':') && !set.rg.some(k => x.includes(':' + k + '>'))), toPort = c.legs.filter(x => x.endsWith('>A-L-8388') || x.endsWith('>A-M-3340'));
+  rec('CONV-SAVOIR', rgLegs.includes(set.rgId + ':' + R8 + '>' + R9) && rgLegs.includes(set.rgId + ':' + R9 + '>' + R10) && !toPort.length,
+    `tronçons du Regard 3→4 et 6→7 sur 8 → ${rgLegs.join(', ')} ; aucun tronçon vers un port inconnu (${toPort.length})`);
+  rec('CONV-PORTS', JSON.stringify(c.ports) === JSON.stringify(set.ports) && JSON.stringify(c.routes) === JSON.stringify(set.routes) && c.copie,
+    `ports connus ${JSON.stringify(c.ports)} (avant ${JSON.stringify(set.ports)}), routes ${c.routes.length} (avant ${set.routes.length}) : aucun port donné · copie gardée ${c.copie}`);
+  rec('CONV-EMBUSCADE', c.amb === set.cr[2] && c.legacy.includes('Vigie@' + set.cr[2]) && c.seen >= 1 && c.changed,
+    `Vigie reste sur l'ancien jalon ${c.amb} et y voit les convois PNJ comme avant : ${c.seen} relevé(s) à ce jalon`);
+  rec('ACCUEIL', wl && wl.title === 'Nouvelle carte' && /3 balises posées sur des relais/.test(wl.body) && /2 balises rentrées au hangar/.test(wl.body) && /Vigie reste en embuscade/.test(wl.body) && /aucun port n’a été donné/.test(wl.body) && /Ancienne carte|ancienne carte/.test(wl.body) && wl.ok === 'Voir la carte' && c.mode5 === 'generale' && c.accueil > 0,
+    `fiche « ${wl && wl.title} » : ${wl && wl.body.slice(0, 260)}… [${wl && wl.ok}]`);
+  await p.evaluate(() => saveGame()); await p.reload({ waitUntil: 'load' }); await sleep(6000);
+  const again = await p.evaluate(() => !document.getElementById('sb-modal-overlay').classList.contains('hidden'));
+  rec('ACCUEIL-1X', !again, `après rechargement, la fiche ne revient pas (${again})`);
+  await ctx.close();
+}
+
+// ═══ 2. Sondage d'une zone (univers ouvert), mondes, rechargement ═══
 const ctx = await browser.newContext(iphone); let p = await ctx.newPage(); watch(p, '[test]');
 const base = `http://127.0.0.1:${port}/`;
 await newGame(p, base, 'OPUS-ONE');
@@ -284,24 +338,26 @@ const home = await p.evaluate(() => {
   saveGame(); return { home: `${a.cluster}-${a.sector}-${a.system}-${a.planet}`, colony: coord, worlds: G.worlds.map(w => w.id + ':' + w.name) };
 });
 await sleep(2500);
-const btn = await p.evaluate(() => ({ allowed: SBZones.allowed(), btn: !!document.getElementById('sb-zones-btn') }));
-rec('ACCÈS', btn.allowed && btn.btn, `compte de test : accès ${btn.allowed}, bouton « Zones · test » dans le Centre de prospection ${btn.btn} · mondes ${home.worlds.join(', ')}`);
+// le joueur connaît les six stations du réseau (ses routes y mènent) : corridors, itinéraires et modèles des stations plus bas
+await p.evaluate(() => { for (const l of SBLines.network().lines) if (l.corridor) SBLines.revealLine(l, Date.now(), l.kind && l.kind.label); saveGame(); });
+const btn = await p.evaluate(() => ({ allowed: SBZones.allowed(), mig: SBZones.migrated(), btn: !!document.getElementById('sb-zones-btn'), cor: SBZones.state().corKnown }));
+rec('CARTE2', btn.allowed && btn.mig && !btn.btn && btn.cor.length === 6, `partie migrée ${btn.mig}, aucun bouton d'essai (${btn.btn}), corridors connus ${JSON.stringify(btn.cor)} · mondes ${home.worlds.join(', ')}`);
 await p.evaluate(() => SBZones.open());
 const frameReady = async () => { for (let i = 0; i < 80; i++) { const f = p.frames().find(f => f.url().includes('atlas/index.html')); if (f) { const ok = await f.evaluate(() => !!(window.STARBYTE_ZONES && STARBYTE_ZONES.zj.snap)).catch(() => false); if (ok) return f; } await sleep(500); } return null; };
 let F = await frameReady();
 await sleep(3500);
-const reg = await p.evaluate(() => { const r = G.zoneProspect && G.zoneProspect.region; if (!r) return null; const c = { rien: 0, commun: 0, choix: 0 }, kinds = {}; for (const z of r.zones) { c[z.content.cat]++; if (z.content.kind) kinds[z.content.kind] = (kinds[z.content.kind] || 0) + 1; }
-  return { n: r.zones.length, c, kinds, grid: r.grid, notes: r.notes, sysOk: r.zones.every(z => z.content.cat === 'rien' || /^[A-Z]-[A-Z]-\d{4}$/.test(z.content.sys)), groups: r.zones.reduce((a, z) => (a[z.grp] = (a[z.grp] || 0) + 1, a), {}) }; });
-// la maison du compte de test est tirée au hasard : dans un coin pauvre, un contenu sans système à portée est abandonné (noté), la zone reste vide
-const lost = reg && reg.notes ? reg.notes.filter(n => /contenu abandonné/.test(n)).length : 0;
-rec('RÉGION', reg && reg.n === 30 && lost <= 2 && reg.c.rien === 12 + lost && reg.c.commun + reg.c.choix === 18 - lost && reg.sysOk && reg.grid === 'tac-2', reg ? `30 zones ${JSON.stringify(reg.groups)} · ${JSON.stringify(reg.c)} · ${JSON.stringify(reg.kinds)} · contenus posés sur de vrais systèmes ${reg.sysOk}${reg.notes && reg.notes.length ? ' · notes : ' + reg.notes.join(' ; ') : ''}` : 'région absente');
+const reg = await p.evaluate(() => ({ region: !!(G.zoneProspect && G.zoneProspect.region), journal: ((G.zoneProspect && G.zoneProspect.journal) || []).length }));
+rec('SANS-RÉGION', !reg.region && reg.journal === 0, `aucune région d'essai créée (${reg.region}), aucun journal de mesures (${reg.journal}) : l'univers est ouvert`);
 await p.screenshot({ path: path.join(SHOTS, '1_ouverture.png') });
 
-// un sondage : zone « commun » la plus proche de la capitale
-const target = await p.evaluate(() => { const r = G.zoneProspect.region; const z = r.zones.filter(z => z.content.cat === 'commun').sort((a, b) => ['A1', 'A2', 'B', 'C'].indexOf(a.grp) - ['A1', 'A2', 'B', 'C'].indexOf(b.grp))[0]; return { id: z.id, kind: z.content.kind, sys: z.content.sys, k: z.k }; });
+// un sondage : la zone « commun » à portée la plus proche de la capitale (contenu tiré de son identifiant, le même pour tous)
+let target = null;
+for (let t = 0; t < 20 && !target; t++) { await sleep(500); target = await F.evaluate(() => { const h = zjHome(); if (!h) return null; const [q0, r0] = tacCellOf(h.p[0], h.p[2]), k = tacLayerOf(h.p[1]);
+  for (let n = 2; n < 12; n++) for (const [q, r] of hexRing(q0, r0, n)) { const id = zoneId(q, r, k), e = zjEstimate(id); if (!e || !e.inRange) continue; const c = zjZoneContent(id); if (c && c.cat === 'commun' && /^[A-Z]-[A-Z]-\d{4}$/.test(c.sys || '')) return { id, kind: c.kind, sys: c.sys, k }; }
+  return null; }); }
 await F.evaluate((id) => STARBYTE_ZONES.selectZone(id), target.id); await sleep(400);
 const fiche = await F.evaluate(() => ({ body: document.getElementById('zj-sh-body').innerText.replace(/\s+/g, ' '), foot: document.getElementById('zj-sh-foot').innerText.replace(/\s+/g, ' '), btns: document.querySelectorAll('#zj-sh-foot button').length }));
-rec('FICHE', /Non sondée/.test(fiche.body) && /Durée/.test(fiche.body) && /Coût/.test(fiche.body) && /Sonder cette zone/.test(fiche.foot) && fiche.btns === 1, `« ${fiche.body.slice(0, 150)} » · bouton : ${fiche.foot}`);
+rec('FICHE', /Non sondée/.test(fiche.body) && /Durée/.test(fiche.body) && /Coût/.test(fiche.body) && /Sonder cette zone/.test(fiche.foot) && fiche.btns >= 1 && !/région de test/.test(fiche.body), `« ${fiche.body.slice(0, 150)} » · bouton : ${fiche.foot}`);
 await p.screenshot({ path: path.join(SHOTS, '2_fiche_zone.png') });
 const before = await p.evaluate(() => ({ radars: G.probesPool.filter(x => x.tier === 'radar' && x.state === 'ready').length, missions: G.probeMissions.length }));
 await F.evaluate(() => { const b = document.querySelector('#zj-sh-foot [data-a="launch"]'); b.click(); b.disabled = false; b.click(); });
@@ -377,91 +433,21 @@ await p.screenshot({ path: path.join(SHOTS, '7_colonie.png') });
 
 // rechargement : rien ne se recrée, rien ne se perd
 await p.evaluate(() => saveGame());
-const reg1 = await p.evaluate(() => JSON.stringify(G.zoneProspect.region.zones.map(z => z.id + z.content.cat)));
 await p.reload({ waitUntil: 'load' }); await sleep(5000);
-const re = await p.evaluate((id) => ({ region: JSON.stringify(G.zoneProspect.region.zones.map(z => z.id + z.content.cat)), st: G.zoneProspect.zones[id] && G.zoneProspect.zones[id].st, sigs: Object.values(G.signatures).filter(s => s.zone).length }), target.id);
-rec('RECHARGE', re.region === reg1 && re.st === 'done' && re.sigs === 1, `après rechargement : région identique ${re.region === reg1}, zone ${re.st}, ${re.sigs} signature de zone (pas de doublon)`);
+const re = await p.evaluate((id) => ({ region: !!G.zoneProspect.region, st: G.zoneProspect.zones[id] && G.zoneProspect.zones[id].st, sigs: Object.values(G.signatures).filter(s => s.zone).length, mig: SBZones.migrated() }), target.id);
+rec('RECHARGE', !re.region && re.mig && re.st === 'done' && re.sigs === 1, `après rechargement : toujours sur la nouvelle carte ${re.mig}, pas de région ${!re.region}, zone ${re.st}, ${re.sigs} signature de zone (pas de doublon)`);
 await p.evaluate(() => SBZones.open()); F = await frameReady(); await sleep(2500);
 const re2 = await F.evaluate((id) => { STARBYTE_ZONES.selectZone(id); return document.getElementById('zj-sh-body').innerText.replace(/\s+/g, ' ').slice(0, 80); }, target.id);
 rec('RECHARGE2', /Sondée/.test(re2), `la carte rouverte montre la zone : « ${re2} »`);
 await p.screenshot({ path: path.join(SHOTS, '8_apres_rechargement.png') });
 
-// ═══ 3. Lecture d'une autre partie (v53 simulée : même forme que dev_player_map) ═══
-const mineState = () => p.evaluate(() => JSON.stringify({ region: G.zoneProspect.region, zones: G.zoneProspect.zones, pm: G.probeMissions.map(m => m.id), sig: Object.keys(G.signatures).sort(), radars: G.probesPool.length }));
-const before3 = await mineState();
-const nf = await p.evaluate(async () => { window.SB_ZONES_FAKE = async () => { throw new Error('Could not find the function public.dev_player_map(p_pseudo) in the schema cache'); }; const r = await SBZones.peek('Panzerstorm'); return r.why; });
-rec('V53-ABS', /schema_mp_v53/.test(nf), `serveur sans v53 : « ${nf} »`);
-await p.evaluate(() => {
-  const A = (c, s, n, pl) => `${c}-${s}-${String(n).padStart(4, '0')}` + (pl ? '-' + String(pl).padStart(2, '0') : '');
-  window.SB_ZONES_FAKE = async (fn, args) => {
-    if (fn !== 'dev_player_map') throw new Error('rpc inconnu');
-    if (String(args.p_pseudo).toLowerCase() !== 'panzerstorm') return { ok: false, why: 'unknown_pseudo', candidates: ['Panzerstorm'] };
-    const sig = (id, sys, extra) => Object.assign({ id, system: sys, type: 'heat_point', typeLabel: 'Point chaud', intensity: 'faible', resolved: false }, extra || {});
-    return { ok: true, pseudo: 'Panzerstorm', planet_name: 'NÉRÉIDE', address: A('A', 'K', 6184, 12), level: 9, saved_at: new Date(Date.now() - 3600e3).toISOString(),
-      colonies: [{ address: A('A', 'K', 6301, 5), name: 'Brèche' }, { address: A('A', 'L', 420, 7), name: 'Ostra' }, { address: A('A', 'J', 3001, 3), name: 'Halde' }, { address: A('A', 'M', 1500, 9), name: 'Kern' }],
-      save_worlds: [{ id: 'home', kind: 'home' }, { id: 'col-9', kind: 'colony', name: 'Vigie', coord: A('A', 'L', 777, 2) }],
-      signatures: [sig('SIG-PZ1', A('A', 'K', 6190)), sig('SIG-PZ2', A('A', 'K', 6100), { resolved: true, resolvedType: 'moving', movingCoordKey: 'A-K-6100#1' }), sig('SIG-PZ3', A('A', 'L', 430), { resolved: true, resolvedType: 'fixed', fixedClass: 'habitable', fixedAddress: A('A', 'L', 430, 4) }), sig('SIG-PZ4', A('A', 'K', 6000), { ignored: true })],
-      known_targets: [{ key: 'A-K-6100#1', label: 'Champ d’astéroïdes', status: 'available' }],
-      known_systems: [A('A', 'K', 6184), A('A', 'K', 6185), A('A', 'K', 6190), A('A', 'K', 6200), A('A', 'L', 420), A('A', 'L', 430), A('A', 'J', 3001)],
-      reports: [{ tier: 'radar', system: A('A', 'K', 6250), at: Date.now() - 864e5 }], missions: [{ tier: 'light', status: 'in_transit' }], arks: [{ coord: A('A', 'N', 10, 1), name: 'Arche' }] };
-  };
-});
-await p.evaluate(() => { SBZones.close(); SBZones.open({ peek: 'Panzerstorm' }); }); F = await frameReady();
-let pk = null; for (let i = 0; i < 40 && !(pk && pk.on); i++) { await sleep(500); pk = await F.evaluate(() => { const zj = STARBYTE_ZONES.zj; return { on: !!zj.peek }; }); }
-await sleep(1500);
-pk = await F.evaluate(() => { const zj = STARBYTE_ZONES.zj, P = zj.peek, R = zj.snap.zp.region; return { trN: zj.tr.length, on: !!P, ws: zj.ws.map(w => w.kind[0] + ':' + w.name), sigs: zj.snap.sigs.length, explored: P && P.explored.size, known: P && P.knownN, region: R && R.zones.length,
-  cats: R && R.zones.reduce((a, z) => (a[z.content.cat] = (a[z.content.cat] || 0) + 1, a), {}), amas: P && P.amas.size, head: document.querySelector('.zj-test').textContent, pill: document.getElementById('zj-worlds').textContent,
-  body: document.getElementById('zj-sh-body').innerText.replace(/\s+/g, ' '), foot: document.getElementById('zj-sh-foot').innerText.replace(/\s+/g, ' ') }; });
-rec('LECTURE', pk.on && pk.ws.length === 6 && pk.ws[0] === 'h:NÉRÉIDE' && pk.sigs === 3 && pk.explored > 0 && pk.region === 30 && /L’empire de Panzerstorm/.test(pk.body) && /Revenir à ma partie/.test(pk.foot) && /PANZERSTORM/.test(pk.head) && pk.pill === 'Ses mondes',
-  `${pk.ws.join(', ')} · ${pk.sigs} signatures (l'ignorée écartée) · ${pk.known} systèmes connus sur ${pk.explored} zones · région simulée ${pk.region} ${JSON.stringify(pk.cats)} · amas touchés par la portée ${pk.amas} · « ${pk.body.slice(0, 900)} »`);
-rec('FOLLOW-07', pk.trN === 0 && /Instantané/.test(pk.body), `partie lue : ${pk.trN} mission suivie ; « ${(pk.body.match(/Instantané[^.]*\./) || [''])[0]} »`);
-await p.screenshot({ path: path.join(SHOTS, '9_panzerstorm_tactique.png') });
-// une zone de sa région : contenu prévu montré, aucun bouton d'envoi
-const pz = await F.evaluate(() => { const Z = STARBYTE_ZONES, R = Z.zj.snap.zp.region, z = R.zones.find(z => z.content.cat === 'choix') || R.zones[1]; Z.selectZone(z.id); return { body: document.getElementById('zj-sh-body').innerText.replace(/\s+/g, ' '), launch: !!document.querySelector('#zj-sh-foot [data-a="launch"]'), kind: z.content.kind }; });
-const sigView = await F.evaluate(() => { const o = STARBYTE_ZONES.objects().find(o => o.type === 'sig'); STARBYTE_ZONES.selectObj(o);
-  return { body: document.getElementById('zj-sh-body').innerText.replace(/\s+/g, ' '), foot: document.getElementById('zj-sh-foot').innerText.replace(/\s+/g, ' '), act: !!document.querySelector('#zj-sh-foot [data-a="act"]') }; });
-rec('LECT-SEULE', !pz.launch && /Contenu prévu/.test(pz.body) && !sigView.act, `zone de sa région : « ${pz.body.slice(0, 170)} » (bouton Sonder ${pz.launch}) · signature : « ${sigView.foot.slice(0, 80)} » (bouton d'action ${sigView.act})`);
-await F.evaluate(() => { STARBYTE_ZONES.setMode('atlas'); const w = STARBYTE_ZONES.zj.ws[0]; STARBYTE_ZONES.atlasFocus(w.p, 5200); }); await sleep(3500);
-const pa = await F.evaluate(() => STARBYTE_ZONES.atlasState().marks.map(m => m.t));
-rec('LECT-ATLAS', pa.some(t => /Sa capitale · NÉRÉIDE/.test(t)) || pa.some(t => /lieux/.test(t)), `Atlas sur son empire : ${pa.slice(0, 8).join(' | ')}`);
-await p.screenshot({ path: path.join(SHOTS, '10_panzerstorm_atlas.png') });
-// retour à ma partie, et rien n'a bougé dans la mienne
-await F.evaluate(() => { STARBYTE_ZONES.setMode('tac'); STARBYTE_ZONES.peekStop(); }); await sleep(600);
-const mine = await F.evaluate(() => ({ on: !!STARBYTE_ZONES.zj.peek, ws: STARBYTE_ZONES.zj.ws.map(w => w.name), head: document.querySelector('.zj-test').textContent }));
-const after3 = await mineState();
-const same = after3 === before3, diff = same ? '' : Object.keys(JSON.parse(before3)).filter(k => JSON.stringify(JSON.parse(before3)[k]) !== JSON.stringify(JSON.parse(after3)[k])).join(', ');
-rec('LECT-RETOUR', !mine.on && mine.ws.includes('OPUS-ONE') && /HADRIEN/.test(mine.head) && same, `retour : ${mine.ws.join(', ')} · « ${mine.head} » · ma partie inchangée (région, zones, sondes, signatures) ${same}${diff ? ' · diffère : ' + diff : ''}`);
-// par l'interface : Mes mondes › Voir la partie d'un commandant
-await F.evaluate(() => document.getElementById('zj-worlds').click()); await sleep(300);
-const ui = await F.evaluate(async () => { const i = document.getElementById('zj-peek-in'); if (!i) return { input: false }; i.value = 'panzerstorm'; document.querySelector('#zj-sh-body [data-a="peek"]').click(); for (let k = 0; k < 30 && !STARBYTE_ZONES.zj.peek; k++) await new Promise(r => setTimeout(r, 200)); return { input: true, on: !!STARBYTE_ZONES.zj.peek, ws: STARBYTE_ZONES.zj.ws.length }; });
-await F.evaluate(() => STARBYTE_ZONES.peekStop());
-rec('LECT-UI', ui.input && ui.on && ui.ws === 6, `champ « Voir la partie d’un commandant » présent ${ui.input}, lecture ouverte ${ui.on} (${ui.ws} mondes)`);
-
-// ═══ 4. « Télécharger cette carte » : un fichier HTML autonome, qui s'ouvre sans le jeu ni le serveur ═══
-await F.evaluate(async () => { await STARBYTE_ZONES.peekStart('Panzerstorm'); }); await sleep(1500);
-await F.evaluate(() => document.getElementById('zj-sh-back').click()); await sleep(300);
-const dlP = p.waitForEvent('download', { timeout: 15000 }).catch(() => null);
-const exBtn = await F.evaluate(() => { const b = document.querySelector('#zj-sh-foot [data-a="export"]'); if (!b) return false; b.click(); return true; });
-const dl = await dlP; const EXP = path.join(SHOTS, 'export_panzerstorm.html'); let expName = null;
-if (dl) { expName = dl.suggestedFilename(); await dl.saveAs(EXP); }
-const { size: expSize } = dl ? await stat(EXP) : { size: 0 };
-rec('EXPORT', exBtn && !!dl && /^starbyte-carte-panzerstorm-\d{4}-\d\d-\d\d\.html$/.test(expName || '') && expSize > 500e3, `bouton ${exBtn} → fichier ${expName} (${Math.round(expSize / 1024)} Ko)`);
-if (dl) {
-  const ctxF = await browser.newContext(iphone); const pf = await ctxF.newPage(); const ferr = []; pf.on('pageerror', e => ferr.push(String(e.message || e).slice(0, 200)));
-  await pf.goto('file://' + EXP, { waitUntil: 'load', timeout: 60000 }); await sleep(4000);
-  const fx = await pf.evaluate(() => { const Z = window.STARBYTE_ZONES, zj = Z && Z.zj; return zj ? { peek: !!zj.peek, ws: zj.ws.length, region: zj.snap && zj.snap.zp.region && zj.snap.zp.region.zones.length, close: getComputedStyle(document.getElementById('zj-close')).display,
-    body: document.getElementById('zj-sh-body').innerText.replace(/\s+/g, ' ').slice(0, 260), foot: document.getElementById('zj-sh-foot').innerText.trim(), title: document.title, block: !document.getElementById('zj-block').hidden } : null; });
-  const sameRegion = fx && await F.evaluate(() => JSON.stringify(STARBYTE_ZONES.zj.snap.zp.region.zones.map(z => z.id + z.content.cat))) === await pf.evaluate(() => JSON.stringify(STARBYTE_ZONES.zj.snap.zp.region.zones.map(z => z.id + z.content.cat)));
-  await pf.evaluate(() => { STARBYTE_ZONES.setMode('atlas'); }); await sleep(2500);
-  const fa = await pf.evaluate(() => STARBYTE_ZONES.atlasState().marks.length);
-  await pf.screenshot({ path: path.join(SHOTS, '11_fichier_exporte_atlas.png') });
-  await pf.evaluate(() => { STARBYTE_ZONES.setMode('tac'); }); await sleep(800);
-  await pf.screenshot({ path: path.join(SHOTS, '12_fichier_exporte_tactique.png') });
-  rec('FICHIER', fx && fx.peek && fx.ws === 6 && fx.region === 30 && sameRegion && fx.close === 'none' && !fx.block && /Fichier exporté le/.test(fx.body) && fx.foot === '' && fa > 0 && ferr.length === 0,
-    fx ? `ouvert seul (file://, sans jeu ni serveur) : « ${fx.title} », ${fx.ws} mondes, région ${fx.region} identique à celle du jeu ${sameRegion}, ${fa} marqueurs dans l'Atlas, croix ${fx.close}, aucun bouton d'action « ${fx.foot} » · « ${fx.body.slice(0, 200)} »${ferr.length ? ' · erreurs : ' + ferr.join(' | ') : ''}` : 'page vide');
-  await ctxF.close();
-}
-await F.evaluate(() => STARBYTE_ZONES.peekStop());
+// ═══ 3. Outils d'essai retirés (14/11) : plus de lecture d'une autre partie, plus de fichier exporté, plus de mention TEST ═══
+{ await p.evaluate(() => SBZones.open()); F = await frameReady(); await sleep(2000);
+  const o = await F.evaluate(() => { document.getElementById('zj-worlds').click(); const t = document.body.innerText; return { peekIn: !!document.getElementById('zj-peek-in'), voir: /Voir la partie/.test(t), head: document.querySelector('#zj-sh-head .zj-test').textContent, test: /\bTEST\b|compte de test|région de test|· essai|Panzerstorm/i.test(t), title: document.title, api: ['peekStart', 'exportHtml'].filter(k => k in STARBYTE_ZONES) }; });
+  const g = await p.evaluate(() => ({ peek: 'peek' in SBZones, region: 'saveRegion' in SBZones, btn: !!document.getElementById('sb-zones-btn') }));
+  rec('OUTILS', !o.peekIn && !o.voir && o.head === 'MA CARTE' && !o.test && o.title === 'Starbyte · Carte' && !o.api.length && !g.peek && !g.region && !g.btn,
+    `« Mes mondes » sans « Voir la partie d’un commandant » (${!o.voir}), tête de fiche « ${o.head} », titre « ${o.title} », aucune mention d'essai (${!o.test}), fonctions retirées : lecture ${!g.peek}, région ${!g.region}, export ${!o.api.length}`);
+  await F.evaluate(() => STARBYTE_ZONES.open && 0); }
 
 // ═══ 5. Suivre un vrai tanker (cahier « Observer » v1.1, § 18 et 23) ═══
 // Le tanker part par l'action du jeu (launchTankerToKnownTarget) vers la cible mouvante identifiée plus haut par la Légère.
@@ -519,15 +505,6 @@ rec('FOLLOW-03', sus.F.susp && sus.d > 5 && /Reprendre le suivi/.test(sus.foot) 
 await F.evaluate(() => document.querySelector('#zj-sh-foot [data-a="travel-fit"]').click()); await sleep(1800);
 const fit = await F.evaluate(id => { const S = STARBYTE_ZONES, tr = S.travels().find(x => x.id === 'tk:' + id); return { F: S.followState(), d: S.pres().distance, L: tr.L }; }, tk.id);
 await p.screenshot({ path: path.join(SHOTS, '15_tanker_trajet.png') });
-// étape 3 (§ 22) : comparer les itinéraires de ce vrai tanker sur le réseau candidat ; rien ne change dans la mission
-const cmpBtn = await F.evaluate(() => { const b = document.querySelector('#zj-sh-foot [data-a="cor-tr"]'); if (b) b.click(); return !!b; }); await sleep(1500);
-const cT = await F.evaluate(() => ({ s: STARBYTE_ZONES.corState(), body: document.getElementById('zj-sh-body').innerText.replace(/\s+/g, ' '), par: STARBYTE_ZONES.corParams() }));
-const sameTk2 = await p.evaluate(j => { const m = G.tankerMissions.find(x => x.id === JSON.parse(j).id); return JSON.stringify(m) === j; }, tk.json);
-const dT = cT.s.plans && cT.s.plans[0], fT = cT.s.plans && cT.s.plans.find(x => x.k === 'cor');
-await p.screenshot({ path: path.join(SHOTS, '15b_tanker_itineraires.png') });
-rec('COR-02', cmpBtn && dT && dT.k === 'libre' && (fT ? (fT.test < dT.test * .95) === fT.best && (dT.best === !fT.best) : dT.best) && Math.abs(dT.test - Math.max(dT.min, cT.par.Lmin / cT.par.v) / cT.par.season) < 1e-9 && dT.fuel === Math.round(cT.s.ctx.fuel * Math.max(dT.fu, cT.par.Lmin) / cT.par.Lref) && /minimum par mission/.test(cT.body) && sameTk2 && /Mission réelle : vol direct/.test(cT.body),
-  `tanker ${tk.name} (trajet court) : ${cT.s.plans.map(x => x.name + ' ' + x.len.toFixed(0) + ' u, ' + x.test.toFixed(1) + ' min d’essai, ' + x.fuel + ' carburant' + (x.best ? ' [retenu]' : '')).join(' · ')} (sans minimum : ${(dT.min / cT.par.season).toFixed(1)} min, ${Math.round(cT.s.ctx.fuel * dT.fu / cT.par.Lref)} carburant ; minimum par mission ${(cT.par.Lmin / cT.par.v / cT.par.season).toFixed(1)} min) · aucun avantage imposé au corridor ; mission du jeu inchangée ${sameTk2}`);
-await F.evaluate(() => document.querySelector('#zj-sh-foot [data-a="cor-back"]').click()); await sleep(600);
 rec('FOLLOW-T', fit.F.susp && fit.d > fit.L * .4, `Voir le trajet : vue de ${fit.d.toFixed(0)} u pour un tracé de ${fit.L.toFixed(0)} u, suivi suspendu (la mission continue)`);
 // arrière-plan : au retour, la position se recale sur les horaires de la partie
 // (environnement lent : on garde au tanker au moins 4 min de trajet, pour que le saut de 40 % ne le fasse pas arriver)
@@ -606,7 +583,7 @@ await F.evaluate(k => { const S = STARBYTE_ZONES, o = S.objects().find(o => o.ty
 await p.screenshot({ path: path.join(SHOTS, '19_itineraire_tactique.png') });
 const rt2 = await lineTap('seg'); await sleep(400);
 await p.screenshot({ path: path.join(SHOTS, '19b_troncon_touche.png') });
-rec('ROUTE-02', rt2.sel === 'seg' && /TRONÇON/.test(rt2.kind || ''), `réseau d'essai affiché (${rt2.n} segments touchables) : toucher un corridor en (${rt2.x}, ${rt2.y}) → fiche « ${rt2.kind || ''} » (${rt2.id || ''}), pas la zone dessous`);
+rec('ROUTE-02', rt2.sel === 'seg' && /TRONÇON/.test(rt2.kind || ''), `corridors connus affichés (${rt2.n} segments touchables) : toucher un corridor en (${rt2.x}, ${rt2.y}) → fiche « ${rt2.kind || ''} » (${rt2.id || ''}), pas la zone dessous`);
 // flotte mixte en embuscade (la tienne : composition connue) : un modèle par type présent, effectif complet dans la fiche
 const flId = await p.evaluate(() => { const now = Date.now(), sys = (G.worlds[0] && G.worlds[0].coord || '').split('-').slice(0, 3).join('-');
   const f = { id: 'fl-test-mixte', name: 'Escadre Mixte', composition: { cuirasse: { t1: 2, t2: 0, t3: 0 }, fregate: { t1: 6, t2: 0, t3: 0 }, tanker: { t1: 3, t2: 0, t3: 0 } }, soldiers: { garde: 0, lourd: 0 }, createdAt: now,

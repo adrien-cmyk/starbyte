@@ -1,83 +1,40 @@
 /* ═══════════════════════════════════════════════════════════════════════
-   STARBYTE — CARTE PAR ZONES · TEST (10/11/2026)
-   Cf. claude/starbyte_decision_sondage_zone.md (cahier « Prospection par zones », v2.0)
+   STARBYTE — LA CARTE (Atlas et Tactique) · pont entre le jeu et atlas/index.html
+   Cf. claude/starbyte_migration_carte_hadrien.md (migration de toutes les parties, 14/11/2026)
 
-   Réservé au compte de test d'Adrien (Hadrien) : même règle que le panneau de
-   triche (_sbDevAllowed : pseudo au registre ou empreinte de l'email), plus le
-   jeu en local. Pour tout autre joueur, ce fichier ne fait rien d'autre que
-   déclarer la clé de sauvegarde « zoneProspect », qui reste vide.
-
-   Ce que fait le test :
-   → un bouton « Zones · test » dans le Centre de prospection ouvre la nouvelle
-     carte (atlas/index.html) en plein écran, comme le Télébyte ;
-   → « Sonder cette zone » envoie une VRAIE Radar du hangar du monde choisi
+   Toutes les parties passent sur la nouvelle carte (marque G.atlasCarte) : elle
+   s'affiche dans le Centre de prospection, sous son bandeau. L'ancienne carte reste
+   à un bouton (« Ancienne carte ») le temps de la transition.
+   → « Sonder cette zone » envoie une vraie Radar du hangar du monde choisi
      (G.probesPool), mission rangée dans G.probeMissions comme les autres ;
-   → à l'arrivée, le contenu FIXE de la zone devient de vraies signatures
-     (G.signatures) : la Légère, la Moyenne, les tankers et la colonisation
-     existants font la suite. Une zone sondée l'est pour de bon.
-   Région de test : 30 zones autour des mondes du compte, contenu fixé une fois
-   pour toutes (G.zoneProspect.region), journal des actions pour les mesures.
-   → « Mes mondes › Voir la partie d'un commandant » (ou ?zones=Panzerstorm) : la partie d'un autre
-     joueur en LECTURE SEULE sur la même carte (fonction serveur dev_player_map, v53).
+   → à l'arrivée, le contenu de la zone (tiré de son seul identifiant, le même
+     pour tous) devient de vraies signatures : la suite est celle du jeu ;
+   → la conversion (une fois par partie) passe les lignes des six stations sur
+     leurs corridors en gardant l'avancement de chacun (balises, signaux
+     d'antenne, tronçons connus), sans faire découvrir de port (décision du 14/11).
    ═══════════════════════════════════════════════════════════════════════ */
 (function () {
   'use strict';
   if (window.EXTRA_SAVE_KEYS && EXTRA_SAVE_KEYS.indexOf('zoneProspect') < 0) EXTRA_SAVE_KEYS.push('zoneProspect');
 
   const PAGE = 'atlas/index.html';
-  const PAGE_V = '8f44ab6584';   // empreinte de atlas/index.html, écrite par labo/carte-zones/build.py
+  const PAGE_V = '13904e73da';   // empreinte de atlas/index.html, écrite par labo/carte-zones/build.py
   const GRID = 'tac-2';
   const MIN = 60e3;
   const SB = 'https://elupnpdcblztpfywnhjl.supabase.co';
   const KEY = 'sb_publishable_tXGrQIROzH2DwBrny1GcHQ_iKJKoBOQ';   // clé publique (faite pour être dans le client)
 
-  /* ── qui voit le test (10/11 soir : Adrien ne voyait pas le bouton sur son iPhone, compte Hadrien) ──
-     Plusieurs preuves indépendantes, la première qui répond suffit : la règle du panneau de triche, le pseudo au
-     registre, l'empreinte de l'email (relue ici, y compris un email lié pas encore confirmé),
-     et la capitale du compte de test (A-O-2178, OPUS-ONE). Aucune ne contient l'adresse email en clair. */
-  const DEV_NAMES = ['hadrien'];
-  const DEV_SYSTEMS = ['A-O-2178'];
-  let mailOk = false, mailSeen = '';
-  (function mailCheck() {
-    try {
-      const u = window.SBCloud && SBCloud.user;
-      const m = u && String(u.email || u.new_email || (u.user_metadata && u.user_metadata.email) || '').trim().toLowerCase();
-      if (m && m !== mailSeen && window.crypto && crypto.subtle && typeof SB_DEV_EMAIL_SHA === 'string') {
-        mailSeen = m;
-        crypto.subtle.digest('SHA-256', new TextEncoder().encode(m)).then(b => {
-          mailOk = [...new Uint8Array(b)].map(x => x.toString(16).padStart(2, '0')).join('') === SB_DEV_EMAIL_SHA;
-        }).catch(() => {});
-      }
-    } catch (e) {}
-    if (!mailOk) setTimeout(mailCheck, 3000);
-  })();
-  function why() {
-    if (window.SB_ZONES_OFF) return null;
-    try { if (typeof _sbDevAllowed === 'function' && _sbDevAllowed()) return 'triche'; } catch (e) {}
-    // le pseudo du registre seulement (unique) : un nom de capitaine se choisit librement dans la partie
-    try { const n = window.SBMP && SBMP.world && SBMP.world.pseudo; if (n && DEV_NAMES.includes(String(n).trim().toLowerCase())) return 'pseudo'; } catch (e) {}
-    if (mailOk) return 'email';
-    try {
-      const sys = (a) => a ? `${a.cluster}-${a.sector}-${String(a.system).padStart(4, '0')}` : '';
-      const reg = window.SBMP && SBMP.world && SBMP.world.address;
-      if (typeof MY_ADDRESS !== 'undefined' && DEV_SYSTEMS.includes(sys(MY_ADDRESS))) return 'capitale';
-      if (reg && DEV_SYSTEMS.some(s => String(reg).indexOf(s + '-') === 0)) return 'capitale';
-    } catch (e) {}
-    return null;
-  }
-  const allowed = () => !!why();
-  let installed = false, overlay = null;
+  // 14/11 : toutes les parties ont la carte (seul SB_ZONES_OFF la coupe, pour les essais de l'ancienne)
+  const allowed = () => !window.SB_ZONES_OFF;
+  const why = () => (allowed() ? 'carte' : null);
+  let overlay = null;
   const listeners = new Set();
 
   const zp = () => (G.zoneProspect && G.zoneProspect.v === 1) ? G.zoneProspect : (G.zoneProspect = { v: 1, grid: GRID, region: null, zones: {}, journal: [] });
   const fmtAddr = (a) => a ? `${a.cluster}-${a.sector}-${String(a.system).padStart(4, '0')}-${String(a.planet == null ? 40 : a.planet).padStart(2, '0')}` : '';
   const save = () => { try { if (typeof saveGame === 'function') saveGame(); } catch (e) {} };
   const notify = () => { for (const f of listeners) { try { f(); } catch (e) {} } };
-  function log(kind, data) {
-    const z = zp();
-    z.journal.push(Object.assign({ t: Date.now(), kind }, data || {}));
-    if (z.journal.length > 400) z.journal.splice(0, z.journal.length - 400);
-  }
+  function log() {}   // 14/11 : le journal des mesures de l'essai est retiré (il grossissait la sauvegarde)
 
   /* ── les mondes du compte (capitale + colonies), adresses réelles ── */
   function worlds() {
@@ -221,14 +178,6 @@
     return { now, active: G.activeWorld || 'home', worlds: ws, hangars: hang, ranges, zp: JSON.parse(JSON.stringify(z)), missions, sigs, travels: tr, mig: migrated(), ports: kn ? kn.ports : null, routes: kn ? kn.routes : null, systems: kn ? kn.systems : null, tags: kn ? kn.tags : null, cmd: kn ? kn.cmd : null, fleetsReady: kn ? kn.fleets : null, corKnown: kn ? corKnown() : null, netPorts: kn ? NET_PORTS : null, moves5: kn ? ((G.atlasCarte && G.atlasCarte.moves5) || []) : null, hosted: kn ? kn.hosted : null, incoming: kn ? kn.incoming : null, posts: kn ? kn.posts : null, beacons: kn ? beacons() : null, nav: kn ? navState() : null };
   }
 
-  /* ── région de test : écrite une seule fois par la carte (contenu fixe) ── */
-  function saveRegion(region) {
-    const z = zp();
-    if (z.region) return { ok: true, region: z.region, already: true };
-    z.region = region; log('region', { zones: region.zones.length });
-    save(); notify();
-    return { ok: true, region };
-  }
 
   /* ── lancer une Radar sur une zone ── */
   // 12/11 : univers ouvert (compte migré). Une zone hors de l'ancienne région arrive avec le contenu tiré par la carte ;
@@ -249,13 +198,13 @@
   }
   function launch(req) {
     const z = zp(), id = req && req.zone;
-    let zone = z.region && z.region.zones.find(x => x.id === id);
-    if (!zone && migrated() && ZONE_RE.test(String(id || ''))) { zone = openZone(req); if (!zone) return { ok: false, why: 'Contenu de zone illisible : rien n’est lancé.' }; }
-    if (!zone) return { ok: false, why: 'Cette zone n’est pas dans la région de test.' };
     const st = z.zones[id];
     if (st && st.st === 'done') return { ok: false, why: 'Zone déjà sondée.' };
     const already = (G.probeMissions || []).find(m => m && m.zone === id && m.status === 'in_transit');
     if (already) return { ok: true, mission: already.id, already: true };   // double pression, rejeu : une seule mission
+    let zone = z.region && z.region.zones.find(x => x.id === id);   // les 30 zones tirées avant le 12/11 (partie d'Hadrien) gardent leur contenu
+    if (!zone && migrated() && ZONE_RE.test(String(id || ''))) { zone = openZone(req); if (!zone) return { ok: false, why: 'Contenu de zone illisible : rien n’est lancé.' }; }
+    if (!zone) return { ok: false, why: 'Zone inconnue : rien n’est lancé.' };
     const wid = req.world || 'home';
     if (!worlds().some(w => w.id === wid)) return { ok: false, why: 'Monde de départ inconnu.' };
     const range = Math.max(1, +req.range || 1), dist = Math.max(0, +req.dist || 0);
@@ -356,22 +305,14 @@
   /* ── ouverture de la carte en plein écran ── */
   function open(opt) {
     try { migrate(); } catch (e) {}
-    if (migrated() && !(opt && opt.peek) && !(opt && opt.overlay)) { oldMap = false; if (typeof goto === 'function' && !onProspect()) goto('prospect'); showNewMap(opt && opt.focus || null); return; }
-    if (overlay || !(allowed() || migrated())) return;
-    const pk = opt && opt.peek ? '&peek=' + encodeURIComponent(String(opt.peek).slice(0, 40)) : '';
-    overlay = document.createElement('div');
-    overlay.id = 'sb-zones-overlay';
-    overlay.style.cssText = 'position:fixed;inset:0;z-index:9998;background:#03040c';
-    overlay.innerHTML = '<iframe title="Carte par zones (test)" style="position:absolute;inset:0;width:100%;height:100%;border:0"></iframe>';
-    overlay.querySelector('iframe').src = PAGE + '?v=' + PAGE_V + pk; overlay.dataset.peek = pk ? '1' : '';
-    document.body.appendChild(overlay);
-    log('open', {});
+    if (!migrated()) return;
+    oldMap = false; if (typeof goto === 'function' && !onProspect()) goto('prospect'); showNewMap(opt && opt.focus || null);
   }
   function close() {
     if (!overlay) return;
     overlay.remove(); overlay = null;
     try { if (typeof refreshCurrentScreen === 'function') refreshCurrentScreen(); } catch (e) {}
-  }
+  }   // (14/11 : plus de cadre plein écran ; gardée pour les actions qui ramènent au Centre de prospection)
 
   /* ── règles du jeu pour poser le contenu de la région : portée actuelle, emplacement habitable ── */
   function check(sys, kind) {
@@ -379,42 +320,6 @@
     try { radar = !!validateAddressForTier(sys, 'radar').valid; } catch (e) {}
     if (kind === 'habitable') { try { habitable = getPlanetSlotsInSystem(sys).some(z => getCelestialTypeForSlot(sys, z) === 'habitable'); } catch (e) {} }
     return { radar, habitable };
-  }
-
-  /* ── lecture seule de la partie d'un autre commandant (v53, dev_player_map : compte de test seulement) ── */
-  function token() {
-    try { const a = JSON.parse(localStorage.getItem('starbyte_auth') || 'null'); return a && (a.access_token || (a.currentSession && a.currentSession.access_token)); } catch (e) { return null; }
-  }
-  async function rpc(fn, args) {
-    if (window.SB_ZONES_FAKE) return window.SB_ZONES_FAKE(fn, args);   // essais hors ligne
-    if (typeof window._sbRpc === 'function') {
-      const { data, error } = await window._sbRpc(fn, args);
-      if (error) throw new Error(error.message || 'rpc');
-      return data;
-    }
-    const tok = token(); if (!tok) throw new Error('not_signed_in');
-    const r = await fetch(SB + '/rest/v1/rpc/' + fn, { method: 'POST', headers: { 'Content-Type': 'application/json', apikey: KEY, Authorization: 'Bearer ' + tok }, body: JSON.stringify(args || {}) });
-    let j = null; try { j = await r.json(); } catch (e) {}
-    if (!r.ok) throw new Error((j && (j.message || j.error)) || ('http_' + r.status));
-    return j;
-  }
-  async function peek(pseudo) {
-    if (!allowed()) return { ok: false, why: 'Réservé au compte de test.' };
-    let d;
-    try { d = await rpc('dev_player_map', { p_pseudo: String(pseudo || '').slice(0, 40) }); }
-    catch (e) {
-      const m = String(e && e.message || e);
-      if (/dev_player_map|function|schema cache|404/i.test(m) && !/dev_only/.test(m)) return { ok: false, why: 'Le serveur ne connaît pas encore cette lecture : colle server/schema_mp_v53_dev_lecture_partie.sql dans Supabase → SQL Editor → Run.' };
-      if (/dev_only/.test(m)) return { ok: false, why: 'Le serveur refuse : réservé au compte de test.' };
-      if (/not_signed_in/.test(m)) return { ok: false, why: 'Pas de session en ligne sur cet appareil.' };
-      return { ok: false, why: 'Lecture impossible : ' + m.slice(0, 120) };
-    }
-    if (!d || !d.ok) {
-      if (d && d.why === 'unknown_pseudo') return { ok: false, why: 'Aucun commandant « ' + pseudo + ' » au registre' + (d.candidates && d.candidates.length ? ' · proches : ' + d.candidates.join(', ') : '') + '.' };
-      return { ok: false, why: 'Rien à lire.' };
-    }
-    log('peek', { pseudo: d.pseudo });
-    return { ok: true, data: d };
   }
 
   /* ── catalogue des modèles du jeu (cahier v1.2 § 24.1) : l'atlas ne tient aucune liste à lui ──
@@ -438,32 +343,18 @@
     return { meshopt: abs('assets/meshopt_decoder.module.js'), stations, ships, bmUrl: bm };
   }
 
-  /* ══ 12/11 : la partie d'Hadrien passe sur la nouvelle carte (bascule progressive, décision d'Adrien du 12/11) ══
-     Compte pilote seulement : pseudo du registre « hadrien » ou capitale A-O-2178 (pas tous les comptes du mode triche ;
-     les essais locaux le demandent avec localStorage sb_atlas_pilote = 1). La marque G.atlasCarte est posée une fois.
-     Le Centre de prospection garde son bandeau, ses feuilles (Sondes, Missions, Rapports, Carnet, Archives) et sa croix ;
-     seule la carte du fond change : la nouvelle carte entre le bandeau et la barre du bas. L'ancienne reste à un bouton,
-     au même endroit (« Ancienne carte »), tant que toutes ses actions ne sont pas reprises. Aucune donnée n'est convertie
-     à cette étape : routes → corridors et balises viendront chacune avec sa propre migration. */
-  function pilot() {
-    if (window.SB_ZONES_OFF) return false;
-    try { if (localStorage.getItem('sb_atlas_pilote') === '1') return true; } catch (e) {}
-    try { const n = window.SBMP && SBMP.world && SBMP.world.pseudo; if (n && DEV_NAMES.includes(String(n).trim().toLowerCase())) return true; } catch (e) {}
-    try {
-      const sys = (a) => a ? `${a.cluster}-${a.sector}-${String(a.system).padStart(4, '0')}` : '';
-      if (typeof MY_ADDRESS !== 'undefined' && DEV_SYSTEMS.includes(sys(MY_ADDRESS))) return true;
-      const reg = window.SBMP && SBMP.world && SBMP.world.address;
-      if (reg && DEV_SYSTEMS.some(s => String(reg).indexOf(s + '-') === 0)) return true;
-    } catch (e) {}
-    return false;
-  }
+  /* ══ 14/11 : toutes les parties passent sur la nouvelle carte (la partie d'Hadrien depuis le 12/11) ══
+     La marque G.atlasCarte est posée une fois. Le Centre de prospection garde son bandeau, ses feuilles (Sondes, Missions,
+     Rapports, Carnet, Archives) et sa croix ; seule la carte du fond change. L'ancienne reste à un bouton, au même endroit,
+     le temps de la transition. */
+  function pilot() { return !window.SB_ZONES_OFF; }
   const migrated = () => !window.SB_ZONES_OFF && typeof G !== 'undefined' && !!G && !!G.atlasCarte && G.atlasCarte.v >= 1;
   let oldMap = false, frameWrap = null, pendingFocus = null;
   function migrate() {
     if (typeof G === 'undefined' || !G || !G.planet || migrated() || !pilot()) return false;
-    G.atlasCarte = { v: 1, since: Date.now(), mode: 'progressive', etapes: { bascule: Date.now() } };
-    log('migration', { etape: 'bascule' }); save();
-    try { if (typeof toast === 'function') toast('Ta partie passe sur la nouvelle carte. L’ancienne reste à un bouton : « Ancienne carte ».'); } catch (e) {}
+    G.atlasCarte = { v: 1, since: Date.now(), mode: 'generale', etapes: { bascule: Date.now() } };
+    if (G.zoneProspect && Array.isArray(G.zoneProspect.journal)) G.zoneProspect.journal = [];
+    save();
     return true;
   }
   const scrP = () => document.getElementById('scr-prospect');
@@ -563,44 +454,93 @@
       return out.sort((a, b) => a.t - b.t).slice(0, 6);
     } catch (e) { return []; }
   }
-  // conversion de l'étape 5 (une fois) : ce que la partie savait des anciennes lignes devient la connaissance des corridors ;
-  // les balises et les échos d'antenne posés sur d'anciens jalons vont au nœud le plus proche du corridor du même nom.
-  // Une copie de ce qui est déplacé reste dans la sauvegarde (atlasCarte.copie5).
-  function convertLines(api) {
+  // ── Conversion des lignes des six stations (une fois par partie) ──
+  // Décision d'Adrien du 14/11 (« même avancement, aucun cadeau ») : sur son corridor, une ligne n'a que 1 à 4 relais au lieu
+  // de 6 à 8 jalons. Ce que la partie avait sur l'ancienne ligne passe sur le corridor AU MÊME AVANCEMENT (le jalon i sur n
+  // devient le relais ⌈(i+1)·m/n⌉ − 1 sur m), jamais sur le dernier relais avant un port encore inconnu :
+  //   · tronçons connus → les tronçons du corridor au même avancement (un port connu révèle tout son corridor, rien de plus) ;
+  //   · balises posées ou en route → le relais au même avancement, ou un relais libre en deçà ; sinon elle rentre au hangar, prête ;
+  //   · signaux d'antenne → le relais au même avancement (le seul relais d'un corridor court, s'il n'y en a pas d'autre) ;
+  //   · flottes en embuscade sur un ancien jalon → elles y restent et voient les convois comme avant (lines.js) ;
+  // aucun port n'est découvert, aucune route n'est créée. Copie de tout ce qui bouge : atlasCarte.copie5.
+  // La partie d'Hadrien (convertie le 12/11 avec l'ancienne règle) n'est pas reconvertie.
+  const nodeNum = (k) => +String(k).split('-')[2];
+  function convertLines() {
     const A = G.atlasCarte; if (!A || !window.SBLines) return;
     if (!A.etapes) A.etapes = {};
     if (A.etapes.lignes && A.etapes.balises) return;
     const net = SBLines.network(); if (net.mode !== 'cor') return;
-    const now = Date.now(), cor = net.lines.filter(l => l.oldChain);
-    if (!A.copie5) A.copie5 = { at: now, beacons: (typeof sbAllProbes === 'function' ? sbAllProbes() : G.probesPool || []).filter(b => b && b.tier === 'beacon' && (b.state === 'deployed')).map(b => ({ id: b.id, sys: b.deployedSystem || null })),
-      going: (G.probeMissions || []).filter(m => m && m.tier === 'beacon' && m.status === 'in_transit').map(m => ({ id: m.id, sys: m.targetCoords })), echoes: JSON.parse(JSON.stringify(G.trafficEchoes || {})), legs: (G.spottedLegs || []).filter(l => l && l.npc).length };
+    const now = Date.now(), cor = net.lines.filter(l => Array.isArray(l.oldChain) && l.oldChain.length && Array.isArray(l.chain) && l.chain.length);
+    const probes = () => (typeof sbAllProbes === 'function' ? sbAllProbes() : G.probesPool || []);
+    if (!G.hiddenPorts) G.hiddenPorts = {}; if (!Array.isArray(G.spottedLegs)) G.spottedLegs = []; if (!G.trafficEchoes) G.trafficEchoes = {}; if (!G.mapSeen) G.mapSeen = {};
+    const oldIdx = {};   // ancien jalon → [{ line, i }]
+    for (const L of cor) L.oldChain.forEach((k, i) => { (oldIdx[k] = oldIdx[k] || []).push({ line: L, i }); });
+    const known = (L) => !!G.hiddenPorts[L.port];
+    const prog = (L, i) => Math.max(0, Math.ceil((i + 1) * L.chain.length / L.oldChain.length) - 1);
+    const capOf = (L) => known(L) ? L.chain.length - 1 : L.chain.length - 2;   // jamais le relais qui touche un port inconnu
+    const where = (sys, lineId) => { const l = oldIdx[sys]; if (!l) return null; return (lineId && l.find(x => x.line.id === lineId)) || l[0]; };
+    // relais candidats : celui du même avancement, puis en deçà ; port connu : aussi au-delà (plus près d'abord)
+    const cands = (L, j, beacon) => { const cap = capOf(L), out = [];
+      for (let d = 0; d < L.chain.length; d++) for (const k of (d ? [j - d, known(L) ? j + d : -1] : [j])) if (k >= 0 && k <= cap && !out.includes(k)) out.push(k);
+      return out.map(k => L.chain[k]).filter(x => !beacon || nodeNum(x) >= 1000); };
+    if (!A.copie5) A.copie5 = { at: now, regle: 'avancement',
+      beacons: probes().filter(b => b && b.tier === 'beacon' && b.state === 'deployed').map(b => ({ id: b.id, sys: b.deployedSystem || null, world: b.world || null })),
+      going: (G.probeMissions || []).filter(m => m && m.tier === 'beacon' && m.status === 'in_transit').map(m => ({ id: m.id, sys: m.targetCoords })),
+      echoes: JSON.parse(JSON.stringify(G.trafficEchoes)), legs: JSON.parse(JSON.stringify(G.spottedLegs.filter(l => l && l.npc && cor.some(L => L.id === l.lineId)))),
+      ports: Object.keys(G.hiddenPorts), routes: (G.routes || []).map(r => r && r.id) };
+    const moves = [];
     if (!A.etapes.lignes) {
-      for (const line of cor) if ((G.spottedLegs || []).some(l => l && l.npc && l.lineId === line.id) || (G.hiddenPorts && G.hiddenPorts[line.port])) { try { SBLines.revealLine(line, now, line.kind && line.kind.label); } catch (e) {} }
+      // 1. tronçons connus
+      for (const L of cor) {
+        if (known(L)) { try { SBLines.revealLine(L, now, L.kind && L.kind.label); } catch (e) {} continue; }   // port déjà connu : son corridor entier
+        const cap = capOf(L);
+        for (const l of G.spottedLegs.filter(x => x && x.npc && x.lineId === L.id)) {
+          const i = L.oldChain.indexOf(sysOfAddr(l.from)); if (i < 0) continue;
+          const j = Math.min(prog(L, i), cap); if (j < 0 || j > L.chain.length - 2) continue;   // un tronçon qui finirait au port n'est jamais donné
+          const from = L.chain[j], to = L.chain[j + 1];
+          G.mapSeen[from] = G.mapSeen[from] || now; G.mapSeen[to] = G.mapSeen[to] || now;
+          if (!G.spottedLegs.some(x => x && x.npc && x.lineId === L.id && x.from === from && x.to === to)) G.spottedLegs.unshift({ id: `mig-${L.id}-${from}`, lineId: L.id, from, to, pseudo: l.pseudo || (L.kind && L.kind.label) || '', at: l.at || now, npc: true, cargo: l.cargo || 'moyen', migre: true });
+        }
+      }
+      // 2. signaux d'antenne en attente posés sur un ancien jalon (un signal traité, ou d'un port déjà connu, ne sert plus : il reste où il est)
+      const portOfLine = (id) => (net.byId[id] || {}).port;
+      for (const [k, e] of Object.entries({ ...G.trafficEchoes })) {
+        const w = e && !e.done && !e.fromCard && where(k, e.lineId); if (!w || known(w.line)) continue;
+        const L = w.line, j = Math.min(prog(L, w.i), Math.max(0, capOf(L)));
+        let done = false;
+        for (const t of cands(L, j, true).concat(capOf(L) < 0 ? L.chain.filter(x => nodeNum(x) >= 1000).slice(0, 1) : [])) {   // un signal invite à poser une balise : jamais sous 1000
+          const cur = G.trafficEchoes[t];
+          if (cur && portOfLine(cur.lineId) === L.port) { delete G.trafficEchoes[k]; done = true; break; }   // la même station y a déjà son signal
+          if (cur) continue;
+          G.trafficEchoes[t] = Object.assign({}, e, { migre: k }); delete G.trafficEchoes[k]; G.mapSeen[t] = G.mapSeen[t] || now; done = true; break;
+        }
+        // aucun relais libre : le signal ne mènerait nulle part ; il est retiré (copie dans copie5), l'antenne en captera un autre
+        if (!done) { delete G.trafficEchoes[k]; moves.push({ echo: true, from: k, to: null, cor: L.corridor || null }); }
+      }
       A.etapes.lignes = now; save();
     }
-    if (A.etapes.balises || !api || typeof api.posOf !== 'function') return;   // les positions viennent de la carte : on attend qu'elle soit ouverte
-    const d3 = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
-    const target = (sys) => {   // le nœud le plus proche du corridor de la ligne dont ce système était un jalon (numéros 1000 à 9999 : règle du jeu)
-      const line = cor.find(l => l.oldChain.includes(sys)); if (!line) return null;
-      const p = api.posOf(sys); const nodes = line.chain.filter(k => +k.split('-')[2] >= 1000); if (!nodes.length) return null;
-      if (!p) return { sys: nodes[0], line };
-      let best = null, bd = Infinity; for (const k of nodes) { const q = api.posOf(k); if (!q) continue; const dd = d3(p, q); if (dd < bd) { bd = dd; best = k; } }
-      return best ? { sys: best, line, d: Math.round(bd) } : null;
-    };
-    const moves = [];
-    for (const b of (typeof sbAllProbes === 'function' ? sbAllProbes() : G.probesPool || [])) if (b && b.tier === 'beacon' && b.state === 'deployed') {
-      const from = sysOfAddr(b.deployedSystem), t = from && target(from); if (!t || t.sys === from) continue;
-      if ((typeof sbAllProbes === 'function' ? sbAllProbes() : G.probesPool || []).some(x => x !== b && x.tier === 'beacon' && x.state === 'deployed' && sysOfAddr(x.deployedSystem) === t.sys)) continue;   // une balise y est déjà : celle-ci reste
-      b.deployedSystem = t.sys; delete b._linesAt; moves.push({ id: b.id, name: b.name || 'Balise', from, to: t.sys, cor: t.line.corridor, d: t.d || null });
+    // 3. balises posées (et en route) sur un ancien jalon
+    const taken = new Set(probes().filter(b => b && b.tier === 'beacon' && b.state === 'deployed' && !oldIdx[sysOfAddr(b.deployedSystem)]).map(b => sysOfAddr(b.deployedSystem)));
+    for (const m of G.probeMissions || []) if (m && m.tier === 'beacon' && m.status === 'in_transit' && !oldIdx[sysOfAddr(m.targetCoords)]) taken.add(sysOfAddr(m.targetCoords));
+    const order = probes().filter(b => b && b.tier === 'beacon' && b.state === 'deployed' && oldIdx[sysOfAddr(b.deployedSystem)])
+      .sort((a, b) => (where(sysOfAddr(b.deployedSystem)).i - where(sysOfAddr(a.deployedSystem)).i) || ((a.deployedAt || 0) - (b.deployedAt || 0)));   // les plus avancées d'abord
+    for (const b of order) {
+      const from = sysOfAddr(b.deployedSystem), w = where(from), L = w.line, j = Math.min(prog(L, w.i), capOf(L));
+      const t = j < 0 ? null : cands(L, j, true).find(x => !taken.has(x));
+      if (t) { b.deployedSystem = t; b._linesAt = now; taken.add(t); moves.push({ id: b.id, name: b.name || 'Balise', from, to: t, cor: L.corridor || null }); }
+      else { b.state = 'ready'; delete b.deployedAt; delete b.deployedSystem; delete b._linesAt; moves.push({ id: b.id, name: b.name || 'Balise', from, to: null, back: true, cor: L.corridor || null }); }
     }
-    for (const m of (G.probeMissions || [])) if (m && m.tier === 'beacon' && m.status === 'in_transit') {
-      const from = sysOfAddr(m.targetCoords), t = from && target(from); if (!t || t.sys === from) continue;
-      m.targetCoords = t.sys; moves.push({ id: m.id, name: m.probeName || 'Balise en route', from, to: t.sys, cor: t.line.corridor, going: true });
+    for (const m of G.probeMissions || []) if (m && m.tier === 'beacon' && m.status === 'in_transit') {
+      const from = sysOfAddr(m.targetCoords), w = from && where(from); if (!w) continue;
+      const L = w.line, j = Math.min(prog(L, w.i), capOf(L)), t = j < 0 ? null : cands(L, j, true).find(x => !taken.has(x));
+      if (t) { m.targetCoords = t; taken.add(t); moves.push({ id: m.id, name: m.probeName || 'Balise en route', from, to: t, cor: L.corridor || null, going: true }); }
     }
-    for (const [k, e] of Object.entries(G.trafficEchoes || {})) { const t = target(k); if (!t || t.sys === k || G.trafficEchoes[t.sys]) continue; G.trafficEchoes[t.sys] = e; delete G.trafficEchoes[k]; }
-    A.moves5 = (A.moves5 || []).concat(moves).slice(-40); A.etapes.balises = now; save(); notify();
-    if (moves.length) { try { toast(`${moves.length} balise${moves.length > 1 ? 's' : ''} déplacée${moves.length > 1 ? 's' : ''} sur les relais des corridors · détail dans « Mes balises »`); } catch (e) {} }
-  }   // les stations du réseau : seules destinations des voyages serveur
+    // 4. flottes en embuscade sur un ancien jalon : elles restent (lines.js les fait voir comme avant), la fiche d'accueil le dit
+    const legacy = ((G.fleet && G.fleet.prepared) || []).filter(f => f && f.ambush && !f.ambush.edge && f.ambush.phase !== 'returning' && oldIdx[sysOfAddr(f.ambush.system)]).map(f => ({ id: String(f.id), name: f.name || 'Flotte', sys: sysOfAddr(f.ambush.system) }));
+    A.moves5 = (A.moves5 || []).concat(moves.filter(m => !m.echo)).slice(-60); A.legacy5 = legacy; A.etapes.balises = now;
+    A.bilan = { at: now, moved: moves.filter(m => !m.echo && m.to && !m.going).length, going: moves.filter(m => m.going).length, back: moves.filter(m => m.back).length, legacy: legacy.length, echoesDropped: moves.filter(m => m.echo).length };
+    save(); notify();
+  }
   // décision du 12/11 : chaque route connue (G.routes) devient la connaissance du corridor du même nom. Rien n'est retiré :
   // les routes restent dans la partie. Une copie de ce qu'elles étaient est gardée dans la sauvegarde avant la conversion.
   function corKnown() {
@@ -727,14 +667,42 @@
       g._atlasHook = true; window.goto = g;
     }
   }
+  // 14/11 : fiche d'accueil, une fois par partie migrée (pas pour la partie d'Hadrien, ni pour un joueur qui n'a pas encore
+  // ouvert le Centre de prospection : il n'a jamais vu l'ancienne carte). Jamais par-dessus une autre fenêtre ou le tutoriel.
+  let welcomeOpen = false;
+  function welcome() {
+    const A = G.atlasCarte; if (!A || A.mode !== 'generale' || A.accueil || welcomeOpen) return;
+    if (!(A.etapes && A.etapes.balises)) return;
+    // un nouveau joueur (rien encore fait au Centre de prospection) n'a jamais connu l'ancienne carte : pas de fiche
+    const played = (G.probeReports || []).length || (G.probeMissions || []).length || (G.tankerMissions || []).length || (G.routes || []).length
+      || Object.keys(G.knownSystems || {}).length > 1 || Object.keys(G.trafficEchoes || {}).length || (A.moves5 || []).length;
+    let locked = false; try { locked = typeof prospectLocked === 'function' && prospectLocked(); } catch (e) {}
+    if (!played || locked) { A.accueil = played ? 'sans-centre' : 'nouveau'; save(); return; }
+    if (typeof sbConfirm !== 'function') return;
+    const mo = document.getElementById('sb-modal-overlay'); if (mo && !mo.classList.contains('hidden')) return;   // une autre question est ouverte
+    try { const c = document.getElementById('sb-coach'); if (c && c.offsetParent && getComputedStyle(c).display !== 'none') return; } catch (e) {}   // le guide du tutoriel parle : plus tard
+    try { if (typeof getCurrentScreen === 'function' && !['planet', 'prospect', 'dashboard'].includes(getCurrentScreen())) return; } catch (e) {}
+    const b = A.bilan || {}, esc = (v) => String(v == null ? '' : v).replace(/[<>&"]/g, ''), pl = (n, a, z) => n + ' ' + (n > 1 ? z : a);
+    const parts = ['Le Centre de prospection a une nouvelle carte : l’<strong>Atlas</strong> en 3D et la vue <strong>Tactique</strong>. Tes mondes, tes flottes, tes routes, tes balises, tes rapports et les commandants que tu connais y sont.'];
+    parts.push('Les convois des six grandes stations passent maintenant par des <strong>corridors</strong>, plus courts que les anciennes lignes. Tu y gardes ton avancement : aucun port n’a été donné, aucun n’a été retiré.');
+    const bl = [];
+    if (b.moved) bl.push(pl(b.moved, 'balise posée sur un relais', 'balises posées sur des relais') + ', au même avancement');
+    if (b.going) bl.push(pl(b.going, 'balise en route redirigée', 'balises en route redirigées'));
+    if (b.back) bl.push(pl(b.back, 'balise rentrée au hangar, prête', 'balises rentrées au hangar, prêtes') + ' (plus de relais libre sur leur ligne)');
+    if (bl.length) parts.push(bl.join(' · ') + '. Le détail est dans « Mes balises ».');
+    for (const f of (A.legacy5 || [])) parts.push('<strong>' + esc(f.name) + '</strong> reste en embuscade sur l’ancien jalon ' + esc(f.sys) + ' et y voit les convois comme avant. Pour la poster sur un tronçon de corridor, rappelle-la.');
+    parts.push('L’ancienne carte reste à un bouton, au même endroit, le temps de la transition.');
+    welcomeOpen = true; A.accueil = Date.now(); save();
+    Promise.resolve(sbConfirm({ title: 'Nouvelle carte', body: parts.map(x => '<p style="margin:0 0 10px">' + x + '</p>').join(''), confirmLabel: 'Voir la carte', cancelLabel: 'Plus tard' }))
+      .then(ok => { welcomeOpen = false; if (ok) open(); }).catch(() => { welcomeOpen = false; });
+  }
   function migTick() {
     try {
       if (typeof G === 'undefined' || !G || !G.planet) return;
       migrate(); hookGame();
       if (!migrated()) return;
-      try { convertLines(frameApi()); } catch (e) { console.warn('[carte] lignes → corridors', e); }
-      const b = document.getElementById('sb-zones-btn'); if (b) b.remove();   // le bouton d'essai n'a plus lieu d'être
-      if (overlay && !overlay.dataset.peek) close();   // l'ancien cadre plein écran : la carte est maintenant dans le Centre de prospection
+      try { convertLines(); } catch (e) { console.warn('[carte] lignes → corridors', e); }
+      try { welcome(); } catch (e) { console.warn('[carte] accueil', e); }
       if (onProspect() && !oldMap) mountAtlas(); else if (!onProspect()) unmountAtlas();
       place();
     } catch (e) { console.warn('[carte] bascule', e); }
@@ -891,43 +859,9 @@
   }
 
   window.SBZones = {
-    allowed, why, open, close, state, saveRegion, launch, arrive, act, check, peek, models, migrated, pilot, known, gameAct, beaconCheck, corridorChain, nodeTraffic, voyageTransport: (fn) => { voyageTransport = typeof fn === 'function' ? fn : null; }, showOldMap, showNewMap, embedded: () => !!frameWrap, sigAction: (id, wid) => sigAction((G.signatures || {})[id], wid),
+    allowed, why, open, close, state, launch, arrive, act, check, models, migrated, pilot, known, gameAct, beaconCheck, corridorChain, nodeTraffic, voyageTransport: (fn) => { voyageTransport = typeof fn === 'function' ? fn : null; }, showOldMap, showNewMap, embedded: () => !!frameWrap, sigAction: (id, wid) => sigAction((G.signatures || {})[id], wid),
     onChange(f) { listeners.add(f); return () => listeners.delete(f); },
     grid: GRID,
   };
 
-  /* ── bouton d'entrée : Centre de prospection, à côté de « Recentrer » et « Vue d'ensemble » ── */
-  function install() {
-    if (installed || !allowed() || migrated()) return;
-    const tools = document.querySelector('#scr-prospect .smw-tools');
-    if (!tools) return;
-    installed = true;
-    const st = document.createElement('style');
-    st.textContent = `#sb-zones-btn{position:relative}#sb-zones-btn i{position:absolute;right:-6px;top:-7px;font:600 8px/1 'JetBrains Mono',monospace;letter-spacing:.06em;
-      padding:2px 4px;border-radius:4px;background:#b29aff;color:#0b0c1c;font-style:normal}`;
-    document.head.appendChild(st);
-    const b = document.createElement('button');
-    b.id = 'sb-zones-btn'; b.setAttribute('aria-label', 'Carte par zones (test)'); b.title = 'Carte par zones · test (compte de test seulement)';
-    b.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><path d="M12 3l7.8 4.5v9L12 21l-7.8-4.5v-9z"/><path d="M12 3v18M4.2 7.5L19.8 16.5M19.8 7.5L4.2 16.5" opacity=".45"/></svg><i>TEST</i>';
-    b.onclick = (e) => { e.stopPropagation(); open(); };
-    tools.appendChild(b);
-  }
-  const tick = () => { try { install(); } catch (e) {} };
-  setTimeout(tick, 1500); setInterval(tick, 2000);
-  // ?zones ouvre la carte ; ?zones=Panzerstorm l'ouvre sur la partie de ce commandant. Sans accès au bout de 20 s, on dit pourquoi.
-  const qz = location.search.match(/[?&]zones(?:=([^&]*))?/);
-  if (qz) {
-    let n = 0;
-    const t = setInterval(() => {
-      n++;
-      if (allowed() && typeof G !== 'undefined' && G.planet) { clearInterval(t); open(qz[1] ? { peek: decodeURIComponent(qz[1]) } : null); return; }
-      if (n === 20) {
-        clearInterval(t);
-        let p = '—', c = '—';
-        try { p = (window.SBMP && SBMP.world && SBMP.world.pseudo) || '—'; } catch (e) {}
-        try { c = fmtAddr(MY_ADDRESS); } catch (e) {}
-        try { toast(`Carte par zones : accès refusé · pseudo ${String(p).replace(/[<>&"]/g, '')} · capitale ${c} · session ${window.SBCloud && SBCloud.user ? (SBCloud.user.email || SBCloud.user.new_email ? 'avec email' : 'sans email') : 'absente'}`); } catch (e) {}
-      }
-    }, 1000);
-  }
 })();

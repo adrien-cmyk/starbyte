@@ -92,14 +92,14 @@
 
   /* ── le réseau ── */
   let _net = null;
-  // 12/11 — étape 5 de la migration de la carte (compte pilote seulement) : les lignes des six stations du réseau passent sur le
-  // corridor du même nom (jalons = relais et jonctions du corridor). Horaires, convois, noms et ports ne changent pas ; les
-  // autres joueurs gardent leurs jalons. La chaîne d'origine reste dans line.oldChain (conversion des balises et des connaissances).
+  // 12/11 — nouvelle carte (toutes les parties depuis le 14/11) : les lignes des six stations du réseau passent sur le corridor
+  // du même nom (jalons = relais et jonctions du corridor). Horaires, convois, noms et ports ne changent pas. La chaîne
+  // d'origine reste dans line.oldChain : conversion des connaissances, et flottes restées en embuscade sur un ancien jalon.
   function corridorMode() { try { return !!(window.SBZones && typeof SBZones.corridorChain === 'function' && SBZones.migrated && SBZones.migrated()); } catch (e) { return false; } }
   function network() {
     const mode = corridorMode() ? 'cor' : 'old';
     if (_net && _net.mode === mode) return _net;
-    const lines = [], bySys = {}, ports = {}, retired = {};
+    const lines = [], bySys = {}, ports = {}, retired = {}, bySysOld = {};
     const hintsP = (typeof HINT_PREFIXES !== 'undefined') ? HINT_PREFIXES : [];
     const hintsB = (typeof HINT_BODIES !== 'undefined') ? HINT_BODIES : [];
     // 14/10 (Adrien) : 3 lieux cachés au début, pas 40 — un par secteur de la saison (M, N, O),
@@ -154,11 +154,12 @@
           if (Array.isArray(c) && c.length && c.every(k => SYS.test(k))) { line.oldChain = chain; line.chain = c.slice(); line.corridor = STATION_PORTS[dock.id].route; }
         }
         lines.push(line); ports[port].lines.push(line.id);
+        if (line.oldChain) { const sh = Object.assign({}, line, { chain: line.oldChain, legacy: true }); line.oldChain.forEach((s, i) => { (bySysOld[s] = bySysOld[s] || []).push({ line: sh, i }); }); }
         line.chain.forEach((s, i) => { (bySys[s] = bySys[s] || []).push({ line, i }); });
         (bySys[port] = bySys[port] || []).push({ line, i: line.chain.length, isPort: true });
       }
     }
-    _net = { mode, lines, bySys, ports, retired, byId: Object.fromEntries(lines.map(l => [l.id, l])) };
+    _net = { mode, lines, bySys, ports, retired, bySysOld, byId: Object.fromEntries(lines.map(l => [l.id, l])) };
     return _net;
   }
 
@@ -1146,7 +1147,8 @@
       pushOrders(f);
       a.blind = false;   // v2 : une flotte postée voit par elle-même (plus besoin de balise sur son système)
       // 12/11 (étape 5) : une flotte postée sur un TRONÇON de corridor voit les convois qui y entrent, par l'un ou l'autre bout
-      const on = a.edge ? segEntries(net, a) : (net.bySys[a.system] || []).filter(o => !o.isPort);
+      // 14/11 : une flotte restée en embuscade sur un ancien jalon (posée avant la nouvelle carte) y voit les convois comme avant
+      const on = a.edge ? segEntries(net, a) : ((net.bySys[a.system] || []).length ? net.bySys[a.system] : (net.bySysOld[a.system] || [])).filter(o => !o.isPort);
       const from = Math.max(a.npcAt || a.postedAt || now, now - HEAT_MS);
       a.npcAt = now;
       if (!on.length) continue;

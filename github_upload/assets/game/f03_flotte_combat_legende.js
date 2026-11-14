@@ -4415,7 +4415,7 @@ function handleProbeReturn(missionId) {
   const mission = G.probeMissions[idx];
   if (mission.status !== 'in_transit') return;
 
-  // ZONES_1011 — carte par zones (compte de test, assets/zones_test.js) : une Radar envoyée sur une zone
+  // ZONES_1011 — la carte (assets/zones_test.js) : une Radar envoyée sur une zone
   // rapporte le contenu fixé de cette zone. Les autres missions ne passent jamais ici (pas de champ zone).
   if (mission.zone && window.SBZones && typeof SBZones.arrive === 'function') return SBZones.arrive(mission, idx);
 
