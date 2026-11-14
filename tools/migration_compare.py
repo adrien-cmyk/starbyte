@@ -83,8 +83,10 @@ def check(row):
     unknownPorts = set(portOf.values()) - set(sb.get('ports', []))
     gifts = [x for x in added if x.split('>')[1] in unknownPorts]
     out['SAVOIR'] = (not lostlegs and not gifts, f"tronçons {len(lb)}→{len(la)} (+{len(added)})" + (f" · perdus {sorted(lostlegs)[:3]}" if lostlegs else '') + (f" · vers un port inconnu {gifts[:3]}" if gifts else ''))
-    rep_ok = all((sa.get('reports') or {}).get(k, 0) >= v for k, v in (sb.get('reports') or {}).items())
-    same = sb.get('known') == sa.get('known') and sb.get('sigs') == sa.get('sigs') and sb.get('worlds') == sa.get('worlds')
+    # les rapports de balise (fenêtre de 12 min) et les signatures (apparitions, expirations) bougent avec le temps de jeu entre les deux
+    # passages : ils sont montrés, pas comptés ; la migration n'y touche pas
+    rep_ok = all((sa.get('reports') or {}).get(k, 0) >= v for k, v in (sb.get('reports') or {}).items() if k != 'beacon')
+    same = sb.get('known') == sa.get('known') and sb.get('worlds') == sa.get('worlds')
     out['RAPPORTS'] = (rep_ok and same, f"rapports {sb.get('reports')}→{sa.get('reports')} · systèmes {sb.get('known')}→{sa.get('known')} · signatures {sb.get('sigs')}→{sa.get('sigs')}")
     out['TEXTE'] = (not m.get('test'), 'mention trouvée' if m.get('test') else '')
     wl = a.get('welcome'); locked = a.get('locked')
