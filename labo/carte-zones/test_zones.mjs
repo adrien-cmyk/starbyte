@@ -337,6 +337,7 @@ await newGame(p, base, 'OPUS-ONE');
 const home = await p.evaluate(() => {
   const a = MY_ADDRESS, sys = ((a.system + 137 - 1000) % 9000) + 1000, coord = `${a.cluster}-${a.sector}-${String(sys).padStart(4, '0')}-12`;
   sbFoundColony({ name: 'OPUS-SCND', coord }); G.probesPool.push({ id: 'p-t-r4', tier: 'radar', state: 'ready', builtAt: Date.now() });
+  G.antenna = Object.assign(G.antenna || {}, { built: true, building: false });   // le Centre de prospection s'ouvre avec l'antenne (règle du jeu)
   saveGame(); return { home: `${a.cluster}-${a.sector}-${a.system}-${a.planet}`, colony: coord, worlds: G.worlds.map(w => w.id + ':' + w.name) };
 });
 await sleep(2500);

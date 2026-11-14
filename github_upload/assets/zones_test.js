@@ -701,6 +701,7 @@
       if (typeof G === 'undefined' || !G || !G.planet) return;
       migrate(); hookGame();
       if (!migrated()) return;
+      if (G.zoneProspect && Array.isArray(G.zoneProspect.journal) && G.zoneProspect.journal.length) { G.zoneProspect.journal = []; save(); }   // 14/11 : journal des mesures d'essai retiré
       try { convertLines(); } catch (e) { console.warn('[carte] lignes → corridors', e); }
       try { welcome(); } catch (e) { console.warn('[carte] accueil', e); }
       if (onProspect() && !oldMap) mountAtlas(); else if (!onProspect()) unmountAtlas();
