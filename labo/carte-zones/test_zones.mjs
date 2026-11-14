@@ -342,7 +342,7 @@ const home = await p.evaluate(() => {
 });
 await sleep(2500);
 // le joueur connaît les six stations du réseau (ses routes y mènent) : corridors, itinéraires et modèles des stations plus bas
-await p.evaluate(() => { for (const l of SBLines.network().lines) if (l.corridor) SBLines.revealLine(l, Date.now(), l.kind && l.kind.label); saveGame(); });
+await p.evaluate(() => { const t = window.toast; window.toast = () => {}; try { for (const l of SBLines.network().lines) if (l.corridor) SBLines.revealLine(l, Date.now(), l.kind && l.kind.label); } finally { window.toast = t; } saveGame(); });   // sans les six bulles « lieu découvert » qui couvriraient l'écran
 const btn = await p.evaluate(() => ({ allowed: SBZones.allowed(), mig: SBZones.migrated(), btn: !!document.getElementById('sb-zones-btn'), cor: SBZones.state().corKnown }));
 rec('CARTE2', btn.allowed && btn.mig && !btn.btn && btn.cor.length === 6, `partie migrée ${btn.mig}, aucun bouton d'essai (${btn.btn}), corridors connus ${JSON.stringify(btn.cor)} · mondes ${home.worlds.join(', ')}`);
 await p.evaluate(() => SBZones.open());
@@ -404,6 +404,7 @@ const st = await F.evaluate(async () => { const Z = STARBYTE_ZONES, zj = Z.zj; Z
 let stOk = false, stNote = 'marqueur absent';
 if (st.found) {
   const fr = await F.frameElement(); const box = await fr.boundingBox();
+  const under = await p.evaluate(([x, y]) => { const e = document.elementFromPoint(x, y); return e ? (e.id || String(e.className || e.tagName)).slice(0, 40) : null; }, [box.x + st.x, box.y + st.y]);
   await p.touchscreen.tap(box.x + st.x, box.y + st.y); await sleep(400);
   const a = await F.evaluate(() => STARBYTE_ZONES.zj.sel);
   await sleep(600);
@@ -413,7 +414,7 @@ if (st.found) {
   await F.evaluate(() => { STARBYTE_ZONES.zj.view = 'home'; }); await p.touchscreen.tap(box.x + (st2 || st).lx, box.y + (st2 || st).y); await sleep(400);
   const b = await F.evaluate(() => STARBYTE_ZONES.zj.sel);
   const v2 = await F.evaluate(() => STARBYTE_ZONES.zj.view);
-  stOk = a && a.type === 'station' && b && b.type === 'station' && b.id === a.id && v2 === 'obj'; stNote = `icône → ${a && a.name} (approche : le marqueur devient le nom sous le modèle, ${moved} px plus loin), nom → ${b && b.name}, fiche ${v2}`;
+  stOk = a && a.type === 'station' && b && b.type === 'station' && b.id === a.id && v2 === 'obj'; stNote = `icône (${Math.round(box.x + st.x)}, ${Math.round(box.y + st.y)}, sous le doigt : ${under}) → ${a && a.name} (approche : le marqueur devient le nom sous le modèle, ${moved} px plus loin), nom → ${b && b.name}, fiche ${v2}`;
   await p.screenshot({ path: path.join(SHOTS, '6_atlas_station.png') });
 }
 rec('STATION', stOk, `Atlas, station ${st.name} devant les étoiles : ${stNote}`);
