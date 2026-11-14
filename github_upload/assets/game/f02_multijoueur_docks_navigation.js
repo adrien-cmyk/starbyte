@@ -615,6 +615,8 @@ function sbConvCard() {
     </button>`).join('')}</div>`;
 }
 function sbNotifClose() { const o = document.getElementById('sb-notif'); if (o) o.remove(); }
+// PATCH_1411_SCROLL — cartes (conversations, assistance, invitation) et rapports dans une seule zone qui défile :
+// avec plusieurs conversations, les cartes poussaient l'assistance et la liste hors de la feuille
 function sbNotifOpen() {
   sbNotifClose();
   const items = sbNotifItems();
@@ -625,10 +627,11 @@ function sbNotifOpen() {
     <div class="sbn-head"><div class="sbn-title">NOTIFICATIONS</div>
       ${sbNotifUnread() ? '<button class="sbn-all" onclick="sbNotifReadAll()">Tout marquer comme lu</button>' : ''}
       <button class="sbn-x" onclick="sbNotifClose()" aria-label="Fermer">×</button></div>
+    <div class="sbn-list">
     ${typeof sbConvCard === 'function' ? sbConvCard() : ''}
     ${window.SBAssist ? SBAssist.card() : ''}
     ${window.SBInvite ? SBInvite.card() : ''}
-    <div class="sbn-list">${items.length ? items.map(x => `<div class="sbn-it${x.unread ? ' u' : ''}" onclick="sbNotifGo('${x.src}','${String(x.id).replace(/'/g, '')}')">
+    ${items.length ? items.map(x => `<div class="sbn-it${x.unread ? ' u' : ''}" onclick="sbNotifGo('${x.src}','${String(x.id).replace(/'/g, '')}')">
       <span class="sbn-dot" style="background:${x.unread ? x.color : 'transparent'}"></span>
       <div class="sbn-b"><div class="sbn-tag" style="color:${x.color}">${x.tag}<span>${ago(x.t)}</span></div>
       <div class="sbn-t">${x.title}</div>${x.sub ? `<div class="sbn-s">${x.sub}</div>` : ''}</div></div>`).join('')
