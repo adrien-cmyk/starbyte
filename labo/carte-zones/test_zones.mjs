@@ -355,9 +355,7 @@ await p.screenshot({ path: path.join(SHOTS, '1_ouverture.png') });
 
 // un sondage : la zone « commun » à portée la plus proche de la capitale (contenu tiré de son identifiant, le même pour tous)
 let target = null;
-for (let t = 0; t < 20 && !target; t++) { await sleep(500); target = await F.evaluate(() => { const h = zjHome(); if (!h) return null; const [q0, r0] = tacCellOf(h.p[0], h.p[2]), k = tacLayerOf(h.p[1]);
-  for (let n = 2; n < 12; n++) for (const [q, r] of hexRing(q0, r0, n)) { const id = zoneId(q, r, k), e = zjEstimate(id); if (!e || !e.inRange) continue; const c = zjZoneContent(id); if (c && c.cat === 'commun' && /^[A-Z]-[A-Z]-\d{4}$/.test(c.sys || '')) return { id, kind: c.kind, sys: c.sys, k }; }
-  return null; }); }
+for (let t = 0; t < 20 && !target; t++) { await sleep(500); target = await F.evaluate(() => { const S = STARBYTE_ZONES, id = S.openZoneNear(true, 'commun'); if (!id) return null; const c = S.zoneContent(id); return c && /^[A-Z]-[A-Z]-\d{4}$/.test(c.sys || '') ? { id, kind: c.kind, sys: c.sys, k: +id.split(':')[3] } : null; }); }
 await F.evaluate((id) => STARBYTE_ZONES.selectZone(id), target.id); await sleep(400);
 const fiche = await F.evaluate(() => ({ body: document.getElementById('zj-sh-body').innerText.replace(/\s+/g, ' '), foot: document.getElementById('zj-sh-foot').innerText.replace(/\s+/g, ' '), btns: document.querySelectorAll('#zj-sh-foot button').length }));
 rec('FICHE', /Non sondée/.test(fiche.body) && /Durée/.test(fiche.body) && /Coût/.test(fiche.body) && /Sonder cette zone/.test(fiche.foot) && fiche.btns >= 1 && !/région de test/.test(fiche.body), `« ${fiche.body.slice(0, 150)} » · bouton : ${fiche.foot}`);
