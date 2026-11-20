@@ -591,12 +591,13 @@ await p.screenshot({ path: path.join(SHOTS, '16_tanker_suivi_tactique.png') });
 rec('FOLLOW-06', tac.F.on && Math.abs(tac.k - tac.lay) <= 1 && tac.origin === 'home', `Tactique en suivi : couche ${tac.k} (le tanker est dans la tranche ${tac.lay}, marge de 15 %), départ des sondages ${tac.origin} inchangé`);
 // 12/11 (retour d'Adrien) : toucher le tracé de la mission en Tactique garde la mission ; avant, la zone dessous était choisie
 const lineTap = kind => F.evaluate(async kind => { const S = STARBYTE_ZONES, zj = S.zj, W = innerWidth, H = innerHeight, mine = () => (zj.lines || []).filter(l => l.o.type === kind);
-  const tryTap = () => { for (const l of mine()) for (const u of [.5, .3, .7, .15, .85, .05, .95]) { const x = l.x1 + (l.x2 - l.x1) * u, y = l.y1 + (l.y2 - l.y1) * u; if (x < 30 || x > W - 30 || y < 150 || y > H - 260) continue; const pk = S.pick(x, y); if (pk.chip || pk.list.length) continue;
+  // 20/11 : seulement dans la plaque de la couche affichée (le mille-feuille) ; hors plaque, le tracé n'est pas dessiné
+  const tryTap = () => { const P = S.plate(); for (const l of mine()) for (const u of [.5, .3, .7, .15, .85, .05, .95]) { const x = l.x1 + (l.x2 - l.x1) * u, y = l.y1 + (l.y2 - l.y1) * u; if (x < Math.max(30, P.x0 + 8) || x > Math.min(W - 30, P.x1 - 8) || y < Math.max(150, P.y0 + 34) || y > Math.min(H - 260, P.y1 - 8)) continue; const pk = S.pick(x, y); if (pk.chip || pk.list.length) continue;
     S.tap(x, y); return { x: Math.round(x), y: Math.round(y), sel: zj.sel && zj.sel.type, id: zj.sel && zj.sel.id, kind: (document.querySelector('#zj-sh-body .zj-kind') || {}).textContent, n: mine().length }; } return null; };
   let r = tryTap(); if (r) return r;
   // aucun tracé dans la partie visible de la carte : on le ramène au milieu (comme le ferait un glissé), puis on touche
   const l = mine()[0]; if (!l) return { n: 0 }; if (zj.follow && zj.follow.on) zj.follow.susp = true;
-  zj.cx += ((l.x1 + l.x2) / 2 - W / 2) * zj.upp; zj.cz += ((l.y1 + l.y2) / 2 - H * .4) * zj.upp; zj.dirty = true; await new Promise(res => setTimeout(res, 900));
+  { const P = S.plate(); zj.cx += ((l.x1 + l.x2) / 2 - (P.x0 + P.x1) / 2) * zj.upp; zj.cz += ((l.y1 + l.y2) / 2 - (P.y0 + P.y1) / 2) * zj.upp / P.T; } zj.dirty = true; await new Promise(res => setTimeout(res, 900));
   return tryTap() || { n: mine().length }; }, kind);
 const rt1 = await lineTap('travel'); await sleep(300);
 rec('ROUTE-01', rt1.sel === 'travel' && rt1.id === 'tk:' + tk.id, `tracé de la mission en Tactique (${rt1.n} segments touchables) : toucher (${rt1.x}, ${rt1.y}), loin du repère → fiche ${rt1.sel} ${rt1.id || ''} (« ${rt1.kind || ''} »), pas la zone dessous`);
