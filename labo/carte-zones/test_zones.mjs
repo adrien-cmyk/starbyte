@@ -55,6 +55,9 @@ async function newGame(p, url, planet) {
     return { mig: SBZones.migrated(), flag: !!(G.atlasCarte && G.atlasCarte.v === 1), wrap: !!document.getElementById('sb-atlas-wrap'), rootHidden: getComputedStyle(document.getElementById('spacemap-root')).display === 'none', nav: !!document.querySelector('#scr-prospect .smw-nav'), btn: !!document.getElementById('sb-zones-btn') }; });
   rec('CENTRE', !g.btn && g.mig && g.flag && g.wrap && g.rootHidden && g.nav, `Centre de prospection : nouvelle carte ${g.wrap}, ancienne cachée ${g.rootHidden}, bandeau et feuilles du jeu ${g.nav}, bouton d'essai ${g.btn}`);
   await p.screenshot({ path: path.join(SHOTS, '0_centre_nouvelle_carte.png') });
+  // 20/11 : la carte à molette est en essai sur le compte d'Adrien ; un joueur ordinaire garde la carte actuelle
+  const pg1 = await p.evaluate(() => { const f = document.querySelector('#sb-atlas-wrap iframe'); return { src: f ? f.getAttribute('src') : null, molette: SBZones.molette(), flag: localStorage.getItem('sb_molette') }; });
+  rec('PAGE-JOUEUR', !!pg1.src && /^atlas\/index\.html/.test(pg1.src) && !pg1.molette && pg1.flag === null, `joueur ordinaire : la carte actuelle (${pg1.src}), pas la carte à molette (${pg1.molette})`);
 
   // ═══ 1b. Bascule de la partie pilote (12/11, progressive) ═══
   const crownSys = await p.evaluate(() => { const ds = STATION_UI.crown, sys = mpDockSystem({ id: ds.id }); G.hiddenPorts = G.hiddenPorts || {}; G.hiddenPorts[sys] = { dockId: ds.id, name: 'The Drifting Crown', typeLabel: 'Port franc' }; saveGame(); return sys; });
@@ -347,10 +350,13 @@ await p.evaluate(() => { const t = window.toast; window.toast = () => {}; try { 
 const btn = await p.evaluate(() => ({ allowed: SBZones.allowed(), mig: SBZones.migrated(), btn: !!document.getElementById('sb-zones-btn'), cor: SBZones.state().corKnown }));
 rec('CARTE2', btn.allowed && btn.mig && !btn.btn && btn.cor.length === 6, `partie migrée ${btn.mig}, aucun bouton d'essai (${btn.btn}), corridors connus ${JSON.stringify(btn.cor)} · mondes ${home.worlds.join(', ')}`);
 await p.evaluate(() => SBZones.open());
-const frameReady = async () => { for (let i = 0; i < 80; i++) { const f = p.frames().find(f => f.url().includes('atlas/index.html')); if (f) { const ok = await f.evaluate(() => !!(window.STARBYTE_ZONES && STARBYTE_ZONES.zj.snap)).catch(() => false); if (ok) return f; } await sleep(500); } return null; };
+const frameReady = async () => { for (let i = 0; i < 80; i++) { const f = p.frames().find(f => /atlas\/(index|molette)\.html/.test(f.url()));   // 20/11 : en local, la carte à molette (compte de développeur)
+ if (f) { const ok = await f.evaluate(() => !!(window.STARBYTE_ZONES && STARBYTE_ZONES.zj.snap)).catch(() => false); if (ok) return f; } await sleep(500); } return null; };
 let F = await frameReady();
 await sleep(3500);
 const reg = await p.evaluate(() => ({ region: !!(G.zoneProspect && G.zoneProspect.region), journal: ((G.zoneProspect && G.zoneProspect.journal) || []).length }));
+const pg2 = await p.evaluate(() => { const f = document.querySelector('#sb-atlas-wrap iframe'); return { src: f ? f.getAttribute('src') : null, molette: SBZones.molette(), flag: localStorage.getItem('sb_molette') }; });
+rec('PAGE-ESSAI', pg2.molette && pg2.flag === '1' && /^atlas\/molette\.html/.test(pg2.src || ''), `compte de développeur (en local, comme le compte d'Adrien) : la carte à molette (${pg2.src}), appareil mémorisé (${pg2.flag})`);
 rec('SANS-RÉGION', !reg.region && reg.journal === 0, `aucune région d'essai créée (${reg.region}), aucun journal de mesures (${reg.journal}) : l'univers est ouvert`);
 await p.screenshot({ path: path.join(SHOTS, '1_ouverture.png') });
 

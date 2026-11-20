@@ -1,8 +1,11 @@
 #!/usr/bin/env python3
 """Construit github_upload/atlas/index.html : l'atlas fractal (base_atlas.html) + la carte par zones (zj_*).
 Écrit aussi l'empreinte de la page dans github_upload/assets/zones_test.js (adresse ?v=).
-Usage : python3 labo/carte-zones/build.py   (depuis la racine du dépôt ou d'ailleurs)"""
-import os, re, hashlib
+Usage : python3 labo/carte-zones/build.py                 → atlas/index.html (la carte des joueurs), empreinte PAGE_V
+        python3 labo/carte-zones/build.py --page=molette  → atlas/molette.html (essai sur le compte d'Adrien, 20/11), empreinte PAGE_V2"""
+import os, re, hashlib, sys
+PAGE = next((a.split('=', 1)[1] for a in sys.argv[1:] if a.startswith('--page=')), 'index')
+VAR = 'PAGE_V' if PAGE == 'index' else 'PAGE_V2'
 D = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.abspath(os.path.join(D, '..', '..'))
 s = open(os.path.join(D, 'base_atlas.html'), encoding='utf-8').read()
@@ -26,14 +29,15 @@ m = re.search(r'<canvas id="space"[^>]*>(</canvas>)?', s); assert m
 s = s[:m.end()] + '\n' + open(os.path.join(D, 'zj.html'), encoding='utf-8').read() + s[m.end():]
 once("</style>", open(os.path.join(D, 'zj.css'), encoding='utf-8').read() + "\n</style>")
 once("<title>Starbyte · Atlas vivant · navigation</title>", "<title>Starbyte · Carte</title><script>document.documentElement.classList.add('zj-js')</script>")
-out = os.path.join(ROOT, 'github_upload', 'atlas', 'index.html')
+out = os.path.join(ROOT, 'github_upload', 'atlas', PAGE + '.html')
 os.makedirs(os.path.dirname(out), exist_ok=True)
 open(out, 'w', encoding='utf-8').write(s)
 h = hashlib.sha256(s.encode('utf-8')).hexdigest()[:10]
 zt = os.path.join(ROOT, 'github_upload', 'assets', 'zones_test.js')
 z = open(zt, encoding='utf-8').read()
-z2 = re.sub(r"const PAGE_V = '[^']*';", "const PAGE_V = '" + h + "';", z, count=1)
+z2 = re.sub(r"const " + VAR + r" = '[^']*';", "const " + VAR + " = '" + h + "';", z, count=1)
+assert z2 != z or ("const " + VAR + " = '" + h + "';") in z, 'variable ' + VAR + ' absente de zones_test.js'
 if z2 != z: open(zt, 'w', encoding='utf-8').write(z2)
 app = re.search(r'<script id="application">(.*?)</script>', s, re.S).group(1)
 open('/tmp/zj_app_check.js', 'w', encoding='utf-8').write(app)
-print('atlas/index.html', len(s) // 1024, 'Ko · empreinte', h)
+print('atlas/' + PAGE + '.html', len(s) // 1024, 'Ko · empreinte', h)

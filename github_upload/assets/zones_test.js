@@ -18,7 +18,18 @@
   if (window.EXTRA_SAVE_KEYS && EXTRA_SAVE_KEYS.indexOf('zoneProspect') < 0) EXTRA_SAVE_KEYS.push('zoneProspect');
 
   const PAGE = 'atlas/index.html';
-  const PAGE_V = '129461487e';   // empreinte de atlas/index.html, écrite par labo/carte-zones/build.py
+  const PAGE_V = '96e933626e';   // empreinte de atlas/index.html, écrite par labo/carte-zones/build.py
+  // 20/11 (Adrien : « je veux tester sur mon compte hadrien ») : la carte à molette (couches en mille-feuille, zone sondable dans
+  // l'amas et à ±5 couches, zones « en mission » reprises) s'ouvre d'abord sur son compte seulement : accès de développeur du jeu
+  // (pseudo hadrien au registre, son email, ou en local). Les autres joueurs gardent atlas/index.html tel quel.
+  const PAGE2 = 'atlas/molette.html';
+  const PAGE_V2 = '129461487e';   // empreinte de atlas/molette.html, écrite par labo/carte-zones/build.py --page=molette
+  function molette() {
+    try {
+      if (typeof _sbDevAllowed === 'function' && _sbDevAllowed()) { localStorage.setItem('sb_molette', '1'); return true; }
+      return localStorage.getItem('sb_molette') === '1';   // le registre se lit après le démarrage : l'appareil s'en souvient
+    } catch (e) { return false; }
+  }
   const GRID = 'tac-2';
   const MIN = 60e3;
   const SB = 'https://elupnpdcblztpfywnhjl.supabase.co';
@@ -390,7 +401,7 @@
     if (!frameWrap || !frameWrap.isConnected) {
       frameWrap = document.createElement('div'); frameWrap.className = 'sb-atlas-wrap'; frameWrap.id = 'sb-atlas-wrap';
       frameWrap.innerHTML = '<iframe title="Carte" allow="fullscreen"></iframe>';
-      frameWrap.querySelector('iframe').src = PAGE + '?v=' + PAGE_V + '&in=jeu';
+      frameWrap.querySelector('iframe').src = (molette() ? PAGE2 + '?v=' + PAGE_V2 : PAGE + '?v=' + PAGE_V) + '&in=jeu';
       const map = s.querySelector('.smw-map'); s.insertBefore(frameWrap, map ? map.nextSibling : s.firstChild);
       log('carte', { mount: true });
     }
@@ -725,7 +736,7 @@
       if (typeof G === 'undefined' || !G || !G.planet) return;
       migrate(); hookGame();
       if (!migrated()) return;
-      try { fixOrphans(); } catch (e) { console.warn('[carte] zones en mission', e); }
+      if (molette()) try { fixOrphans(); } catch (e) { console.warn('[carte] zones en mission', e); }   // 20/11 : en essai sur le compte d'Adrien d'abord
       if (G.zoneProspect && Array.isArray(G.zoneProspect.journal) && G.zoneProspect.journal.length) { G.zoneProspect.journal = []; save(); }   // 14/11 : journal des mesures d'essai retiré
       try { convertLines(); } catch (e) { console.warn('[carte] lignes → corridors', e); }
       try { welcome(); } catch (e) { console.warn('[carte] accueil', e); }
@@ -885,7 +896,7 @@
   }
 
   window.SBZones = {
-    allowed, why, open, close, state, launch, arrive, act, check, models, migrated, pilot, known, gameAct, beaconCheck, corridorChain, nodeTraffic, voyageTransport: (fn) => { voyageTransport = typeof fn === 'function' ? fn : null; }, showOldMap, showNewMap, embedded: () => !!frameWrap, sigAction: (id, wid) => sigAction((G.signatures || {})[id], wid),
+    allowed, why, open, close, state, launch, arrive, act, check, models, migrated, pilot, molette, known, gameAct, beaconCheck, corridorChain, nodeTraffic, voyageTransport: (fn) => { voyageTransport = typeof fn === 'function' ? fn : null; }, showOldMap, showNewMap, embedded: () => !!frameWrap, sigAction: (id, wid) => sigAction((G.signatures || {})[id], wid),
     onChange(f) { listeners.add(f); return () => listeners.delete(f); },
     grid: GRID,
   };

@@ -24,7 +24,7 @@ const BRIDGE = `(() => { const W = ${JSON.stringify(WORLDS)}, S = ${JSON.stringi
     corKnown: [], netPorts: [], moves5: [], hosted: [], incoming: [], posts: { mine: [], others: [] }, beacons: { list: [], going: [], quota: 3, cost: { metal: 300, cristal: 100 }, status: {}, posts: [] }, nav: [] });
   window.SBZones = { state, check: () => ({ radar: true, habitable: false }), sigAction: () => ({ kind: 'off', label: 'Signature à identifier' }), act: () => ({ ok: false }), launch: () => ({ ok: false }),
     close() {}, onChange: () => () => {}, gameAct: () => ({ ok: false, why: 'essai' }), beaconCheck: () => ({ ok: false, why: '' }), nodeTraffic: () => [] }; })();`;
-const HOST = `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>html,body{margin:0;height:100%;background:#000;overflow:hidden}iframe{position:fixed;inset:0;width:100%;height:100%;border:0}</style><script>${BRIDGE}</script><iframe src="/github_upload/atlas/index.html?v=obs"></iframe>`;
+const HOST = `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>html,body{margin:0;height:100%;background:#000;overflow:hidden}iframe{position:fixed;inset:0;width:100%;height:100%;border:0}</style><script>${BRIDGE}</script><iframe src="/github_upload/atlas/molette.html?v=obs"></iframe>`;
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8', '.json': 'application/json', '.png': 'image/png', '.jpg': 'image/jpeg', '.webp': 'image/webp', '.glb': 'model/gltf-binary', '.wasm': 'application/wasm', '.css': 'text/css' };
 const srv = await new Promise(res => { const s = createServer((q, r) => { const u = decodeURIComponent(new URL(q.url, 'http://x').pathname); if (u === '/hote.html') { r.writeHead(200, { 'Content-Type': MIME['.html'] }); r.end(HOST); return; }
   const f = path.join(ROOT, u); if (!f.startsWith(ROOT) || !fs.existsSync(f) || !fs.statSync(f).isFile()) { r.writeHead(404); r.end(); return; } r.writeHead(200, { 'Content-Type': MIME[path.extname(f)] || 'application/octet-stream' }); r.end(fs.readFileSync(f)); }); s.listen(0, '127.0.0.1', () => res(s)); });
@@ -36,7 +36,7 @@ async function open(ctxOpt) {
   page.on('pageerror', e => errs.push(String(e.message || e).slice(0, 200)));
   await page.goto(URL0, { waitUntil: 'load', timeout: 60000 });
   let F = null;
-  for (let i = 0; i < 60; i++) { await sleep(400); F = page.frames().find(f => /atlas\/index\.html/.test(f.url())); if (F && await F.evaluate(() => !!(window.STARBYTE_ZONES && STARBYTE_ZONES.zj.snap && STARBYTE_ZONES.zj.ws.length)).catch(() => false)) break; }
+  for (let i = 0; i < 60; i++) { await sleep(400); F = page.frames().find(f => /atlas\/(index|molette)\.html/.test(f.url())); if (F && await F.evaluate(() => !!(window.STARBYTE_ZONES && STARBYTE_ZONES.zj.snap && STARBYTE_ZONES.zj.ws.length)).catch(() => false)) break; }
   await sleep(1200);
   // la carte vit dans le cadre : les évaluations s'y font, les captures prennent la page entière
   const p = { evaluate: (f, a) => F.evaluate(f, a), screenshot: (o) => page.screenshot(o), page };

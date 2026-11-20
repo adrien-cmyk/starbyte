@@ -4419,7 +4419,12 @@ function handleProbeReturn(missionId) {
   // rapporte le contenu fixé de cette zone. Les autres missions ne passent jamais ici (pas de champ zone).
   // 20/11 : au chargement, le jeu rattrape les retours (d04) avant que la carte soit chargée (zones_test.js, plus bas dans la page).
   // Une Radar de zone attend alors le tick suivant au lieu de prendre le chemin habituel (rapport classique, zone « en mission » à vie).
-  if (mission.zone) { if (window.SBZones && typeof SBZones.arrive === 'function') return SBZones.arrive(mission, idx); return; }
+  // En essai sur le compte d'Adrien d'abord (drapeau « sb_molette » posé par la carte sur son appareil).
+  if (mission.zone) {
+    if (window.SBZones && typeof SBZones.arrive === 'function') return SBZones.arrive(mission, idx);
+    let essai = false; try { essai = localStorage.getItem('sb_molette') === '1'; } catch (e) {}
+    if (essai) return;
+  }
 
   // PATCH_1410_ECLAIREUR — Moyenne en éclaireur : elle se consume en traçant le passage, qui devient une route
   if (mission.mode === 'scout' && window.SBLines) {
