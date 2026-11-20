@@ -4417,7 +4417,9 @@ function handleProbeReturn(missionId) {
 
   // ZONES_1011 — la carte (assets/zones_test.js) : une Radar envoyée sur une zone
   // rapporte le contenu fixé de cette zone. Les autres missions ne passent jamais ici (pas de champ zone).
-  if (mission.zone && window.SBZones && typeof SBZones.arrive === 'function') return SBZones.arrive(mission, idx);
+  // 20/11 : au chargement, le jeu rattrape les retours (d04) avant que la carte soit chargée (zones_test.js, plus bas dans la page).
+  // Une Radar de zone attend alors le tick suivant au lieu de prendre le chemin habituel (rapport classique, zone « en mission » à vie).
+  if (mission.zone) { if (window.SBZones && typeof SBZones.arrive === 'function') return SBZones.arrive(mission, idx); return; }
 
   // PATCH_1410_ECLAIREUR — Moyenne en éclaireur : elle se consume en traçant le passage, qui devient une route
   if (mission.mode === 'scout' && window.SBLines) {

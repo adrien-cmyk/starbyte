@@ -18,7 +18,7 @@
   if (window.EXTRA_SAVE_KEYS && EXTRA_SAVE_KEYS.indexOf('zoneProspect') < 0) EXTRA_SAVE_KEYS.push('zoneProspect');
 
   const PAGE = 'atlas/index.html';
-  const PAGE_V = '96e933626e';   // empreinte de atlas/index.html, écrite par labo/carte-zones/build.py
+  const PAGE_V = '129461487e';   // empreinte de atlas/index.html, écrite par labo/carte-zones/build.py
   const GRID = 'tac-2';
   const MIN = 60e3;
   const SB = 'https://elupnpdcblztpfywnhjl.supabase.co';
@@ -209,6 +209,9 @@
     if (!worlds().some(w => w.id === wid)) return { ok: false, why: 'Monde de départ inconnu.' };
     const range = Math.max(1, +req.range || 1), dist = Math.max(0, +req.dist || 0);
     if (dist > range) return { ok: false, why: 'Hors de portée depuis ce monde.' };
+    // 20/11 (Adrien) : 5 couches au plus du monde de départ, dans son amas (la carte le calcule et le dit)
+    if (req.band === false) return { ok: false, why: 'Hors de portée : plus de 5 couches au-dessus ou au-dessous de ce monde.' };
+    if (req.amas === false) return { ok: false, why: 'Hors de portée : hors de l’amas de ce monde.' };
     const res = inWorld(wid, () => {
       const probe = (G.probesPool || []).find(p => p.tier === 'radar' && p.state === 'ready');
       if (!probe) return { ok: false, why: 'noradar' };
@@ -697,11 +700,32 @@
     Promise.resolve(sbConfirm({ title: 'Nouvelle carte', body: parts.map(x => '<p style="margin:0 0 10px">' + x + '</p>').join(''), confirmLabel: 'Voir la carte', cancelLabel: 'Plus tard' }))
       .then(ok => { welcomeOpen = false; if (ok) open(); }).catch(() => { welcomeOpen = false; });
   }
+  // 20/11 : avant ce jour, une Radar de zone revenue pendant que le jeu était fermé passait par le chemin habituel : rapport classique
+  // sur le système d'ancrage, et la zone restait « en mission » pour toujours (6 zones de Panzerstorm le 16/11). Le jeu attend
+  // maintenant la carte (f03). Ici, les zones déjà touchées reprennent ce que la Radar a vraiment rapporté (son rapport classique) ;
+  // sans rapport retrouvé, la zone redevient à sonder. Rien n'est donné, rien n'est retiré. Le lancement pose la mission et la zone
+  // dans le même appel : une zone « en mission » sans mission en vol est toujours une zone perdue.
+  function fixOrphans() {
+    const z = G.zoneProspect; if (!z || !z.zones) return;
+    if (!Object.values(z.zones).some(e => e && e.st === 'mission')) return;
+    const live = new Set((G.probeMissions || []).filter(m => m && m.zone && m.status === 'in_transit').map(m => m.id));
+    let n = 0;
+    for (const [id, e] of Object.entries(z.zones)) {
+      if (!e || e.st !== 'mission' || live.has(e.mission)) continue;
+      const anchor = e.open && e.open.anchor;
+      const rep = anchor && (G.probeReports || []).find(r => r && r.tier === 'radar' && !r.zone && r.targetCoords === anchor && (r.createdAt || 0) >= (e.at || 0));
+      if (rep) z.zones[id] = { st: 'done', at: rep.createdAt, world: e.world || 'home', found: (rep.signatureIds || []).slice(), mission: e.mission, repris: 1 };
+      else delete z.zones[id];
+      n++;
+    }
+    if (n) { save(); notify(); console.info('[carte] zones « en mission » sans mission reprises :', n); }
+  }
   function migTick() {
     try {
       if (typeof G === 'undefined' || !G || !G.planet) return;
       migrate(); hookGame();
       if (!migrated()) return;
+      try { fixOrphans(); } catch (e) { console.warn('[carte] zones en mission', e); }
       if (G.zoneProspect && Array.isArray(G.zoneProspect.journal) && G.zoneProspect.journal.length) { G.zoneProspect.journal = []; save(); }   // 14/11 : journal des mesures d'essai retiré
       try { convertLines(); } catch (e) { console.warn('[carte] lignes → corridors', e); }
       try { welcome(); } catch (e) { console.warn('[carte] accueil', e); }

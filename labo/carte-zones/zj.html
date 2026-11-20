@@ -6,7 +6,15 @@
  <button id="zj-worlds" class="zj-pill">Mes mondes</button>
  <button id="zj-close" class="zj-x" aria-label="Fermer la carte">×</button>
 </div>
-<div id="zj-depth"><button id="zj-down" aria-label="Couche du dessous">▼<i id="zj-down-n"></i></button><span id="zj-ctx">…</span><button id="zj-up" aria-label="Couche du dessus">▲<i id="zj-up-n"></i></button></div>
+<div id="zj-wheel" role="group" aria-label="Profondeur : couches de la carte">
+ <div class="zj-wh-t" aria-hidden="true">PROFONDEUR</div>
+ <button id="zj-wh-up" class="zj-wh-ch" aria-label="Couche du dessus"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 15l6-6 6 6"/></svg></button>
+ <div id="zj-wh-list"><div id="zj-wh-rows"></div></div>
+ <button id="zj-wh-dn" class="zj-wh-ch" aria-label="Couche du dessous"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></button>
+ <button id="zj-wh-zero" aria-label="Revenir à la couche du monde de départ"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="6.5"/><path d="M12 2.5v4M12 17.5v4M2.5 12h4M17.5 12h4"/></svg><b>0</b></button>
+ <div class="zj-wh-g" aria-hidden="true">GLISSER</div>
+ <span id="zj-ctx" class="zj-sr" aria-live="polite"></span>
+</div>
 <div id="zj-zoom"><button id="zj-zin" aria-label="Zoomer">+</button><button id="zj-zout" aria-label="Dézoomer">−</button><button id="zj-home" aria-label="Recentrer sur le monde de départ">⌖</button></div>
 <section id="zj-sheet" data-state="sum" aria-label="Fiche">
  <div id="zj-sh-head"><button id="zj-sh-back" aria-label="Retour" hidden>‹</button><span class="zj-test">MA CARTE</span><button id="zj-sh-tog" aria-label="Agrandir ou réduire la fiche">▾</button></div>

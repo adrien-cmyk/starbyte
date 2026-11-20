@@ -1133,11 +1133,11 @@ var SBProspectGuide = (function () {
       </div>
       <div class="note">💡 La Moyenne demande la <b>cartographie sismique</b> : laboratoire amélioré au niveau 2.</div>`,
     () => `<h3>Lire la carte</h3>
-      <div class="gest"><div class="g">🧭</div><div><b>Atlas</b> pour l'espace en 3D, <b>Tactique</b> pour la vue de dessus, couche par couche.</div></div>
-      <div class="gest"><div class="g">👆</div><div><b>Touche une zone</b> voisine, puis « <b>Sonder cette zone</b> » : une seule <b>Radar</b> suffit, quel que soit le nombre d'étoiles. Commence près de ta planète : c'est rapide et ça coûte peu.</div></div>
+      <div class="gest"><div class="g">🧭</div><div><b>Atlas</b> pour l'espace en 3D, <b>Tactique</b> pour les couches empilées. La <b>molette</b> à droite passe d'une couche à l'autre ; le chiffre dit combien de zones tu y as sondées.</div></div>
+      <div class="gest"><div class="g">👆</div><div><b>Touche une zone</b> voisine, puis « <b>Sonder cette zone</b> » : une seule <b>Radar</b> suffit, quel que soit le nombre d'étoiles. Une zone sondée reste claire ; ce qui reste à sonder est voilé. Tu sondes dans ton amas, jusqu'à 5 couches au-dessus ou au-dessous de ta planète.</div></div>
       <div class="gest"><div class="g">📄</div><div><b>Rapports</b> : chaque sonde revient avec un rapport. Touche une signature pour y envoyer une Légère.</div></div>
       <div class="gest"><div class="g">📒</div><div><b>Carnet</b> : tout ce que tu connais (systèmes, signatures suivies, commandants). <b>Mes mondes</b> : tes planètes et ce qui est en vol.</div></div>
-      <div class="gest"><div class="g">⌖</div><div>Le viseur recentre la carte sur ta planète.</div></div>
+      <div class="gest"><div class="g">⌖</div><div>« ⌖ 0 » sous la molette te ramène à ta planète.</div></div>
       <div class="gest"><div class="g">📡</div><div>Ton <b>antenne</b> capte aussi du trafic : quand une bulle apparaît en haut, quelqu'un passe dans le coin.</div></div>`,
     () => hasShip()
       ? `<h3>Et ensuite</h3>

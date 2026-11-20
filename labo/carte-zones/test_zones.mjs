@@ -388,8 +388,45 @@ rec('REFUS', !deny.again.ok && !deny.out.ok, `zone déjà sondée : « ${deny.ag
 // toucher une étoile : la zone, jamais une fiche de système
 const star = await F.evaluate(() => { const Z = STARBYTE_ZONES, zj = Z.zj; Z.setMode('tac'); zj.sel = null; Z.draw(); const v = zj; // première étoile visible hors objets
   const c = document.getElementById('tac-overlay'); return { w: innerWidth, h: innerHeight }; });
-const starTap = await F.evaluate(() => { const Z = STARBYTE_ZONES, zj = Z.zj; let pt = null; for (let y = 260; y < 560 && !pt; y += 7) for (let x = 40; x < 350 && !pt; x += 7) { const pk = Z.pick(x, y); if (!pk.chip && !pk.list.length) pt = [x, y]; } if (!pt) return null; Z.tap(pt[0], pt[1]); return { sel: zj.sel && zj.sel.type, view: zj.view }; });
+const starTap = await F.evaluate(() => { const Z = STARBYTE_ZONES, zj = Z.zj; zj.kf = zj.k; Z.draw(); const P = Z.plate(); let pt = null;   // 20/11 : dans la plaque de la couche affichée (le mille-feuille)
+  for (let y = Math.ceil(P.y0 + 34); y < P.y1 - 6 && !pt; y += 7) for (let x = Math.ceil(P.x0 + 10); x < P.x1 - 10 && !pt; x += 7) { const pk = Z.pick(x, y); if (!pk.chip && !pk.list.length) pt = [x, y]; } if (!pt) return null; Z.tap(pt[0], pt[1]); return { sel: zj.sel && zj.sel.type, view: zj.view }; });
 rec('ÉTOILE', starTap && starTap.sel === 'zone' && starTap.view === 'zone', `toucher le décor étoilé → ${starTap && starTap.sel} (fiche ${starTap && starTap.view}), aucune fiche de système`);
+
+// ═══ 2b. Molette de profondeur et mille-feuille (20/11, maquette d'Adrien ; retour de Panzerstorm) ═══
+const wh = await F.evaluate(() => { const S = STARBYTE_ZONES, zj = S.zj, fin = () => { zj.kf = zj.k; S.draw(); }; S.setMode('tac'); S.wheelZero(); fin(); const k0 = S.k0();
+  const rows = () => [...document.querySelectorAll('#zj-wh-rows .zj-wh-r')].map(b => ({ k: b.dataset.k == null ? null : +b.dataset.k, on: b.classList.contains('on'), home: !!b.querySelector('i svg'), t: b.textContent.replace(/\s+/g, ' ').trim() }));
+  const r0 = rows(); document.getElementById('zj-wh-up').click(); fin(); const up = zj.k; document.getElementById('zj-wh-dn').click(); document.getElementById('zj-wh-dn').click(); fin(); const dn = zj.k;
+  document.getElementById('zj-wh-zero').click(); fin(); const zero = zj.k, wheel = document.getElementById('zj-wheel').getBoundingClientRect(), plate = S.plate();
+  const done = Object.entries(S.zj.snap.zp.zones).filter(([id, z]) => +id.split(':')[3] === k0 && (z.st === 'done' || z.st === 'mission')).length;
+  return { k0, r0, up, dn, zero, done, right: wheel.left > plate.x1, ctx: document.getElementById('zj-ctx').textContent, title: document.querySelector('.zj-wh-t').textContent, g: document.querySelector('.zj-wh-g').textContent }; });
+rec('MOLETTE', wh.r0.length === 5 && wh.r0[2].on && wh.r0[2].k === wh.k0 && wh.r0[2].home && /^\+2/.test(wh.r0[0].t) && /^−2/.test(wh.r0[4].t) && wh.up === wh.k0 + 1 && wh.dn === wh.k0 - 1 && wh.zero === wh.k0 && wh.right && wh.title === 'PROFONDEUR' && wh.r0[2].t.includes(String(wh.done)),
+  `molette à droite de la carte (${wh.right}) : ${wh.r0.map(r => (r.on ? '[' + r.t + ']' : r.t)).join(' ')} · ⌖ sur la couche du monde de départ, ${wh.done} zone(s) sondée(s) comptée(s) · ▲ ${wh.up - wh.k0 > 0 ? '+1' : '?'} · ▼▼ ${wh.dn - wh.k0} · ⊕ 0 → ${wh.zero - wh.k0} · « ${wh.ctx} »`);
+// glisser la molette vers le bas fait monter de deux couches (comme une molette de réglage)
+{ const fr = await F.frameElement(), box = await fr.boundingBox(), lr = await F.evaluate(() => { const b = document.getElementById('zj-wh-list').getBoundingClientRect(); return { x: b.x + b.width / 2, y: b.y + b.height / 2, row: document.querySelector('#zj-wh-rows .zj-wh-r').offsetHeight }; });
+  await p.mouse.move(box.x + lr.x, box.y + lr.y); await p.mouse.down(); for (let i = 1; i <= 8; i++) { await p.mouse.move(box.x + lr.x, box.y + lr.y + i * lr.row * 2 / 8); await sleep(30); } await p.mouse.up(); await sleep(200);
+  const g = await F.evaluate(() => { const S = STARBYTE_ZONES, k = S.zj.k; S.wheelZero(); return k - S.k0(); });
+  rec('GLISSER', g === 2, `glisser la molette de deux crans vers le bas : couche ${g >= 0 ? '+' : ''}${g} (attendu +2), puis ⊕ 0`); }
+// le mille-feuille : les couches voisines empilées ; toucher l'une d'elles l'amène au centre
+const mfe = await F.evaluate(() => { const S = STARBYTE_ZONES, zj = S.zj; zj.kf = zj.k; S.draw(); const k0 = zj.k, pl = S.plates(), P = S.plate(), up1 = pl.find(q => q.j === k0 + 1), dn1 = pl.find(q => q.j === k0 - 1);
+  const order = up1 && dn1 && up1.y1 < P.y0 && dn1.y0 > P.y1 && (up1.y1 - up1.y0) < (P.y1 - P.y0);
+  if (up1) S.tap((up1.x0 + up1.x1) / 2, (up1.y0 + up1.y1) / 2); const k1 = zj.k; zj.kf = zj.k; S.draw(); S.wheelZero(); zj.kf = zj.k; S.draw();
+  return { n: pl.length, js: pl.map(q => q.j - k0), order, k1: k1 - k0, T: P.T }; });
+rec('MILLE-FEUILLE', mfe.n >= 4 && mfe.order && mfe.k1 === 1 && mfe.T > 0 && mfe.T < 1, `${mfe.n} couches voisines dans la pile (${mfe.js.join(', ')}), au-dessus et au-dessous de la couche affichée, plus aplaties (${mfe.order}) ; toucher la couche +1 l'amène au centre (${mfe.k1 >= 0 ? '+' : ''}${mfe.k1}) ; couche affichée vue de 3/4 (inclinaison ${mfe.T})`);
+await p.screenshot({ path: path.join(SHOTS, '4b_mille_feuille.png') });
+// 20/11 (Adrien, « la zone verte ») : on sonde dans l'amas du monde de départ, à 5 couches au plus de ce monde
+const band = await F.evaluate(async () => { const S = STARBYTE_ZONES, zj = S.zj, h = zj.ws.find(w => w.kind === 'home'), k0 = S.layerOf(h.p[1]), [q, r] = S.cellOf(h.p[0], h.p[2]);
+  const id5 = 'tac-2:' + q + ':' + r + ':' + (k0 + 5), id6 = 'tac-2:' + q + ':' + r + ':' + (k0 + 6), e5 = S.estimate(id5), e6 = S.estimate(id6);
+  S.selectZone(id6); await new Promise(r => setTimeout(r, 300)); const foot = document.getElementById('zj-sh-foot').innerText.replace(/\s+/g, ' '), body = document.getElementById('zj-sh-body').innerText.replace(/\s+/g, ' ');
+  const c6 = S.zoneContent(id6); const br = parent.SBZones.launch({ zone: id6, world: 'home', dist: 10, range: 99999, band: false, amas: true, content: c6, anchor: c6 && c6.anchor });
+  S.wheelZero(); return { e5: { band: e5.band, ok: e5.inRange }, e6: { band: e6.band, ok: e6.inRange }, foot, body: body.slice(0, 200), br }; });
+rec('PORTÉE-COUCHES', band.e5.band && !band.e6.band && !band.e6.ok && /Hors de portée · Plus de 5 couches au-dessus/.test(band.foot) && !band.br.ok && /couches/.test(band.br.why || ''),
+  `5 couches au-dessus de la capitale : dans la bande (${band.e5.band}) ; 6 couches : hors bande, refusée (sondable ${band.e6.ok}), bouton « ${band.foot} » ; le jeu refuse aussi (« ${band.br.why} »)`);
+const am = await F.evaluate(() => { const S = STARBYTE_ZONES, zj = S.zj, h = zj.ws.find(w => w.kind === 'home'), k0 = S.layerOf(h.p[1]), [q0, r0] = S.cellOf(h.p[0], h.p[2]); let out = null, inn = null;
+  const ring = (n) => { const D = [[1, 0], [1, -1], [0, -1], [-1, 0], [-1, 1], [0, 1]], o = []; let x = q0 - n, y = r0 + n; for (let i = 0; i < 6; i++) for (let j = 0; j < n; j++) { o.push([x, y]); x += D[i][0]; y += D[i][1]; } return o; };
+  for (let n = 1; n < 14 && !out; n++) for (const [q, r] of ring(n)) { const id = 'tac-2:' + q + ':' + r + ':' + k0, e = S.estimate(id); if (!e.far && e.band && !e.amas && !out) out = id; if (e.amas && e.band && !e.far && !inn) inn = id; }
+  if (!out) return { none: true, inn: !!inn };
+  S.selectZone(out); const foot = document.getElementById('zj-sh-foot').innerText.replace(/\s+/g, ' '); S.wheelZero(); return { out, inn: !!inn, foot }; });
+rec('PORTÉE-AMAS', am.none ? am.inn : (am.inn && /Hors de l’amas/.test(am.foot)), am.none ? `aucune zone d'un autre amas à portée de cette capitale (elle est loin du bord) : la règle de l'amas n'enlève rien ici` : `zone à portée mais dans l'amas voisin (${am.out}) : « ${am.foot} » ; les zones de son amas restent sondables`);
 
 // Atlas : même sélection, volume visible, marqueurs prioritaires
 await F.evaluate((id) => { STARBYTE_ZONES.selectZone(id); STARBYTE_ZONES.setMode('atlas'); }, target.id); await sleep(2500);
@@ -443,6 +480,24 @@ await p.evaluate(() => SBZones.open()); F = await frameReady(); await sleep(2500
 const re2 = await F.evaluate((id) => { STARBYTE_ZONES.selectZone(id); return document.getElementById('zj-sh-body').innerText.replace(/\s+/g, ' ').slice(0, 80); }, target.id);
 rec('RECHARGE2', /Sondée/.test(re2), `la carte rouverte montre la zone : « ${re2} »`);
 await p.screenshot({ path: path.join(SHOTS, '8_apres_rechargement.png') });
+// 20/11 (sauvegarde de Panzerstorm) : une Radar de zone qui arrive pendant que le jeu est fermé ; et la reprise des zones déjà touchées
+{ const id2 = await F.evaluate(() => STARBYTE_ZONES.openZoneNear(true));
+  await F.evaluate((id) => { STARBYTE_ZONES.selectZone(id); const b = document.querySelector('#zj-sh-foot [data-a="launch"]'); if (b) b.click(); }, id2); await sleep(500);
+  const prep = await p.evaluate((id) => { const m = G.probeMissions.find(m => m.zone === id); if (!m) return null; m.arrivalAt = Date.now() - 1000;   // elle arrive pendant que le jeu est fermé
+    const z = G.zoneProspect.zones, now = Date.now();   // deux zones déjà touchées avant le correctif : l'une a son rapport classique, l'autre rien
+    z['tac-2:900:900:0'] = { st: 'mission', mission: 'pm-perdue-1', world: 'home', at: now - 5000, open: { anchor: 'A-X-1234', content: { cat: 'commun' } } };
+    z['tac-2:901:900:0'] = { st: 'mission', mission: 'pm-perdue-2', world: 'home', at: now - 5000, open: { anchor: 'A-X-1235', content: { cat: 'rien' } } };
+    G.probeReports.unshift({ id: 'pr-classique', tier: 'radar', targetCoords: 'A-X-1234', createdAt: now - 1000, signatureIds: ['SIG-AAA', 'SIG-BBB'], read: false });
+    saveGame(); return { mission: m.id }; }, id2);
+  await p.reload({ waitUntil: 'load' }); await sleep(13000);   // le tick des sondes repasse toutes les 10 s
+  const after = await p.evaluate(([id, mid]) => { const z = G.zoneProspect.zones, rep = (G.probeReports || []).find(r => r.zone === id);
+    return { st: z[id] && z[id].st, viaCarte: !!rep, classique: (G.probeReports || []).some(r => !r.zone && r.tier === 'radar' && r.createdAt > Date.now() - 60000 && r.id !== 'pr-classique'), left: G.probeMissions.filter(m => m.id === mid).length,
+      a: z['tac-2:900:900:0'] && { st: z['tac-2:900:900:0'].st, found: z['tac-2:900:900:0'].found }, b: z['tac-2:901:900:0'] || null }; }, [id2, prep && prep.mission]);
+  rec('RETOUR-FERMÉ', !!prep && after.st === 'done' && after.viaCarte && !after.classique && after.left === 0, `Radar de zone arrivée jeu fermé : au rechargement, la zone est « ${after.st} » par la carte (rapport de zone ${after.viaCarte}), aucun rapport classique (${after.classique})`);
+  rec('ZONES-REPRISES', after.a && after.a.st === 'done' && JSON.stringify(after.a.found) === '["SIG-AAA","SIG-BBB"]' && after.b === null, `zone restée « en mission » sans mission : reprend le rapport classique reçu (${after.a && after.a.st}, ${JSON.stringify(after.a && after.a.found)}) ; sans rapport : redevient à sonder (${after.b === null})`);
+  await p.evaluate(() => { delete G.zoneProspect.zones['tac-2:900:900:0']; saveGame(); });
+  await p.evaluate(() => SBZones.open()); F = await frameReady(); await sleep(2500);
+}
 
 // ═══ 3. Outils d'essai retirés (14/11) : plus de lecture d'une autre partie, plus de fichier exporté, plus de mention TEST ═══
 { await p.evaluate(() => SBZones.open()); F = await frameReady(); await sleep(2000);
