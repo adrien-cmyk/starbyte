@@ -489,7 +489,9 @@ await p.screenshot({ path: path.join(SHOTS, '8_apres_rechargement.png') });
     z['tac-2:901:900:0'] = { st: 'mission', mission: 'pm-perdue-2', world: 'home', at: now - 5000, open: { anchor: 'A-X-1235', content: { cat: 'rien' } } };
     G.probeReports.unshift({ id: 'pr-classique', tier: 'radar', targetCoords: 'A-X-1234', createdAt: now - 1000, signatureIds: ['SIG-AAA', 'SIG-BBB'], read: false });
     saveGame(); return { mission: m.id }; }, id2);
-  await p.reload({ waitUntil: 'load' }); await sleep(13000);   // le tick des sondes repasse toutes les 10 s
+  await p.reload({ waitUntil: 'load' });
+  // le jeu démarre lentement après « load » (nuage hors ligne) ; le tick des sondes repasse toutes les 10 s : on attend jusqu'à 60 s
+  for (let t = 0; t < 30; t++) { await sleep(2000); const ok = await p.evaluate((id) => { const z = G.zoneProspect && G.zoneProspect.zones; return !!(z && z[id] && z[id].st === 'done' && (!z['tac-2:900:900:0'] || z['tac-2:900:900:0'].st === 'done')); }, id2).catch(() => false); if (ok) break; }
   const after = await p.evaluate(([id, mid]) => { const z = G.zoneProspect.zones, rep = (G.probeReports || []).find(r => r.zone === id);
     return { st: z[id] && z[id].st, viaCarte: !!rep, classique: (G.probeReports || []).some(r => !r.zone && r.tier === 'radar' && r.createdAt > Date.now() - 60000 && r.id !== 'pr-classique'), left: G.probeMissions.filter(m => m.id === mid).length,
       a: z['tac-2:900:900:0'] && { st: z['tac-2:900:900:0'].st, found: z['tac-2:900:900:0'].found }, b: z['tac-2:901:900:0'] || null }; }, [id2, prep && prep.mission]);
