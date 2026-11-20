@@ -23,7 +23,7 @@
   // l'amas et à ±5 couches, zones « en mission » reprises) s'ouvre d'abord sur son compte seulement : accès de développeur du jeu
   // (pseudo hadrien au registre, son email, ou en local). Les autres joueurs gardent atlas/index.html tel quel.
   const PAGE2 = 'atlas/molette.html';
-  const PAGE_V2 = '41491da2d1';   // empreinte de atlas/molette.html, écrite par labo/carte-zones/build.py --page=molette
+  const PAGE_V2 = '4b7682a137';   // empreinte de atlas/molette.html, écrite par labo/carte-zones/build.py --page=molette
   function molette() {
     try {
       if (typeof _sbDevAllowed === 'function' && _sbDevAllowed()) { localStorage.setItem('sb_molette', '1'); return true; }

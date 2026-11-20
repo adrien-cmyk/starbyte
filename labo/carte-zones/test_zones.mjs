@@ -414,7 +414,7 @@ rec('MOLETTE', wh.r0.length === 5 && wh.r0[2].on && wh.r0[2].k === wh.k0 && wh.r
   rec('GLISSER', g === 2, `glisser la molette de deux crans vers le bas : couche ${g >= 0 ? '+' : ''}${g} (attendu +2), puis ⊕ 0`); }
 // 20/11 au soir (Adrien : « plein écran, plus de dessus, un vrai 3/4 ») : une vraie perspective, la couche remplit l'écran ;
 // le loin rapetisse ; toucher reste exact ; la couche du dessous se voit à travers
-const per = await F.evaluate(() => { const S = STARBYTE_ZONES, zj = S.zj, k0 = zj.k; zj.kf = zj.k; S.draw(); const c = S.cam(), P = S.plate();
+const per = await F.evaluate(() => { const S = STARBYTE_ZONES, zj = S.zj, k0 = zj.k; zj.kf = zj.k; S.draw(); const c = S.tcam(), P = S.plate();
   const full = [[0, 0], [innerWidth, 0], [0, innerHeight], [innerWidth, innerHeight]].every(q => S.screenHit(q[0], q[1]));
   const wAt = y => { const w = S.under(c.W0, y), a = S.proj(w[0], w[1]), b = S.proj(w[0] + 240, w[1]); return b[0] - a[0]; }, top = wAt(P.y0 + 40), bot = wAt(P.y1 - 20);
   const tx = c.W0 - 30, ty = c.H0 - 50; S.tap(tx, ty); const sel = zj.sel && zj.sel.type === 'zone' ? zj.sel.zone : null; let off = null;
