@@ -87,21 +87,24 @@ renderer.render=function(sc,cam){if(zj.mode==='tac'&&cam===camera){zjPlaceCam();
 function zjPlaceCam(){const W=innerWidth,H=innerHeight,[a,b]=tacLayerY(zj.k),ym=(a+b)/2;zjCam.left=-W/2*zj.upp;zjCam.right=W/2*zj.upp;zjCam.top=H/2*zj.upp;zjCam.bottom=-H/2*zj.upp;
  zjCam.position.set(zj.cx-origin.x,ym+150000-origin.y,zj.cz-origin.z);zjCam.lookAt(zj.cx-origin.x,ym-origin.y,zj.cz-origin.z);zjCam.updateProjectionMatrix();zjCam.updateMatrixWorld()}
 const zjHidden=[];function zjSceneVisible(on){if(!on){zjHidden.length=0;for(const o of [sectorRoot,distant,systemGroup])if(o&&o.visible){o.visible=false;zjHidden.push(o)}}else{for(const o of zjHidden)o.visible=true;zjHidden.length=0}}
-/* ── 20/11 (Adrien, retour de Panzerstorm) : MILLE-FEUILLE. La couche active est vue de 3/4 au centre ; ses voisines sont
-   empilées au-dessus et au-dessous, de plus en plus inclinées en s'éloignant, comme sur une molette. Toutes les couches
-   montrent la même fenêtre du monde (x, z). Projection affine (le toucher reste exact) :
-   X = (x − cx)/upp + Xc ;  Y = (z − cz)·T/upp + Yc ;  T = inclinaison de la couche (ZJ_T0 pour la couche active). ── */
-const ZJ_T0=.6,ZJ_F=.28,ZJ_N=2,ZJ_GAP=6;
-function zjLayout(){const ins=zjInsets(),f=ZJ_F,n=ZJ_N,cap=2,W=Math.max(140,ins.right-ins.left),avail=Math.max(170,ins.bottom-ins.top-cap),den=1+2*f*(1-Math.pow(f,n))/(1-f),
-  H0=Math.max(100,(avail-2*n*ZJ_GAP)/den),P=x=>H0*(1+f)*(1-Math.pow(f,x))/(2*(1-f))+ZJ_GAP*x,h=x=>H0*Math.pow(f,x);
- return{Xc:(ins.left+ins.right)/2,W,H0,Hu:H0/ZJ_T0,P,h,Ya:ins.top+cap+P(n)+h(n)/2}}
-// géométrie d'une couche à la distance d (fractionnaire pendant le défilement) de la couche affichée
-function zjGeom(L,d){const x=Math.abs(d);return{Xc:L.Xc,W:L.W,Hu:L.Hu,T:ZJ_T0*Math.pow(ZJ_F,x),Yc:L.Ya-Math.sign(d)*L.P(x),hh:L.h(x)}}
-function zjGeo(){return zj.G||(zj.G=zjGeom(zj.L||(zj.L=zjLayout()),0))}
-function zjView(){const G=zjGeo(),u=zj.upp;return{x0:zj.cx-G.W/2*u,x1:zj.cx+G.W/2*u,z0:zj.cz-G.Hu/2*u,z1:zj.cz+G.Hu/2*u}}
-const zjW=(px,py)=>{const G=zjGeo();return[zj.cx+(px-G.Xc)*zj.upp,zj.cz+(py-G.Yc)*zj.upp/G.T]};
-function zjAnchor(wx,wz,px,py){const G=zjGeo();zj.cx=wx-(px-G.Xc)*zj.upp;zj.cz=wz-(py-G.Yc)*zj.upp/G.T}   // le point (wx, wz) reste sous (px, py)
-const zjOnPlate=(G,px,py,m=0)=>px>=G.Xc-G.W/2-m&&px<=G.Xc+G.W/2+m&&py>=G.Yc-G.hh/2-m&&py<=G.Yc+G.hh/2+m;
+/* ── 20/11 au soir (Adrien) : « la vue dans des bentos est illisible, il faut plein écran et plus de dessus ; on sent trop que
+   c'est un plateau 2D resizé, ce n'est pas un vrai 3/4 ». La Tactique est maintenant une vraie vue en perspective : une caméra
+   inclinée de ZJ_PITCH sous l'horizon regarde la couche affichée, qui remplit tout l'écran (les zones lointaines rapetissent).
+   Les couches du dessous se devinent à travers, plus bas et plus petites ; changer de couche fait monter ou descendre la pile
+   devant la caméra. Toucher, glisser et pincer restent exacts : un rayon part de la caméra jusqu'au plan de la couche. ── */
+const ZJ_PITCH=64*Math.PI/180,ZJ_FOV=54*Math.PI/180,ZJ_GAPR=.34;   // ZJ_GAPR : écart entre deux couches dans la pile, en part de la distance de la caméra
+// caméra : visée au centre de la partie utile (sous la barre, au-dessus de la fiche, à gauche de la molette) ; zj.upp = unités du monde par pixel au point visé
+function zjCamMake(){const ins=zjInsets(),focal=innerHeight/2/Math.tan(ZJ_FOV/2),D=zj.upp*focal,sp=Math.sin(ZJ_PITCH),cp=Math.cos(ZJ_PITCH);
+ return{ins,W0:(ins.left+ins.right)/2,H0:(ins.top+ins.bottom)/2,focal,D,sp,cp,C:[zj.cx,D*sp,zj.cz+D*cp],gap:ZJ_GAPR*D}}
+// projection d'un point (x, y de la pile, z) → [X, Y, profondeur] ; avant = (0, −sin, −cos), droite = +x, haut = (0, cos, −sin)
+function zjPr(K,x,y,z){const d0=x-K.C[0],d1=y-K.C[1],d2=z-K.C[2],dep=-K.sp*d1-K.cp*d2,s=K.focal/Math.max(1e-3,dep);return[K.W0+d0*s,K.H0-(K.cp*d1-K.sp*d2)*s,dep]}
+// le point du plan y = yp sous le pixel (px, py)
+function zjRay(K,px,py,yp){const a=(px-K.W0)/K.focal,b=-(py-K.H0)/K.focal,dy=-K.sp+b*K.cp,dz=-K.cp-b*K.sp;if(dy>-1e-4)return null;const t=(yp-K.C[1])/dy;return[K.C[0]+t*a,K.C[2]+t*dz]}
+const zjPlaneY=K=>(zj.k-(zj.kf==null?zj.k:zj.kf))*K.gap;   // la couche affichée glisse vers le point visé pendant le défilement
+function zjView(){const K=zjCamMake(),yp=zjPlaneY(K),pts=[[0,0],[innerWidth,0],[0,innerHeight],[innerWidth,innerHeight]].map(q=>zjRay(K,q[0],q[1],yp)||[zj.cx,zj.cz]);
+ return{x0:Math.min(...pts.map(p=>p[0])),x1:Math.max(...pts.map(p=>p[0])),z0:Math.min(...pts.map(p=>p[1])),z1:Math.max(...pts.map(p=>p[1]))}}
+const zjW=(px,py)=>{const K=zjCamMake();return zjRay(K,px,py,zjPlaneY(K))||[zj.cx,zj.cz]};
+function zjAnchor(wx,wz,px,py){const w=zjW(px,py);zj.cx+=wx-w[0];zj.cz+=wz-w[1];zj.cam=null}   // le point (wx, wz) vient sous (px, py)
 // défilement de la pile : zj.kf rejoint zj.k (jamais plus de 2,5 couches d'animation)
 function zjKfStep(){const now=performance.now(),dt=Math.min(.1,(now-(zj.kfT||now))/1000);zj.kfT=now;if(zj.kf==null||zjReduce){zj.kf=zj.k;return}
  const d=zj.k-zj.kf;if(Math.abs(d)>2.5)zj.kf=zj.k-Math.sign(d)*2.5;zj.kf+=(zj.k-zj.kf)*Math.min(1,dt*11);if(Math.abs(zj.k-zj.kf)<.004)zj.kf=zj.k}
@@ -141,17 +144,8 @@ function zjPatterns(){const mk=f=>{const c=document.createElement('canvas');c.wi
  zjHatch=mk(x=>{x.strokeStyle='rgba(205,195,255,.26)';x.lineWidth=1;x.beginPath();x.moveTo(-1,13);x.lineTo(13,-1);x.stroke()});
  zjStripe=mk(x=>{x.fillStyle='rgba(120,145,200,.26)';x.beginPath();x.moveTo(0,0);x.lineTo(6,0);x.lineTo(0,6);x.fill();x.beginPath();x.moveTo(12,6);x.lineTo(12,12);x.lineTo(6,12);x.fill()})}
 const ZJ_HEX=[...Array(6)].map((_,i)=>{const a=Math.PI/180*(60*i-30);return[Math.cos(a)*TAC_R,Math.sin(a)*TAC_R]});
-let zjHT=1;   // inclinaison de la couche en cours de dessin : l'hexagone est aplati en Y
-function zjHexPath(c,X,Y,s){const t=s*zjHT;c.moveTo(X+ZJ_HEX[0][0]*s,Y+ZJ_HEX[0][1]*t);for(let i=1;i<6;i++)c.lineTo(X+ZJ_HEX[i][0]*s,Y+ZJ_HEX[i][1]*t);c.lineTo(X+ZJ_HEX[0][0]*s,Y+ZJ_HEX[0][1]*t);c.lineTo(X+ZJ_HEX[1][0]*s,Y+ZJ_HEX[1][1]*t)}
-// une plaque du mille-feuille : rectangle arrondi du plan, vu incliné (coins elliptiques), décalé de dy pour la tranche
-function zjPlatePath(c,G,dy=0){const r=Math.min(18,G.W/8),ry=Math.min(r*G.T,G.hh/2),x0=G.Xc-G.W/2,x1=G.Xc+G.W/2,yt=G.Yc-G.hh/2+dy,yb=G.Yc+G.hh/2+dy;c.beginPath();
- c.moveTo(x0+r,yt);c.lineTo(x1-r,yt);c.ellipse(x1-r,yt+ry,r,ry,0,-Math.PI/2,0);c.lineTo(x1,yb-ry);c.ellipse(x1-r,yb-ry,r,ry,0,0,Math.PI/2);
- c.lineTo(x0+r,yb);c.ellipse(x0+r,yb-ry,r,ry,0,Math.PI/2,Math.PI);c.lineTo(x0,yt+ry);c.ellipse(x0+r,yt+ry,r,ry,0,Math.PI,Math.PI*1.5);c.closePath()}
-function zjPlate(c,G,on,ok){const e=on?8:Math.max(1.5,6*G.T/ZJ_T0+1),yt=G.Yc-G.hh/2,yb=G.Yc+G.hh/2;
- zjPlatePath(c,G,e);c.fillStyle=on?'#2a2254':ok?'#1f1a40':'#141226';c.fill();   // la tranche : l'épaisseur de la couche
- const gr=c.createLinearGradient(0,yt,0,yb);gr.addColorStop(0,on?'rgba(8,9,24,.96)':ok?'rgba(12,13,32,.95)':'rgba(8,8,18,.95)');gr.addColorStop(1,on?'rgba(22,22,52,.96)':ok?'rgba(24,24,56,.95)':'rgba(14,14,28,.95)');   // le fond de la couche s'éloigne : plus sombre
- zjPlatePath(c,G);c.fillStyle=gr;c.fill();
- c.strokeStyle=on?'rgba(178,154,255,.8)':ok?'rgba(178,154,255,.42)':'rgba(140,130,190,.2)';c.lineWidth=on?1.4:1;c.stroke()}
+// un hexagone de la couche (centre cx, cz ; f = part du rayon) projeté sur le plan y de la pile
+function zjHexP(c,K,cx,y,cz,f){for(let i=0;i<=6;i++){const h=ZJ_HEX[i%6],q=zjPr(K,cx+h[0]*f,y,cz+h[1]*f);i?c.lineTo(q[0],q[1]):c.moveTo(q[0],q[1])}c.closePath()}
 function zjPatShift(p,ox,oy){try{p.setTransform(new DOMMatrix().translate(ox,oy))}catch(e){}}
 function zjInsets(){const r=id=>{const e=$(id);if(!e)return null;const b=e.getBoundingClientRect();return b.width&&b.height?b:null},top=Math.max(56,...['zj-top'].map(r).filter(Boolean).map(b=>b.bottom))+8,s=r('zj-sheet');
  let bottom=innerHeight-12;if(s&&mobile)bottom=Math.min(bottom,s.top-8);const rt=['zj-zoom','zj-wheel'].map(r).filter(Boolean).map(b=>b.left);return{top,bottom,left:mobile?8:(s?s.right+8:8),right:(rt.length?Math.min(...rt):innerWidth)-8}}
@@ -162,57 +156,58 @@ function zjCtxLabel(k=zj.k){const ws=zj.ws.filter(w=>tacLayerOf(w.p[1])===k);if(
 
 /* ══ DESSIN DE LA TACTIQUE ══ */
 const zjSegD=(px,py,l)=>{const dx=l.x2-l.x1,dy=l.y2-l.y1,L=dx*dx+dy*dy||1,u=Math.max(0,Math.min(1,((px-l.x1)*dx+(py-l.y1)*dy)/L));return Math.hypot(l.x1+u*dx-px,l.y1+u*dy-py)};
-function zjDraw(){const mig=zjMig();const c=zjCtx,W=innerWidth,H=innerHeight,inv=1/zj.upp,hexPx=TAC_GRID.S*inv,hits=[],chips=[],lines=[],t=performance.now()/1000,now=Date.now();
- zjKfStep();const L=zj.L=zjLayout(),G=zj.G=zjGeom(L,zj.k-zj.kf),T=G.T,v=zjView(),[y0,y1]=tacLayerY(zj.k),pl={left:G.Xc-G.W/2,right:G.Xc+G.W/2,top:G.Yc-G.hh/2,bottom:G.Yc+G.hh/2};
- const sx=X=>(X-zj.cx)*inv+G.Xc,sy=Z=>(Z-zj.cz)*inv*T+G.Yc,mapOpen=G.hh>=60,okK=zjBandOk(zj.k);zj.anim=zj.kf!==zj.k;
+function zjDraw(){const mig=zjMig();const c=zjCtx,W=innerWidth,H=innerHeight,hits=[],chips=[],lines=[],t=performance.now()/1000,now=Date.now();
+ zjKfStep();const K=zj.cam=zjCamMake(),ya=zjPlaneY(K),v=zjView(),[y0,y1]=tacLayerY(zj.k),ins=K.ins,okK=zjBandOk(zj.k);zj.anim=zj.kf!==zj.k;
+ const P=(x,z)=>zjPr(K,x,ya,z),sc=dep=>K.focal/Math.max(1,dep),onS=(X,Y,m)=>X>=-m&&X<=W+m&&Y>=-m&&Y<=H+m,inI=(X,Y,m)=>X>=ins.left-m&&X<=ins.right+m&&Y>=ins.top-m&&Y<=ins.bottom+m;
  c.setTransform(zjDpr,0,0,zjDpr,0,0);c.clearRect(0,0,W,H);
- // 0. fond : voile sur le ciel ; la pile des couches voisines (mille-feuille), de la plus basse à la plus haute
- c.fillStyle='rgba(3,4,12,.62)';c.fillRect(0,0,W,H);
- const[klo,khi]=zjKBounds();zj.plates=[];
- for(let j=Math.max(klo,Math.floor(zj.kf)-ZJ_N-1);j<=Math.min(khi,Math.ceil(zj.kf)+ZJ_N+1);j++)if(j!==zj.k)zjDrawLite(c,L,j);
- // la couche active : sa plaque, puis tout son contenu découpé à la plaque
- zjPlate(c,G,true,okK);c.save();zjPlatePath(c,G);c.clip();zjHT=T;
+ // 0. fond, puis les couches du dessous, vues à travers la couche affichée (plus bas, plus petites)
+ c.fillStyle='rgba(3,4,12,.7)';c.fillRect(0,0,W,H);
+ const[klo,khi]=zjKBounds();zj.plates=[];zj.ghostN=0;
+ for(let j=Math.max(klo,Math.floor(zj.kf)-2);j<=Math.min(khi,Math.ceil(zj.kf)+1);j++)if(j!==zj.k)zjDrawGhost(c,K,j);
  const need=zjNeedSectors(v),SS=SECTOR_SIZE,loadedAt=new Set();for(const s of need)if(tacSecs.has(keyOf(s)))loadedAt.add(s[0]*1e6+s[2]);
  const cellLoaded=(cx,cz)=>{for(let a=Math.floor((cx-TAC_R)/SS);a<=Math.floor((cx+TAC_R)/SS);a++)for(let b=Math.floor((cz-TAC_R)/SS);b<=Math.floor((cz+TAC_R)/SS);b++){if(Math.abs(a)>SECTOR_LIMIT||Math.abs(b)>SECTOR_LIMIT)continue;if(!loadedAt.has(a*1e6+b))return false}return true};
- const RC=mig?zjReachCtx():null,hx=hexPx,hy=hexPx*T;
+ const RC=mig?zjReachCtx():null,hexPx=TAC_GRID.S/zj.upp;   // hexPx : taille d'une zone au point visé (elle rapetisse au loin)
  // 1. zones visibles (et, partie migrée, celles qu'on ne peut pas sonder d'ici)
  const rowH=TAC_GRID.S*TQ3/2,cells=[];
  for(let r=Math.floor((v.z0-TAC_R)/rowH)-1;r<=Math.ceil((v.z1+TAC_R)/rowH)+1;r++){const q0=Math.floor(v.x0/TAC_GRID.S-r/2)-1,q1=Math.ceil(v.x1/TAC_GRID.S-r/2)+1;
-  for(let q=q0;q<=q1;q++){const[cx,cz]=tacCellCenter(q,r),X=sx(cx),Y=sy(cz);if(X<pl.left-hx||X>pl.right+hx||Y<pl.top-hy||Y>pl.bottom+hy)continue;const id=zoneId(q,r,zj.k),rg=zj.regionMap.get(id),st0=(rg||mig)?zjZoneState(id):null,reg=rg||(mig&&st0.st!=='todo'?{open:true}:null);
-   const out=RC?!RC.test([cx,(y0+y1)/2,cz],zj.k).ok:false;cells.push({q,r,X,Y,cx,cz,id,reg,out,loaded:cellLoaded(cx,cz),st:reg?st0:null})}}
+  for(let q=q0;q<=q1;q++){const[cx,cz]=tacCellCenter(q,r),pr=P(cx,cz),s=sc(pr[2]),X=pr[0],Y=pr[1],hp=TAC_R*s+2;if(!onS(X,Y,hp))continue;const id=zoneId(q,r,zj.k),rg=zj.regionMap.get(id),st0=(rg||mig)?zjZoneState(id):null,reg=rg||(mig&&st0.st!=='todo'?{open:true}:null);
+   const out=RC?!RC.test([cx,(y0+y1)/2,cz],zj.k).ok:false;cells.push({q,r,X,Y,s,cx,cz,id,reg,out,loaded:cellLoaded(cx,cz),st:reg?st0:null})}}
+ const hexA=(arr,f)=>{c.beginPath();for(const e of arr)zjHexP(c,K,e.cx,ya,e.cz,f)};
  // 2. étoiles de la tranche : du décor, jamais une cible
- let drawn=0;const rr=Math.max(1.1,Math.min(2.6,inv*2.4));c.fillStyle='rgba(222,226,245,.6)';
- for(const s of need){const o=tacSecs.get(keyOf(s));const a=o&&o.byL.get(zj.k);if(!a)continue;const step=a.length>2600&&inv<.35?2:1;
-  for(let j=0;j<a.length;j+=step){const i=a[j],X=sx(o.pos[i*3]),Y=sy(o.pos[i*3+2]);if(X<pl.left-4||X>pl.right+4||Y<pl.top-4||Y>pl.bottom+4)continue;c.fillRect(X-rr/2,Y-rr*T/2,rr,Math.max(1,rr*T));drawn++}}
+ let drawn=0;c.fillStyle='rgba(222,226,245,.62)';
+ for(const s of need){const o=tacSecs.get(keyOf(s));const a=o&&o.byL.get(zj.k);if(!a)continue;const step=a.length>2600&&zj.upp>2.9?2:1;
+  for(let j=0;j<a.length;j+=step){const i=a[j],pr=P(o.pos[i*3],o.pos[i*3+2]);if(!onS(pr[0],pr[1],3))continue;const r=Math.max(1,Math.min(2.6,2.4*sc(pr[2])));c.fillRect(pr[0]-r/2,pr[1]-r*K.sp/2,r,Math.max(1,r*K.sp));drawn++}}
  zj.shown=drawn;
- // 3. 20/11 « on ne voit pas ce qu'on a exploré » : le non-sondé est voilé, le sondé reste clair ; ce qu'on ne peut pas sonder d'ici est hachuré
- if(mig){const clear=cells.filter(e=>e.st&&e.st.st!=='todo');c.beginPath();c.rect(pl.left-2,pl.top-2,G.W+4,G.hh+4);for(const e of clear)zjHexPath(c,e.X,e.Y,inv*.97);c.fillStyle='rgba(5,6,18,.52)';c.fill('evenodd');
-  const far=cells.filter(e=>e.out&&!(e.st&&e.st.st!=='todo'));if(far.length){c.beginPath();for(const e of far)zjHexPath(c,e.X,e.Y,inv);c.fillStyle='rgba(2,2,9,.55)';c.fill();zjPatShift(zjHatch,(-zj.cx*inv)%12,(-zj.cz*inv*T)%12);c.fillStyle=zjHatch;c.fill()}}
+ // 3. « on ne voit pas ce qu'on a exploré » (Panzerstorm) : le non-sondé est voilé, le sondé reste clair ; ce qu'on ne peut pas sonder d'ici est hachuré
+ if(mig){const clear=cells.filter(e=>e.st&&e.st.st!=='todo');c.beginPath();c.rect(-4,-4,W+8,H+8);for(const e of clear)zjHexP(c,K,e.cx,ya,e.cz,.97);c.fillStyle='rgba(5,6,18,.5)';c.fill('evenodd');
+  const far=cells.filter(e=>e.out&&!(e.st&&e.st.st!=='todo'));if(far.length){hexA(far,1);c.fillStyle='rgba(2,2,9,.55)';c.fill();zjPatShift(zjHatch,0,0);c.fillStyle=zjHatch;c.fill()}}
  // 4. zones non chargées : rayures, jamais « vides »
- const unl=cells.filter(e=>!e.loaded);if(unl.length){zj.anim=zj.anim||!zjReduce;zjPatShift(zjStripe,zjReduce?0:(t*14)%12,0);c.fillStyle=zjStripe;c.beginPath();for(const e of unl)zjHexPath(c,e.X,e.Y,inv);c.fill()}
+ const unl=cells.filter(e=>!e.loaded);if(unl.length){zj.anim=zj.anim||!zjReduce;zjPatShift(zjStripe,zjReduce?0:(t*14)%12,0);c.fillStyle=zjStripe;hexA(unl,1);c.fill()}
  // 5. grille
- if(hexPx>=14){c.beginPath();for(const e of cells)zjHexPath(c,e.X,e.Y,inv);c.strokeStyle='rgba(175,155,255,'+Math.min(.18,.06+(hexPx-14)/500)+')';c.lineWidth=1;c.stroke()}
+ if(hexPx>=12){hexA(cells.filter(e=>TAC_GRID.S*e.s>=10),1);c.strokeStyle='rgba(175,155,255,'+Math.min(.2,.07+(hexPx-12)/500)+')';c.lineWidth=1;c.stroke()}
  // 6. zones : En mission (anneau), Sondée (claire, bord net + ✓) — et, pour les 30 zones tirées avant le 12/11, Non sondée (hachures)
  const reg=cells.filter(e=>e.reg&&e.loaded);
- if(reg.length){if(!mig){zjPatShift(zjHatch,(-zj.cx*inv)%12,(-zj.cz*inv)%12);c.beginPath();for(const e of reg)if(e.st.st==='todo')zjHexPath(c,e.X,e.Y,inv*.96);c.fillStyle=zjHatch;c.fill()}
-  for(const e of reg){const st=e.st.st;c.beginPath();zjHexPath(c,e.X,e.Y,inv*.94);
+ if(reg.length){if(!mig){zjPatShift(zjHatch,0,0);c.beginPath();for(const e of reg)if(e.st.st==='todo')zjHexP(c,K,e.cx,ya,e.cz,.96);c.fillStyle=zjHatch;c.fill()}
+  for(const e of reg){const st=e.st.st,hp=TAC_GRID.S*e.s;c.beginPath();zjHexP(c,K,e.cx,ya,e.cz,.94);
    if(st==='todo'){if(mig)continue;c.strokeStyle='rgba(190,175,255,.55)';c.lineWidth=1.2;c.setLineDash([4,4]);c.stroke();c.setLineDash([])}
-   else if(st==='done'){const n=(e.st.z.found||[]).length;c.fillStyle=n?'rgba(255,207,150,.13)':'rgba(128,230,211,.07)';c.fill();c.strokeStyle=n?'rgba(255,207,150,.9)':'rgba(128,230,211,.75)';c.lineWidth=1.5;c.stroke()}
-   else{zj.anim=zj.anim||!zjReduce;const p=zjReduce?.5:(t*1.3)%1;c.strokeStyle='#b29aff';c.lineWidth=1.8;c.stroke();c.beginPath();c.ellipse(e.X,e.Y,Math.max(6,TAC_R*inv*(.2+.45*p)),Math.max(4,TAC_R*inv*(.2+.45*p)*T),0,0,6.283);c.strokeStyle='rgba(205,190,255,'+(.9-.7*p)+')';c.lineWidth=1.5;c.stroke()}
-   c.textAlign='center';c.textBaseline='middle';
-   if(hexPx>=96){c.font='600 10px ui-monospace,SFMono-Regular,monospace';const ty=e.Y+TAC_R*inv*.55*T;
+   else if(st==='done'){const n=(e.st.z.found||[]).length;c.fillStyle=n?'rgba(255,207,150,.14)':'rgba(128,230,211,.08)';c.fill();c.strokeStyle=n?'rgba(255,207,150,.9)':'rgba(128,230,211,.78)';c.lineWidth=1.6;c.stroke()}
+   else{zj.anim=zj.anim||!zjReduce;const p=zjReduce?.5:(t*1.3)%1,rr=TAC_R*e.s*(.2+.45*p);c.strokeStyle='#b29aff';c.lineWidth=1.8;c.stroke();c.beginPath();c.ellipse(e.X,e.Y,Math.max(6,rr),Math.max(4,rr*K.sp),0,0,6.283);c.strokeStyle='rgba(205,190,255,'+(.9-.7*p)+')';c.lineWidth=1.5;c.stroke()}
+   c.textAlign='center';c.textBaseline='middle';const ty=e.Y+TAC_R*e.s*.55*K.sp;
+   if(hp>=96){c.font='600 10px ui-monospace,SFMono-Regular,monospace';
     if(st==='done'){const n=(e.st.z.found||[]).length;c.fillStyle=n?'#ffd9a8':'#bff3e9';c.fillText(n?'✓ '+n+' SIGNAL':'✓ SILENCE',e.X,ty)}
     else if(st==='mission'){c.fillStyle='#e6dcff';c.fillText('EN MISSION · '+zjDur(e.st.m.arrivalAt-now),e.X,ty)}}
-   else if(hexPx>=18&&st==='done'){const n=(e.st.z.found||[]).length;c.font='700 '+Math.round(Math.max(9,Math.min(13,hexPx*.2)))+'px system-ui';c.fillStyle=n?'#ffd9a8':'#bff3e9';c.fillText(n?'✓'+n:'✓',e.X,e.Y+TAC_R*inv*.5*T)}}}
+   else if(hp>=18&&st==='done'){const n=(e.st.z.found||[]).length;c.font='700 '+Math.round(Math.max(9,Math.min(13,hp*.2)))+'px system-ui';c.fillStyle=n?'#ffd9a8':'#bff3e9';c.fillText(n?'✓'+n:'✓',e.X,e.Y+TAC_R*e.s*.5*K.sp)}}}
  // 7. sélection de zone
  const sz=zj.sel&&zj.sel.type==='zone'?zoneParse(zj.sel.zone):null;
- if(sz&&sz.k===zj.k){const[cx,cz]=tacCellCenter(sz.q,sz.r),X=sx(cx),Y=sy(cz);c.beginPath();zjHexPath(c,X,Y,inv*.98);c.strokeStyle='#ffffff';c.lineWidth=2.6;c.stroke();c.beginPath();zjHexPath(c,X,Y,inv*1.06);c.strokeStyle='rgba(255,255,255,.28)';c.lineWidth=1.2;c.stroke()}
- // 8. objets importants : seules cibles touchables
+ if(sz&&sz.k===zj.k){const[cx,cz]=tacCellCenter(sz.q,sz.r);c.beginPath();zjHexP(c,K,cx,ya,cz,.98);c.strokeStyle='#ffffff';c.lineWidth=2.6;c.stroke();c.beginPath();zjHexP(c,K,cx,ya,cz,1.06);c.strokeStyle='rgba(255,255,255,.28)';c.lineWidth=1.2;c.stroke()}
+ // 7b. le lointain s'efface : la profondeur se lit d'un coup d'œil
+ {const g=c.createLinearGradient(0,0,0,Math.max(60,K.H0*.9));g.addColorStop(0,'rgba(3,4,12,.72)');g.addColorStop(1,'rgba(3,4,12,0)');c.fillStyle=g;c.fillRect(0,0,W,Math.max(60,K.H0*.9))}
+ // 8. objets importants : seules cibles touchables (repères à taille fixe, posés sur le plan)
  const ind=[],labs=[];const labOk=(x,y,w)=>{if(labs.some(r=>x<r[0]+r[2]&&x+w>r[0]&&Math.abs(y-r[1])<13))return false;labs.push([x,y,w]);return true};
- const zjOrd=o=>o.type==='world'?0:o.type==='station'?1:o.type==='sig'?2:o.cmd?2.5:3,inPl=(X,Y,m)=>X>=pl.left-m&&X<=pl.right+m&&Y>=pl.top-m&&Y<=pl.bottom+m;
+ const zjOrd=o=>o.type==='world'?0:o.type==='station'?1:o.type==='sig'?2:o.cmd?2.5:3;
  for(const o of zjObjects().slice().sort((a,b)=>zjOrd(a)-zjOrd(b))){if(!zjInSlice(o.p[1])){if(zj.sel&&zj.sel.id===o.id)ind.push(o);continue}
-  const X=sx(o.p[0]),Y=sy(o.p[2]);if(!inPl(X,Y,6))continue;
-  if(o.type==='world'&&mig&&(zj.snap.incoming||[]).some(r=>zjRaidHits(r,o.w))){zj.anim=!zjReduce||zj.anim;const q=zjReduce?.5:(t*1.1)%1;c.strokeStyle='rgba(255,90,77,'+(.95-.7*q)+')';c.lineWidth=2;c.beginPath();c.arc(X,Y,10+12*q,0,6.283);c.stroke()}
+  const pr=P(o.p[0],o.p[2]),X=pr[0],Y=pr[1],hpo=TAC_GRID.S*sc(pr[2]);if(!onS(X,Y,6))continue;
+  if(o.type==='world'&&mig&&(zj.snap.incoming||[]).some(r=>zjRaidHits(r,o.w))){zj.anim=!zjReduce||zj.anim;const q=zjReduce?.5:(t*1.1)%1;c.strokeStyle='rgba(255,90,77,'+(.95-.7*q)+')';c.lineWidth=2;c.beginPath();c.ellipse(X,Y,10+12*q,(10+12*q)*K.sp,0,0,6.283);c.stroke()}
   if(o.type==='world'){c.strokeStyle='#80e6d3';c.lineWidth=2;c.beginPath();c.arc(X,Y,8,0,6.283);c.stroke();c.fillStyle='#80e6d3';c.beginPath();c.arc(X,Y,3,0,6.283);c.fill();c.font='600 10px system-ui';c.textAlign='left';c.textBaseline='middle';const t=zjMine(o.w.kind).toUpperCase()+' · '+o.name;if(labOk(X+12,Y,c.measureText(t).width))c.fillText(t,X+12,Y)}
   else if(o.type==='station'){c.fillStyle='#0b0c1c';c.strokeStyle='#ffcf96';c.lineWidth=2;c.beginPath();c.arc(X,Y,7,0,6.283);c.fill();c.stroke();c.fillStyle='#ffcf96';c.font='600 10px system-ui';c.textAlign='left';c.textBaseline='middle';const t=o.name.toUpperCase();if(labOk(X+12,Y,c.measureText(t).width))c.fillText(t,X+12,Y)}
   else if(o.type==='sys'&&o.node&&!o.cmd){const col='#ddd0ff';c.fillStyle='#0b0c1c';c.strokeStyle=col;c.lineWidth=1.8;c.beginPath();if(o.node.type==='jonction')c.rect(X-5,Y-5,10,10);else c.arc(X,Y,4.5,0,6.283);c.fill();c.stroke();
@@ -220,65 +215,60 @@ function zjDraw(){const mig=zjMig();const c=zjCtx,W=innerWidth,H=innerHeight,inv
   else if(o.type==='sys'&&o.cmd){const col=zjCmdCol(o.cmd);c.fillStyle='#0b0c1c';c.strokeStyle=col;c.lineWidth=2;c.beginPath();c.arc(X,Y,6.5,0,6.283);c.fill();c.stroke();c.fillStyle=col;c.beginPath();c.arc(X,Y,2.2,0,6.283);c.fill();
    c.font='600 10px system-ui';c.textAlign='left';c.textBaseline='middle';const t=o.name.toUpperCase();if(labOk(X+12,Y,c.measureText(t).width))c.fillText(t,X+12,Y)}
   else if(o.type==='sys'){const col=o.tag==='star'?'#ffc864':o.tag==='skip'?'rgba(255,106,90,.8)':'rgba(214,224,242,.9)';c.fillStyle='#0b0c1c';c.fillRect(X-4,Y-4,8,8);c.strokeStyle=col;c.lineWidth=1.4;c.strokeRect(X-3.5,Y-3.5,7,7);
-   if(o.tag==='star'){c.fillStyle=col;c.fillRect(X-1.5,Y-1.5,3,3)}if(hexPx>=70||(zj.sel&&zj.sel.id===o.id)){c.fillStyle=col;c.font='500 9px ui-monospace,SFMono-Regular,monospace';c.textAlign='left';c.textBaseline='middle';if(labOk(X+9,Y,c.measureText(o.key).width))c.fillText(o.key,X+9,Y)}}
+   if(o.tag==='star'){c.fillStyle=col;c.fillRect(X-1.5,Y-1.5,3,3)}if(hpo>=70||(zj.sel&&zj.sel.id===o.id)){c.fillStyle=col;c.font='500 9px ui-monospace,SFMono-Regular,monospace';c.textAlign='left';c.textBaseline='middle';if(labOk(X+9,Y,c.measureText(o.key).width))c.fillText(o.key,X+9,Y)}}
   else{const g=o.g,d=7;c.beginPath();c.moveTo(X,Y-d);c.lineTo(X+d,Y);c.lineTo(X,Y+d);c.lineTo(X-d,Y);c.closePath();c.fillStyle='#0b0c1c';c.fill();
    c.strokeStyle=!g.resolved?'#f2f0ff':g.resolvedType==='moving'?'#ffc864':g.fixedAddress?'#9fe0a0':'#b29aff';c.lineWidth=1.8;c.stroke();if(!g.resolved){c.fillStyle='#f2f0ff';c.font='700 9px system-ui';c.textAlign='center';c.textBaseline='middle';c.fillText('?',X,Y+.5)}
-   if(hexPx>=96||(zj.sel&&zj.sel.id===o.id)){c.fillStyle='#ece8ff';c.font='10px system-ui';c.textAlign='left';c.textBaseline='middle';if(labOk(X+11,Y,c.measureText(o.name).width))c.fillText(o.name,X+11,Y)}}
+   if(hpo>=96||(zj.sel&&zj.sel.id===o.id)){c.fillStyle='#ece8ff';c.font='10px system-ui';c.textAlign='left';c.textBaseline='middle';if(labOk(X+11,Y,c.measureText(o.name).width))c.fillText(o.name,X+11,Y)}}
   if(mig&&zj.snap.beacons){const bc=zjBc(o.key);if(bc&&(bc.here||bc.going)){c.save();c.strokeStyle='#c4a8ff';c.lineWidth=1.6;if(bc.going)c.setLineDash([3,3]);c.beginPath();c.arc(X,Y,13,0,6.283);c.stroke();c.restore()}}
   hits.push({x:X,y:Y,o})}
  // 9a. réseau de corridors (GDD navigation § 9)
- zjCorDrawTac(c,sx,sy,y0,y1,lines);
- if(mig){const g=zjCorGraph();if(g)for(const t of zj.tr||[])if(t.seg&&t.status!=='returning'){const e=g.edges.find(x=>x.id===t.seg.edge);if(!e)continue;c.save();c.strokeStyle=t.status==='posted'?'rgba(255,106,90,.9)':'rgba(255,106,90,.45)';c.lineWidth=3.2;c.setLineDash(t.status==='posted'?[]:[6,5]);c.beginPath();e.pts.forEach((q,i)=>{const X=sx(q[0]),Y=sy(q[2]);i?c.lineTo(X,Y):c.moveTo(X,Y)});c.stroke();c.restore();for(let j=1;j<e.pts.length;j++)lines.push({x1:sx(e.pts[j-1][0]),y1:sy(e.pts[j-1][2]),x2:sx(e.pts[j][0]),y2:sy(e.pts[j][2]),o:{type:'seg',id:e.id}})}}
+ const pp=(x,z)=>P(x,z);
+ zjCorDrawTac(c,pp,y0,y1,lines);
+ if(mig){const g=zjCorGraph();if(g)for(const t of zj.tr||[])if(t.seg&&t.status!=='returning'){const e=g.edges.find(x=>x.id===t.seg.edge);if(!e)continue;c.save();c.strokeStyle=t.status==='posted'?'rgba(255,106,90,.9)':'rgba(255,106,90,.45)';c.lineWidth=3.2;c.setLineDash(t.status==='posted'?[]:[6,5]);c.beginPath();e.pts.forEach((q,i)=>{const r=P(q[0],q[2]);i?c.lineTo(r[0],r[1]):c.moveTo(r[0],r[1])});c.stroke();c.restore();for(let j=1;j<e.pts.length;j++){const a=P(e.pts[j-1][0],e.pts[j-1][2]),b=P(e.pts[j][0],e.pts[j][2]);lines.push({x1:a[0],y1:a[1],x2:b[0],y2:b[1],o:{type:'seg',id:e.id}})}}}
  // 9b. missions suivables : tracé projeté de la mission choisie (parcouru plein, restant en tirets), repère orienté touchable
  {const now=Date.now(),selTr=zj.sel&&zj.sel.type==='travel'?zj.sel.id:null;
   for(const tr of zj.tr){if(!tr.ok)continue;const st=zjTrState(tr,now),isSel=tr.id===selTr;
-   if(isSel&&tr.pts.length>1){const P=tr.pts,cut=st.along*tr.L;c.save();c.lineWidth=2;c.strokeStyle='rgba(159,211,255,.55)';c.setLineDash([6,5]);c.beginPath();P.forEach((q,j)=>j?c.lineTo(sx(q[0]),sy(q[2])):c.moveTo(sx(q[0]),sy(q[2])));c.stroke();c.setLineDash([]);
-    c.strokeStyle='#d7ecff';c.beginPath();if(st.phase==='back'){c.moveTo(sx(P[P.length-1][0]),sy(P[P.length-1][2]))}else{c.moveTo(sx(P[0][0]),sy(P[0][2]));for(let j=1;j<P.length&&tr.cum[j]<=cut;j++)c.lineTo(sx(P[j][0]),sy(P[j][2]))}c.lineTo(sx(st.p[0]),sy(st.p[2]));c.stroke();
-    for(const q of P.slice(1,-1)){const X=sx(q[0]),Y=sy(q[2]);c.strokeStyle='#9fd3ff';c.lineWidth=1.4;c.strokeRect(X-3,Y-3,6,6)}c.restore();
-    for(let j=1;j<P.length;j++)lines.push({x1:sx(P[j-1][0]),y1:sy(P[j-1][2]),x2:sx(P[j][0]),y2:sy(P[j][2]),o:{type:'travel',id:tr.id}})}
+   if(isSel&&tr.pts.length>1){const L=tr.pts,cut=st.along*tr.L,Q=L.map(q=>P(q[0],q[2])),pS=P(st.p[0],st.p[2]);c.save();c.lineWidth=2;c.strokeStyle='rgba(159,211,255,.55)';c.setLineDash([6,5]);c.beginPath();Q.forEach((q,j)=>j?c.lineTo(q[0],q[1]):c.moveTo(q[0],q[1]));c.stroke();c.setLineDash([]);
+    c.strokeStyle='#d7ecff';c.beginPath();if(st.phase==='back'){c.moveTo(Q[Q.length-1][0],Q[Q.length-1][1])}else{c.moveTo(Q[0][0],Q[0][1]);for(let j=1;j<Q.length&&tr.cum[j]<=cut;j++)c.lineTo(Q[j][0],Q[j][1])}c.lineTo(pS[0],pS[1]);c.stroke();
+    for(const q of Q.slice(1,-1)){c.strokeStyle='#9fd3ff';c.lineWidth=1.4;c.strokeRect(q[0]-3,q[1]-3,6,6)}c.restore();
+    for(let j=1;j<Q.length;j++)lines.push({x1:Q[j-1][0],y1:Q[j-1][1],x2:Q[j][0],y2:Q[j][1],o:{type:'travel',id:tr.id}})}
    const o={type:'travel',id:tr.id,name:tr.name,p:st.p};if(!zjInSlice(st.p[1])){if(isSel)ind.push(o);continue}
-   const X=sx(st.p[0]),Y=sy(st.p[2]);if(!inPl(X,Y,6))continue;const a=Math.atan2((st.dir?st.dir[2]:1)*T,st.dir?st.dir[0]:0);
+   const pr=P(st.p[0],st.p[2]),X=pr[0],Y=pr[1];if(!onS(X,Y,6))continue;const dr=st.dir||[0,0,1],pr2=P(st.p[0]+dr[0]*60,st.p[2]+dr[2]*60),a=Math.atan2(pr2[1]-Y,pr2[0]-X);
    c.save();c.translate(X,Y);c.rotate(a);c.beginPath();c.moveTo(9,0);c.lineTo(-6,6);c.lineTo(-3,0);c.lineTo(-6,-6);c.closePath();c.fillStyle=isSel?'#ffffff':tr.hostile?'#ff6a5a':'#9fd3ff';c.fill();c.restore();
-   if(isSel||hexPx>=40||tr.hostile){c.fillStyle=tr.hostile?'#ffb0a8':'#cfe9ff';c.font='600 10px system-ui';c.textAlign='left';c.textBaseline='middle';const t=tr.name.toUpperCase()+' · '+(ZJ_TR_KIND[tr.kind]||'');if(labOk(X+12,Y,c.measureText(t).width))c.fillText(t,X+12,Y)}
+   if(isSel||TAC_GRID.S*sc(pr[2])>=40||tr.hostile){c.fillStyle=tr.hostile?'#ffb0a8':'#cfe9ff';c.font='600 10px system-ui';c.textAlign='left';c.textBaseline='middle';const t=tr.name.toUpperCase()+' · '+(ZJ_TR_KIND[tr.kind]||'');if(labOk(X+12,Y,c.measureText(t).width))c.fillText(t,X+12,Y)}
    hits.push({x:X,y:Y,o})}}
  // 9c. Radars en vol (position issue des horodatages)
- if(zj.snap)for(const m of zj.snap.missions){if(zj.tr.some(t=>t.ok&&t.id==='pr:'+m.id))continue;const p=zjMissionPos(m);if(!p||!zjInSlice(p[1]))continue;const X=sx(p[0]),Y=sy(p[2]);if(!inPl(X,Y,10))continue;zj.anim=!zjReduce||zj.anim;
+ if(zj.snap)for(const m of zj.snap.missions){if(zj.tr.some(t=>t.ok&&t.id==='pr:'+m.id))continue;const p=zjMissionPos(m);if(!p||!zjInSlice(p[1]))continue;const pr=P(p[0],p[2]),X=pr[0],Y=pr[1];if(!onS(X,Y,10))continue;zj.anim=!zjReduce||zj.anim;
   c.fillStyle='#e6f0ff';c.beginPath();c.moveTo(X,Y-6);c.lineTo(X+5,Y+4);c.lineTo(X-5,Y+4);c.closePath();c.fill()}
  // 10. halo de l'objet sélectionné
- if(zj.sel&&zj.sel.p&&zj.sel.type!=='zone'&&zjInSlice(zj.sel.p[1])){const X=sx(zj.sel.p[0]),Y=sy(zj.sel.p[2]);c.strokeStyle='#fff';c.lineWidth=1.6;c.beginPath();c.arc(X,Y,14,0,6.283);c.stroke();c.strokeStyle='rgba(255,255,255,.3)';c.beginPath();c.arc(X,Y,21,0,6.283);c.stroke()}
- c.restore();zjHT=1;
- zjPlatePath(c,G);c.strokeStyle='rgba(178,154,255,.8)';c.lineWidth=1.4;c.stroke();
- // 10b. le nom de la couche, en haut à gauche de la plaque (« hors de portée » au-delà de 5 couches du monde de départ)
- {const cap=zjRel(zj.k)+' · '+zjCtxLabel().toUpperCase()+(okK?'':' · HORS DE PORTÉE');c.font='600 10px system-ui';const tw=Math.min(G.W-24,c.measureText(cap).width+16),bx=pl.left+10,by=pl.top+8;
-  if(G.hh>=46){c.fillStyle='rgba(8,9,22,.86)';c.beginPath();c.roundRect?c.roundRect(bx,by,tw,20,7):c.rect(bx,by,tw,20);c.fill();c.fillStyle=okK?'#e6dcff':'#ffb3a6';c.textAlign='left';c.textBaseline='middle';c.save();c.beginPath();c.rect(bx,by,tw-6,20);c.clip();c.fillText(cap,bx+8,by+10.5);c.restore()}}
- // 11. indicateurs des lieux importants hors de la pile (cadrage explicite vers leur profondeur)
- const ins=pl,placed=[];if(mapOpen)for(const o of ind){const dk=tacLayerOf(o.p[1])-zj.k,lab=(o.type==='world'?zjMine(o.w.kind)+' ':'Sélection · ')+o.name+' · '+(dk>0?'au-dessus':'au-dessous');
-  let X=sx(o.p[0]),Y=sy(o.p[2]);const inside=X>ins.left+10&&X<ins.right-10&&Y>ins.top+34&&Y<ins.bottom-10;c.font='600 10px system-ui';const tw=Math.min(G.W-12,c.measureText(lab).width+(inside?16:30)),bh=30;
+ if(zj.sel&&zj.sel.p&&zj.sel.type!=='zone'&&zjInSlice(zj.sel.p[1])){const pr=P(zj.sel.p[0],zj.sel.p[2]),X=pr[0],Y=pr[1];c.strokeStyle='#fff';c.lineWidth=1.6;c.beginPath();c.arc(X,Y,14,0,6.283);c.stroke();c.strokeStyle='rgba(255,255,255,.3)';c.beginPath();c.arc(X,Y,21,0,6.283);c.stroke()}
+ // 10b. le nom de la couche, en haut à gauche (« hors de portée » au-delà de 5 couches du monde de départ)
+ {const cap=zjRel(zj.k)+' · '+zjCtxLabel().toUpperCase()+(okK?'':' · HORS DE PORTÉE');c.font='600 10px system-ui';const tw=Math.min(ins.right-ins.left-12,c.measureText(cap).width+16),bx=ins.left+4,by=ins.top+2;
+  c.fillStyle='rgba(8,9,22,.86)';c.beginPath();c.roundRect?c.roundRect(bx,by,tw,20,7):c.rect(bx,by,tw,20);c.fill();c.fillStyle=okK?'#e6dcff':'#ffb3a6';c.textAlign='left';c.textBaseline='middle';c.save();c.beginPath();c.rect(bx,by,tw-6,20);c.clip();c.fillText(cap,bx+8,by+10.5);c.restore()}
+ // 11. repère de l'objet choisi quand il est sur une autre couche (cadrage explicite vers sa profondeur)
+ const placed=[];if(ins.bottom-ins.top>=80)for(const o of ind){const dk=tacLayerOf(o.p[1])-zj.k,lab=(o.type==='world'?zjMine(o.w.kind)+' ':'Sélection · ')+o.name+' · '+(dk>0?'au-dessus':'au-dessous');
+  const pr=P(o.p[0],o.p[2]);let X=pr[0],Y=pr[1];const inside=X>ins.left+10&&X<ins.right-10&&Y>ins.top+34&&Y<ins.bottom-10;c.font='600 10px system-ui';const tw=Math.min(ins.right-ins.left-12,c.measureText(lab).width+(inside?16:30)),bh=30;
   let bx=inside?Math.min(X+14,ins.right-tw-4):Math.min(Math.max(X-tw/2,ins.left+4),ins.right-tw-4),by=inside?Y-bh/2:Math.min(Math.max(Y-bh/2,ins.top+32),ins.bottom-bh-4);
   for(let g=0;g<8&&placed.some(r=>bx<r[0]+r[2]&&bx+tw>r[0]&&by<r[1]+r[3]+4&&by+bh+4>r[1]);g++)by=by+bh+6>ins.bottom-bh?by-(bh+6)*(g+1):by+bh+6;placed.push([bx,by,tw,bh]);
   if(inside){c.setLineDash([3,3]);c.strokeStyle='#80e6d3';c.lineWidth=1.3;c.beginPath();c.arc(X,Y,9,0,6.283);c.stroke();c.setLineDash([])}
   c.fillStyle='rgba(12,12,29,.94)';c.strokeStyle='#80e6d3';c.lineWidth=1;c.beginPath();c.roundRect?c.roundRect(bx,by,tw,bh,8):c.rect(bx,by,tw,bh);c.fill();c.stroke();c.fillStyle='#bff3e9';c.textAlign='left';c.textBaseline='middle';
   c.fillText((inside?'':(X<ins.left+10?'← ':X>ins.right-10?'→ ':Y<ins.top+34?'↑ ':'↓ '))+lab,bx+8,by+bh/2);chips.push({x:bx,y:by-7,w:tw,h:bh+14,o})}
  zj.hits=hits;zj.chips=chips;zj.lines=lines;zj.lastDraw=performance.now();zj.dirty=false;zjDepthUI()}
-// une couche voisine dans la pile : sa plaque, ses zones sondées ou en mission, mes mondes, les ports et les signatures (sans étoiles)
-function zjDrawLite(c,L,j){const d=j-zj.kf,x=Math.abs(d);if(x>ZJ_N+.75)return;const G=zjGeom(L,d);if(G.hh<2.5)return;
- const a=Math.max(0,Math.min(1,(ZJ_N+.75-x)/.75)),inv=1/zj.upp,sx=X=>(X-zj.cx)*inv+G.Xc,sy=Z=>(Z-zj.cz)*inv*G.T+G.Yc,ok=zjBandOk(j),x0=G.Xc-G.W/2,x1=G.Xc+G.W/2,yt=G.Yc-G.hh/2,yb=G.Yc+G.hh/2,hp=TAC_R*inv;
- c.save();c.globalAlpha=a;zjPlate(c,G,false,ok);c.save();zjPlatePath(c,G);c.clip();zjHT=G.T;
- if(G.hh>=18&&TAC_GRID.S*inv>=14){const v=zjView(),rowH=TAC_GRID.S*TQ3/2,RC=zjMig()?zjReachCtx():null,[ya,yb2]=tacLayerY(j),ym=(ya+yb2)/2,grid=[],far=[];
-  for(let r=Math.floor((v.z0-TAC_R)/rowH)-1;r<=Math.ceil((v.z1+TAC_R)/rowH)+1;r++){const q0=Math.floor(v.x0/TAC_GRID.S-r/2)-1,q1=Math.ceil(v.x1/TAC_GRID.S-r/2)+1;
-   for(let q=q0;q<=q1;q++){const[cx,cz]=tacCellCenter(q,r),X=sx(cx),Y=sy(cz);if(X<x0-hp||X>x1+hp||Y<yt-hp||Y>yb+hp)continue;grid.push([X,Y]);if(RC&&!RC.test([cx,ym,cz],j).ok)far.push([X,Y])}}
-  if(far.length){c.beginPath();for(const[X,Y]of far)zjHexPath(c,X,Y,inv);c.fillStyle='rgba(2,2,9,.5)';c.fill();zjPatShift(zjHatch,(-zj.cx*inv)%12,0);c.fillStyle=zjHatch;c.fill()}
-  c.beginPath();for(const[X,Y]of grid)zjHexPath(c,X,Y,inv);c.strokeStyle='rgba(175,155,255,.09)';c.lineWidth=1;c.stroke()}
- for(const z of zjZonesByK().get(j)||[]){const[cx,cz]=tacCellCenter(z.q,z.r),X=sx(cx),Y=sy(cz);if(X<x0-hp||X>x1+hp||Y<yt-hp*G.T||Y>yb+hp*G.T)continue;c.beginPath();zjHexPath(c,X,Y,inv*.94);
-  if(z.st==='done'){c.fillStyle=z.n?'rgba(255,207,150,.42)':'rgba(128,230,211,.32)';c.fill();c.strokeStyle=z.n?'rgba(255,207,150,.95)':'rgba(128,230,211,.85)';c.lineWidth=1;c.stroke()}
-  else{c.fillStyle='rgba(178,154,255,.25)';c.fill();c.strokeStyle='#b29aff';c.lineWidth=1.2;c.stroke()}}
- const rd=Math.max(1.6,Math.min(3.6,G.hh/9));
- for(const o of zjObjects()){if(o.type!=='world'&&o.type!=='station'&&o.type!=='sig')continue;if(tacLayerOf(o.p[1])!==j)continue;const X=sx(o.p[0]),Y=sy(o.p[2]);if(X<x0||X>x1||Y<yt-2||Y>yb+2)continue;
-  c.fillStyle=o.type==='world'?'#80e6d3':o.type==='station'?'#ffcf96':'#f2f0ff';c.beginPath();if(o.type==='sig'){c.moveTo(X,Y-rd);c.lineTo(X+rd,Y);c.lineTo(X,Y+rd);c.lineTo(X-rd,Y);c.closePath()}else c.arc(X,Y,o.type==='world'?rd+1:rd,0,6.283);c.fill()}
- c.restore();zjHT=1;
- if(G.hh>=10){const s=zjRel(j),n=(zjZonesByK().get(j)||[]).length,lab=s+(n&&G.hh>=24?'  ·  '+n+' sondée'+(n>1?'s':''):'');c.font='600 '+(G.hh>=24?10:9)+'px ui-monospace,monospace';const w=c.measureText(lab).width+12,h=Math.min(16,G.hh-2);
-  c.fillStyle='rgba(8,9,22,.8)';c.beginPath();c.roundRect?c.roundRect(x0+8,G.Yc-h/2,w,h,5):c.rect(x0+8,G.Yc-h/2,w,h);c.fill();c.fillStyle=ok?'#d9ccff':'#8a84ad';c.textAlign='left';c.textBaseline='middle';c.fillText(lab,x0+14,G.Yc+.5)}
- c.restore();zj.plates.push({j,x0,x1,y0:yt,y1:yb})}
+// une autre couche de la pile, dessinée en transparence à sa hauteur : ses zones sondées ou en mission, mes mondes, les ports et
+// les signatures. Celles du dessous se voient à travers la couche affichée ; celle du dessus n'apparaît que pendant le défilement.
+function zjDrawGhost(c,K,j){const d=j-zj.kf,yj=d*K.gap;if(d>0&&d>=.98)return;const a=d<0?Math.max(0,.62-.24*(-d-1))*Math.min(1,-d*1.4):Math.max(0,.9*(1-d));if(a<.03)return;
+ const W=innerWidth,H=innerHeight,P=(x,z)=>zjPr(K,x,yj,z),ZK=zjZonesByK().get(j)||[];c.save();c.globalAlpha=a;
+ // la grille de la couche juste en dessous : elle glisse moins vite que la couche affichée quand on se déplace (la profondeur se sent)
+ if(d<0&&d>-1.6&&TAC_GRID.S/zj.upp>=16){const v=zjView(),rowH=TAC_GRID.S*TQ3/2;c.beginPath();
+  for(let r=Math.floor((v.z0-TAC_R)/rowH)-2;r<=Math.ceil((v.z1+TAC_R)/rowH)+2;r++){const q0=Math.floor(v.x0/TAC_GRID.S-r/2)-2,q1=Math.ceil(v.x1/TAC_GRID.S-r/2)+2;
+   for(let q=q0;q<=q1;q++){const[cx,cz]=tacCellCenter(q,r),pr=P(cx,cz);if(pr[0]<-60||pr[0]>W+60||pr[1]<-60||pr[1]>H+60)continue;zjHexP(c,K,cx,yj,cz,1)}}
+  c.strokeStyle='rgba(150,130,240,.16)';c.lineWidth=1;c.stroke()}
+ for(const z of ZK){const[cx,cz]=tacCellCenter(z.q,z.r),pr=P(cx,cz);if(pr[0]<-80||pr[0]>W+80||pr[1]<-80||pr[1]>H+80)continue;zj.ghostN++;c.beginPath();zjHexP(c,K,cx,yj,cz,.94);
+  if(z.st==='done'){c.fillStyle=z.n?'rgba(255,207,150,.22)':'rgba(128,230,211,.16)';c.fill();c.strokeStyle=z.n?'rgba(255,207,150,.8)':'rgba(128,230,211,.7)';c.lineWidth=1;c.stroke()}
+  else{c.strokeStyle='#b29aff';c.lineWidth=1.1;c.stroke()}}
+ for(const o of zjObjects()){if(o.type!=='world'&&o.type!=='station'&&o.type!=='sig')continue;if(tacLayerOf(o.p[1])!==j)continue;const pr=P(o.p[0],o.p[2]);if(pr[0]<-10||pr[0]>W+10||pr[1]<-10||pr[1]>H+10)continue;
+  const r=o.type==='world'?4:3;c.fillStyle=o.type==='world'?'#80e6d3':o.type==='station'?'#ffcf96':'#f2f0ff';c.beginPath();if(o.type==='sig'){c.moveTo(pr[0],pr[1]-r);c.lineTo(pr[0]+r,pr[1]);c.lineTo(pr[0],pr[1]+r);c.lineTo(pr[0]-r,pr[1]);c.closePath()}else c.arc(pr[0],pr[1],r,0,6.283);c.fill()}
+ c.restore()}
 
 /* ── toucher : objet important d'abord, sinon la zone ; un pincement ne produit jamais de toucher ── */
 function zjPick(px,py){for(const ch of zj.chips)if(px>=ch.x&&px<=ch.x+ch.w&&py>=ch.y&&py<=ch.y+ch.h)return{chip:ch};
@@ -286,13 +276,11 @@ function zjPick(px,py){for(const ch of zj.chips)if(px>=ch.x&&px<=ch.x+ch.w&&py>=
 function zjTap(px,py){const r=zjPick(px,py);
  if(r.chip){zjFocus(r.chip.o);return}
  const l=r.list;if(l.length){const close=l.filter(a=>a.d<=l[0].d+10);if(close.length===1)return zjSelectObj(close[0].h.o);zj.list=close.map(a=>a.h.o);zjOpen('choix');return}
- const G=zjGeo(),onP=zjOnPlate(G,px,py,4);
- const ln=onP&&(zj.lines||[]).map(l=>({l,d:zjSegD(px,py,l)})).filter(a=>a.d<=12).sort((a,b)=>a.d-b.d)[0];   // un tracé touché : la mission ou le tronçon, pas la zone dessous
+ const ln=(zj.lines||[]).map(l=>({l,d:zjSegD(px,py,l)})).filter(a=>a.d<=12).sort((a,b)=>a.d-b.d)[0];   // un tracé touché : la mission ou le tronçon, pas la zone dessous
  if(ln){if(ln.l.o.type==='travel')return zjSelectTravel(ln.l.o.id);if(ln.l.o.type==='seg')return zjSelectSeg(ln.l.o.id)}
- if(!onP){const pl=(zj.plates||[]).filter(q=>px>=q.x0&&px<=q.x1&&py>=q.y0-5&&py<=q.y1+5).sort((a,b)=>Math.abs(a.j-zj.k)-Math.abs(b.j-zj.k))[0];if(pl)zjSetLayer(pl.j);return}   // une couche de la pile : elle vient au centre
  const[wx,wz]=zjW(px,py),[q,rr]=tacCellOf(wx,wz);zjSelectZone(zoneId(q,rr,zj.k))}
-function zjCenterOn(p,force){if(zj.mode!=='tac')return;const G=zjGeo(),X=(p[0]-zj.cx)/zj.upp+G.Xc,Y=(p[2]-zj.cz)/zj.upp*G.T+G.Yc,pad=Math.min(50,TAC_R/zj.upp);
- if(!force&&X>G.Xc-G.W/2+pad&&X<G.Xc+G.W/2-pad&&Y>G.Yc-G.hh/2+pad*G.T+26&&Y<G.Yc+G.hh/2-pad*G.T)return;zj.cx=p[0];zj.cz=p[2];zj.dirty=true}   // au centre de la plaque active
+function zjCenterOn(p,force){if(zj.mode!=='tac')return;const K=zjCamMake(),pr=zjPr(K,p[0],zjPlaneY(K),p[2]),ins=K.ins,pad=40;
+ if(!force&&pr[0]>ins.left+pad&&pr[0]<ins.right-pad&&pr[1]>ins.top+pad+26&&pr[1]<ins.bottom-pad)return;zj.cx=p[0];zj.cz=p[2];zj.cam=null;zj.dirty=true}   // au point visé de la caméra
 function zjSelectZone(id,fromCode){zj.follow=null;zjTrObsDispose();zj.sel={type:'zone',zone:id};if(zj.mode==='atlas'){zjObsDispose();zj.pres.level='zone';zj.pres.zone=id;zj.pres.hold=false}const z=zoneParse(id);zj.sel.p=zoneCenter(z.q,z.r,z.k);if(zj.mode==='tac'&&z.k!==zj.k)zj.k=z.k;zj.dirty=true;zjMarkAtlasSel();zjOpen('zone');
  if(zj.mode==='tac')zjCenterOn(zj.sel.p,false);else if(fromCode)flyTo(vector(zj.sel.p),Math.max(420,Math.min(1400,distance)))}
 function zjSelectObj(o){if(o&&o.type==='travel')return zjSelectTravel(o.id);zj.follow=null;zjTrObsDispose();zj.sel={type:o.type,id:o.id,p:o.p,zone:o.zone,name:o.name,key:o.key};zj.dirty=true;zjMarkAtlasSel();zjOpen('obj');if(zj.mode==='atlas'){if(o.type==='sys'){zjObsDispose();zj.pres.level='zone';zj.pres.zone=o.zone;flyTo(vector(o.p),Math.max(260,Math.min(900,distance)))}else zjObserve(o)}else zjCenterOn(o.p,false)}
@@ -307,12 +295,12 @@ zjCv.addEventListener('pointermove',e=>{if(!zjPtr.has(e.pointerId)||!zjG)return;
  if(zjPtr.size>=2){const a=[...zjPtr.values()],d=Math.hypot(a[0].x-a[1].x,a[0].y-a[1].y)||1,m=[(a[0].x+a[1].x)/2,(a[0].y+a[1].y)/2],[wx,wz]=zjW(zjG.pm[0],zjG.pm[1]);
   zj.upp=Math.max(ZJ_UPP[0],Math.min(ZJ_UPP[1],zj.upp*zjG.pd/d));zjAnchor(wx,wz,m[0],m[1]);zjG.pd=d;zjG.pm=m;zjG.moved=true;zj.dirty=true;return}
  if(Math.hypot(e.clientX-zjG.x,e.clientY-zjG.y)>7)zjG.moved=true;if(!zjG.moved)return;zjOnPan();
- zj.cx-=(e.clientX-prev.x)*zj.upp;zj.cz-=(e.clientY-prev.y)*zj.upp/zjGeo().T;zj.dirty=true});
+ {const a=zjW(prev.x,prev.y),b=zjW(e.clientX,e.clientY);zj.cx+=a[0]-b[0];zj.cz+=a[1]-b[1];zj.cam=null}zj.dirty=true});   // le point sous le doigt reste sous le doigt
 function zjUp(e){if(!zjPtr.has(e.pointerId))return;zjPtr.delete(e.pointerId);if(zjPtr.size||!zjG)return;const g=zjG;zjG=null;if(e.type==='pointercancel'||g.multi)return;if(!g.moved&&performance.now()-g.t<700)zjTap(e.clientX,e.clientY)}
 zjCv.addEventListener('pointerup',zjUp);zjCv.addEventListener('pointercancel',zjUp);
 zjCv.addEventListener('wheel',e=>{e.preventDefault();zjZoom(Math.exp(e.deltaY*.0015),e.clientX,e.clientY)},{passive:false});
 zjCv.addEventListener('contextmenu',e=>e.preventDefault());
-function zjZoom(f,px,py){const G=zjGeo();px=px==null?G.Xc:px;py=py==null?G.Yc:py;const[wx,wz]=zjW(px,py);zj.upp=Math.max(ZJ_UPP[0],Math.min(ZJ_UPP[1],zj.upp*f));zjAnchor(wx,wz,px,py);zj.dirty=true}
+function zjZoom(f,px,py){const K=zjCamMake();px=px==null?K.W0:px;py=py==null?K.H0:py;const[wx,wz]=zjW(px,py);zj.upp=Math.max(ZJ_UPP[0],Math.min(ZJ_UPP[1],zj.upp*f));zjAnchor(wx,wz,px,py);zj.dirty=true}
 function zjSetLayer(k){const[lo,hi]=zjKBounds();k=Math.max(lo,Math.min(hi,Math.round(k)));if(k===zj.k)return;zj.k=k;zj.dirty=true;zjSheet()}
 /* ── la molette de profondeur (20/11, maquette d'Adrien) : couches comptées depuis le monde de départ (0, ⌖), la couche
    affichée au milieu, le nombre de zones sondées ou en mission à droite ; flèches, glisser, molette de souris, ⊕ 0. ── */
@@ -977,7 +965,7 @@ function zjCorPickPlan(i){if(!zj.cor.plans||!zj.cor.plans[i])return;zj.cor.pick=
 function zjCorFit(){const x=zj.cor.plans&&zj.cor.plans[zj.cor.pick];if(!x)return;const P=x.pl.pts,c=[0,1,2].map(j=>(Math.min(...P.map(q=>q[j]))+Math.max(...P.map(q=>q[j])))/2),R=Math.max(60,...P.map(q=>zjD3(q,c)));
  if(zj.follow&&zj.follow.on)zj.follow.susp=true;
  if(zj.mode==='atlas'){zjObsDispose();zj.pres.level='neighbourhood';flyTo(vector(c),Math.min(6400,zjFrameDist(R*1.08,.86)))}
- else{const G=zjGeo(),ext=Math.max(...P.map(q=>Math.abs(q[0]-c[0])),...P.map(q=>Math.abs(q[2]-c[2])))*2.3;zj.upp=Math.max(ZJ_UPP[0],Math.min(ZJ_UPP[1],ext/Math.min(G.W,G.Hu)));zjCenterOn(c,true)}}
+ else{const ins=zjInsets(),ext=Math.max(...P.map(q=>Math.abs(q[0]-c[0])),...P.map(q=>Math.abs(q[2]-c[2])))*2.3;zj.upp=Math.max(ZJ_UPP[0],Math.min(ZJ_UPP[1],ext/Math.min(ins.right-ins.left,ins.bottom-ins.top)));zjCenterOn(c,true)}}
 // tracé de l'itinéraire choisi dans l'Atlas : corridor en trait plein, vol libre en tirets
 let zjCorSel=null;
 function zjCorSelDispose(){if(!zjCorSel)return;scene.remove(zjCorSel.g);zjDisposeTree(zjCorSel.g);zjCorSel=null}
@@ -994,17 +982,17 @@ function zjCorToggle(on){zj.cor.on=on==null?!zj.cor.on:!!on;if(!zj.cor.on){zj.co
 // Tactique (GDD navigation § 9) : la portion dans la tranche en trait plein, le reste atténué en tirets ; sorties ▲/▼ là où le
 // corridor quitte la couche ; seuls les vrais nœuds de la couche sont dessinés (deux corridors qui se croisent en projection : rien)
 const ZJ_COR_RGB={imperial:'189,209,255',marchand:'255,207,150',arme:'255,153,107',pirate:'255,112,128'};
-function zjCorDrawTac(c,sx,sy,y0,y1,lines){const g=zj.cor.on&&zjCorGraph();if(!g)return;const only=zjCorOnly(),onK=id=>!only||only.has(id),nodeK=id=>!only||g.cors.some(cr=>only.has(cr.id)&&cr.nodes.includes(id));const inL=y=>y>=y0&&y<y1;c.save();c.lineCap='round';
+function zjCorDrawTac(c,pp,y0,y1,lines){const g=zj.cor.on&&zjCorGraph();if(!g)return;const only=zjCorOnly(),onK=id=>!only||only.has(id),nodeK=id=>!only||g.cors.some(cr=>only.has(cr.id)&&cr.nodes.includes(id));const inL=y=>y>=y0&&y<y1;c.save();c.lineCap='round';
  const strokePath=(P,rgb,w,selected)=>{for(let j=1;j<P.length;j++){const a=P[j-1],b=P[j],ia=inL(a[1]),ib=inL(b[1]);
-   c.setLineDash(ia&&ib?[]:[5,6]);c.strokeStyle='rgba('+rgb+','+(ia&&ib?(selected?.95:.75):(selected?.4:.2))+')';c.lineWidth=ia&&ib?w:Math.max(1,w-1);c.beginPath();c.moveTo(sx(a[0]),sy(a[2]));c.lineTo(sx(b[0]),sy(b[2]));c.stroke();
-   if(ia!==ib){const yb=ia?(b[1]>=y1?y1:y0):(a[1]>=y1?y1:y0),u=(yb-a[1])/((b[1]-a[1])||1e-9),X=sx(a[0]+(b[0]-a[0])*u),Y=sy(a[2]+(b[2]-a[2])*u),up=(ia?b[1]:a[1])>=y1;   // sortie de la couche
+   c.setLineDash(ia&&ib?[]:[5,6]);c.strokeStyle='rgba('+rgb+','+(ia&&ib?(selected?.95:.75):(selected?.4:.2))+')';c.lineWidth=ia&&ib?w:Math.max(1,w-1);c.beginPath();{const A=pp(a[0],a[2]),B=pp(b[0],b[2]);c.moveTo(A[0],A[1]);c.lineTo(B[0],B[1])}c.stroke();
+   if(ia!==ib){const yb=ia?(b[1]>=y1?y1:y0):(a[1]>=y1?y1:y0),u=(yb-a[1])/((b[1]-a[1])||1e-9),[X,Y]=pp(a[0]+(b[0]-a[0])*u,a[2]+(b[2]-a[2])*u),up=(ia?b[1]:a[1])>=y1;   // sortie de la couche
     c.setLineDash([]);c.fillStyle='rgba('+rgb+',.95)';c.font='700 11px system-ui';c.textAlign='center';c.textBaseline='middle';c.fillText(up?'▲':'▼',X,Y)}}};
  for(const cr of g.cors)if(onK(cr.id))strokePath(cr.pts,ZJ_COR_RGB[cr.cls]||'220,220,255',2,false);
  const x=zj.cor.plans&&zj.cor.plans[zj.cor.pick];if(x)strokePath(x.pl.pts,'255,255,255',3,true);
  const se=zj.sel&&zj.sel.type==='seg'&&g.edges.find(e=>e.id===zj.sel.id);if(se)strokePath(se.pts,'255,255,255',3.4,true);
- if(lines)for(const e of g.edges)if(onK(e.cor))for(let j=1;j<e.pts.length;j++){const a=e.pts[j-1],b=e.pts[j];lines.push({x1:sx(a[0]),y1:sy(a[2]),x2:sx(b[0]),y2:sy(b[2]),o:{type:'seg',id:e.id}})}
+ if(lines)for(const e of g.edges)if(onK(e.cor))for(let j=1;j<e.pts.length;j++){const a=e.pts[j-1],b=e.pts[j];{const A=pp(a[0],a[2]),B=pp(b[0],b[2]);lines.push({x1:A[0],y1:A[1],x2:B[0],y2:B[1],o:{type:'seg',id:e.id}})}}
  c.setLineDash([]);c.textAlign='left';c.textBaseline='middle';
- for(const n of Object.values(g.nodes)){if(!inL(n.p[1])||n.type==='station'||!nodeK(n.id)||only)continue;/* partie migrée : les nœuds connus sont des objets de la carte */const X=sx(n.p[0]),Y=sy(n.p[2]);   // les stations ont déjà leur repère
+ for(const n of Object.values(g.nodes)){if(!inL(n.p[1])||n.type==='station'||!nodeK(n.id)||only)continue;/* partie migrée : les nœuds connus sont des objets de la carte */const[X,Y]=pp(n.p[0],n.p[2]);   // les stations ont déjà leur repère
   if(n.type==='jonction'){c.fillStyle='#0b0c1c';c.strokeStyle='#ddd0ff';c.lineWidth=2;c.beginPath();c.rect(X-5,Y-5,10,10);c.fill();c.stroke();c.fillStyle='#ddd0ff';c.font='600 10px system-ui';c.fillText(n.id,X+8,Y)}
   else{c.fillStyle='rgba(255,255,255,.85)';c.beginPath();c.arc(X,Y,2.6,0,6.283);c.fill();c.fillStyle='rgba(255,255,255,.6)';c.font='500 9px system-ui';c.fillText(n.id,X+5,Y)}}
  c.restore()}
@@ -1040,6 +1028,6 @@ window.STARBYTE_ZONES={zj,refresh:zjRefresh,travels:()=>zj.tr.map(t=>({id:t.id,k
  follow:id=>zjFollow(id),followState:()=>zj.follow&&{...zj.follow},followStop:zjFollowStop,followResume:zjFollowResume,travelFit:zjTravelFit,selectTravel:zjSelectTravel,trObs:()=>!!zjTrObs,ready:()=>!!zjBooted,zoneContent:id=>zjZoneContent(id),openZoneNear:(full,cat)=>{const h=zjHome();if(!h)return null;const[q0,r0]=tacCellOf(h.p[0],h.p[2]),k=tacLayerOf(h.p[1]);for(let n=2;n<12;n++)for(const[q,r]of hexRing(q0,r0,n)){const id=zoneId(q,r,k);if(zj.regionMap.has(id))continue;const e=zjEstimate(id);if(!e||!e.inRange)continue;if(full){const c=zjZoneContent(id);if(!c||c.cat==='rien'||(cat&&c.cat!==cat))continue}return id}return null},focusGame:sel=>zjFocusGame(sel),mig:()=>zjMig(),corCompare:(kind,id)=>{const ctx=kind==='travel'?zjCorCtxTravel(zjTrFind(id)):zjCorCtxObj(zjObjects().find(x=>x.id===id));const ok=zjCorCompare(ctx);if(ok)zjOpen('cor');return ok},corState:()=>{const g=zjCorGraph(),C=zj.cor;return{on:C.on,ready:!!g,net:g&&{cors:g.cors.length,edges:g.edges.length,len:g.len,chord:g.chord,nodes:Object.keys(g.nodes).length},plans:C.plans&&C.plans.map(x=>({k:x.k,name:x.name,len:x.pl.len,min:x.pl.min,fu:x.pl.fu,nCor:x.pl.nCor,lenCor:x.pl.lenCor,test:x.q.test,norm:x.q.norm,fuel:x.q.fuel,best:x.best,sig:x.pl.sig,avoid:x.avoid&&x.avoid.edge.id,legs:x.pl.legs.map(l=>({t:l.type,a:l.a,b:l.b,len:l.len,min:l.min,e:l.edge&&l.edge.id,n:l.pts.length,p0:l.pts[0],p1:l.pts[l.pts.length-1]}))})),pick:C.pick,ctx:C.ctx&&{src:C.ctx.src,O:C.ctx.O.key,D:C.ctx.D.key,fuel:C.ctx.fuel,tier:C.ctx.tier},netVis:zjCorNetVis()&&!!zjCorGraph(),drawn:navRoot.visible,sel:!!zjCorSel}},corToggle:on=>zjCorToggle(on),zoomTo:d=>{travel=null;wantedDistance=d},posOf:a=>zjAddrPos(a),vehPos:()=>{if(!zjTrObs)return null;const g=zjTrObs.group.position,v=zjTrObs.veh.position;return[g.x+v.x+origin.x,g.y+v.y+origin.y,g.z+v.z+origin.z]},corPick:i=>zjCorPickPlan(i),corParams:()=>({...ZJ_COR}),modelState:()=>{const c=zjCat();const vis=g=>{let n=0;if(g)g.traverse(o=>{if(o.isMesh&&o.visible){let v=true;for(let q=o;q;q=q.parent)if(!q.visible){v=false;break}if(v)n++}});return n};return{cat:!!c,stations:c?c.stations.map(x=>x.sys+'='+x.code):[],ships:c?Object.keys(c.ships):[],cache:[...zjM.cache.keys()].map(u=>u.replace(/^.*\//,'')),loads:zjM.loads,fails:zjM.fails,env:!!zjM.env,obs:zjObs&&zjObs.model&&{id:zjObs.id,st:zjObs.model.st,url:zjObs.urls&&zjObs.urls[0],isModel:!!zjObs.main.userData.zjModel,meshes:vis(zjObs.main)},tr:zjTrObs&&zjTrObs.model&&{id:zjTrObs.id,st:zjTrObs.model.st,n:zjTrObs.model.n||0,urls:zjTrObs.urls||[],list:zjTrObs.model.list||[],px:zjTrObs.px,vehVis:zjTrObs.veh.visible,shown:zjTrObs.holder?zjTrObs.holder.children.filter(c=>c.visible).length:0}}},obsTex:()=>{const m=zjObs&&zjObs.main.material,c=m&&m.map&&m.map.image;if(!c)return null;const d=c.getContext('2d').getImageData(0,0,c.width,c.height).data;let h=0;for(let i=0;i<d.length;i+=97)h=(h*31+d[i])>>>0;return h},prism:()=>!!zjZoneMesh,demoSystem:()=>!!systemGroup,panBy:(dx,dy)=>pan(dx,dy),mem:()=>({...renderer.info.memory}),insets:()=>zjInsets(),
  objScreen:()=>{if(!zjObs)return null;const v=vector(zjObs.p),q=toLocal(v).project(camera),r=new T.Vector3().setFromMatrixColumn(camera.matrixWorld,0),e=toLocal(v.clone().addScaledVector(r,zjObs.R)).project(camera);return{x:(q.x*.5+.5)*innerWidth,y:(-q.y*.5+.5)*innerHeight,rpx:Math.abs(e.x-q.x)*.5*innerWidth}},observe:id=>{const o=zjObjects().find(x=>x.id===id);if(o){zj.sel={type:o.type,id:o.id,p:o.p,zone:o.zone,name:o.name,key:o.key};zjOpen('obj');if(zj.mode==='tac')zjSetMode('atlas');else zjObserve(o)}return!!o},backN:zjBackNeighbourhood,atlasTapAt:(x,y)=>zjAtlasTap(x,y),
  obs:()=>zjObs&&{id:zjObs.id,addr:zjObs.addr,p:zjObs.p,anchor:zjObs.anchor,R:zjObs.R,dObj:zjObs.dObj,dSys:zjObs.dSys,sysR:zjObs.sysR,others:zjObs.others.map(a=>a.id),star:!!(zjObs.star&&zjObs.star.visible),uuid:zjObs.group.uuid},pres:()=>({...zj.pres,distance,wantedDistance}),texN:()=>zjTexCache.size,minD:()=>zjMinD(),screenOf:p=>{const q=toLocal(vector(p)).project(camera);return{x:(q.x*.5+.5)*innerWidth,y:(-q.y*.5+.5)*innerHeight,z:q.z}},cam:()=>({target:[target.x,target.y,target.z],distance,yaw,pitch}),selectObj:zjSelectObj,draw:()=>zjDraw(),tap:zjTap,pick:zjPick,setMode:zjSetMode,selectZone:zjSelectZone,objects:zjObjects,estimate:zjEstimate,
- selectSeg:id=>zjSelectSeg(id),cellOf:tacCellOf,center:tacCellCenter,layerOf:tacLayerOf,zoneOfPoint,zoneParse,sx:X=>(X-zj.cx)/zj.upp+zjGeo().Xc,sy:Z=>(Z-zj.cz)/zj.upp*zjGeo().T+zjGeo().Yc,load:zjLoad,plate:()=>{const G=zjGeo();return{x0:G.Xc-G.W/2,x1:G.Xc+G.W/2,y0:G.Yc-G.hh/2,y1:G.Yc+G.hh/2,T:G.T}},plates:()=>(zj.plates||[]).slice(),setLayer:k=>zjSetLayer(k),kBounds:()=>zjKBounds(),k0:()=>zjK0(),wheelZero:()=>zjWheelZero(),
+ selectSeg:id=>zjSelectSeg(id),cellOf:tacCellOf,center:tacCellCenter,layerOf:tacLayerOf,zoneOfPoint,zoneParse,proj:(x,z)=>{const K=zjCamMake();return zjPr(K,x,zjPlaneY(K),z)},sx:X=>{const K=zjCamMake();return zjPr(K,X,zjPlaneY(K),zj.cz)[0]},sy:Z=>{const K=zjCamMake();return zjPr(K,zj.cx,zjPlaneY(K),Z)[1]},load:zjLoad,plate:()=>{const i=zjInsets();return{x0:i.left,x1:i.right,y0:i.top,y1:i.bottom,T:1}},plates:()=>(zj.plates||[]).slice(),anchor:(px,py,tx,ty)=>{const w=zjW(px,py);zjAnchor(w[0],w[1],tx,ty);zj.dirty=true},under:(px,py)=>zjW(px,py),screenHit:(px,py)=>{const K=zjCamMake();return !!zjRay(K,px,py,zjPlaneY(K))},cam:()=>{const K=zjCamMake();return{W0:K.W0,H0:K.H0,pitch:ZJ_PITCH,fov:ZJ_FOV,D:K.D,gap:K.gap}},setLayer:k=>zjSetLayer(k),kBounds:()=>zjKBounds(),k0:()=>zjK0(),wheelZero:()=>zjWheelZero(),
  atlasFocus:(p,d)=>{target.set(p[0],p[1],p[2]);distance=wantedDistance=d||500;travel=null;rebase();updateStreaming(true)},atlasTap:(x,y)=>pick(x,y),
  atlasState:()=>({sel:zj.sel,target:[target.x,target.y,target.z],mesh:!!zjZoneMesh,marks:[...zjMarkEls.values()].map(e=>{const r=e.getBoundingClientRect();return{t:e.textContent,x:r.x,y:r.y,w:r.width,h:r.height}})})};

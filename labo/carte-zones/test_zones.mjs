@@ -412,13 +412,18 @@ rec('MOLETTE', wh.r0.length === 5 && wh.r0[2].on && wh.r0[2].k === wh.k0 && wh.r
   await p.mouse.move(box.x + lr.x, box.y + lr.y); await p.mouse.down(); for (let i = 1; i <= 8; i++) { await p.mouse.move(box.x + lr.x, box.y + lr.y + i * lr.row * 2 / 8); await sleep(30); } await p.mouse.up(); await sleep(200);
   const g = await F.evaluate(() => { const S = STARBYTE_ZONES, k = S.zj.k; S.wheelZero(); return k - S.k0(); });
   rec('GLISSER', g === 2, `glisser la molette de deux crans vers le bas : couche ${g >= 0 ? '+' : ''}${g} (attendu +2), puis ⊕ 0`); }
-// le mille-feuille : les couches voisines empilées ; toucher l'une d'elles l'amène au centre
-const mfe = await F.evaluate(() => { const S = STARBYTE_ZONES, zj = S.zj; zj.kf = zj.k; S.draw(); const k0 = zj.k, pl = S.plates(), P = S.plate(), up1 = pl.find(q => q.j === k0 + 1), dn1 = pl.find(q => q.j === k0 - 1);
-  const order = up1 && dn1 && up1.y1 < P.y0 && dn1.y0 > P.y1 && (up1.y1 - up1.y0) < (P.y1 - P.y0);
-  if (up1) S.tap((up1.x0 + up1.x1) / 2, (up1.y0 + up1.y1) / 2); const k1 = zj.k; zj.kf = zj.k; S.draw(); S.wheelZero(); zj.kf = zj.k; S.draw();
-  return { n: pl.length, js: pl.map(q => q.j - k0), order, k1: k1 - k0, T: P.T }; });
-rec('MILLE-FEUILLE', mfe.n >= 4 && mfe.order && mfe.k1 === 1 && mfe.T > 0 && mfe.T < 1, `${mfe.n} couches voisines dans la pile (${mfe.js.join(', ')}), au-dessus et au-dessous de la couche affichée, plus aplaties (${mfe.order}) ; toucher la couche +1 l'amène au centre (${mfe.k1 >= 0 ? '+' : ''}${mfe.k1}) ; couche affichée vue de 3/4 (inclinaison ${mfe.T})`);
-await p.screenshot({ path: path.join(SHOTS, '4b_mille_feuille.png') });
+// 20/11 au soir (Adrien : « plein écran, plus de dessus, un vrai 3/4 ») : une vraie perspective, la couche remplit l'écran ;
+// le loin rapetisse ; toucher reste exact ; la couche du dessous se voit à travers
+const per = await F.evaluate(() => { const S = STARBYTE_ZONES, zj = S.zj, k0 = zj.k; zj.kf = zj.k; S.draw(); const c = S.cam(), P = S.plate();
+  const full = [[0, 0], [innerWidth, 0], [0, innerHeight], [innerWidth, innerHeight]].every(q => S.screenHit(q[0], q[1]));
+  const wAt = y => { const w = S.under(c.W0, y), a = S.proj(w[0], w[1]), b = S.proj(w[0] + 240, w[1]); return b[0] - a[0]; }, top = wAt(P.y0 + 40), bot = wAt(P.y1 - 20);
+  const tx = c.W0 - 30, ty = c.H0 - 50; S.tap(tx, ty); const sel = zj.sel && zj.sel.type === 'zone' ? zj.sel.zone : null; let off = null;
+  if (sel) { const z = S.zoneParse(sel), ctr = S.center(z.q, z.r), q = S.proj(ctr[0], ctr[1]); off = Math.hypot(q[0] - tx, q[1] - ty); }
+  const n0 = Object.keys(zj.snap.zp.zones).filter(id => +id.split(':')[3] === k0).length; S.setLayer(k0 + 1); zj.kf = zj.k; S.draw(); const ghost = zj.ghostN; S.wheelZero(); zj.kf = zj.k; S.draw();
+  return { full, pitch: Math.round(c.pitch * 180 / Math.PI), top: Math.round(top), bot: Math.round(bot), sel: !!sel, off: off && Math.round(off), hexR: Math.round(140 / zj.upp), n0, ghost }; });
+rec('PERSPECTIVE', per.full && per.pitch >= 60 && per.top < per.bot * .92 && per.sel && per.off != null && per.off < per.hexR && (per.n0 === 0 || per.ghost > 0),
+  `plein écran (${per.full}), caméra à ${per.pitch}° sous l'horizon ; une zone fait ${per.top} px en haut et ${per.bot} px en bas (vraie perspective) ; toucher choisit la zone sous le doigt (centre à ${per.off} px) ; depuis la couche +1, les ${per.n0} zone(s) sondée(s) de la couche 0 se voient à travers (${per.ghost})`);
+await p.screenshot({ path: path.join(SHOTS, '4b_perspective.png') });
 // 20/11 (Adrien, « la zone verte ») : on sonde dans l'amas du monde de départ, à 5 couches au plus de ce monde
 const band = await F.evaluate(async () => { const S = STARBYTE_ZONES, zj = S.zj, h = zj.ws.find(w => w.kind === 'home'), k0 = S.layerOf(h.p[1]), [q, r] = S.cellOf(h.p[0], h.p[2]);
   const id5 = 'tac-2:' + q + ':' + r + ':' + (k0 + 5), id6 = 'tac-2:' + q + ':' + r + ':' + (k0 + 6), e5 = S.estimate(id5), e6 = S.estimate(id6);
@@ -597,7 +602,7 @@ const lineTap = kind => F.evaluate(async kind => { const S = STARBYTE_ZONES, zj 
   let r = tryTap(); if (r) return r;
   // aucun tracé dans la partie visible de la carte : on le ramène au milieu (comme le ferait un glissé), puis on touche
   const l = mine()[0]; if (!l) return { n: 0 }; if (zj.follow && zj.follow.on) zj.follow.susp = true;
-  { const P = S.plate(); zj.cx += ((l.x1 + l.x2) / 2 - (P.x0 + P.x1) / 2) * zj.upp; zj.cz += ((l.y1 + l.y2) / 2 - (P.y0 + P.y1) / 2) * zj.upp / P.T; } zj.dirty = true; await new Promise(res => setTimeout(res, 900));
+  { const P = S.plate(); S.anchor((l.x1 + l.x2) / 2, (l.y1 + l.y2) / 2, (P.x0 + P.x1) / 2, (P.y0 + P.y1) / 2); } zj.dirty = true; await new Promise(res => setTimeout(res, 900));
   return tryTap() || { n: mine().length }; }, kind);
 const rt1 = await lineTap('travel'); await sleep(300);
 rec('ROUTE-01', rt1.sel === 'travel' && rt1.id === 'tk:' + tk.id, `tracé de la mission en Tactique (${rt1.n} segments touchables) : toucher (${rt1.x}, ${rt1.y}), loin du repère → fiche ${rt1.sel} ${rt1.id || ''} (« ${rt1.kind || ''} »), pas la zone dessous`);

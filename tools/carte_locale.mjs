@@ -60,7 +60,8 @@ data.sig = await F.evaluate(() => { const Z = parent.SBZones, s = Z.state(), out
 await browser.close(); srv.close();
 
 // la carte, bibliothèque GLTF incluse (un cadre srcdoc ne peut pas charger un fichier voisin)
-let atlas = readFileSync(path.join(DIR, 'atlas', 'index.html'), 'utf8');
+// 20/11 : CARTE_PAGE=molette pour la carte à molette (en essai sur le compte d'Adrien)
+let atlas = readFileSync(path.join(DIR, 'atlas', (process.env.CARTE_PAGE || 'index') + '.html'), 'utf8');
 const gltf = readFileSync(path.join(DIR, 'atlas', 'vendor', 'gltf_r128.js'), 'utf8');
 // la carte la charge à la demande (« si THREE.GLTFLoader manque ») : on la pose d'avance, après le reste de la page
 const tag = '<script>' + gltf.replace(/<\/script/gi, '<\\/script') + '</script>';
