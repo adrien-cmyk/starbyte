@@ -481,7 +481,9 @@ const re2 = await F.evaluate((id) => { STARBYTE_ZONES.selectZone(id); return doc
 rec('RECHARGE2', /Sondée/.test(re2), `la carte rouverte montre la zone : « ${re2} »`);
 await p.screenshot({ path: path.join(SHOTS, '8_apres_rechargement.png') });
 // 20/11 (sauvegarde de Panzerstorm) : une Radar de zone qui arrive pendant que le jeu est fermé ; et la reprise des zones déjà touchées
-{ const id2 = await F.evaluate(() => STARBYTE_ZONES.openZoneNear(true));
+{ const id2 = await F.evaluate(() => { const S = STARBYTE_ZONES, zj = S.zj; S.refresh(true); const h = zj.ws.find(w => w.kind === 'home'), k = S.layerOf(h.p[1]), [q0, r0] = S.cellOf(h.p[0], h.p[2]), known = (zj.snap.zp && zj.snap.zp.zones) || {}, D = [[1, 0], [1, -1], [0, -1], [-1, 0], [-1, 1], [0, 1]];
+    for (let n = 1; n < 12; n++) { let x = q0 - n, y = r0 + n; for (let i = 0; i < 6; i++) for (let j = 0; j < n; j++) { const id = 'tac-2:' + x + ':' + y + ':' + k; x += D[i][0]; y += D[i][1]; if (known[id]) continue; const e = S.estimate(id); if (!e || !e.inRange) continue; const c = S.zoneContent(id); if (c && c.anchor) return id; } }
+    return null; });   // une zone à portée jamais sondée (pas celle des contrôles précédents)
   await F.evaluate((id) => { STARBYTE_ZONES.selectZone(id); const b = document.querySelector('#zj-sh-foot [data-a="launch"]'); if (b) b.click(); }, id2); await sleep(500);
   const prep = await p.evaluate((id) => { const m = G.probeMissions.find(m => m.zone === id); if (!m) return null; m.arrivalAt = Date.now() - 1000;   // elle arrive pendant que le jeu est fermé
     const z = G.zoneProspect.zones, now = Date.now();   // deux zones déjà touchées avant le correctif : l'une a son rapport classique, l'autre rien
@@ -495,7 +497,7 @@ await p.screenshot({ path: path.join(SHOTS, '8_apres_rechargement.png') });
   const after = await p.evaluate(([id, mid]) => { const z = G.zoneProspect.zones, rep = (G.probeReports || []).find(r => r.zone === id);
     return { st: z[id] && z[id].st, viaCarte: !!rep, classique: (G.probeReports || []).some(r => !r.zone && r.tier === 'radar' && r.createdAt > Date.now() - 60000 && r.id !== 'pr-classique'), left: G.probeMissions.filter(m => m.id === mid).length,
       a: z['tac-2:900:900:0'] && { st: z['tac-2:900:900:0'].st, found: z['tac-2:900:900:0'].found }, b: z['tac-2:901:900:0'] || null }; }, [id2, prep && prep.mission]);
-  rec('RETOUR-FERMÉ', !!prep && after.st === 'done' && after.viaCarte && !after.classique && after.left === 0, `Radar de zone arrivée jeu fermé : au rechargement, la zone est « ${after.st} » par la carte (rapport de zone ${after.viaCarte}), aucun rapport classique (${after.classique})`);
+  rec('RETOUR-FERMÉ', !!prep && after.st === 'done' && after.viaCarte && !after.classique && after.left === 0, `${prep ? '' : 'AUCUNE MISSION LANCÉE sur ' + id2 + ' · '}Radar de zone arrivée jeu fermé : au rechargement, la zone est « ${after.st} » par la carte (rapport de zone ${after.viaCarte}), aucun rapport classique (${after.classique})`);
   rec('ZONES-REPRISES', after.a && after.a.st === 'done' && JSON.stringify(after.a.found) === '["SIG-AAA","SIG-BBB"]' && after.b === null, `zone restée « en mission » sans mission : reprend le rapport classique reçu (${after.a && after.a.st}, ${JSON.stringify(after.a && after.a.found)}) ; sans rapport : redevient à sonder (${after.b === null})`);
   await p.evaluate(() => { delete G.zoneProspect.zones['tac-2:900:900:0']; saveGame(); });
   await p.evaluate(() => SBZones.open()); F = await frameReady(); await sleep(2500);
